@@ -21,15 +21,13 @@ function onSheet1() {
   write_row = tempSheet.getLastRow()+1
   tempSheet.getRange(write_row, 1, 1, 1).setValue(Date())
   
-  tempSheet.getRange(write_row, 2, 1, 1).setValue('=GOOGLEFINANCE("NYSE:RBLX", "price")')
-  // to remove the auto-updation of cell
-  var values = tempSheet.getRange(write_row, 2, 1, 1).getValues()
-  tempSheet.getRange(write_row, 2, 1, 1).setValues(values)
+  tempSheet.getRange(write_row, 2, 1, 1).setValue('=GOOGLEFINANCE("JSE:TFG", "price")')
+  tempSheet.getRange(write_row, 3, 1, 1).setValue('=GOOGLEFINANCE("JSE:TFG", "volume")')
 
-  tempSheet.getRange(write_row, 3, 1, 1).setValue('=GOOGLEFINANCE("NYSE:RBLX", "volume")')
-  // to remove the auto-updation of cell
-  values = tempSheet.getRange(write_row, 3, 1, 1).getValues()
-  tempSheet.getRange(write_row, 3, 1, 1).setValues(values)
+  // to remove the auto-updations of cell
+  var values = tempSheet.getRange(write_row, 1, 1, 3).getValues()
+  Logger.log(values)
+  tempSheet.getRange(write_row, 1, 1, 3).setValues(values)
 }
 
 function omnSheet1() {
