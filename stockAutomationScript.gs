@@ -57,5 +57,15 @@ function getValuesOnSpreadsheet() {
   const sheetId = "16qS9OF_K2AqV089FXk43Bk-vpzVfbD2F3OGauhJl5AA" // cache.get("stockObj")
   const data = getStockData(stockname)
   const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("Sheet1")
-  sheet.getRange(1, 1, data.length, data[0].length).setValues(data).setValues(data)
+  const horizontalAlignments = [
+    ["center", "center", "center", "center", "center"]
+  ]
+  const cellTextStyle = [
+    ["bold", "bold", "bold", "bold", "bold"]
+  ]
+  const bgColors = [
+    ["cyan", "cyan", "cyan", "cyan", "cyan"]
+  ]
+  sheet.getRange(1,1,1,5).setValues([["PRICE", "VOLUME", "QUOTESTRUCTURE", "VOLUMESTRUCTURE", "REFINEDSTRUCTURE"]]).setFontWeights(cellTextStyle).setHorizontalAlignments(horizontalAlignments).setBackgrounds(bgColors)
+  sheet.getRange(2, 1, data.length, data[0].length).setValues(data).setValues(data)
 }
