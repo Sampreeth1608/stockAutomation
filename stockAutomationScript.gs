@@ -1,6 +1,7 @@
 var cache = CacheService.getScriptCache()
 
 function creations() {
+  //TODO: sanitize the username
   const sheetObj = createSpreadsheet()
   connectToDb("NSE:TATAMOTORS", sheetObj.getId()) // creates a default document inside the collection.
   const spreadsheet = SpreadsheetApp.openById(sheetObj.getId())
@@ -49,4 +50,12 @@ function fetchAndSetValues() {
   Logger.log("prevValues : " + prevValues)
   cache.put("prevValues", JSON.stringify([values[0][1], values[0][2]]), 21600)
   insertToCollection({"stockname" : stockname, "values" : collectedValues})
+}
+
+function getValuesOnSpreadsheet() {
+  const stockname = cache.get("stockname")
+  const sheetId = cache.get("stockObj")
+  const data = getStockData(stockname)
+  const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("Sheet1")
+  sheet.getRange(1, 1, data[0].length, data.legnth).setValues(data)
 }
