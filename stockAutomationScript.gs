@@ -53,9 +53,9 @@ function fetchAndSetValues() {
 }
 
 function getValuesOnSpreadsheet() {
-  const stockname = cache.get("stockname")
-  const sheetId = cache.get("stockObj")
+  const stockname = "NSE:TATAMOTORS" //cache.get("stockname")
+  const sheetId = "16qS9OF_K2AqV089FXk43Bk-vpzVfbD2F3OGauhJl5AA" // cache.get("stockObj")
   const data = getStockData(stockname)
   const sheet = SpreadsheetApp.openById(sheetId).getSheetByName("Sheet1")
-  sheet.getRange(1, 1, data[0].length, data.legnth).setValues(data)
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data).setValues(data)
 }

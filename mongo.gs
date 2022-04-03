@@ -30,7 +30,7 @@ const insertToCollection= (data) => {
   }
 }
 
-const getStockData= (stockname) => {
+const getStockData = (stockname) => {
   // sanitize the stockname.
   const handlerFunction= (key, value) => {
     // format of value [{"$numberDouble":"436.2"}]
@@ -52,6 +52,14 @@ const getStockData= (stockname) => {
     return numbers
   }
 
+  const handlerFunctionTemporary = (data) => {
+    var number = []
+    for (var i=0; i<data[0].length; i++) {
+      number.push([data[0][i], data[1][i], data[2][i], data[3][i], data[4][i]])
+    }
+    return number
+  }
+
   var testKeyNames = new Map()
   testKeyNames.set("price", 0)
   testKeyNames.set("volume", 0)
@@ -71,7 +79,7 @@ const getStockData= (stockname) => {
     var data = [] // this will going to have sub-lists as an element
     result = JSON.parse(result)
     testKeyNames.forEach((value, key) => data.push(handlerFunction(key, result[key])))
-    Logger.log(data)
+    data = handlerFunctionTemporary(data)
     return data
   } else {
     throw Error("no documents found")
