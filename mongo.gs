@@ -32,12 +32,6 @@ const insertToCollection= (data) => {
 
 const getStockData= (stockname) => {
   // sanitize the stockname.
-  var testKeyNames = new Map()
-  testKeyNames.set("price", 0)
-  testKeyNames.set("volume", 0)
-  testKeyNames.set("quoteStructure", 0)
-  testKeyNames.set("volumeStructure", 0)
-  testKeyNames.set("refinedStructure", 0)
   const handlerFunction= (key, value) => {
     // format of value [{"$numberDouble":"436.2"}]
     if (testKeyNames.has(key)) {
@@ -52,8 +46,18 @@ const getStockData= (stockname) => {
         }
       }
     }
+    if (testKeyNames.get(key) != 1) {
+      throw Error("Something went wrong")
+    }
     return numbers
   }
+
+  var testKeyNames = new Map()
+  testKeyNames.set("price", 0)
+  testKeyNames.set("volume", 0)
+  testKeyNames.set("quoteStructure", 0)
+  testKeyNames.set("volumeStructure", 0)
+  testKeyNames.set("refinedStructure", 0)
 
   var params = {
     "method" : "post",
@@ -67,6 +71,7 @@ const getStockData= (stockname) => {
     var data = [] // this will going to have sub-lists as an element
     result = JSON.parse(result)
     testKeyNames.forEach((value, key) => data.push(handlerFunction(key, result[key])))
+    Logger.log(data)
     return data
   } else {
     throw Error("no documents found")
