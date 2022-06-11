@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body style="background-color:#000000;">
+    <h1 style="color:#ffffff"> Stock Automation </h1>
+    <p style="color:#00FFE3"> This is a basic user interface (UI) to interact with scripts written in apps script running on cloud.</p>
+    <label for="stockname" style="color:white"> Enter stock name : </label> <!-- "for" attribute here should be equal to id of the tag for which label is used -->
+    <input type="text" id="stockname" minlength="1" size="10"><br>
+    <input type="button" id="button" value="Submit"><br>  <!-- input type if "submit" or "button", works only to submit/reset something, this doesn't do much -->
+    <div id="parent" style="">
+      <dl id="parentDl1">
+        <dt>Security Code</dt>
+        <dd>_</dd>
+        <dt>Issuer Name</dt>
+        <dd>_</dd>
+        <dt>Security Id</dt>
+        <dd>_</dd>
+        <dt>Security Name</dt>
+        <dd>_</dd>
+        <dt>Status</dt>
+        <dd>_</dd>
+        <dt>Group</dt>
+        <dd>_</dd>
+        <dt>Face Value</dt>
+        <dd>_</dd>
+        <dt>ISIN No.</dt>
+        <dd>_</dd>
+        <dt>Industry</dt>
+        <dd>_</dd>
+        <dt>Instrument</dt>
+        <dd>_</dd>
+        <dt>Sectory Name</dt>
+        <dd>_</dd>
+        <dt>Industry New Name</dt>
+        <dd>_</dd>
+        <dt>IGroup Name</dt>
+        <dd>_</dd>
+        <dt>ISubGroup Name</dt>
+        <dd>_</dd>
+      </dl>
+    </div>
+    <script>
+      const button = document.querySelector("#button")
+      const inputElement = document.querySelector("#stockname")
+      const divElement = document.querySelector("#parent")
+      button.addEventListener("click", getStockInformation)
+      
+      function getStockInformation() {
+        const dlElement = document.querySelector("#parentDl1")
+        if (!inputElement.value) {
+          appendToHTML(false, "Empty input provided!!!")
+          return
+        }
+        google.script.run.withSuccessHandler(appendToHTML).getBSEStockInfo(inputElement.value)
+        // remove the previous content from specific elements ex: input element, and div element.
+        if (inputElement.value) {
+          inputElement.value = ""
+        }
+        //manipulate the DOM (Document object model)
+        //Adds a dt/dd element to dl
+        function appendToHTML(output, errorMsg=null) {
+          console.log(output)
+          var p = document.querySelector("#errorMsg")
+          if (typeof output == "boolean" && !output) {
+            if (!p) {
+              var p = document.createElement("p")
+              p.setAttribute("style", "color:red")
+              p.setAttribute("id", "errorMsg")
+              p.innerText = errorMsg ? errorMsg : "No Stock Information is available"
+              document.querySelector("body").insertBefore(p, divElement)
+              divElement.style.display = "none" // none sets it to hidden
+              return
+            } else {
+              p.innerText = errorMsg ? errorMsg : "No Stock Information is available"
+            }
+          } else if (p) {
+            document.querySelector("body").removeChild(p)
+            divElement.style.display = "" // providing an empty string will allow this element to display on stdout.
+          }
+          var i = 0
+          var ddCounter = 0
+          while (i<dlElement.children.length) {
+            if (dlElement.children[i].localName == "dd") {
+              dlElement.children[i].innerText = output[ddCounter]
+              ddCounter += 1
+            }
+            i += 1
+           }
+        }
+      }
+    </script>
+    <style>
+      dt {
+        color: gray;
+      }
+
+      dd {
+        color: cyan;
+        innerText: "x";
+      }
+    </style>
+  </body>
+</html>
