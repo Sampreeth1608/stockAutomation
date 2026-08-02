@@ -1,11 +1,11 @@
-"""SQLite storage for Gold Petal ticks."""
+"""SQLite storage for Gold Petal ticks, bars, and signals."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "ticks.db"
 
@@ -33,14 +33,59 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 low REAL,
                 close REAL,
                 volume INTEGER,
+                bp REAL,
+                sp REAL,
                 raw_json TEXT NOT NULL
             )
             """
         )
+        # Older DBs may not have bp/sp columns yet.
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(ticks)").fetchall()
+        }
+        if "bp" not in cols:
+            conn.execute("ALTER TABLE ticks ADD COLUMN bp REAL")
+        if "sp" not in cols:
+            conn.execute("ALTER TABLE ticks ADD COLUMN sp REAL")
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ticks_received_at ON ticks(received_at)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_token ON ticks(token)")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bars (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_label TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                token TEXT NOT NULL,
+                cmp REAL NOT NULL,
+                bp REAL NOT NULL,
+                sp REAL NOT NULL,
+                net REAL NOT NULL,
+                price_delta REAL,
+                net_delta REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_label TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT NOT NULL,
+                position_after TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                price_delta REAL,
+                net REAL,
+                net_delta REAL,
+                dry_run INTEGER NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -51,7 +96,6 @@ def _scale_price(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    # Angel websocket prices are typically in paise.
     return number / 100.0
 
 
@@ -62,13 +106,15 @@ def save_tick(
     received_at: str,
     db_path: Path = DB_PATH,
 ) -> None:
+    bp = message.get("total_buy_quantity")
+    sp = message.get("total_sell_quantity")
     with connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO ticks (
                 received_at, exchange_timestamp, symbol, token,
-                ltp, open, high, low, close, volume, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ltp, open, high, low, close, volume, bp, sp, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 received_at,
@@ -81,7 +127,68 @@ def save_tick(
                 _scale_price(message.get("low_price_of_the_day")),
                 _scale_price(message.get("closed_price")),
                 message.get("volume_trade_for_the_day"),
+                float(bp) if bp is not None else None,
+                float(sp) if sp is not None else None,
                 json.dumps(message, default=str),
+            ),
+        )
+        conn.commit()
+
+
+def save_bar(
+    time_label: str,
+    symbol: str,
+    token: str,
+    cmp: float,
+    bp: float,
+    sp: float,
+    net: float,
+    price_delta: Optional[float],
+    net_delta: Optional[float],
+    db_path: Path = DB_PATH,
+) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO bars (
+                time_label, symbol, token, cmp, bp, sp, net, price_delta, net_delta
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (time_label, symbol, token, cmp, bp, sp, net, price_delta, net_delta),
+        )
+        conn.commit()
+
+
+def save_signal(
+    time_label: str,
+    symbol: str,
+    action: str,
+    position_after: str,
+    reason: str,
+    price_delta: Optional[float],
+    net: float,
+    net_delta: Optional[float],
+    dry_run: bool,
+    db_path: Path = DB_PATH,
+) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO signals (
+                time_label, symbol, action, position_after, reason,
+                price_delta, net, net_delta, dry_run
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time_label,
+                symbol,
+                action,
+                position_after,
+                reason,
+                price_delta,
+                net,
+                net_delta,
+                1 if dry_run else 0,
             ),
         )
         conn.commit()
@@ -100,8 +207,25 @@ def latest_ticks(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
         return list(
             conn.execute(
                 """
-                SELECT received_at, symbol, token, ltp, volume, exchange_timestamp
+                SELECT received_at, symbol, token, ltp, volume, bp, sp, exchange_timestamp
                 FROM ticks
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        )
+
+
+def latest_signals(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return list(
+            conn.execute(
+                """
+                SELECT time_label, symbol, action, position_after, reason,
+                       price_delta, net, net_delta, dry_run
+                FROM signals
                 ORDER BY id DESC
                 LIMIT ?
                 """,
@@ -114,7 +238,7 @@ def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) ->
     init_db(db_path)
     query = """
         SELECT received_at, exchange_timestamp, symbol, token,
-               ltp, open, high, low, close, volume
+               ltp, open, high, low, close, volume, bp, sp
         FROM ticks
         ORDER BY id ASC
     """
@@ -129,7 +253,7 @@ def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         handle.write(
-            "received_at,exchange_timestamp,symbol,token,ltp,open,high,low,close,volume\n"
+            "received_at,exchange_timestamp,symbol,token,ltp,open,high,low,close,volume,bp,sp\n"
         )
         for row in rows:
             handle.write(
@@ -145,6 +269,8 @@ def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) ->
                         str(row["low"] or ""),
                         str(row["close"] or ""),
                         str(row["volume"] or ""),
+                        str(row["bp"] or ""),
+                        str(row["sp"] or ""),
                     ]
                 )
                 + "\n"
