@@ -234,6 +234,109 @@ def latest_signals(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row
         )
 
 
+def count_bars(db_path: Path = DB_PATH) -> int:
+    init_db(db_path)
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT COUNT(*) AS c FROM bars").fetchone()
+        return int(row["c"])
+
+
+def sheet_rows(limit: int | None = None, db_path: Path = DB_PATH) -> list[dict[str, Any]]:
+    """Build manual-sheet style rows from bars + signals."""
+    init_db(db_path)
+    query = """
+        SELECT
+            b.id,
+            b.time_label,
+            b.symbol,
+            b.cmp,
+            b.bp,
+            b.sp,
+            b.net,
+            b.price_delta,
+            b.net_delta,
+            s.action,
+            s.position_after,
+            s.reason
+        FROM bars b
+        LEFT JOIN signals s
+          ON s.id = (
+            SELECT s2.id FROM signals s2
+            WHERE s2.time_label = b.time_label AND s2.symbol = b.symbol
+            ORDER BY s2.id DESC
+            LIMIT 1
+          )
+        ORDER BY b.id ASC
+    """
+    with connect(db_path) as conn:
+        rows = list(conn.execute(query))
+
+    if limit is not None:
+        rows = rows[-limit:]
+
+    out: list[dict[str, Any]] = []
+    prev_bp: float | None = None
+    prev_sp: float | None = None
+    for row in rows:
+        bp = float(row["bp"])
+        sp = float(row["sp"])
+        bp_delta = None if prev_bp is None else bp - prev_bp
+        sp_delta = None if prev_sp is None else sp - prev_sp
+        out.append(
+            {
+                "time": row["time_label"],
+                "symbol": row["symbol"],
+                "cmp": row["cmp"],
+                "price_delta": row["price_delta"],
+                "bp": bp,
+                "bp_delta": bp_delta,
+                "sp": sp,
+                "sp_delta": sp_delta,
+                "net": row["net"],
+                "net_delta": row["net_delta"],
+                "signal": row["action"],
+                "position": row["position_after"],
+                "reason": row["reason"],
+            }
+        )
+        prev_bp = bp
+        prev_sp = sp
+    return out
+
+
+def export_sheet_csv(
+    path: Path, limit: int | None = None, db_path: Path = DB_PATH
+) -> int:
+    rows = sheet_rows(limit=limit, db_path=db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        "TIME,CMP,PRICE_DELTA,BP,BP_DELTA,SP,SP_DELTA,BP_SP,NET_DELTA,SIGNAL,POSITION,REASON\n"
+    )
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(header)
+        for row in rows:
+            handle.write(
+                ",".join(
+                    [
+                        str(row["time"] or ""),
+                        str(row["cmp"] if row["cmp"] is not None else ""),
+                        str(row["price_delta"] if row["price_delta"] is not None else ""),
+                        str(row["bp"] if row["bp"] is not None else ""),
+                        str(row["bp_delta"] if row["bp_delta"] is not None else ""),
+                        str(row["sp"] if row["sp"] is not None else ""),
+                        str(row["sp_delta"] if row["sp_delta"] is not None else ""),
+                        str(row["net"] if row["net"] is not None else ""),
+                        str(row["net_delta"] if row["net_delta"] is not None else ""),
+                        str(row["signal"] or ""),
+                        str(row["position"] or ""),
+                        '"' + str(row["reason"] or "").replace('"', "'") + '"',
+                    ]
+                )
+                + "\n"
+            )
+    return len(rows)
+
+
 def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) -> int:
     init_db(db_path)
     query = """
