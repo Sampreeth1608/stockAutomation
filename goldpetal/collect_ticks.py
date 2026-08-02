@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import signal
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from logzero import logger
@@ -32,6 +32,12 @@ def main() -> None:
     print(f"Symbol : {symbol}")
     print(f"Token  : {token}")
     print(f"Expiry : {contract['expiry']}")
+    print(f"Front  : {contract['front_month_expiry']} ({contract['days_to_front_expiry']} days left)")
+    print(f"Next   : {contract['next_month_expiry']}")
+    print(
+        f"Roll   : {'YES — using next month' if contract['rolled'] else 'no'} "
+        f"(switch {contract['rollover_days']} days before expiry)"
+    )
     print("DB     : ~/goldpetal/data/ticks.db")
     print("Press Ctrl+C to stop")
     print("================================")
