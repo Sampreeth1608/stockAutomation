@@ -76,6 +76,8 @@ def main() -> None:
     print(f"Token    : {token}")
     print(f"Expiry   : {contract['expiry']}")
     print(f"Interval : {interval} minutes")
+    print("Rules    : netΔ only (priceΔ ignored for entry)")
+    print("Exits    : long netΔ↓ / short netΔ↑ / 2%+3x exhaustion / tiny-price+net surge")
     print(f"DRY_RUN  : {dry_run} (signals only; no live orders)")
     print(f"Next bar : {next_bar_at.isoformat(timespec='seconds')}")
     print("Press Ctrl+C to stop")

@@ -1,4 +1,4 @@
-"""Quick offline checks for pressure strategy rules."""
+"""Offline checks for updated net-pressure-only strategy."""
 
 from __future__ import annotations
 
@@ -6,51 +6,63 @@ from strategy import BarSnapshot, PressureStrategy
 
 
 def main() -> None:
+    # Entry ignores priceΔ: only netΔ
     s = PressureStrategy()
-
-    # Baseline
-    r0 = s.on_bar(BarSnapshot("t0", cmp=14340, bp=3759, sp=4565))
-    assert r0.action == "WAIT", r0
-
-    # priceΔ=+3, net: -806 -> -1182 => netΔ=-376; flat, signs mismatch => FLAT
-    r1 = s.on_bar(BarSnapshot("t1", cmp=14343, bp=4308, sp=5490))
-    assert r1.price_delta == 3
-    assert r1.net_delta == -376
-    assert r1.action == "FLAT", r1
-
-    # Force a long setup: rising price + rising net
-    s2 = PressureStrategy()
-    s2.on_bar(BarSnapshot("a0", cmp=100, bp=50, sp=40))  # net=10
-    r_buy = s2.on_bar(BarSnapshot("a1", cmp=110, bp=80, sp=40))  # priceΔ=10, netΔ=30
+    s.on_bar(BarSnapshot("t0", cmp=10000, bp=100, sp=100))  # net 0
+    r_buy = s.on_bar(BarSnapshot("t1", cmp=9990, bp=200, sp=100))  # price down, netΔ=+100
     assert r_buy.action == "BUY", r_buy
 
-    # Hold while aligned and netΔ increases: prev netΔ=30, now net=50-> netΔ from prev net 40 = 10? 
-    # prev_cmp=110, prev_net=40; new cmp=120 bp=100 sp=40 net=60; priceΔ=10 netΔ=20; 20<30 decrease => CLOSE
-    r_close_dec = s2.on_bar(BarSnapshot("a2", cmp=120, bp=100, sp=40))
-    assert r_close_dec.action == "CLOSE", r_close_dec
-
-    # Decrease example from sheet: 269 -> 266 while long
-    s3 = PressureStrategy()
-    s3.on_bar(BarSnapshot("b0", cmp=14340, bp=1000, sp=1000))  # net 0
-    # Make netΔ=269 and enter long: need price up and net up
-    r_b1 = s3.on_bar(BarSnapshot("b1", cmp=14363, bp=1269, sp=1000))  # priceΔ>0 netΔ=269
-    assert r_b1.action == "BUY", r_b1
-    # Next: price still up, netΔ=266 (<269) => CLOSE
-    # prev_net = 269; want net_delta=266 => net=269+266=535 => bp-sp=535
-    r_b2 = s3.on_bar(BarSnapshot("b2", cmp=14401, bp=1535, sp=1000))
-    assert r_b2.net_delta == 266
-    assert r_b2.action == "CLOSE", r_b2
-
-    # Negative increase hold: -1827 -> -376 while short
-    s4 = PressureStrategy()
-    s4.on_bar(BarSnapshot("c0", cmp=15000, bp=1000, sp=1000))  # net 0
-    r_short = s4.on_bar(BarSnapshot("c1", cmp=14900, bp=1000, sp=2827))  # priceΔ=-100 netΔ=-1827
+    s2 = PressureStrategy()
+    s2.on_bar(BarSnapshot("s0", cmp=10000, bp=100, sp=100))
+    r_short = s2.on_bar(BarSnapshot("s1", cmp=10050, bp=50, sp=200))  # price up, netΔ=-150
     assert r_short.action == "SHORT", r_short
-    # netΔ=-376 (> -1827) and price still down, net still negative => HOLD
-    # prev_net=-1827; netΔ=-376 => net=-1827-376=-2203
-    r_hold = s4.on_bar(BarSnapshot("c2", cmp=14850, bp=1000, sp=3203))
-    assert r_hold.net_delta == -376
+
+    # Long closes when netΔ decreases
+    s3 = PressureStrategy()
+    s3.on_bar(BarSnapshot("a0", cmp=10000, bp=100, sp=100))  # net0
+    assert s3.on_bar(BarSnapshot("a1", cmp=10010, bp=200, sp=100)).action == "BUY"  # netΔ=100
+    # prev_net=100; want netΔ=90 (<100) => net=190
+    r_dec = s3.on_bar(BarSnapshot("a2", cmp=10020, bp=290, sp=100))
+    assert r_dec.net_delta == 90
+    assert r_dec.action == "CLOSE", r_dec
+
+    # Short closes when netΔ increases (-1827 -> -376)
+    s4 = PressureStrategy()
+    s4.on_bar(BarSnapshot("b0", cmp=15000, bp=1000, sp=1000))
+    assert s4.on_bar(BarSnapshot("b1", cmp=14900, bp=1000, sp=2827)).action == "SHORT"  # netΔ=-1827
+    # -1827 -> -376 is an increase => CLOSE for short
+    r_close_up = s4.on_bar(BarSnapshot("b2", cmp=14850, bp=1000, sp=3203))
+    assert r_close_up.net_delta == -376
+    assert r_close_up.action == "CLOSE", r_close_up
+
+    # Short holds when netΔ decreases further (more negative)
+    s4b = PressureStrategy()
+    s4b.on_bar(BarSnapshot("e0", cmp=15000, bp=1000, sp=1000))
+    assert s4b.on_bar(BarSnapshot("e1", cmp=14950, bp=1000, sp=1100)).action == "SHORT"  # netΔ=-100
+    # prev_net=-100; netΔ=-300 => net=-400
+    r_hold = s4b.on_bar(BarSnapshot("e2", cmp=14900, bp=1000, sp=1400))
+    assert r_hold.net_delta == -300
     assert r_hold.action == "HOLD", r_hold
+
+    # Exhaustion long: >=2% price up from entry and netΔ >= 3x entry netΔ
+    s5 = PressureStrategy()
+    s5.on_bar(BarSnapshot("c0", cmp=10000, bp=0, sp=0))
+    assert s5.on_bar(BarSnapshot("c1", cmp=10000, bp=100, sp=0)).action == "BUY"  # entry netΔ=100
+    # prev_net=100; netΔ=300 (>=3x100), price 10250 = +2.5%
+    r_ex = s5.on_bar(BarSnapshot("c2", cmp=10250, bp=400, sp=0))
+    assert r_ex.net_delta == 300
+    assert r_ex.action == "CLOSE", r_ex
+    assert "exhaustion" in r_ex.reason
+
+    # Divergence: tiny price change, netΔ surged a lot
+    s6 = PressureStrategy()
+    s6.on_bar(BarSnapshot("d0", cmp=10000, bp=0, sp=0))
+    assert s6.on_bar(BarSnapshot("d1", cmp=10000, bp=50, sp=0)).action == "BUY"  # netΔ=50
+    # price almost flat (0.05%), netΔ = 120 (>= 2x 50)
+    # prev_net=50; netΔ=120 => net=170
+    r_div = s6.on_bar(BarSnapshot("d2", cmp=10005, bp=170, sp=0))
+    assert r_div.action == "CLOSE", r_div
+    assert "divergence" in r_div.reason
 
     print("strategy checks passed")
 
