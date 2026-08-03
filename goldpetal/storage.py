@@ -241,6 +241,19 @@ def count_bars(db_path: Path = DB_PATH) -> int:
         return int(row["c"])
 
 
+def latest_bar(db_path: Path = DB_PATH):
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return conn.execute(
+            """
+            SELECT time_label, symbol, token, cmp, bp, sp, net, price_delta, net_delta
+            FROM bars
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+
 def sheet_rows(limit: int | None = None, db_path: Path = DB_PATH) -> list[dict[str, Any]]:
     """Build manual-sheet style rows from bars + signals."""
     init_db(db_path)
