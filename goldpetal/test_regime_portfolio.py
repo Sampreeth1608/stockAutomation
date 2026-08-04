@@ -38,7 +38,7 @@ def test_portfolio_gates() -> None:
     assert not p.allows("S2_BALANCE", "CHOP")
 
 
-def test_env_defaults_disable_s2(monkeypatch=None) -> None:
+def test_env_defaults_include_s2(monkeypatch=None) -> None:
     import os
 
     os.environ.pop("ENABLE_S1", None)
@@ -49,16 +49,16 @@ def test_env_defaults_disable_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S6", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
+    assert "S2_BALANCE" in p.enabled
     assert "S3_ML" in p.enabled
     assert "S4_OVERNIGHT" in p.enabled
     assert "S5_MINEDGE" in p.enabled
     assert "S6_MIN30" in p.enabled
-    assert "S2_BALANCE" not in p.enabled
 
 
 if __name__ == "__main__":
     test_regime_quiet_vs_trend()
     test_wide_spread()
     test_portfolio_gates()
-    test_env_defaults_disable_s2()
+    test_env_defaults_include_s2()
     print("ok")

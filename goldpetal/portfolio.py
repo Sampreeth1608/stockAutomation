@@ -11,12 +11,20 @@ from regime import Regime
 # Default: based on observed paper results — S2 is noisy in chop; S1 likes structure;
 # S3 needs model edge; nothing trades in wide spreads.
 DEFAULT_ALLOWED: dict[Regime, set[str]] = {
-    "TREND": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT", "S5_MINEDGE", "S6_MIN30"},
+    "TREND": {
+        "S1_NETDELTA",
+        "S2_BALANCE",
+        "S3_ML",
+        "S4_OVERNIGHT",
+        "S5_MINEDGE",
+        "S6_MIN30",
+    },
     "CHOP": {"S4_OVERNIGHT"},  # S5/S6 skip chop by edge size usually
-    "QUIET": {"S1_NETDELTA", "S4_OVERNIGHT", "S6_MIN30"},
+    "QUIET": {"S1_NETDELTA", "S2_BALANCE", "S4_OVERNIGHT", "S6_MIN30"},
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
         "S1_NETDELTA",
+        "S2_BALANCE",
         "S3_ML",
         "S4_OVERNIGHT",
         "S5_MINEDGE",
@@ -63,11 +71,9 @@ def portfolio_from_env() -> PortfolioConfig:
     enabled: set[str] = set()
     if os.getenv("ENABLE_S1", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S1_NETDELTA")
-    if os.getenv("ENABLE_S2", "false").strip().lower() in {"1", "true", "yes", "y"}:
-        # default false — currently loses in chop
+    if os.getenv("ENABLE_S2", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S2_BALANCE")
     else:
-        # keep explicit false as default for S2 unless user enables
         pass
     if os.getenv("ENABLE_S3", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S3_ML")

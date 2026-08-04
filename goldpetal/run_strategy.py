@@ -20,7 +20,7 @@ from portfolio import portfolio_from_env
 from regime import RegimeDetector
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
-from strategy_balance import BalanceStrategy
+from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_overnight import OvernightStrategy, overnight_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
@@ -178,7 +178,9 @@ def run_once(
         flush=True,
     )
     print(
-        f"S2       : depth flips [{'ON' if portfolio.is_enabled(strategy_s2.name) else 'OFF'}]",
+        f"S2       : 1-min depth sum "
+        f"[{'ON' if portfolio.is_enabled(strategy_s2.name) else 'OFF'}] "
+        f"{strategy_s2.status_line}",
         flush=True,
     )
     print(
@@ -327,25 +329,24 @@ def run_once(
         state["next_bar_at"] = _next_boundary(now, interval)
 
     def emit_s2_if_changed(now: datetime, message: dict) -> None:
-        """S2 reacts instantly when depth buy1-5 vs sell1-5 sign flips."""
+        """S2: accumulate buy1-5/sell1-5 for 1 minute, then trade on net sign."""
         if not portfolio.is_enabled(strategy_s2.name):
             return
         if latest["cmp"] is None:
             return
-        buy_sum, sell_sum, details = depth_buy_sell_sums(message)
-        # If depth missing entirely, skip (do not use total_buy/total_sell for S2).
-        if buy_sum == 0 and sell_sum == 0 and not message.get("best_5_buy_data") and not message.get("best_5_sell_data"):
+
+        result = strategy_s2.on_tick(now, float(latest["cmp"]), message)
+        if result is None:
             return
 
-        tick_bar = BarSnapshot(
-            time_label=now.isoformat(timespec="seconds"),
-            cmp=float(latest["cmp"]),
-            bp=buy_sum,
-            sp=sell_sum,
-        )
-        result = strategy_s2.on_bar(tick_bar, details=details)
         regime = regime_det.last.regime
         action = result.action
+        buy_sum = float((strategy_s2.last_minute or {}).get("buy_sum", result.net or 0))
+        sell_sum = float((strategy_s2.last_minute or {}).get("sell_sum", 0))
+        # Reconstruct sell from net if needed
+        if strategy_s2.last_minute:
+            buy_sum = float(strategy_s2.last_minute["buy_sum"])
+            sell_sum = float(strategy_s2.last_minute["sell_sum"])
 
         if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s2.name, regime):
             strategy_s2.position = "flat"
@@ -355,7 +356,6 @@ def run_once(
             and portfolio.should_flatten(strategy_s2.name, regime)
             and action != "CLOSE"
         ):
-            # Force flatten when regime turns bad for S2
             if strategy_s2.position != "flat":
                 action = "CLOSE"
                 strategy_s2.position = "flat"
@@ -374,7 +374,7 @@ def run_once(
         if action not in {"BUY", "SHORT", "CLOSE"}:
             return
         save_signal(
-            time_label=tick_bar.time_label,
+            time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
             action=action,
             position_after=result.position_after if action != "CLOSE" else "flat",
@@ -384,11 +384,12 @@ def run_once(
             net_delta=result.net_delta,
             dry_run=dry_run,
             strategy=strategy_s2.name,
-            cmp=tick_bar.cmp,
+            cmp=float(latest["cmp"]),
         )
         line = (
-            f"[{tick_bar.time_label}] {strategy_s2.name} regime={regime} "
-            f"CMP={tick_bar.cmp} buy_sum={buy_sum} sell_sum={sell_sum} NET={result.net} "
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s2.name} regime={regime} "
+            f"CMP={latest['cmp']} buy_sum={buy_sum:.0f} sell_sum={sell_sum:.0f} "
+            f"NET={result.net} "
             f"=> {action} (pos={strategy_s2.position}) | {result.reason}"
         )
         print(line, flush=True)
@@ -647,7 +648,7 @@ def run_once(
                 print(line, flush=True)
                 logger.info(line)
 
-            # S2: tick-based depth buy1-5 vs sell1-5 sign flips
+            # S2: 1-min sum of buy1-5 vs sell1-5
             emit_s2_if_changed(now, message)
             # S3: ML model BUY/SHORT/CLOSE
             emit_s3_if_changed(now, message)
@@ -705,7 +706,7 @@ def run_once(
 def main() -> None:
     stop_flag = {"stop": False}
     strategy_s1 = PressureStrategy()
-    strategy_s2 = BalanceStrategy()
+    strategy_s2 = balance_from_env()
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     strategy_s3 = ml_strategy_from_env()
     strategy_s4 = overnight_from_env()
