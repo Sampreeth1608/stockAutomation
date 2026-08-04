@@ -341,12 +341,8 @@ def run_once(
 
         regime = regime_det.last.regime
         action = result.action
-        buy_sum = float((strategy_s2.last_minute or {}).get("buy_sum", result.net or 0))
+        buy_sum = float((strategy_s2.last_minute or {}).get("buy_sum", 0))
         sell_sum = float((strategy_s2.last_minute or {}).get("sell_sum", 0))
-        # Reconstruct sell from net if needed
-        if strategy_s2.last_minute:
-            buy_sum = float(strategy_s2.last_minute["buy_sum"])
-            sell_sum = float(strategy_s2.last_minute["sell_sum"])
 
         if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s2.name, regime):
             strategy_s2.position = "flat"
