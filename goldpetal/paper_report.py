@@ -62,11 +62,14 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     cfg = charges_from_env()
-    print("=== PAPER TRADE REPORT (after charges + tax) ===")
+    print("=== PAPER TRADE REPORT (Angel MCX fees + tax) ===")
     print(
-        f"Charges: ₹{cfg.round_trip_cost():.2f}/closed trade "
-        f"(per_side={cfg.charge_per_side}, lot={cfg.lot_size}) | "
-        f"TAX_RATE={cfg.tax_rate*100:.0f}% on profit after charges"
+        f"Brokerage ₹{cfg.brokerage_per_order}/order "
+        f"{'(PROMO ₹0)' if cfg.brokerage_promo else ''} | "
+        f"MCX txn {cfg.mcx_txn_rate*100:.4f}% | CTT sell {cfg.ctt_sell_rate*100:.3f}% | "
+        f"stamp buy {cfg.stamp_buy_rate*100:.4f}% | GST {cfg.gst_rate*100:.0f}% | "
+        f"SEBI {cfg.sebi_rate*100:.4f}% | TAX {cfg.tax_rate*100:.0f}% | "
+        f"lot={cfg.lot_size} turnover_mult={cfg.turnover_mult}"
     )
     print("Mode: paper only until DRY_RUN=false + live order module")
     print()
@@ -86,9 +89,8 @@ def main() -> None:
         export_trades_csv(out / f"trades_{name}.csv", strategy=strat)
 
     print()
-    print("CSVs include: gross_pnl, charges, pnl_after_charges, tax, pnl_after_tax")
-    print("net_pnl column = pnl_after_tax (take-home).")
-    print("Set TRADE_CHARGE_PER_SIDE / TRADE_ROUND_TRIP_CHARGE / TAX_RATE in .env")
+    print("CSVs include Angel fee breakup + pnl_after_tax (net_pnl).")
+    print("Env: BROKERAGE_PER_ORDER, BROKERAGE_PROMO, TAX_RATE, LOT_SIZE, TURNOVER_MULT")
 
 
 if __name__ == "__main__":

@@ -1,43 +1,53 @@
-"""Tests for charges + tax on paper PnL."""
+"""Tests for Angel One MCX futures charges + tax."""
 
 from __future__ import annotations
 
 import os
 
-from charges import ChargeConfig, apply_charges_and_tax
+from charges import ChargeConfig, apply_charges_and_tax, round_trip_charges
 
 
-def test_profit_taxed() -> None:
-    cfg = ChargeConfig(charge_per_side=20, tax_rate=0.30, lot_size=1)
-    # gross 100, fees 40, after 60, tax 18, after_tax 42
-    out = apply_charges_and_tax(100.0, cfg)
-    assert out["gross_pnl"] == 100.0
-    assert out["charges"] == 40.0
-    assert out["pnl_after_charges"] == 60.0
-    assert out["tax"] == 18.0
-    assert out["pnl_after_tax"] == 42.0
+def test_round_trip_has_brokerage_gst_ctt() -> None:
+    cfg = ChargeConfig(
+        brokerage_per_order=20.0,
+        brokerage_promo=False,
+        lot_size=1.0,
+        turnover_mult=0.1,
+    )
+    fee = round_trip_charges(side="BUY", entry_price=14000.0, exit_price=14100.0, cfg=cfg)
+    # 2 orders × ₹20 brokerage
+    assert fee["brokerage"] == 40.0
+    assert fee["gst"] > 0
+    assert fee["ctt"] > 0  # sell leg
+    assert fee["stamp"] > 0  # buy legs (entry buy + no stamp on sell; short would differ)
+    assert fee["charges"] > 40.0
 
 
-def test_loss_no_tax() -> None:
-    cfg = ChargeConfig(charge_per_side=20, tax_rate=0.30)
-    out = apply_charges_and_tax(-10.0, cfg)
-    assert out["gross_pnl"] == -10.0
-    assert out["charges"] == 40.0
-    assert out["pnl_after_charges"] == -50.0
+def test_promo_zero_brokerage() -> None:
+    cfg = ChargeConfig(brokerage_per_order=0.0, lot_size=1.0, turnover_mult=0.1)
+    fee = round_trip_charges(side="BUY", entry_price=14000.0, exit_price=14100.0, cfg=cfg)
+    assert fee["brokerage"] == 0.0
+    assert fee["charges"] > 0  # still statutory
+
+
+def test_profit_after_tax() -> None:
+    cfg = ChargeConfig(brokerage_per_order=20.0, tax_rate=0.30, turnover_mult=0.1, lot_size=1)
+    # 100 points * 0.1 = ₹10 gross — small vs ₹40 brokerage → loss after fees
+    out = apply_charges_and_tax(
+        100.0, cfg, side="BUY", entry_price=14000.0, exit_price=14100.0
+    )
+    assert out["gross_pnl"] == 10.0
+    assert out["charges"] > 40.0
+    assert out["pnl_after_charges"] < 0
     assert out["tax"] == 0.0
-    assert out["pnl_after_tax"] == -50.0
 
 
-def test_round_trip_override() -> None:
-    cfg = ChargeConfig(charge_per_side=20, round_trip_charge=55, tax_rate=0.3)
-    out = apply_charges_and_tax(100.0, cfg)
-    assert out["charges"] == 55.0
-
-
-def test_build_trades_applies_charges() -> None:
-    os.environ["TRADE_CHARGE_PER_SIDE"] = "20"
+def test_build_trades_angel_schedule() -> None:
+    os.environ["BROKERAGE_PER_ORDER"] = "20"
+    os.environ["BROKERAGE_PROMO"] = "false"
     os.environ["TAX_RATE"] = "0.30"
-    os.environ.pop("TRADE_ROUND_TRIP_CHARGE", None)
+    os.environ["TURNOVER_MULT"] = "0.1"
+    os.environ["LOT_SIZE"] = "1"
 
     import tempfile
     from pathlib import Path
@@ -48,26 +58,25 @@ def test_build_trades_applies_charges() -> None:
     db = Path(tmp.name)
     tmp.close()
     init_db(db)
+    # Big move so after fees still profit: 500 points * 0.1 = ₹50 gross
     save_signal(
         "t1", "GOLDPETAL", "BUY", "long", "in",
-        None, 1, 1, True, strategy="S3_ML", cmp=100.0, db_path=db,
+        None, 1, 1, True, strategy="S3_ML", cmp=14000.0, db_path=db,
     )
     save_signal(
         "t2", "GOLDPETAL", "CLOSE", "flat", "out",
-        None, 0, None, True, strategy="S3_ML", cmp=200.0, db_path=db,
+        None, 0, None, True, strategy="S3_ML", cmp=14500.0, db_path=db,
     )
     t = build_trades(strategy="S3_ML", db_path=db)[0]
-    assert t["gross_pnl"] == 100.0
-    assert t["charges"] == 40.0
-    assert t["pnl_after_charges"] == 60.0
-    assert t["tax"] == 18.0
-    assert t["pnl_after_tax"] == 42.0
-    assert t["net_pnl"] == 42.0
+    assert t["gross_pnl"] == 50.0
+    assert float(t["charges"]) >= 40.0
+    assert "brokerage" in t
+    assert t["pnl_after_tax"] == t["net_pnl"]
 
 
 if __name__ == "__main__":
-    test_profit_taxed()
-    test_loss_no_tax()
-    test_round_trip_override()
-    test_build_trades_applies_charges()
+    test_round_trip_has_brokerage_gst_ctt()
+    test_promo_zero_brokerage()
+    test_profit_after_tax()
+    test_build_trades_angel_schedule()
     print("ok")

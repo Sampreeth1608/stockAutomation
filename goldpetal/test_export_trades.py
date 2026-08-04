@@ -7,10 +7,18 @@ import tempfile
 from pathlib import Path
 
 # Zero costs so pairing tests stay about price PnL
-os.environ["TRADE_CHARGE_PER_SIDE"] = "0"
+os.environ["BROKERAGE_PER_ORDER"] = "0"
+os.environ["BROKERAGE_PROMO"] = "true"
+os.environ["MCX_TXN_RATE"] = "0"
+os.environ["CTT_SELL_RATE"] = "0"
+os.environ["SEBI_RATE"] = "0"
+os.environ["STAMP_BUY_RATE"] = "0"
+os.environ["GST_RATE"] = "0"
 os.environ["TAX_RATE"] = "0"
 os.environ["LOT_SIZE"] = "1"
+os.environ["TURNOVER_MULT"] = "1"
 os.environ.pop("TRADE_ROUND_TRIP_CHARGE", None)
+os.environ.pop("TRADE_CHARGE_PER_SIDE", None)
 
 from storage import build_trades, export_trades_csv, init_db, save_signal
 

@@ -435,11 +435,17 @@ def _build_trades_one(
         if entry is not None and entry != "" and exit_price is not None:
             entry_f = float(entry)
             if side == "BUY":
-                pnl = exit_price - entry_f
+                pnl_pts = exit_price - entry_f
             else:
-                pnl = entry_f - exit_price
-            pnl_pct = (pnl / entry_f * 100.0) if entry_f else 0.0
-            charge_bits = apply_charges_and_tax(pnl, charges_from_env())
+                pnl_pts = entry_f - exit_price
+            pnl_pct = (pnl_pts / entry_f * 100.0) if entry_f else 0.0
+            charge_bits = apply_charges_and_tax(
+                pnl_pts,
+                charges_from_env(),
+                side=side,
+                entry_price=entry_f,
+                exit_price=float(exit_price),
+            )
             # Keep net_pnl as after-tax so journals/reports default to real take-home
             pnl = charge_bits["pnl_after_tax"]
         trade.update(
@@ -451,6 +457,12 @@ def _build_trades_one(
                 "exit_net_delta": exit_net_delta if exit_net_delta is not None else "",
                 "gross_pnl": charge_bits["gross_pnl"],
                 "charges": charge_bits["charges"],
+                "brokerage": charge_bits.get("brokerage", ""),
+                "txn": charge_bits.get("txn", ""),
+                "sebi": charge_bits.get("sebi", ""),
+                "stamp": charge_bits.get("stamp", ""),
+                "ctt": charge_bits.get("ctt", ""),
+                "gst": charge_bits.get("gst", ""),
                 "pnl_after_charges": charge_bits["pnl_after_charges"],
                 "tax": charge_bits["tax"],
                 "pnl_after_tax": charge_bits["pnl_after_tax"],
@@ -507,6 +519,12 @@ def _build_trades_one(
                 "exit_net_delta": "",
                 "gross_pnl": "",
                 "charges": "",
+                "brokerage": "",
+                "txn": "",
+                "sebi": "",
+                "stamp": "",
+                "ctt": "",
+                "gst": "",
                 "pnl_after_charges": "",
                 "tax": "",
                 "pnl_after_tax": "",
@@ -546,6 +564,12 @@ TRADE_CSV_FIELDS = [
     "exit_price",
     "gross_pnl",
     "charges",
+    "brokerage",
+    "txn",
+    "sebi",
+    "stamp",
+    "ctt",
+    "gst",
     "pnl_after_charges",
     "tax",
     "pnl_after_tax",
