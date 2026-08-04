@@ -23,18 +23,18 @@ def _msg(buy_qty: float, sell_qty: float) -> dict:
 
 def test_fee_break_even_large() -> None:
     be = fee_break_even_points(14380.0)
-    # Angel ₹20*2 + CTT/stamp/txn → hundreds of points at ₹0.10/pt
-    assert be > 100.0
+    # Angel ~₹50 RT / ₹1 per point → roughly tens of points, not hundreds
+    assert 30.0 < be < 120.0
 
 
 def test_required_cover_fees() -> None:
     thr = EdgeThresholds(
         min_edge_points=20.0,
-        fee_break_even_points=400.0,
+        fee_break_even_points=50.0,
         safety_mult=1.25,
         cover_fees=True,
     )
-    assert thr.required_points == 500.0  # max(20, 400*1.25)
+    assert thr.required_points == 62.5  # max(20, 50*1.25)
 
 
 def test_required_user_only() -> None:

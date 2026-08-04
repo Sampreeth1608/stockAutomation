@@ -8,10 +8,11 @@ Defaults match Angel One commodity futures tariff (non-agri MCX):
   - Stamp duty: 0.002% on BUY turnover
   - GST: 18% on (brokerage + exchange txn + SEBI)
 
-Gold Petal contract (typical):
-  - Quote: ₹ / 10 grams
-  - Lot size: 1 gram
-  - Turnover per lot ≈ price * (1/10) * LOT_SIZE = price * 0.1 * LOT_SIZE
+Gold Petal contract (MCX official):
+  - Trading unit / lot: 1 gram
+  - Quotation / base value: ₹ per 1 gram
+  - Tick: ₹1 per 1 gram → 1 point ≈ ₹1 PnL per lot
+  - Turnover per lot ≈ price * LOT_SIZE * TURNOVER_MULT (default mult=1.0)
 
 Tax on trading profit (user request): TAX_RATE (default 30%) on profit after charges.
 """
@@ -33,8 +34,8 @@ class ChargeConfig:
     gst_rate: float = 0.18
     tax_rate: float = 0.30
     lot_size: float = 1.0
-    # Quote is ₹/10g, lot=1g → multiplier 0.1
-    turnover_mult: float = 0.1
+    # Quote is ₹/1g, lot=1g → multiplier 1.0 (1 point = ₹1)
+    turnover_mult: float = 1.0
 
 
 def charges_from_env() -> ChargeConfig:
@@ -65,7 +66,7 @@ def charges_from_env() -> ChargeConfig:
         gst_rate=float(os.getenv("GST_RATE", "0.18")),
         tax_rate=float(os.getenv("TAX_RATE", "0.30")),
         lot_size=float(os.getenv("LOT_SIZE", "1")),
-        turnover_mult=float(os.getenv("TURNOVER_MULT", "0.1")),
+        turnover_mult=float(os.getenv("TURNOVER_MULT", "1.0")),
     )
 
 

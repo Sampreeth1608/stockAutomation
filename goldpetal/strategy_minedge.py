@@ -5,9 +5,9 @@ Enters BUY/SHORT only if expected_points >= required_points
 (required = max(MIN_EDGE_POINTS, fee_break_even * safety) when COVER_FEES=true).
 
 Why COVER_FEES matters:
-  Angel Gold Petal round-trip fees ≈ ₹47 → break-even ≈ 470+ points
-  (₹0.10/point with TURNOVER_MULT=0.1). A 20-point move alone (~₹2) cannot
-  cover costs. MIN_EDGE_POINTS=20 is the *floor*; fee cover raises the bar.
+  Angel Gold Petal round-trip fees ≈ ₹50 → break-even ≈ 50 points
+  (₹1/point with TURNOVER_MULT=1.0; quote is ₹ per 1 gram).
+  MIN_EDGE_POINTS is the *floor*; fee cover raises the bar when enabled.
 
 Exits when:
   - move from entry reaches +expected (target), or
