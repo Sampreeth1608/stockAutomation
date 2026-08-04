@@ -228,21 +228,83 @@ def latest_ticks(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
         )
 
 
-def latest_signals(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
+def latest_signals(
+    limit: int = 20,
+    strategy: str | None = None,
+    db_path: Path = DB_PATH,
+) -> list[sqlite3.Row]:
     init_db(db_path)
+    if strategy:
+        query = """
+            SELECT time_label, symbol, strategy, action, position_after, reason,
+                   price_delta, net, net_delta, dry_run
+            FROM signals
+            WHERE strategy = ?
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        params: tuple[Any, ...] = (strategy, limit)
+    else:
+        query = """
+            SELECT time_label, symbol, strategy, action, position_after, reason,
+                   price_delta, net, net_delta, dry_run
+            FROM signals
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        params = (limit,)
     with connect(db_path) as conn:
-        return list(
-            conn.execute(
-                """
-                SELECT time_label, symbol, strategy, action, position_after, reason,
-                       price_delta, net, net_delta, dry_run
-                FROM signals
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+        return list(conn.execute(query, params))
+
+
+def export_signals_csv(
+    path: Path,
+    strategy: str | None = None,
+    limit: int | None = None,
+    db_path: Path = DB_PATH,
+) -> int:
+    init_db(db_path)
+    query = """
+        SELECT time_label, symbol, strategy, action, position_after, reason,
+               price_delta, net, net_delta, dry_run
+        FROM signals
+    """
+    params: list[Any] = []
+    if strategy:
+        query += " WHERE strategy = ?"
+        params.append(strategy)
+    query += " ORDER BY id ASC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    with connect(db_path) as conn:
+        rows = list(conn.execute(query, tuple(params)))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(
+            "time,symbol,strategy,action,position,price_delta,net,net_delta,reason,dry_run\n"
         )
+        for row in rows:
+            handle.write(
+                ",".join(
+                    [
+                        str(row["time_label"] or ""),
+                        str(row["symbol"] or ""),
+                        str(row["strategy"] or ""),
+                        str(row["action"] or ""),
+                        str(row["position_after"] or ""),
+                        str(row["price_delta"] if row["price_delta"] is not None else ""),
+                        str(row["net"] if row["net"] is not None else ""),
+                        str(row["net_delta"] if row["net_delta"] is not None else ""),
+                        '"' + str(row["reason"] or "").replace('"', "'") + '"',
+                        str(row["dry_run"]),
+                    ]
+                )
+                + "\n"
+            )
+    return len(rows)
 
 
 def count_bars(db_path: Path = DB_PATH) -> int:
