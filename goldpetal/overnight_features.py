@@ -184,14 +184,12 @@ def load_archive_days(archive_root: Path) -> pd.DataFrame:
 
 
 def model_matrix(days: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
-    need = DAY_FEATURE_COLS + ["y_gap_up", "gap_next", "date"]
-    clean = days.dropna(subset=["y_gap_up"] + [c for c in DAY_FEATURE_COLS if c not in {"mom_3", "ewma_vol", "ret_z", "gap_lag2"}]).copy()
-    # fill longer-horizon features
+    need_y = days.dropna(subset=["y_gap_up"]).copy()
     for c in DAY_FEATURE_COLS:
-        if c not in clean.columns:
-            clean[c] = 0.0
-        clean[c] = clean[c].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    X = clean[DAY_FEATURE_COLS].astype(float)
-    y = clean["y_gap_up"].astype(int)
-    gaps = clean["gap_next"].astype(float)
+        if c not in need_y.columns:
+            need_y[c] = 0.0
+        need_y[c] = need_y[c].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    X = need_y[DAY_FEATURE_COLS].astype(float)
+    y = need_y["y_gap_up"].astype(int)
+    gaps = need_y["gap_next"].astype(float)
     return X, y, gaps

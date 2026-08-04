@@ -21,6 +21,57 @@ DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "data" / "models"
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "data" / "s4_state.json"
 
 
+class HeuristicGapModel:
+    """Fallback scorer when ML overnight model is not trained yet.
+
+    P(gap_up) ≈ σ( 8*late_ret + 0.8*late_imb + 0.4*clv - 0.1*ret_z )
+    using a logistic sigmoid. Not a fitted model — bridge until enough days.
+    """
+
+    feature_names_ = [
+        "late_ret",
+        "late_imb",
+        "clv",
+        "ret_z",
+        "log_ret",
+        "parkinson",
+    ]
+
+    def predict_proba(self, X):  # noqa: ANN001 — sklearn-like
+        import math
+
+        import numpy as np
+
+        arr = np.asarray(X, dtype=float)
+        # map known column order from DAY_FEATURE_COLS if wide matrix
+        # Prefer named positions when full feature matrix passed
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        # DAY_FEATURE_COLS indices
+        from overnight_features import DAY_FEATURE_COLS
+
+        idx = {n: i for i, n in enumerate(DAY_FEATURE_COLS)}
+
+        def col(name: str, default: float = 0.0) -> float:
+            i = idx.get(name)
+            if i is None or i >= arr.shape[1]:
+                return default
+            v = arr[0, i]
+            return float(v) if v == v else default
+
+        z = (
+            8.0 * col("late_ret")
+            + 0.8 * col("late_imb")
+            + 0.4 * col("clv")
+            - 0.1 * col("ret_z")
+            + 2.0 * col("log_ret")
+        )
+        # clip for numerical stability
+        z = max(-20.0, min(20.0, z))
+        p = 1.0 / (1.0 + math.exp(-z))
+        return np.array([[1.0 - p, p]])
+
+
 @dataclass
 class OvernightState:
     side: Position  # long/short/flat
@@ -65,10 +116,12 @@ class OvernightStrategy:
 
         path = model_path or self._resolve_model()
         if path is None:
-            self._load_error = (
-                "No overnight model. Run: python train_overnight.py "
-                "(needs ≥2 day→next-open pairs)"
-            )
+            # Always-on quant heuristic so S4 can paper-trade while days accumulate
+            self.model = HeuristicGapModel()
+            self.features = list(DAY_FEATURE_COLS)
+            self.enabled = True
+            self.model_path = Path("heuristic://gap_sigmoid")
+            self._load_error = None
             return
         try:
             bundle = joblib.load(path)
@@ -77,7 +130,11 @@ class OvernightStrategy:
             self.enabled = True
             self.model_path = path
         except Exception as exc:  # noqa: BLE001
-            self._load_error = f"Failed loading {path}: {exc}"
+            self.model = HeuristicGapModel()
+            self.features = list(DAY_FEATURE_COLS)
+            self.enabled = True
+            self.model_path = Path("heuristic://gap_sigmoid")
+            self._load_error = f"ML load failed ({exc}); using heuristic"
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:
@@ -144,8 +201,9 @@ class OvernightStrategy:
     @property
     def status_line(self) -> str:
         if self.enabled:
+            kind = "heuristic" if "heuristic" in str(self.model_path) else "ml"
             return (
-                f"enabled model={getattr(self, 'model_path', '?')} "
+                f"enabled ({kind}) model={self.model_path} "
                 f"buy>={self.buy_prob} short<={self.short_prob} "
                 f"entry={self.entry_minutes_before_close}m_before_close "
                 f"pos={self.state.side}"

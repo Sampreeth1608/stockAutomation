@@ -42,13 +42,20 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
     days = day_bars_from_ticks(ticks, late_minutes=late_minutes)
     # Need enough days with next-day label
     labeled = days.dropna(subset=["y_gap_up"])
-    if len(labeled) < 2:
+    if len(labeled) < 1:
         raise SystemExit(
-            f"Need at least 2 complete day→next-open pairs to train (have {len(labeled)}). "
-            "Keep collecting; S4 will enable when enough history exists."
+            f"Need at least 1 complete day→next-open pair to train (have {len(labeled)}). "
+            "Keep collecting; S4 uses heuristic until then."
+        )
+    if len(labeled) < 2:
+        print(
+            f"Warning: only {len(labeled)} labeled day(s). "
+            "Model will be weak; heuristic remains available as fallback."
         )
 
     X, y, gaps = model_matrix(days)
+    if len(X) < 1:
+        raise SystemExit("Feature matrix empty after cleaning.")
     # chronological split
     cut = max(1, int(len(X) * 0.7))
     if cut >= len(X):
