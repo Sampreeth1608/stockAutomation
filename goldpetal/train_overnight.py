@@ -171,7 +171,33 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
     best_auc = -1.0
 
     for name, model in models.items():
-        model.fit(X_tr, y_tr)
+        try:
+            model.fit(X_tr, y_tr)
+        except ValueError as exc:
+            print(f"{name}: fit failed ({exc}); saving heuristic fallback")
+            from strategy_overnight import HeuristicGapModel
+
+            path = model_dir / "overnight_heuristic.joblib"
+            joblib.dump(
+                {
+                    "model": HeuristicGapModel(),
+                    "features": DAY_FEATURE_COLS,
+                    "name": "overnight_heuristic",
+                    "late_minutes": late_minutes,
+                },
+                path,
+            )
+            report["models"]["overnight_heuristic"] = {
+                "path": str(path),
+                "note": f"fit_fallback:{exc}",
+            }
+            report["best_model"] = "overnight_heuristic"
+            (model_dir / "overnight_report.json").write_text(
+                json.dumps(report, indent=2), encoding="utf-8"
+            )
+            days.to_csv(model_dir / "day_features.csv", index=False)
+            print(f"Saved heuristic fallback -> {path}")
+            return report
         if len(X_te) and y_te.nunique() >= 1:
             prob = model.predict_proba(X_te)[:, 1]
             pred = (prob >= 0.55).astype(int)
