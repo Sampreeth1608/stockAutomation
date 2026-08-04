@@ -203,18 +203,21 @@ def run_once(
             price_delta=result_s1.price_delta,
             net_delta=result_s1.net_delta,
         )
-        save_signal(
-            time_label=bar.time_label,
-            symbol=symbol,
-            action=result_s1.action,
-            position_after=result_s1.position_after,
-            reason=result_s1.reason,
-            price_delta=result_s1.price_delta,
-            net=result_s1.net,
-            net_delta=result_s1.net_delta,
-            dry_run=dry_run,
-            strategy=strategy_s1.name,
-        )
+        # Persist only trade transitions for the journal (BUY/SHORT/CLOSE).
+        if result_s1.action in {"BUY", "SHORT", "CLOSE"}:
+            save_signal(
+                time_label=bar.time_label,
+                symbol=symbol,
+                action=result_s1.action,
+                position_after=result_s1.position_after,
+                reason=result_s1.reason,
+                price_delta=result_s1.price_delta,
+                net=result_s1.net,
+                net_delta=result_s1.net_delta,
+                dry_run=dry_run,
+                strategy=strategy_s1.name,
+                cmp=bar.cmp,
+            )
         line = (
             f"[{bar.time_label}] {strategy_s1.name} "
             f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result_s1.net} "
@@ -256,6 +259,7 @@ def run_once(
             net_delta=result.net_delta,
             dry_run=dry_run,
             strategy=strategy_s2.name,
+            cmp=tick_bar.cmp,
         )
         line = (
             f"[{tick_bar.time_label}] {strategy_s2.name} "

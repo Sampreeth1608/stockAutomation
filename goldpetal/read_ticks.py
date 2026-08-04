@@ -61,9 +61,10 @@ def main() -> None:
             label = strategy or "ALL"
             print(f"\nLatest {len(rows)} signals [{label}]:")
             for row in rows:
+                cmp_v = row["cmp"] if "cmp" in row.keys() else None
                 print(
                     f"{row['time_label']} | {row['strategy']} | {row['action']} | "
-                    f"pos={row['position_after']} "
+                    f"pos={row['position_after']} cmp={cmp_v} "
                     f"| net={row['net']} netΔ={row['net_delta']} "
                     f"| {row['reason']}"
                 )
