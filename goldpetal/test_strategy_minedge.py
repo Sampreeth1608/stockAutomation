@@ -106,6 +106,17 @@ def test_s5_target_close() -> None:
     assert s.position == "flat"
 
 
+def test_s6_requires_30_points() -> None:
+    from strategy_minedge import min30_from_env
+    import os
+
+    os.environ["S6_MIN_POINTS"] = "30"
+    s = min30_from_env()
+    assert s.name == "S6_MIN30"
+    assert s.cover_fees is False
+    assert s.required_points == 30.0
+
+
 if __name__ == "__main__":
     test_fee_break_even_large()
     test_required_cover_fees()
@@ -114,4 +125,5 @@ if __name__ == "__main__":
     test_s5_skips_small_edge()
     test_s5_enters_on_large_move_and_bias()
     test_s5_target_close()
+    test_s6_requires_30_points()
     print("ok")

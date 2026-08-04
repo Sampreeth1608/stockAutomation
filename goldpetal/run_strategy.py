@@ -23,7 +23,7 @@ from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy
 from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_overnight import OvernightStrategy, overnight_from_env
-from strategy_minedge import MinEdgeStrategy, minedge_from_env
+from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -141,6 +141,7 @@ def run_once(
     strategy_s3: MLStrategy,
     strategy_s4: OvernightStrategy,
     strategy_s5: MinEdgeStrategy,
+    strategy_s6: MinEdgeStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -195,6 +196,12 @@ def run_once(
         f"S5       : min-edge "
         f"[{'ON' if portfolio.is_enabled(strategy_s5.name) else 'OFF'}] "
         f"{strategy_s5.status_line}",
+        flush=True,
+    )
+    print(
+        f"S6       : min-30pts "
+        f"[{'ON' if portfolio.is_enabled(strategy_s6.name) else 'OFF'}] "
+        f"{strategy_s6.status_line}",
         flush=True,
     )
     print(
@@ -542,6 +549,46 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s6_if_changed(now: datetime, message: dict) -> None:
+        """S6: trade when expected move >= 30 points (user floor, no fee gate)."""
+        if not portfolio.is_enabled(strategy_s6.name):
+            return
+        if latest["cmp"] is None:
+            return
+        if not portfolio.allows(strategy_s6.name, regime_det.last.regime):
+            if strategy_s6.position == "flat":
+                return
+        result = strategy_s6.on_tick(now, float(latest["cmp"]), message)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+            strategy_s6.name, regime_det.last.regime
+        ):
+            strategy_s6.position = "flat"
+            strategy_s6.entry_price = None
+            return
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s6.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s6.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"exp={strategy_s6.last_expected} "
+            f"=> {result.action} (pos={strategy_s6.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -594,7 +641,8 @@ def run_once(
                     f"regime={rs.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
-                    f"s4={strategy_s4.position} s5={strategy_s5.position}{s3_extra}"
+                    f"s4={strategy_s4.position} s5={strategy_s5.position} "
+                    f"s6={strategy_s6.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -607,6 +655,8 @@ def run_once(
             emit_s4_if_changed(now, message)
             # S5: min-edge (fee-aware)
             emit_s5_if_changed(now, message)
+            # S6: min 30 points expected move
+            emit_s6_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -660,6 +710,7 @@ def main() -> None:
     strategy_s3 = ml_strategy_from_env()
     strategy_s4 = overnight_from_env()
     strategy_s5 = minedge_from_env()
+    strategy_s6 = min30_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
@@ -667,9 +718,10 @@ def main() -> None:
     print(f"S3_ML: {strategy_s3.status_line}", flush=True)
     print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(f"S5_MINEDGE: {strategy_s5.status_line}", flush=True)
+    print(f"S6_MIN30: {strategy_s6.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4/S5/S6 in .env)",
         flush=True,
     )
 
@@ -689,6 +741,7 @@ def main() -> None:
                 strategy_s3,
                 strategy_s4,
                 strategy_s5,
+                strategy_s6,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -706,7 +759,8 @@ def main() -> None:
             f"Reconnecting in {RECONNECT_DELAY_SEC}s "
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
             f"s3={strategy_s3.position} s4={strategy_s4.position} "
-            f"s5={strategy_s5.position} regime={regime_det.last.regime})...",
+            f"s5={strategy_s5.position} s6={strategy_s6.position} "
+            f"regime={regime_det.last.regime})...",
             flush=True,
         )
         logger.info("Reconnecting in %ss", RECONNECT_DELAY_SEC)

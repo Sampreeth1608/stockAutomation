@@ -35,14 +35,19 @@ class MinEdgeStrategy:
         every_n_ticks: int = 5,
         atr_window: int = 100,
         imbalance_ratio: float = 1.35,
+        *,
+        name: str | None = None,
+        cover_fees: bool | None = None,
     ) -> None:
         thr = edge_thresholds_from_env()
+        if name:
+            self.name = name
         self.min_edge_points = (
             float(min_edge_points)
             if min_edge_points is not None
             else thr.min_edge_points
         )
-        self.cover_fees = thr.cover_fees
+        self.cover_fees = thr.cover_fees if cover_fees is None else bool(cover_fees)
         self.safety_mult = thr.safety_mult
         self.fee_break_even = thr.fee_break_even_points
         self.every_n_ticks = max(1, every_n_ticks)
@@ -178,7 +183,24 @@ class MinEdgeStrategy:
 
 
 def minedge_from_env() -> MinEdgeStrategy:
+    """S5: fee-aware min edge (COVER_FEES + MIN_EDGE_POINTS)."""
     every = int(os.getenv("S5_EVERY_N_TICKS", "5"))
     window = int(os.getenv("S5_ATR_WINDOW", "120"))
     imb = float(os.getenv("S5_IMBALANCE_RATIO", "1.35"))
     return MinEdgeStrategy(every_n_ticks=every, atr_window=window, imbalance_ratio=imb)
+
+
+def min30_from_env() -> MinEdgeStrategy:
+    """S6: trade when expected move >= S6_MIN_POINTS (default 30). No fee gate."""
+    every = int(os.getenv("S6_EVERY_N_TICKS", os.getenv("S5_EVERY_N_TICKS", "5")))
+    window = int(os.getenv("S6_ATR_WINDOW", os.getenv("S5_ATR_WINDOW", "120")))
+    imb = float(os.getenv("S6_IMBALANCE_RATIO", os.getenv("S5_IMBALANCE_RATIO", "1.35")))
+    min_pts = float(os.getenv("S6_MIN_POINTS", "30"))
+    return MinEdgeStrategy(
+        name="S6_MIN30",
+        min_edge_points=min_pts,
+        every_n_ticks=every,
+        atr_window=window,
+        imbalance_ratio=imb,
+        cover_fees=False,
+    )

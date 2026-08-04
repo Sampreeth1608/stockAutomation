@@ -11,11 +11,17 @@ from regime import Regime
 # Default: based on observed paper results — S2 is noisy in chop; S1 likes structure;
 # S3 needs model edge; nothing trades in wide spreads.
 DEFAULT_ALLOWED: dict[Regime, set[str]] = {
-    "TREND": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT", "S5_MINEDGE"},
-    "CHOP": {"S4_OVERNIGHT"},  # S5 skips chop by edge size usually
-    "QUIET": {"S1_NETDELTA", "S4_OVERNIGHT"},
+    "TREND": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT", "S5_MINEDGE", "S6_MIN30"},
+    "CHOP": {"S4_OVERNIGHT"},  # S5/S6 skip chop by edge size usually
+    "QUIET": {"S1_NETDELTA", "S4_OVERNIGHT", "S6_MIN30"},
     "WIDE_SPREAD": set(),
-    "UNKNOWN": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT", "S5_MINEDGE"},
+    "UNKNOWN": {
+        "S1_NETDELTA",
+        "S3_ML",
+        "S4_OVERNIGHT",
+        "S5_MINEDGE",
+        "S6_MIN30",
+    },
 }
 
 
@@ -69,10 +75,18 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S4_OVERNIGHT")
     if os.getenv("ENABLE_S5", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S5_MINEDGE")
+    if os.getenv("ENABLE_S6", "true").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S6_MIN30")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:
-        enabled = {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT", "S5_MINEDGE"}
+        enabled = {
+            "S1_NETDELTA",
+            "S3_ML",
+            "S4_OVERNIGHT",
+            "S5_MINEDGE",
+            "S6_MIN30",
+        }
 
     flatten = os.getenv("FLATTEN_ON_BAD_REGIME", "true").strip().lower() in {
         "1",
