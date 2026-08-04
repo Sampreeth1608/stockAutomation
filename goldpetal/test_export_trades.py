@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
+
+# Zero costs so pairing tests stay about price PnL
+os.environ["TRADE_CHARGE_PER_SIDE"] = "0"
+os.environ["TAX_RATE"] = "0"
+os.environ["LOT_SIZE"] = "1"
+os.environ.pop("TRADE_ROUND_TRIP_CHARGE", None)
 
 from storage import build_trades, export_trades_csv, init_db, save_signal
 

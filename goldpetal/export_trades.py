@@ -23,26 +23,40 @@ from storage import build_trades, export_trades_csv
 def _print_summary(label: str, trades: list[dict]) -> None:
     closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
     open_n = sum(1 for t in trades if t.get("status") == "OPEN")
-    pnl = 0.0
-    for t in closed:
-        if t.get("net_pnl") != "" and t.get("net_pnl") is not None:
-            pnl += float(t["net_pnl"])
+
+    def _num(t: dict, key: str) -> float:
+        v = t.get(key, "")
+        if v == "" or v is None:
+            return 0.0
+        return float(v)
+
+    gross = sum(_num(t, "gross_pnl") for t in closed)
+    fees = sum(_num(t, "charges") for t in closed)
+    tax = sum(_num(t, "tax") for t in closed)
+    after_tax = sum(
+        _num(t, "pnl_after_tax") if t.get("pnl_after_tax", "") != "" else _num(t, "net_pnl")
+        for t in closed
+    )
     print(f"\n=== {label} ===")
-    print(f"trades={len(trades)} closed={len(closed)} open={open_n} net_pnl_sum={pnl:.2f}")
+    print(
+        f"trades={len(trades)} closed={len(closed)} open={open_n} "
+        f"gross={gross:.2f} fees={fees:.2f} tax={tax:.2f} after_tax={after_tax:.2f}"
+    )
     if not trades:
         print("(no trades yet)")
         return
     print(
-        "trade# | side | status | entry_ts | entry | exit_ts | exit | net_pnl | pct"
+        "trade# | side | status | entry | exit | gross | fees | tax | after_tax"
     )
     print("-" * 100)
-    for t in trades[-30:]:  # last 30 for console
+    for t in trades[-30:]:
         print(
             f"{t.get('trade_no')} | {t.get('side')} | {t.get('status')} | "
-            f"{t.get('entry_ts')} | {t.get('entry_price')} | "
-            f"{t.get('exit_ts') or '-'} | {t.get('exit_price') or '-'} | "
-            f"{t.get('net_pnl') if t.get('net_pnl') != '' else '-'} | "
-            f"{t.get('net_pnl_pct') if t.get('net_pnl_pct') != '' else '-'}"
+            f"{t.get('entry_price')} | {t.get('exit_price') or '-'} | "
+            f"{t.get('gross_pnl') if t.get('gross_pnl') != '' else '-'} | "
+            f"{t.get('charges') if t.get('charges') != '' else '-'} | "
+            f"{t.get('tax') if t.get('tax') != '' else '-'} | "
+            f"{t.get('pnl_after_tax') if t.get('pnl_after_tax') != '' else t.get('net_pnl')}"
         )
     if len(trades) > 30:
         print(f"... ({len(trades) - 30} earlier trades in CSV)")

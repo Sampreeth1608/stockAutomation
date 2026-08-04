@@ -419,10 +419,19 @@ def _build_trades_one(
     def _close(trade: dict[str, Any], *, exit_ts: str, exit_price: float | None,
                exit_reason: str, exit_net: Any, exit_net_delta: Any,
                status: str) -> dict[str, Any]:
+        from charges import apply_charges_and_tax, charges_from_env
+
         entry = trade.get("entry_price")
         side = trade["side"]
         pnl: float | None = None
         pnl_pct: float | None = None
+        charge_bits = {
+            "gross_pnl": "",
+            "charges": "",
+            "pnl_after_charges": "",
+            "tax": "",
+            "pnl_after_tax": "",
+        }
         if entry is not None and entry != "" and exit_price is not None:
             entry_f = float(entry)
             if side == "BUY":
@@ -430,6 +439,9 @@ def _build_trades_one(
             else:
                 pnl = entry_f - exit_price
             pnl_pct = (pnl / entry_f * 100.0) if entry_f else 0.0
+            charge_bits = apply_charges_and_tax(pnl, charges_from_env())
+            # Keep net_pnl as after-tax so journals/reports default to real take-home
+            pnl = charge_bits["pnl_after_tax"]
         trade.update(
             {
                 "exit_ts": exit_ts,
@@ -437,6 +449,11 @@ def _build_trades_one(
                 "exit_reason": exit_reason,
                 "exit_net": exit_net if exit_net is not None else "",
                 "exit_net_delta": exit_net_delta if exit_net_delta is not None else "",
+                "gross_pnl": charge_bits["gross_pnl"],
+                "charges": charge_bits["charges"],
+                "pnl_after_charges": charge_bits["pnl_after_charges"],
+                "tax": charge_bits["tax"],
+                "pnl_after_tax": charge_bits["pnl_after_tax"],
                 "net_pnl": round(pnl, 2) if pnl is not None else "",
                 "net_pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else "",
                 "status": status,
@@ -488,6 +505,11 @@ def _build_trades_one(
                 "exit_reason": "",
                 "exit_net": "",
                 "exit_net_delta": "",
+                "gross_pnl": "",
+                "charges": "",
+                "pnl_after_charges": "",
+                "tax": "",
+                "pnl_after_tax": "",
                 "net_pnl": "",
                 "net_pnl_pct": "",
                 "status": "OPEN",
@@ -522,6 +544,11 @@ TRADE_CSV_FIELDS = [
     "entry_price",
     "exit_ts",
     "exit_price",
+    "gross_pnl",
+    "charges",
+    "pnl_after_charges",
+    "tax",
+    "pnl_after_tax",
     "net_pnl",
     "net_pnl_pct",
     "entry_reason",
@@ -538,7 +565,7 @@ def export_trades_csv(
     strategy: str | None = None,
     db_path: Path = DB_PATH,
 ) -> tuple[int, int, float]:
-    """Write trade journal CSV. Returns (total_trades, closed_count, closed_pnl_sum)."""
+    """Write trade journal CSV. Returns (total, closed_count, sum pnl_after_tax)."""
     import csv
 
     trades = build_trades(strategy=strategy, db_path=db_path)
@@ -552,8 +579,9 @@ def export_trades_csv(
     closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
     pnl_sum = 0.0
     for t in closed:
-        if t.get("net_pnl") != "" and t.get("net_pnl") is not None:
-            pnl_sum += float(t["net_pnl"])
+        val = t.get("pnl_after_tax", t.get("net_pnl"))
+        if val != "" and val is not None:
+            pnl_sum += float(val)
     return len(trades), len(closed), pnl_sum
 
 
