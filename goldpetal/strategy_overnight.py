@@ -157,7 +157,12 @@ class OvernightStrategy:
                         return alt
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
-        for name in ("overnight_logreg.joblib", "overnight_rf.joblib", "overnight_gb.joblib"):
+        for name in (
+            "overnight_heuristic.joblib",
+            "overnight_logreg.joblib",
+            "overnight_rf.joblib",
+            "overnight_gb.joblib",
+        ):
             p = root / name
             if p.exists():
                 return p

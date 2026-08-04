@@ -56,6 +56,51 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
     X, y, gaps = model_matrix(days)
     if len(X) < 1:
         raise SystemExit("Feature matrix empty after cleaning.")
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    report: dict = {
+        "n_days": int(len(days)),
+        "n_labeled": int(len(X)),
+        "features": DAY_FEATURE_COLS,
+        "models": {},
+    }
+
+    # Too few classes for sklearn classifiers — persist quant heuristic instead.
+    if int(y.nunique()) < 2:
+        from strategy_overnight import HeuristicGapModel
+
+        print(
+            f"Only one gap class in labels {sorted(y.unique().tolist())}. "
+            "Saving overnight_heuristic.joblib (sigmoid late_ret/imb/CLV)."
+        )
+        path = model_dir / "overnight_heuristic.joblib"
+        model = HeuristicGapModel()
+        joblib.dump(
+            {
+                "model": model,
+                "features": DAY_FEATURE_COLS,
+                "name": "overnight_heuristic",
+                "late_minutes": late_minutes,
+            },
+            path,
+        )
+        report["models"]["overnight_heuristic"] = {
+            "accuracy": None,
+            "auc": None,
+            "n_test": 0,
+            "path": str(path),
+            "note": "single_class_fallback",
+        }
+        report["best_model"] = "overnight_heuristic"
+        (model_dir / "overnight_report.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
+        days_path = model_dir / "day_features.csv"
+        days.to_csv(days_path, index=False)
+        print(f"Saved {path}")
+        print(f"Day features: {days_path}")
+        return report
+
     # chronological split
     cut = max(1, int(len(X) * 0.7))
     if cut >= len(X):
@@ -65,10 +110,33 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
     g_te = gaps.iloc[cut:]
 
     if y_tr.nunique() < 2:
-        # with few days, both labels may match — still fit a prior model on all
         print("Warning: train fold has one class; fitting on all labeled days.")
         X_tr, y_tr = X, y
         X_te, y_te, g_te = X, y, gaps
+        if int(y_tr.nunique()) < 2:
+            from strategy_overnight import HeuristicGapModel
+
+            path = model_dir / "overnight_heuristic.joblib"
+            joblib.dump(
+                {
+                    "model": HeuristicGapModel(),
+                    "features": DAY_FEATURE_COLS,
+                    "name": "overnight_heuristic",
+                    "late_minutes": late_minutes,
+                },
+                path,
+            )
+            report["models"]["overnight_heuristic"] = {
+                "path": str(path),
+                "note": "single_class_fallback",
+            }
+            report["best_model"] = "overnight_heuristic"
+            (model_dir / "overnight_report.json").write_text(
+                json.dumps(report, indent=2), encoding="utf-8"
+            )
+            days.to_csv(model_dir / "day_features.csv", index=False)
+            print(f"Saved heuristic fallback -> {path}")
+            return report
 
     models = {
         "overnight_logreg": Pipeline(
@@ -99,13 +167,6 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
         ),
     }
 
-    model_dir.mkdir(parents=True, exist_ok=True)
-    report: dict = {
-        "n_days": int(len(days)),
-        "n_labeled": int(len(X)),
-        "features": DAY_FEATURE_COLS,
-        "models": {},
-    }
     best_name = None
     best_auc = -1.0
 
@@ -149,14 +210,12 @@ def train(model_dir: Path, late_minutes: int, skip_archive: bool) -> dict:
             best_auc = auc
             best_name = name
 
-    # Prefer logreg if AUC tie / tiny sample
     if best_name is None:
         best_name = "overnight_logreg"
     report["best_model"] = best_name
     (model_dir / "overnight_report.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8"
     )
-    # also write day feature table for inspection
     days_path = model_dir / "day_features.csv"
     days.to_csv(days_path, index=False)
     print(f"\nSaved overnight models to {model_dir}")
