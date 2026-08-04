@@ -7,3 +7,4 @@ data/*.db
 data/scrip_master.json
 data/*.csv
 data/models/
+data/archive/

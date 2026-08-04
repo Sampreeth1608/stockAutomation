@@ -15,6 +15,9 @@ from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
 from auth import login
 from depth import depth_buy_sell_sums
+from export_full_ticks import _depth_side
+from portfolio import portfolio_from_env
+from regime import RegimeDetector
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy
@@ -115,10 +118,27 @@ def _seed_strategy_from_db(strategy: PressureStrategy) -> None:
     )
 
 
+def _spread_bps(message: dict, ltp: float | None) -> float | None:
+    if ltp is None or not ltp:
+        return None
+    buy = _depth_side(message, "buy")
+    sell = _depth_side(message, "sell")
+    b1 = buy[0][0] if buy else None
+    s1 = sell[0][0] if sell else None
+    if b1 is None or s1 is None:
+        return None
+    mid = (b1 + s1) / 2.0
+    if not mid:
+        return None
+    return (s1 - b1) / mid * 1e4
+
+
 def run_once(
     strategy_s1: PressureStrategy,
     strategy_s2: BalanceStrategy,
     strategy_s3: MLStrategy,
+    portfolio,
+    regime_det: RegimeDetector,
     stop_flag: dict,
 ) -> None:
     init_db()
@@ -143,10 +163,28 @@ def run_once(
     print(f"Token    : {token}", flush=True)
     print(f"Expiry   : {contract['expiry']}", flush=True)
     print(f"Interval : {interval} minutes", flush=True)
-    print("S1       : netΔ pressure strategy (30-min bars)", flush=True)
-    print("S2       : sum(buy1-5 qty) - sum(sell1-5 qty) sign flips (every tick)", flush=True)
-    print(f"S3       : ML depth/LTP model ({strategy_s3.status_line})", flush=True)
-    print(f"DRY_RUN  : {dry_run} (signals only; no live orders)", flush=True)
+    print(
+        f"Portfolio: enabled={sorted(portfolio.enabled)} "
+        f"flatten_on_bad_regime={portfolio.flatten_when_blocked}",
+        flush=True,
+    )
+    print(
+        f"S1       : netΔ 30-min [{'ON' if portfolio.is_enabled(strategy_s1.name) else 'OFF'}]",
+        flush=True,
+    )
+    print(
+        f"S2       : depth flips [{'ON' if portfolio.is_enabled(strategy_s2.name) else 'OFF'}]",
+        flush=True,
+    )
+    print(
+        f"S3       : ML [{('ON' if portfolio.is_enabled(strategy_s3.name) else 'OFF')}] "
+        f"{strategy_s3.status_line}",
+        flush=True,
+    )
+    print(
+        f"Mode     : {'PAPER (DRY_RUN)' if dry_run else 'LIVE ORDERS NOT WIRED — staying signals-only'}",
+        flush=True,
+    )
     open_s, close_s = _market_window()
     print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
     print(f"Next bar : {state['next_bar_at'].isoformat(timespec='seconds')}", flush=True)
@@ -206,13 +244,46 @@ def run_once(
             price_delta=result_s1.price_delta,
             net_delta=result_s1.net_delta,
         )
-        # Persist only trade transitions for the journal (BUY/SHORT/CLOSE).
-        if result_s1.action in {"BUY", "SHORT", "CLOSE"}:
+        regime = regime_det.last.regime
+        action = result_s1.action
+        # Block new entries when regime unfit; optionally flatten.
+        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s1.name, regime):
+            line = (
+                f"[{bar.time_label}] {strategy_s1.name} SKIP {action} "
+                f"regime={regime} ({regime_det.last.reason})"
+            )
+            print(line, flush=True)
+            logger.info(line)
+            # undo internal position open from on_bar
+            strategy_s1.position = "flat"
+            strategy_s1.entry_cmp = None
+            strategy_s1.entry_net_delta = None
+            action = "HOLD"
+        elif (
+            strategy_s1.position != "flat"
+            and portfolio.should_flatten(strategy_s1.name, regime)
+            and action != "CLOSE"
+        ):
+            action = "CLOSE"
+            strategy_s1.position = "flat"
+            strategy_s1.entry_cmp = None
+            strategy_s1.entry_net_delta = None
+            result_s1 = type(result_s1)(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result_s1.price_delta,
+                net=result_s1.net,
+                net_delta=result_s1.net_delta,
+                prev_net_delta=result_s1.prev_net_delta,
+                reason=f"regime_flatten {regime}: {regime_det.last.reason}",
+            )
+
+        if action in {"BUY", "SHORT", "CLOSE"}:
             save_signal(
                 time_label=bar.time_label,
                 symbol=symbol,
-                action=result_s1.action,
-                position_after=result_s1.position_after,
+                action=action,
+                position_after=result_s1.position_after if action != "CLOSE" else "flat",
                 reason=result_s1.reason,
                 price_delta=result_s1.price_delta,
                 net=result_s1.net,
@@ -222,10 +293,10 @@ def run_once(
                 cmp=bar.cmp,
             )
         line = (
-            f"[{bar.time_label}] {strategy_s1.name} "
+            f"[{bar.time_label}] {strategy_s1.name} regime={regime} "
             f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result_s1.net} "
             f"priceΔ={result_s1.price_delta} netΔ={result_s1.net_delta} "
-            f"=> {result_s1.action} (pos={result_s1.position_after}) | {result_s1.reason}"
+            f"=> {action} (pos={strategy_s1.position}) | {result_s1.reason}"
         )
         print(line, flush=True)
         logger.info(line)
@@ -234,6 +305,8 @@ def run_once(
 
     def emit_s2_if_changed(now: datetime, message: dict) -> None:
         """S2 reacts instantly when depth buy1-5 vs sell1-5 sign flips."""
+        if not portfolio.is_enabled(strategy_s2.name):
+            return
         if latest["cmp"] is None:
             return
         buy_sum, sell_sum, details = depth_buy_sell_sums(message)
@@ -248,14 +321,40 @@ def run_once(
             sp=sell_sum,
         )
         result = strategy_s2.on_bar(tick_bar, details=details)
-        # Only record transitions (BUY/SHORT/CLOSE), not continuous HOLD.
-        if result.action not in {"BUY", "SHORT", "CLOSE"}:
+        regime = regime_det.last.regime
+        action = result.action
+
+        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s2.name, regime):
+            strategy_s2.position = "flat"
+            return
+        if (
+            strategy_s2.position != "flat"
+            and portfolio.should_flatten(strategy_s2.name, regime)
+            and action != "CLOSE"
+        ):
+            # Force flatten when regime turns bad for S2
+            if strategy_s2.position != "flat":
+                action = "CLOSE"
+                strategy_s2.position = "flat"
+                result = type(result)(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=result.price_delta,
+                    net=result.net,
+                    net_delta=result.net_delta,
+                    prev_net_delta=result.prev_net_delta,
+                    reason=f"regime_flatten {regime}: {regime_det.last.reason}",
+                )
+            else:
+                return
+
+        if action not in {"BUY", "SHORT", "CLOSE"}:
             return
         save_signal(
             time_label=tick_bar.time_label,
             symbol=symbol,
-            action=result.action,
-            position_after=result.position_after,
+            action=action,
+            position_after=result.position_after if action != "CLOSE" else "flat",
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
@@ -265,15 +364,17 @@ def run_once(
             cmp=tick_bar.cmp,
         )
         line = (
-            f"[{tick_bar.time_label}] {strategy_s2.name} "
+            f"[{tick_bar.time_label}] {strategy_s2.name} regime={regime} "
             f"CMP={tick_bar.cmp} buy_sum={buy_sum} sell_sum={sell_sum} NET={result.net} "
-            f"=> {result.action} (pos={result.position_after}) | {result.reason}"
+            f"=> {action} (pos={strategy_s2.position}) | {result.reason}"
         )
         print(line, flush=True)
         logger.info(line)
 
     def emit_s3_if_changed(now: datetime, message: dict) -> None:
         """S3 ML: score depth/LTP features; emit BUY/SHORT/CLOSE transitions."""
+        if not portfolio.is_enabled(strategy_s3.name):
+            return
         if not strategy_s3.enabled:
             return
         if latest["cmp"] is None:
@@ -284,13 +385,41 @@ def run_once(
             exchange_timestamp=message.get("exchange_timestamp"),
         )
         result = strategy_s3.maybe_signal(now)
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        regime = regime_det.last.regime
+
+        # Regime flatten even without a model transition
+        if (
+            strategy_s3.position != "flat"
+            and portfolio.should_flatten(strategy_s3.name, regime)
+        ):
+            if result is None or result.action != "CLOSE":
+                from strategy import SignalResult
+
+                result = SignalResult(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=None,
+                    net=0.0,
+                    net_delta=None,
+                    prev_net_delta=None,
+                    reason=f"regime_flatten {regime}: {regime_det.last.reason}",
+                )
+                strategy_s3.position = "flat"
+                strategy_s3.last_signal_ts = now
+
+        if result is None:
+            return
+        action = result.action
+        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s3.name, regime):
+            strategy_s3.position = "flat"
+            return
+        if action not in {"BUY", "SHORT", "CLOSE"}:
             return
         save_signal(
             time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
-            action=result.action,
-            position_after=result.position_after,
+            action=action,
+            position_after=result.position_after if action != "CLOSE" else "flat",
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
@@ -300,9 +429,9 @@ def run_once(
             cmp=float(latest["cmp"]),
         )
         line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy_s3.name} "
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s3.name} regime={regime} "
             f"CMP={latest['cmp']} prob_up={strategy_s3.last_prob} "
-            f"=> {result.action} (pos={result.position_after}) | {result.reason}"
+            f"=> {action} (pos={strategy_s3.position}) | {result.reason}"
         )
         print(line, flush=True)
         logger.info(line)
@@ -335,6 +464,12 @@ def run_once(
                 latest["sp"] = float(sp)
             latest["message"] = message
 
+            if latest["cmp"] is not None:
+                regime_det.update(
+                    float(latest["cmp"]),
+                    _spread_bps(message, float(latest["cmp"])),
+                )
+
             state["tick_count"] += 1
             tick_count = state["tick_count"]
             if tick_count == 1 or tick_count % 50 == 0:
@@ -344,9 +479,11 @@ def run_once(
                         s3_extra = f" p={strategy_s3.last_prob:.2f}"
                     elif strategy_s3.last_skip:
                         s3_extra = f" ({strategy_s3.last_skip})"
+                rs = regime_det.last
                 line = (
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
+                    f"regime={rs.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position}{s3_extra}"
                 )
@@ -408,9 +545,16 @@ def main() -> None:
     strategy_s2 = BalanceStrategy()
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     strategy_s3 = ml_strategy_from_env()
+    portfolio = portfolio_from_env()
+    regime_det = RegimeDetector(window=60)
     init_db()
     _seed_strategy_from_db(strategy_s1)
     print(f"S3_ML: {strategy_s3.status_line}", flush=True)
+    print(
+        f"Portfolio enabled={sorted(portfolio.enabled)} "
+        f"(set ENABLE_S1/S2/S3 in .env)",
+        flush=True,
+    )
 
     def handle_signal(_signum, _frame):
         print("\nStopping strategy runner...", flush=True)
@@ -422,7 +566,14 @@ def main() -> None:
 
     while not stop_flag["stop"]:
         try:
-            run_once(strategy_s1, strategy_s2, strategy_s3, stop_flag)
+            run_once(
+                strategy_s1,
+                strategy_s2,
+                strategy_s3,
+                portfolio,
+                regime_det,
+                stop_flag,
+            )
         except SystemExit:
             raise
         except Exception:
@@ -435,7 +586,7 @@ def main() -> None:
         print(
             f"Reconnecting in {RECONNECT_DELAY_SEC}s "
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
-            f"s3={strategy_s3.position})...",
+            f"s3={strategy_s3.position} regime={regime_det.last.regime})...",
             flush=True,
         )
         logger.info("Reconnecting in %ss", RECONNECT_DELAY_SEC)
