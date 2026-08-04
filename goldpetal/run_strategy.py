@@ -29,6 +29,35 @@ IST = ZoneInfo("Asia/Kolkata")
 SUBSCRIBE_MODE = 3
 DEFAULT_INTERVAL_MINUTES = 30
 RECONNECT_DELAY_SEC = 5
+DEFAULT_MARKET_OPEN = "09:00"
+DEFAULT_MARKET_CLOSE = "23:30"
+
+
+def _parse_hhmm(value: str) -> tuple[int, int]:
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        raise RuntimeError(f"Invalid time '{value}', expected HH:MM")
+    return int(parts[0]), int(parts[1])
+
+
+def _market_window() -> tuple[str, str]:
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    open_s = os.getenv("MARKET_OPEN", DEFAULT_MARKET_OPEN).strip()
+    close_s = os.getenv("MARKET_CLOSE", DEFAULT_MARKET_CLOSE).strip()
+    return open_s, close_s
+
+
+def is_market_open(now: datetime | None = None) -> bool:
+    """MCX Gold Petal default session: Mon-Fri 09:00-23:30 IST."""
+    now = now or datetime.now(IST)
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    open_s, close_s = _market_window()
+    open_h, open_m = _parse_hhmm(open_s)
+    close_h, close_m = _parse_hhmm(close_s)
+    start = now.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
+    end = now.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
+    return start <= now <= end
 
 
 def _interval_minutes() -> int:
