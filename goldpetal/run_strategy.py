@@ -18,6 +18,7 @@ from depth import depth_buy_sell_sums
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy
+from strategy_ml import MLStrategy, ml_strategy_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -117,6 +118,7 @@ def _seed_strategy_from_db(strategy: PressureStrategy) -> None:
 def run_once(
     strategy_s1: PressureStrategy,
     strategy_s2: BalanceStrategy,
+    strategy_s3: MLStrategy,
     stop_flag: dict,
 ) -> None:
     init_db()
@@ -143,6 +145,7 @@ def run_once(
     print(f"Interval : {interval} minutes", flush=True)
     print("S1       : netΔ pressure strategy (30-min bars)", flush=True)
     print("S2       : sum(buy1-5 qty) - sum(sell1-5 qty) sign flips (every tick)", flush=True)
+    print(f"S3       : ML depth/LTP model ({strategy_s3.status_line})", flush=True)
     print(f"DRY_RUN  : {dry_run} (signals only; no live orders)", flush=True)
     open_s, close_s = _market_window()
     print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
@@ -269,6 +272,41 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s3_if_changed(now: datetime, message: dict) -> None:
+        """S3 ML: score depth/LTP features; emit BUY/SHORT/CLOSE transitions."""
+        if not strategy_s3.enabled:
+            return
+        if latest["cmp"] is None:
+            return
+        strategy_s3.push_tick(
+            message,
+            received_at=now.isoformat(timespec="seconds"),
+            exchange_timestamp=message.get("exchange_timestamp"),
+        )
+        result = strategy_s3.maybe_signal(now)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s3.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s3.name} "
+            f"CMP={latest['cmp']} prob_up={strategy_s3.last_prob} "
+            f"=> {result.action} (pos={result.position_after}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -304,13 +342,16 @@ def run_once(
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
-                    f"s2={strategy_s2.position}"
+                    f"s2={strategy_s2.position} s3={strategy_s3.position}"
+                    f"{'' if strategy_s3.last_prob is None else f' p={strategy_s3.last_prob:.2f}'}"
                 )
                 print(line, flush=True)
                 logger.info(line)
 
             # S2: tick-based depth buy1-5 vs sell1-5 sign flips
             emit_s2_if_changed(now, message)
+            # S3: ML model BUY/SHORT/CLOSE
+            emit_s3_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -330,15 +371,17 @@ def run_once(
     def on_close(_wsapp, *args):
         closed["done"] = True
         logger.info(
-            "WebSocket closed. ticks=%s s1=%s s2=%s args=%s",
+            "WebSocket closed. ticks=%s s1=%s s2=%s s3=%s args=%s",
             state["tick_count"],
             strategy_s1.position,
             strategy_s2.position,
+            strategy_s3.position,
             args,
         )
         print(
             f"WebSocket closed. ticks={state['tick_count']} "
-            f"s1={strategy_s1.position} s2={strategy_s2.position}",
+            f"s1={strategy_s1.position} s2={strategy_s2.position} "
+            f"s3={strategy_s3.position}",
             flush=True,
         )
 
@@ -358,8 +401,11 @@ def main() -> None:
     stop_flag = {"stop": False}
     strategy_s1 = PressureStrategy()
     strategy_s2 = BalanceStrategy()
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    strategy_s3 = ml_strategy_from_env()
     init_db()
     _seed_strategy_from_db(strategy_s1)
+    print(f"S3_ML: {strategy_s3.status_line}", flush=True)
 
     def handle_signal(_signum, _frame):
         print("\nStopping strategy runner...", flush=True)
@@ -371,7 +417,7 @@ def main() -> None:
 
     while not stop_flag["stop"]:
         try:
-            run_once(strategy_s1, strategy_s2, stop_flag)
+            run_once(strategy_s1, strategy_s2, strategy_s3, stop_flag)
         except SystemExit:
             raise
         except Exception:
@@ -383,7 +429,8 @@ def main() -> None:
 
         print(
             f"Reconnecting in {RECONNECT_DELAY_SEC}s "
-            f"(s1={strategy_s1.position} s2={strategy_s2.position})...",
+            f"(s1={strategy_s1.position} s2={strategy_s2.position} "
+            f"s3={strategy_s3.position})...",
             flush=True,
         )
         logger.info("Reconnecting in %ss", RECONNECT_DELAY_SEC)

@@ -8,6 +8,7 @@ Run anytime on the VM:
 Writes:
   data/trades_s1.csv
   data/trades_s2.csv
+  data/trades_s3.csv
   data/trades_all.csv
 """
 
@@ -61,7 +62,7 @@ def main() -> None:
         "--strategy",
         type=str,
         default="",
-        help="Only one strategy: S1_NETDELTA or S2_BALANCE (default: all)",
+        help="Only one strategy: S1_NETDELTA, S2_BALANCE, or S3_ML (default: all)",
     )
     parser.add_argument(
         "--quiet",
@@ -82,10 +83,11 @@ def main() -> None:
             _print_summary(strategy, build_trades(strategy=strategy))
         return
 
-    # Default: write S1, S2, and combined
+    # Default: write S1, S2, S3, and combined
     targets = [
         ("S1_NETDELTA", out_dir / "trades_s1.csv"),
         ("S2_BALANCE", out_dir / "trades_s2.csv"),
+        ("S3_ML", out_dir / "trades_s3.csv"),
         (None, out_dir / "trades_all.csv"),
     ]
     for strat, path in targets:
@@ -96,6 +98,7 @@ def main() -> None:
     if not args.quiet:
         _print_summary("S1_NETDELTA", build_trades(strategy="S1_NETDELTA"))
         _print_summary("S2_BALANCE", build_trades(strategy="S2_BALANCE"))
+        _print_summary("S3_ML", build_trades(strategy="S3_ML"))
         _print_summary("ALL", build_trades(strategy=None))
 
 
