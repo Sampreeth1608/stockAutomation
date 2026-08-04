@@ -1,0 +1,10 @@
+smartapi-python
+pyotp
+python-dotenv
+logzero
+websocket-client
+requests
+pandas
+numpy
+scikit-learn
+joblib
