@@ -38,6 +38,8 @@ class SignalResult:
 class PressureStrategy:
     """Trade only on netΔ; asymmetric hold/close for long vs short."""
 
+    name = "S1_NETDELTA"
+
     def __init__(
         self,
         exhaustion_price_pct: float = DEFAULT_EXHAUSTION_PRICE_PCT,

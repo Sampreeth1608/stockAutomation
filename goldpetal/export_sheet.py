@@ -39,16 +39,16 @@ def main() -> None:
 
     rows = sheet_rows(limit=args.latest)
     print(
-        "TIME | CMP | PRICEΔ | BP | BPΔ | SP | SPΔ | BP-SP | NETΔ | SIGNAL | POS"
+        "TIME | CMP | PRICEΔ | BP | BPΔ | SP | SPΔ | BP-SP | NETΔ | STRAT | SIGNAL | POS"
     )
-    print("-" * 110)
+    print("-" * 120)
     for row in rows:
         print(
             f"{row['time']} | {_fmt(row['cmp'])} | {_fmt(row['price_delta'])} | "
             f"{_fmt(row['bp'])} | {_fmt(row['bp_delta'])} | "
             f"{_fmt(row['sp'])} | {_fmt(row['sp_delta'])} | "
             f"{_fmt(row['net'])} | {_fmt(row['net_delta'])} | "
-            f"{row['signal'] or '-'} | {row['position'] or '-'}"
+            f"{row.get('strategy') or '-'} | {row['signal'] or '-'} | {row['position'] or '-'}"
         )
         if row["reason"]:
             print(f"  reason: {row['reason']}")

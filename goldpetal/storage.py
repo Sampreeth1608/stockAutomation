@@ -76,6 +76,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 time_label TEXT NOT NULL,
                 symbol TEXT NOT NULL,
+                strategy TEXT NOT NULL DEFAULT 'S1_NETDELTA',
                 action TEXT NOT NULL,
                 position_after TEXT NOT NULL,
                 reason TEXT NOT NULL,
@@ -86,6 +87,14 @@ def init_db(db_path: Path = DB_PATH) -> None:
             )
             """
         )
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(signals)").fetchall()
+        }
+        if "strategy" not in cols:
+            conn.execute(
+                "ALTER TABLE signals ADD COLUMN strategy TEXT NOT NULL DEFAULT 'S1_NETDELTA'"
+            )
         conn.commit()
 
 
@@ -169,19 +178,21 @@ def save_signal(
     net: float,
     net_delta: Optional[float],
     dry_run: bool,
+    strategy: str = "S1_NETDELTA",
     db_path: Path = DB_PATH,
 ) -> None:
     with connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO signals (
-                time_label, symbol, action, position_after, reason,
+                time_label, symbol, strategy, action, position_after, reason,
                 price_delta, net, net_delta, dry_run
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 time_label,
                 symbol,
+                strategy,
                 action,
                 position_after,
                 reason,
@@ -223,7 +234,7 @@ def latest_signals(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row
         return list(
             conn.execute(
                 """
-                SELECT time_label, symbol, action, position_after, reason,
+                SELECT time_label, symbol, strategy, action, position_after, reason,
                        price_delta, net, net_delta, dry_run
                 FROM signals
                 ORDER BY id DESC
@@ -268,6 +279,7 @@ def sheet_rows(limit: int | None = None, db_path: Path = DB_PATH) -> list[dict[s
             b.net,
             b.price_delta,
             b.net_delta,
+            s.strategy,
             s.action,
             s.position_after,
             s.reason
@@ -307,6 +319,7 @@ def sheet_rows(limit: int | None = None, db_path: Path = DB_PATH) -> list[dict[s
                 "sp_delta": sp_delta,
                 "net": row["net"],
                 "net_delta": row["net_delta"],
+                "strategy": row["strategy"],
                 "signal": row["action"],
                 "position": row["position_after"],
                 "reason": row["reason"],
@@ -323,7 +336,7 @@ def export_sheet_csv(
     rows = sheet_rows(limit=limit, db_path=db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     header = (
-        "TIME,CMP,PRICE_DELTA,BP,BP_DELTA,SP,SP_DELTA,BP_SP,NET_DELTA,SIGNAL,POSITION,REASON\n"
+        "TIME,CMP,PRICE_DELTA,BP,BP_DELTA,SP,SP_DELTA,BP_SP,NET_DELTA,STRATEGY,SIGNAL,POSITION,REASON\n"
     )
     with path.open("w", encoding="utf-8") as handle:
         handle.write(header)
@@ -340,6 +353,7 @@ def export_sheet_csv(
                         str(row["sp_delta"] if row["sp_delta"] is not None else ""),
                         str(row["net"] if row["net"] is not None else ""),
                         str(row["net_delta"] if row["net_delta"] is not None else ""),
+                        str(row.get("strategy") or ""),
                         str(row["signal"] or ""),
                         str(row["position"] or ""),
                         '"' + str(row["reason"] or "").replace('"', "'") + '"',

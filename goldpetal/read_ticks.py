@@ -37,7 +37,8 @@ def main() -> None:
             print(f"\nLatest {len(rows)} signals:")
             for row in rows:
                 print(
-                    f"{row['time_label']} | {row['action']} | pos={row['position_after']} "
+                    f"{row['time_label']} | {row['strategy']} | {row['action']} | "
+                    f"pos={row['position_after']} "
                     f"| priceΔ={row['price_delta']} netΔ={row['net_delta']} "
                     f"| {row['reason']}"
                 )

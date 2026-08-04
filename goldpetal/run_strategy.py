@@ -16,6 +16,7 @@ from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from auth import login
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
+from strategy_balance import BalanceStrategy
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -112,7 +113,11 @@ def _seed_strategy_from_db(strategy: PressureStrategy) -> None:
     )
 
 
-def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
+def run_once(
+    strategy_s1: PressureStrategy,
+    strategy_s2: BalanceStrategy,
+    stop_flag: dict,
+) -> None:
     init_db()
     interval = _interval_minutes()
     dry_run = _dry_run()
@@ -133,12 +138,11 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
     print(f"Token    : {token}", flush=True)
     print(f"Expiry   : {contract['expiry']}", flush=True)
     print(f"Interval : {interval} minutes", flush=True)
-    print("Rules    : netΔ only (priceΔ ignored for entry)", flush=True)
-    print(
-        "Exits    : long netΔ↓ / short netΔ↑ / 2%+3x exhaustion / tiny-price+net surge",
-        flush=True,
-    )
+    print("S1       : netΔ pressure strategy", flush=True)
+    print("S2       : buy_sum - sell_sum sign strategy", flush=True)
     print(f"DRY_RUN  : {dry_run} (signals only; no live orders)", flush=True)
+    open_s, close_s = _market_window()
+    print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
     print(f"Next bar : {next_bar_at.isoformat(timespec='seconds')}", flush=True)
     print("Press Ctrl+C to stop", flush=True)
     print("=================================", flush=True)
@@ -156,6 +160,16 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
 
     def evaluate_bar(now: datetime) -> None:
         nonlocal next_bar_at
+        if not is_market_open(now):
+            msg = (
+                f"[{now.isoformat(timespec='seconds')}] "
+                "outside market hours — skip bar/signal"
+            )
+            print(msg, flush=True)
+            logger.info(msg)
+            next_bar_at = _next_boundary(now, interval)
+            return
+
         if latest["cmp"] is None or latest["bp"] is None or latest["sp"] is None:
             msg = f"[{now.isoformat(timespec='seconds')}] bar skipped — no tick data yet"
             print(msg, flush=True)
@@ -163,7 +177,6 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
             next_bar_at = _next_boundary(now, interval)
             return
 
-        # Keep bar labels aligned to interval boundaries.
         label_time = now.replace(second=0, microsecond=0)
         minute_block = (label_time.minute // interval) * interval
         label_time = label_time.replace(minute=minute_block)
@@ -174,7 +187,11 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
             bp=float(latest["bp"]),
             sp=float(latest["sp"]),
         )
-        result = strategy.on_bar(bar)
+
+        result_s1 = strategy_s1.on_bar(bar)
+        result_s2 = strategy_s2.on_bar(bar)
+
+        # Shared bar metrics from S1 (includes netΔ)
         save_bar(
             time_label=bar.time_label,
             symbol=symbol,
@@ -182,31 +199,36 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
             cmp=bar.cmp,
             bp=bar.bp,
             sp=bar.sp,
-            net=result.net,
-            price_delta=result.price_delta,
-            net_delta=result.net_delta,
-        )
-        save_signal(
-            time_label=bar.time_label,
-            symbol=symbol,
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            dry_run=dry_run,
+            net=result_s1.net,
+            price_delta=result_s1.price_delta,
+            net_delta=result_s1.net_delta,
         )
 
-        line = (
-            f"[{bar.time_label}] "
-            f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result.net} "
-            f"priceΔ={result.price_delta} netΔ={result.net_delta} "
-            f"prev_netΔ={result.prev_net_delta} => {result.action} "
-            f"(pos={result.position_after}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
+        for strat_name, result in (
+            (strategy_s1.name, result_s1),
+            (strategy_s2.name, result_s2),
+        ):
+            save_signal(
+                time_label=bar.time_label,
+                symbol=symbol,
+                action=result.action,
+                position_after=result.position_after,
+                reason=result.reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                dry_run=dry_run,
+                strategy=strat_name,
+            )
+            line = (
+                f"[{bar.time_label}] {strat_name} "
+                f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result.net} "
+                f"priceΔ={result.price_delta} netΔ={result.net_delta} "
+                f"=> {result.action} (pos={result.position_after}) | {result.reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+
         next_bar_at = _next_boundary(now, interval)
 
     def on_data(_wsapp, message):
@@ -218,6 +240,12 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
 
         try:
             now = datetime.now(IST)
+            # Skip night/weekend noise entirely.
+            if not is_market_open(now):
+                if now >= next_bar_at:
+                    next_bar_at = _next_boundary(now, interval)
+                return
+
             received_at = now.isoformat(timespec="seconds")
             save_tick(message, symbol=symbol, token=token, received_at=received_at)
 
@@ -259,13 +287,15 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
     def on_close(_wsapp, *args):
         closed["done"] = True
         logger.info(
-            "WebSocket closed. ticks=%s position=%s args=%s",
+            "WebSocket closed. ticks=%s s1=%s s2=%s args=%s",
             tick_count,
-            strategy.position,
+            strategy_s1.position,
+            strategy_s2.position,
             args,
         )
         print(
-            f"WebSocket closed. ticks={tick_count} position={strategy.position}",
+            f"WebSocket closed. ticks={tick_count} "
+            f"s1={strategy_s1.position} s2={strategy_s2.position}",
             flush=True,
         )
 
@@ -283,9 +313,10 @@ def run_once(strategy: PressureStrategy, stop_flag: dict) -> None:
 
 def main() -> None:
     stop_flag = {"stop": False}
-    strategy = PressureStrategy()
+    strategy_s1 = PressureStrategy()
+    strategy_s2 = BalanceStrategy()
     init_db()
-    _seed_strategy_from_db(strategy)
+    _seed_strategy_from_db(strategy_s1)
 
     def handle_signal(_signum, _frame):
         print("\nStopping strategy runner...", flush=True)
@@ -297,7 +328,7 @@ def main() -> None:
 
     while not stop_flag["stop"]:
         try:
-            run_once(strategy, stop_flag)
+            run_once(strategy_s1, strategy_s2, stop_flag)
         except SystemExit:
             raise
         except Exception:
@@ -308,7 +339,8 @@ def main() -> None:
             break
 
         print(
-            f"Reconnecting in {RECONNECT_DELAY_SEC}s (position={strategy.position})...",
+            f"Reconnecting in {RECONNECT_DELAY_SEC}s "
+            f"(s1={strategy_s1.position} s2={strategy_s2.position})...",
             flush=True,
         )
         logger.info("Reconnecting in %ss", RECONNECT_DELAY_SEC)
