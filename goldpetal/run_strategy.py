@@ -188,10 +188,8 @@ def run_once(
             sp=float(latest["sp"]),
         )
 
+        # S1 stays on 30-minute bars only.
         result_s1 = strategy_s1.on_bar(bar)
-        result_s2 = strategy_s2.on_bar(bar)
-
-        # Shared bar metrics from S1 (includes netΔ)
         save_bar(
             time_label=bar.time_label,
             symbol=symbol,
@@ -203,36 +201,65 @@ def run_once(
             price_delta=result_s1.price_delta,
             net_delta=result_s1.net_delta,
         )
-
-        for strat_name, result in (
-            (strategy_s1.name, result_s1),
-            (strategy_s2.name, result_s2),
-        ):
-            save_signal(
-                time_label=bar.time_label,
-                symbol=symbol,
-                action=result.action,
-                position_after=result.position_after,
-                reason=result.reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                dry_run=dry_run,
-                strategy=strat_name,
-            )
-            line = (
-                f"[{bar.time_label}] {strat_name} "
-                f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result.net} "
-                f"priceΔ={result.price_delta} netΔ={result.net_delta} "
-                f"=> {result.action} (pos={result.position_after}) | {result.reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
+        save_signal(
+            time_label=bar.time_label,
+            symbol=symbol,
+            action=result_s1.action,
+            position_after=result_s1.position_after,
+            reason=result_s1.reason,
+            price_delta=result_s1.price_delta,
+            net=result_s1.net,
+            net_delta=result_s1.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s1.name,
+        )
+        line = (
+            f"[{bar.time_label}] {strategy_s1.name} "
+            f"CMP={bar.cmp} BP={bar.bp} SP={bar.sp} NET={result_s1.net} "
+            f"priceΔ={result_s1.price_delta} netΔ={result_s1.net_delta} "
+            f"=> {result_s1.action} (pos={result_s1.position_after}) | {result_s1.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
 
         next_bar_at = _next_boundary(now, interval)
 
+    def emit_s2_if_changed(now: datetime) -> None:
+        """S2 reacts instantly when buy-sell sign flips."""
+        if latest["cmp"] is None or latest["bp"] is None or latest["sp"] is None:
+            return
+        tick_bar = BarSnapshot(
+            time_label=now.isoformat(timespec="seconds"),
+            cmp=float(latest["cmp"]),
+            bp=float(latest["bp"]),
+            sp=float(latest["sp"]),
+        )
+        result = strategy_s2.on_bar(tick_bar)
+        # Only record transitions (BUY/SHORT/CLOSE), not continuous HOLD.
+        if result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        save_signal(
+            time_label=tick_bar.time_label,
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s2.name,
+        )
+        line = (
+            f"[{tick_bar.time_label}] {strategy_s2.name} "
+            f"CMP={tick_bar.cmp} BP={tick_bar.bp} SP={tick_bar.sp} NET={result.net} "
+            f"=> {result.action} (pos={result.position_after}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
-        nonlocal tick_count
+        nonlocal tick_count, next_bar_at
         if stop_flag["stop"]:
             return
         if not isinstance(message, dict):
@@ -265,11 +292,16 @@ def run_once(
                 line = (
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
-                    f"next_bar={next_bar_at.strftime('%H:%M:%S')}"
+                    f"next_bar={next_bar_at.strftime('%H:%M:%S')} "
+                    f"s2={strategy_s2.position}"
                 )
                 print(line, flush=True)
                 logger.info(line)
 
+            # S2: tick-based sign flips
+            emit_s2_if_changed(now)
+
+            # S1: 30-min bars
             if now >= next_bar_at:
                 evaluate_bar(now)
         except Exception:
