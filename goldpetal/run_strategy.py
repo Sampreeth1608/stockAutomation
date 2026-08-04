@@ -22,6 +22,7 @@ from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy
 from strategy_ml import MLStrategy, ml_strategy_from_env
+from strategy_overnight import OvernightStrategy, overnight_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -137,6 +138,7 @@ def run_once(
     strategy_s1: PressureStrategy,
     strategy_s2: BalanceStrategy,
     strategy_s3: MLStrategy,
+    strategy_s4: OvernightStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -179,6 +181,12 @@ def run_once(
     print(
         f"S3       : ML [{('ON' if portfolio.is_enabled(strategy_s3.name) else 'OFF')}] "
         f"{strategy_s3.status_line}",
+        flush=True,
+    )
+    print(
+        f"S4       : overnight next-open "
+        f"[{'ON' if portfolio.is_enabled(strategy_s4.name) else 'OFF'}] "
+        f"{strategy_s4.status_line}",
         flush=True,
     )
     print(
@@ -435,6 +443,55 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+
+    def emit_s4_if_changed(now: datetime, message: dict) -> None:
+        """S4 overnight: enter near close, exit after next open. Ignores tick regime."""
+        if not portfolio.is_enabled(strategy_s4.name):
+            return
+        if not strategy_s4.enabled:
+            return
+        if latest["cmp"] is None:
+            return
+        # Skip new overnight entries if book is abnormally wide at decision time
+        if (
+            regime_det.last.regime == "WIDE_SPREAD"
+            and strategy_s4.position == "flat"
+        ):
+            return
+        # feed tick row for day feature build
+        from export_full_ticks import row_from_tick
+        import json as _json
+        row = row_from_tick(
+            now.isoformat(timespec="seconds"),
+            message.get("exchange_timestamp"),
+            _json.dumps(message, default=str),
+        )
+        if row.get("ltp") is not None:
+            strategy_s4.push_tick_row(row)
+        result = strategy_s4.maybe_signal(now, float(latest["cmp"]))
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s4.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s4.name} "
+            f"CMP={latest['cmp']} prob_gap_up={strategy_s4.last_prob} "
+            f"=> {result.action} (pos={strategy_s4.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -486,7 +543,8 @@ def run_once(
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"regime={rs.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
-                    f"s2={strategy_s2.position} s3={strategy_s3.position}{s3_extra}"
+                    f"s2={strategy_s2.position} s3={strategy_s3.position} "
+                    f"s4={strategy_s4.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -495,6 +553,8 @@ def run_once(
             emit_s2_if_changed(now, message)
             # S3: ML model BUY/SHORT/CLOSE
             emit_s3_if_changed(now, message)
+            # S4: overnight next-open
+            emit_s4_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -546,14 +606,16 @@ def main() -> None:
     strategy_s2 = BalanceStrategy()
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     strategy_s3 = ml_strategy_from_env()
+    strategy_s4 = overnight_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
     _seed_strategy_from_db(strategy_s1)
     print(f"S3_ML: {strategy_s3.status_line}", flush=True)
+    print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4 in .env)",
         flush=True,
     )
 
@@ -571,6 +633,7 @@ def main() -> None:
                 strategy_s1,
                 strategy_s2,
                 strategy_s3,
+                strategy_s4,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -587,7 +650,8 @@ def main() -> None:
         print(
             f"Reconnecting in {RECONNECT_DELAY_SEC}s "
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
-            f"s3={strategy_s3.position} regime={regime_det.last.regime})...",
+            f"s3={strategy_s3.position} s4={strategy_s4.position} "
+            f"regime={regime_det.last.regime})...",
             flush=True,
         )
         logger.info("Reconnecting in %ss", RECONNECT_DELAY_SEC)

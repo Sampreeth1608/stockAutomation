@@ -88,6 +88,7 @@ def main() -> None:
         ("S1_NETDELTA", out_dir / "trades_s1.csv"),
         ("S2_BALANCE", out_dir / "trades_s2.csv"),
         ("S3_ML", out_dir / "trades_s3.csv"),
+        ("S4_OVERNIGHT", out_dir / "trades_s4.csv"),
         (None, out_dir / "trades_all.csv"),
     ]
     for strat, path in targets:
@@ -99,6 +100,7 @@ def main() -> None:
         _print_summary("S1_NETDELTA", build_trades(strategy="S1_NETDELTA"))
         _print_summary("S2_BALANCE", build_trades(strategy="S2_BALANCE"))
         _print_summary("S3_ML", build_trades(strategy="S3_ML"))
+        _print_summary("S4_OVERNIGHT", build_trades(strategy="S4_OVERNIGHT"))
         _print_summary("ALL", build_trades(strategy=None))
 
 

@@ -45,6 +45,7 @@ def test_env_defaults_disable_s2(monkeypatch=None) -> None:
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
     assert "S3_ML" in p.enabled
+    assert "S4_OVERNIGHT" in p.enabled
     assert "S2_BALANCE" not in p.enabled
 
 

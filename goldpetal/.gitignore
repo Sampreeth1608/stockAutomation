@@ -8,3 +8,4 @@ data/scrip_master.json
 data/*.csv
 data/models/
 data/archive/
+data/s4_state.json

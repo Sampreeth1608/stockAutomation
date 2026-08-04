@@ -41,7 +41,7 @@ def main() -> None:
     print("Mode: paper only until DRY_RUN=false + live order module")
     print()
     rows = []
-    for strat in ("S1_NETDELTA", "S2_BALANCE", "S3_ML", None):
+    for strat in ("S1_NETDELTA", "S2_BALANCE", "S3_ML", "S4_OVERNIGHT", None):
         s = _summarize(strat)
         rows.append(s)
         print(

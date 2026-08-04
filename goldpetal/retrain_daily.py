@@ -92,6 +92,14 @@ def main() -> None:
         threshold_bps=2.0,
         train_frac=0.7,
     )
+    print("\nTraining overnight (S4) models...")
+    try:
+        from train_overnight import train as train_s4
+
+        train_s4(Path(args.model_dir), late_minutes=30, skip_archive=True)
+    except SystemExit as exc:
+        print(f"S4 overnight train skipped: {exc}")
+
     print(
         "Retrain complete. Restart the bot to load new models:\n"
         "  pkill -f run_strategy.py; pkill -f supervise.sh; "

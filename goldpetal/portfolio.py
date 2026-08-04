@@ -11,11 +11,11 @@ from regime import Regime
 # Default: based on observed paper results — S2 is noisy in chop; S1 likes structure;
 # S3 needs model edge; nothing trades in wide spreads.
 DEFAULT_ALLOWED: dict[Regime, set[str]] = {
-    "TREND": {"S1_NETDELTA", "S3_ML"},
-    "CHOP": {"S3_ML"},  # S2 blocked — whipsaw
-    "QUIET": {"S1_NETDELTA"},
-    "WIDE_SPREAD": set(),
-    "UNKNOWN": {"S1_NETDELTA", "S3_ML"},  # allow core strategies while warming up
+    "TREND": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT"},
+    "CHOP": {"S3_ML", "S4_OVERNIGHT"},
+    "QUIET": {"S1_NETDELTA", "S4_OVERNIGHT"},
+    "WIDE_SPREAD": set(),  # S4 also skipped at close if book is wide
+    "UNKNOWN": {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT"},
 }
 
 
@@ -65,10 +65,12 @@ def portfolio_from_env() -> PortfolioConfig:
         pass
     if os.getenv("ENABLE_S3", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S3_ML")
+    if os.getenv("ENABLE_S4", "true").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S4_OVERNIGHT")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:
-        enabled = {"S1_NETDELTA", "S3_ML"}
+        enabled = {"S1_NETDELTA", "S3_ML", "S4_OVERNIGHT"}
 
     flatten = os.getenv("FLATTEN_ON_BAD_REGIME", "true").strip().lower() in {
         "1",
