@@ -14,6 +14,7 @@ import joblib
 import pandas as pd
 
 from overnight_features import DAY_FEATURE_COLS, day_bars_from_ticks
+from day_bias import DayBiasResult, analyze_day
 from strategy import Position, SignalResult
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -208,7 +209,8 @@ class OvernightStrategy:
         if self.enabled:
             kind = "heuristic" if "heuristic" in str(self.model_path) else "ml"
             return (
-                f"enabled ({kind}) model={self.model_path} "
+                f"enabled ({kind}+day_bias) delivery "
+                f"model={self.model_path} "
                 f"buy>={self.buy_prob} short<={self.short_prob} "
                 f"entry={self.entry_minutes_before_close}m_before_close "
                 f"pos={self.state.side}"
@@ -241,7 +243,7 @@ class OvernightStrategy:
         end = open_dt + timedelta(minutes=self.exit_minutes_after_open)
         return open_dt <= now <= end
 
-    def _score_today(self) -> float | None:
+    def _score_ml(self) -> float | None:
         if not self.tick_rows or self.model is None:
             return None
         df = pd.DataFrame(self.tick_rows)
@@ -253,16 +255,33 @@ class OvernightStrategy:
             if c not in latest.columns:
                 latest[c] = 0.0
         X = latest[self.features].astype(float).fillna(0.0)
-        prob = float(self.model.predict_proba(X)[0, 1])
+        return float(self.model.predict_proba(X)[0, 1])
+
+    def _decide_delivery(self) -> tuple[float, DayBiasResult] | None:
+        """Full-day analysis → blended P(bullish) for delivery position."""
+        bias = analyze_day(
+            self.tick_rows,
+            late_minutes=45,
+            bullish_prob=self.buy_prob,
+            bearish_prob=self.short_prob,
+        )
+        if bias is None:
+            return None
+        ml = self._score_ml()
+        # Prefer full-day structure; blend ML gap model when available (not pure heuristic)
+        if ml is not None and "heuristic" not in str(self.model_path):
+            prob = 0.65 * bias.prob_bullish + 0.35 * ml
+        else:
+            prob = bias.prob_bullish
         self.last_prob = prob
-        return prob
+        return prob, bias
 
     def maybe_signal(self, now: datetime, cmp: float) -> SignalResult | None:
         if not self.enabled or self.model is None:
             return None
         today = now.astimezone(IST).strftime("%Y-%m-%d")
 
-        # --- EXIT: next session after overnight hold ---
+        # --- EXIT: next session after overnight delivery hold ---
         if self.state.side != "flat" and self.state.entry_date and self.state.entry_date < today:
             if self._in_exit_window(now) and not self._exited_today:
                 side = self.state.side
@@ -277,10 +296,12 @@ class OvernightStrategy:
                     net=float(self.last_prob or 0.0),
                     net_delta=None,
                     prev_net_delta=None,
-                    reason=f"overnight exit after open; was_{side} entry_date={entry_date}",
+                    reason=(
+                        f"delivery exit after open; was_{side} entry_date={entry_date}"
+                    ),
                 )
 
-        # --- ENTRY: near today's close ---
+        # --- ENTRY: near close after analysing the whole day ---
         if self.state.side != "flat":
             return None
         if self._entered_today:
@@ -288,18 +309,23 @@ class OvernightStrategy:
         if not self._in_entry_window(now):
             return None
 
-        prob = self._score_today()
-        if prob is None:
+        decided = self._decide_delivery()
+        if decided is None:
             return None
+        prob, bias = decided
 
-        if prob >= self.buy_prob:
+        if bias.bias == "BULLISH" and prob >= self.buy_prob:
             action = "BUY"
             pos: Position = "long"
-            reason = f"overnight P(gap_up)={prob:.3f}>={self.buy_prob}; buy near close"
-        elif prob <= self.short_prob:
+            reason = (
+                f"DELIVERY LONG — full-day BULLISH P={prob:.3f}; {bias.reason}"
+            )
+        elif bias.bias == "BEARISH" and prob <= self.short_prob:
             action = "SHORT"
             pos = "short"
-            reason = f"overnight P(gap_up)={prob:.3f}<={self.short_prob}; short near close"
+            reason = (
+                f"DELIVERY SHORT — full-day BEARISH P={prob:.3f}; {bias.reason}"
+            )
         else:
             return None
 
@@ -328,7 +354,7 @@ def overnight_from_env() -> OvernightStrategy:
     load_close = os.getenv("MARKET_CLOSE", "23:30")
     buy = float(os.getenv("S4_BUY_PROB", "0.58"))
     short = float(os.getenv("S4_SHORT_PROB", "0.42"))
-    entry_m = int(os.getenv("S4_ENTRY_MINUTES_BEFORE_CLOSE", "10"))
+    entry_m = int(os.getenv("S4_ENTRY_MINUTES_BEFORE_CLOSE", "15"))
     exit_m = int(os.getenv("S4_EXIT_MINUTES_AFTER_OPEN", "5"))
     model = os.getenv("S4_MODEL_PATH", "").strip()
     path = Path(model) if model else None

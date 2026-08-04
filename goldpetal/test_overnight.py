@@ -118,8 +118,8 @@ def test_s4_entry_exit_windows() -> None:
     state = Path(tempfile.mkdtemp()) / "s4.json"
     s = OvernightStrategy(
         model_path=model_dir / "overnight_logreg.joblib",
-        buy_prob=0.01,  # force buy easily
-        short_prob=0.99,
+        buy_prob=0.55,
+        short_prob=0.45,
         entry_minutes_before_close=15,
         exit_minutes_after_open=10,
         market_open="09:00",
@@ -127,19 +127,56 @@ def test_s4_entry_exit_windows() -> None:
         state_path=state,
     )
     assert s.enabled
-    for _, row in ticks.iterrows():
-        s.push_tick_row(row.to_dict())
+    # strong up-day ticks for delivery long
+    px = 14000.0
+    for i in range(100):
+        px += 1.5
+        s.push_tick_row(
+            {
+                "time": f"2026-08-06 10:00:{i % 60:02d}",
+                "ltp": px,
+                "open": 14000,
+                "high": px + 2,
+                "low": 13990,
+                "close": 14000,
+                "volume": 1000 + i,
+                "last_traded_quantity": 1,
+                "average_traded_price": (14000 + px) / 2,
+                "total_buy_quantity": 8000,
+                "total_sell_quantity": 2000,
+                "buy1_price": px - 1,
+                "buy1_qty": 30,
+                "buy2_price": px - 2,
+                "buy2_qty": 20,
+                "buy3_price": px - 3,
+                "buy3_qty": 10,
+                "buy4_price": px - 4,
+                "buy4_qty": 8,
+                "buy5_price": px - 5,
+                "buy5_qty": 5,
+                "sell1_price": px + 1,
+                "sell1_qty": 5,
+                "sell2_price": px + 2,
+                "sell2_qty": 4,
+                "sell3_price": px + 3,
+                "sell3_qty": 3,
+                "sell4_price": px + 4,
+                "sell4_qty": 2,
+                "sell5_price": px + 5,
+                "sell5_qty": 1,
+                "open_interest": 10000 + i * 3,
+            }
+        )
 
-    # entry near close
-    now = datetime(2026, 8, 6, 23, 25, tzinfo=IST)
-    sig = s.maybe_signal(now, cmp=14100.0)
-    assert sig is not None and sig.action == "BUY"
+    now = datetime(2026, 8, 6, 23, 20, tzinfo=IST)
+    sig = s.maybe_signal(now, cmp=px)
+    assert sig is not None and sig.action == "BUY", (sig, s.last_prob)
     assert s.position == "long"
+    assert "DELIVERY" in (sig.reason or "")
 
-    # exit next morning
     s._exited_today = False
     now2 = datetime(2026, 8, 7, 9, 3, tzinfo=IST)
-    sig2 = s.maybe_signal(now2, cmp=14150.0)
+    sig2 = s.maybe_signal(now2, cmp=px + 10)
     assert sig2 is not None and sig2.action == "CLOSE"
     assert s.position == "flat"
 
