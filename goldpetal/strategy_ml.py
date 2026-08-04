@@ -72,8 +72,10 @@ class MLStrategy:
         self.features = list(FEATURE_COLUMNS)
         self.last_prob: float | None = None
         self.last_signal_ts: datetime | None = None
+        self.last_skip: str | None = None
         self._tick_i = 0
         self._load_error: str | None = None
+        self._score_count = 0
 
         path = model_path or resolve_model_path()
         if path is None:
@@ -136,29 +138,40 @@ class MLStrategy:
     def maybe_signal(self, now: datetime) -> SignalResult | None:
         """Return BUY/SHORT/CLOSE only on transitions; else None."""
         if not self.enabled or self.model is None:
+            self.last_skip = "disabled"
             return None
         if self._tick_i % self.every_n_ticks != 0:
             return None
         if len(self.buffer) < 25:
+            self.last_skip = f"warming_up buffer={len(self.buffer)}/25"
             return None
 
         df = pd.DataFrame(list(self.buffer))
         feat = build_features(df)
-        latest = feat.iloc[[-1]]
-        if latest[self.features].isna().any(axis=None):
+        latest = feat.iloc[[-1]].copy()
+        # Live Angel ticks often miss OI / VWAP / day range → fill so we still score.
+        X = latest[self.features].astype(float).fillna(0.0)
+        if X.isna().any(axis=None):
+            self.last_skip = "features_still_nan"
             return None
 
-        X = latest[self.features].astype(float)
         prob = float(self.model.predict_proba(X)[0, 1])
         self.last_prob = prob
+        self._score_count += 1
         want = self._desired_side(prob)
 
         if want == self.position:
+            self.last_skip = f"hold pos={self.position} p={prob:.3f}"
             return None
         if not self._hold_ok(now):
+            self.last_skip = f"min_hold p={prob:.3f}"
             return None
 
-        net = float(latest["imb_l5"].iloc[0]) if "imb_l5" in latest else 0.0
+        imb = latest["imb_l5"].iloc[0] if "imb_l5" in latest else 0.0
+        try:
+            net = float(imb) if imb == imb else 0.0  # NaN check
+        except (TypeError, ValueError):
+            net = 0.0
         action: Action
         if want == "long":
             action = "BUY"
@@ -177,6 +190,7 @@ class MLStrategy:
             )
 
         self.last_signal_ts = now
+        self.last_skip = None
         return SignalResult(
             action=action,
             position_after=self.position,

@@ -338,12 +338,17 @@ def run_once(
             state["tick_count"] += 1
             tick_count = state["tick_count"]
             if tick_count == 1 or tick_count % 50 == 0:
+                s3_extra = ""
+                if strategy_s3.enabled:
+                    if strategy_s3.last_prob is not None:
+                        s3_extra = f" p={strategy_s3.last_prob:.2f}"
+                    elif strategy_s3.last_skip:
+                        s3_extra = f" ({strategy_s3.last_skip})"
                 line = (
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
-                    f"s2={strategy_s2.position} s3={strategy_s3.position}"
-                    f"{'' if strategy_s3.last_prob is None else f' p={strategy_s3.last_prob:.2f}'}"
+                    f"s2={strategy_s2.position} s3={strategy_s3.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
