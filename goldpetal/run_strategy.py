@@ -384,42 +384,41 @@ def run_once(
             received_at=now.isoformat(timespec="seconds"),
             exchange_timestamp=message.get("exchange_timestamp"),
         )
+        pos_before = strategy_s3.position
         result = strategy_s3.maybe_signal(now)
         regime = regime_det.last.regime
+        allowed = portfolio.allows(strategy_s3.name, regime)
 
-        # Regime flatten even without a model transition
-        if (
-            strategy_s3.position != "flat"
-            and portfolio.should_flatten(strategy_s3.name, regime)
-        ):
-            if result is None or result.action != "CLOSE":
-                from strategy import SignalResult
-
-                result = SignalResult(
-                    action="CLOSE",
-                    position_after="flat",
-                    price_delta=None,
-                    net=0.0,
-                    net_delta=None,
-                    prev_net_delta=None,
-                    reason=f"regime_flatten {regime}: {regime_det.last.reason}",
-                )
+        if not allowed:
+            # Model may have just opened — undo entry; only CLOSE if we were already in.
+            if result is not None and result.action in {"BUY", "SHORT"}:
                 strategy_s3.position = "flat"
-                strategy_s3.last_signal_ts = now
+                result = None
+            if pos_before == "flat":
+                return
+            from strategy import SignalResult
 
-        if result is None:
-            return
-        action = result.action
-        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s3.name, regime):
             strategy_s3.position = "flat"
+            strategy_s3.last_signal_ts = now
+            result = SignalResult(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=None,
+                net=0.0,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=f"regime_flatten {regime}: {regime_det.last.reason}",
+            )
+
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        if action not in {"BUY", "SHORT", "CLOSE"}:
-            return
+
+        action = result.action
         save_signal(
             time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
             action=action,
-            position_after=result.position_after if action != "CLOSE" else "flat",
+            position_after="flat" if action == "CLOSE" else result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
@@ -477,8 +476,10 @@ def run_once(
                 if strategy_s3.enabled:
                     if strategy_s3.last_prob is not None:
                         s3_extra = f" p={strategy_s3.last_prob:.2f}"
-                    elif strategy_s3.last_skip:
-                        s3_extra = f" ({strategy_s3.last_skip})"
+                    else:
+                        skip = getattr(strategy_s3, "last_skip", None)
+                        if skip:
+                            s3_extra = f" ({skip})"
                 rs = regime_det.last
                 line = (
                     f"[{received_at}] ticks={tick_count} "
