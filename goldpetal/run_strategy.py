@@ -14,6 +14,7 @@ from logzero import logger
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
 from auth import login
+from depth import depth_buy_sell_sums
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy
@@ -129,8 +130,10 @@ def run_once(
     exchange_type = contract["exchange_type"]
 
     latest = {"cmp": None, "bp": None, "sp": None, "message": None}
-    next_bar_at = _next_boundary(datetime.now(IST), interval)
-    tick_count = 0
+    state = {
+        "next_bar_at": _next_boundary(datetime.now(IST), interval),
+        "tick_count": 0,
+    }
     closed = {"done": False}
 
     print("=== Gold Petal strategy runner ===", flush=True)
@@ -139,11 +142,11 @@ def run_once(
     print(f"Expiry   : {contract['expiry']}", flush=True)
     print(f"Interval : {interval} minutes", flush=True)
     print("S1       : netΔ pressure strategy (30-min bars)", flush=True)
-    print("S2       : buy_sum - sell_sum sign flips (every tick)", flush=True)
+    print("S2       : sum(buy1-5 qty) - sum(sell1-5 qty) sign flips (every tick)", flush=True)
     print(f"DRY_RUN  : {dry_run} (signals only; no live orders)", flush=True)
     open_s, close_s = _market_window()
     print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
-    print(f"Next bar : {next_bar_at.isoformat(timespec='seconds')}", flush=True)
+    print(f"Next bar : {state['next_bar_at'].isoformat(timespec='seconds')}", flush=True)
     print("Press Ctrl+C to stop", flush=True)
     print("=================================", flush=True)
 
@@ -159,7 +162,6 @@ def run_once(
     )
 
     def evaluate_bar(now: datetime) -> None:
-        nonlocal next_bar_at
         if not is_market_open(now):
             msg = (
                 f"[{now.isoformat(timespec='seconds')}] "
@@ -167,14 +169,14 @@ def run_once(
             )
             print(msg, flush=True)
             logger.info(msg)
-            next_bar_at = _next_boundary(now, interval)
+            state["next_bar_at"] = _next_boundary(now, interval)
             return
 
         if latest["cmp"] is None or latest["bp"] is None or latest["sp"] is None:
             msg = f"[{now.isoformat(timespec='seconds')}] bar skipped — no tick data yet"
             print(msg, flush=True)
             logger.info(msg)
-            next_bar_at = _next_boundary(now, interval)
+            state["next_bar_at"] = _next_boundary(now, interval)
             return
 
         label_time = now.replace(second=0, microsecond=0)
@@ -222,19 +224,24 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
-        next_bar_at = _next_boundary(now, interval)
+        state["next_bar_at"] = _next_boundary(now, interval)
 
-    def emit_s2_if_changed(now: datetime) -> None:
-        """S2 reacts instantly when buy-sell sign flips."""
-        if latest["cmp"] is None or latest["bp"] is None or latest["sp"] is None:
+    def emit_s2_if_changed(now: datetime, message: dict) -> None:
+        """S2 reacts instantly when depth buy1-5 vs sell1-5 sign flips."""
+        if latest["cmp"] is None:
             return
+        buy_sum, sell_sum, details = depth_buy_sell_sums(message)
+        # If depth missing entirely, skip (do not use total_buy/total_sell for S2).
+        if buy_sum == 0 and sell_sum == 0 and not message.get("best_5_buy_data") and not message.get("best_5_sell_data"):
+            return
+
         tick_bar = BarSnapshot(
             time_label=now.isoformat(timespec="seconds"),
             cmp=float(latest["cmp"]),
-            bp=float(latest["bp"]),
-            sp=float(latest["sp"]),
+            bp=buy_sum,
+            sp=sell_sum,
         )
-        result = strategy_s2.on_bar(tick_bar)
+        result = strategy_s2.on_bar(tick_bar, details=details)
         # Only record transitions (BUY/SHORT/CLOSE), not continuous HOLD.
         if result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
@@ -252,14 +259,13 @@ def run_once(
         )
         line = (
             f"[{tick_bar.time_label}] {strategy_s2.name} "
-            f"CMP={tick_bar.cmp} BP={tick_bar.bp} SP={tick_bar.sp} NET={result.net} "
+            f"CMP={tick_bar.cmp} buy_sum={buy_sum} sell_sum={sell_sum} NET={result.net} "
             f"=> {result.action} (pos={result.position_after}) | {result.reason}"
         )
         print(line, flush=True)
         logger.info(line)
 
     def on_data(_wsapp, message):
-        nonlocal tick_count, next_bar_at
         if stop_flag["stop"]:
             return
         if not isinstance(message, dict):
@@ -269,8 +275,8 @@ def run_once(
             now = datetime.now(IST)
             # Skip night/weekend noise entirely.
             if not is_market_open(now):
-                if now >= next_bar_at:
-                    next_bar_at = _next_boundary(now, interval)
+                if now >= state["next_bar_at"]:
+                    state["next_bar_at"] = _next_boundary(now, interval)
                 return
 
             received_at = now.isoformat(timespec="seconds")
@@ -287,22 +293,23 @@ def run_once(
                 latest["sp"] = float(sp)
             latest["message"] = message
 
-            tick_count += 1
+            state["tick_count"] += 1
+            tick_count = state["tick_count"]
             if tick_count == 1 or tick_count % 50 == 0:
                 line = (
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
-                    f"next_bar={next_bar_at.strftime('%H:%M:%S')} "
+                    f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position}"
                 )
                 print(line, flush=True)
                 logger.info(line)
 
-            # S2: tick-based sign flips
-            emit_s2_if_changed(now)
+            # S2: tick-based depth buy1-5 vs sell1-5 sign flips
+            emit_s2_if_changed(now, message)
 
             # S1: 30-min bars
-            if now >= next_bar_at:
+            if now >= state["next_bar_at"]:
                 evaluate_bar(now)
         except Exception:
             logger.exception("Error while handling tick")
@@ -320,13 +327,13 @@ def run_once(
         closed["done"] = True
         logger.info(
             "WebSocket closed. ticks=%s s1=%s s2=%s args=%s",
-            tick_count,
+            state["tick_count"],
             strategy_s1.position,
             strategy_s2.position,
             args,
         )
         print(
-            f"WebSocket closed. ticks={tick_count} "
+            f"WebSocket closed. ticks={state['tick_count']} "
             f"s1={strategy_s1.position} s2={strategy_s2.position}",
             flush=True,
         )
