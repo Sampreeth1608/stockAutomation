@@ -27,12 +27,14 @@ def test_wide_spread() -> None:
 
 
 def test_portfolio_gates() -> None:
-    p = PortfolioConfig(enabled={"S1_NETDELTA", "S3_ML"})
+    p = PortfolioConfig(enabled={"S1_NETDELTA", "S3_ML", "S5_MINEDGE"})
     assert p.allows("S1_NETDELTA", "TREND")
+    assert p.allows("S5_MINEDGE", "TREND")
     assert not p.allows("S2_BALANCE", "TREND")  # not enabled
     assert not p.allows("S1_NETDELTA", "WIDE_SPREAD")
     assert p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
-    assert p.allows("S3_ML", "CHOP")
+    assert not p.allows("S3_ML", "CHOP")  # chop: overnight only by default
+    assert p.allows("S5_MINEDGE", "UNKNOWN")
     assert not p.allows("S2_BALANCE", "CHOP")
 
 
@@ -42,10 +44,13 @@ def test_env_defaults_disable_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S1", None)
     os.environ.pop("ENABLE_S2", None)
     os.environ.pop("ENABLE_S3", None)
+    os.environ.pop("ENABLE_S4", None)
+    os.environ.pop("ENABLE_S5", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
     assert "S3_ML" in p.enabled
     assert "S4_OVERNIGHT" in p.enabled
+    assert "S5_MINEDGE" in p.enabled
     assert "S2_BALANCE" not in p.enabled
 
 

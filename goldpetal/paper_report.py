@@ -78,7 +78,14 @@ def main() -> None:
         f"{'gross':>9} {'fees':>8} {'aftFee':>9} {'tax':>8} {'aftTax':>9}"
     )
     print("-" * 90)
-    for strat in ("S1_NETDELTA", "S2_BALANCE", "S3_ML", "S4_OVERNIGHT", None):
+    for strat in (
+        "S1_NETDELTA",
+        "S2_BALANCE",
+        "S3_ML",
+        "S4_OVERNIGHT",
+        "S5_MINEDGE",
+        None,
+    ):
         s = _summarize(strat)
         print(
             f"{s['strategy']:12} {s['trades']:4} {s['closed']:4} {s['win_rate']:6.1f} "

@@ -1,0 +1,184 @@
+"""S5: only trade when market can move enough points to beat costs.
+
+Uses rolling expected-move (ATR + session range) + strong depth imbalance.
+Enters BUY/SHORT only if expected_points >= required_points
+(required = max(MIN_EDGE_POINTS, fee_break_even * safety) when COVER_FEES=true).
+
+Why COVER_FEES matters:
+  Angel Gold Petal round-trip fees ≈ ₹47 → break-even ≈ 470+ points
+  (₹0.10/point with TURNOVER_MULT=0.1). A 20-point move alone (~₹2) cannot
+  cover costs. MIN_EDGE_POINTS=20 is the *floor*; fee cover raises the bar.
+
+Exits when:
+  - move from entry reaches +expected (target), or
+  - adverse move hits stop (~0.45 * expected), or
+  - regime / portfolio flattens (handled outside)
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any
+
+from depth import depth_buy_sell_sums
+from edge import PointATR, edge_thresholds_from_env
+from strategy import Action, Position, SignalResult
+
+
+class MinEdgeStrategy:
+    name = "S5_MINEDGE"
+
+    def __init__(
+        self,
+        min_edge_points: float | None = None,
+        every_n_ticks: int = 5,
+        atr_window: int = 100,
+        imbalance_ratio: float = 1.35,
+    ) -> None:
+        thr = edge_thresholds_from_env()
+        self.min_edge_points = (
+            float(min_edge_points)
+            if min_edge_points is not None
+            else thr.min_edge_points
+        )
+        self.cover_fees = thr.cover_fees
+        self.safety_mult = thr.safety_mult
+        self.fee_break_even = thr.fee_break_even_points
+        self.every_n_ticks = max(1, every_n_ticks)
+        self.imbalance_ratio = max(1.05, imbalance_ratio)
+        self.atr = PointATR(window=atr_window)
+        self.position: Position = "flat"
+        self.entry_price: float | None = None
+        self.target_points: float | None = None
+        self.stop_points: float | None = None
+        self.last_expected: float | None = None
+        self._tick_i = 0
+        self.last_skip: str | None = None
+
+    @property
+    def required_points(self) -> float:
+        if self.cover_fees:
+            return max(self.min_edge_points, self.fee_break_even * self.safety_mult)
+        return self.min_edge_points
+
+    @property
+    def status_line(self) -> str:
+        return (
+            f"min_user={self.min_edge_points:.0f}pt "
+            f"fee_BE={self.fee_break_even:.0f}pt "
+            f"required={self.required_points:.0f}pt "
+            f"cover_fees={self.cover_fees} "
+            f"imb>={self.imbalance_ratio:.2f} pos={self.position}"
+        )
+
+    def _bias(self, message: dict[str, Any]) -> tuple[str, float]:
+        """Return (bias, imbalance_ratio). ratio = dominant/other side qty."""
+        buy, sell, _ = depth_buy_sell_sums(message)
+        if buy <= 0 and sell <= 0:
+            return "flat", 1.0
+        if buy > sell * self.imbalance_ratio:
+            return "long", (buy / sell) if sell > 0 else 99.0
+        if sell > buy * self.imbalance_ratio:
+            return "short", (sell / buy) if buy > 0 else 99.0
+        return "flat", (max(buy, sell) / max(1e-9, min(buy, sell)))
+
+    def on_tick(
+        self, now: datetime, ltp: float, message: dict[str, Any]
+    ) -> SignalResult | None:
+        self._tick_i += 1
+        expected = self.atr.update(ltp)
+        self.last_expected = expected
+        if self._tick_i % self.every_n_ticks != 0:
+            return None
+        if expected is None:
+            self.last_skip = "warming_atr"
+            return None
+
+        # Refresh fee BE occasionally with live price
+        if self._tick_i % 200 == 0:
+            self.fee_break_even = edge_thresholds_from_env(ltp).fee_break_even_points
+
+        req = self.required_points
+        bias, imb = self._bias(message)
+
+        # --- manage open trade ---
+        if self.position != "flat" and self.entry_price is not None:
+            move = ltp - self.entry_price
+            if self.position == "short":
+                move = -move
+            tgt = self.target_points or expected
+            stop = self.stop_points or (expected * 0.5)
+            if move >= tgt:
+                side = self.position
+                self.position = "flat"
+                self.entry_price = None
+                return SignalResult(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=move,
+                    net=expected,
+                    net_delta=req,
+                    prev_net_delta=None,
+                    reason=f"minedge target hit move={move:.1f}>={tgt:.1f} was_{side}",
+                )
+            if move <= -stop:
+                side = self.position
+                self.position = "flat"
+                self.entry_price = None
+                return SignalResult(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=move,
+                    net=expected,
+                    net_delta=req,
+                    prev_net_delta=None,
+                    reason=f"minedge stop hit move={move:.1f}<=-{stop:.1f} was_{side}",
+                )
+            self.last_skip = f"hold exp={expected:.1f} move={move:.1f}"
+            return None
+
+        # --- entries only if enough expected points + clear book bias ---
+        if expected < req:
+            self.last_skip = f"edge_too_small exp={expected:.1f}<req={req:.1f}"
+            return None
+        if bias == "flat":
+            self.last_skip = f"weak_bias exp={expected:.1f} imb={imb:.2f}"
+            return None
+
+        self.entry_price = ltp
+        # Target at least required (fee-aware); use expected if larger
+        self.target_points = max(req, expected * 0.85)
+        self.stop_points = max(self.min_edge_points * 0.4, expected * 0.45)
+        if bias == "long":
+            self.position = "long"
+            action: Action = "BUY"
+            reason = (
+                f"MINEDGE BUY exp_move={expected:.1f}pt >= required={req:.1f}pt "
+                f"imb={imb:.2f} "
+                f"(user_min={self.min_edge_points:.0f}, fee_BE={self.fee_break_even:.0f})"
+            )
+        else:
+            self.position = "short"
+            action = "SHORT"
+            reason = (
+                f"MINEDGE SHORT exp_move={expected:.1f}pt >= required={req:.1f}pt "
+                f"imb={imb:.2f} "
+                f"(user_min={self.min_edge_points:.0f}, fee_BE={self.fee_break_even:.0f})"
+            )
+        return SignalResult(
+            action=action,
+            position_after=self.position,
+            price_delta=None,
+            net=expected,
+            net_delta=req,
+            prev_net_delta=None,
+            reason=reason,
+        )
+
+
+def minedge_from_env() -> MinEdgeStrategy:
+    every = int(os.getenv("S5_EVERY_N_TICKS", "5"))
+    window = int(os.getenv("S5_ATR_WINDOW", "120"))
+    imb = float(os.getenv("S5_IMBALANCE_RATIO", "1.35"))
+    return MinEdgeStrategy(every_n_ticks=every, atr_window=window, imbalance_ratio=imb)
