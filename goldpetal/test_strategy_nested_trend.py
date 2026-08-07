@@ -172,6 +172,34 @@ def test_fee_gate_blocks_small_tp():
     assert s.last_skip == "fee_gate"
 
 
+def test_depth_blocks_long_when_sell_book_heavy():
+    cfg = NestedTrendConfig(
+        min_imb_pct=10.0,
+        swing_ticks=8,
+        net_ema_alpha=0.5,
+        require_depth=True,
+        depth_ratio=1.20,
+        use_fee_gate=False,
+    )
+    s = NestedTrendStrategy(cfg)
+    px = 10000.0
+    # NET bullish but depth sell-heavy
+    heavy_sell = {
+        "total_buy_quantity": 12000,
+        "total_sell_quantity": 8000,
+        "last_traded_quantity": 5,
+        "best_5_buy_data": [{"flag": 0, "quantity": 10}] * 5,
+        "best_5_sell_data": [{"flag": 1, "quantity": 100}] * 5,
+    }
+    for _ in range(25):
+        px += 1.0
+        sig = s.on_tick(_now(), px, heavy_sell)
+        if sig:
+            assert sig.action != "BUY"
+    assert s.position == "flat"
+    assert s.last_skip and "depth_block" in s.last_skip
+
+
 if __name__ == "__main__":
     test_net_imbalance()
     test_bull_session_bias_and_long_entry()
@@ -179,4 +207,5 @@ if __name__ == "__main__":
     test_no_short_while_bull_bias()
     test_session_flip_closes_long()
     test_fee_gate_blocks_small_tp()
+    test_depth_blocks_long_when_sell_book_heavy()
     print("ok")

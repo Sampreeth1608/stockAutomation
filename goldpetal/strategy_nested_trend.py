@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
+from depth import depth_buy_sell_sums
 from strategy import Action, Position, SignalResult
 
 Bias = Literal["BULL", "BEAR", "NEUTRAL"]
@@ -34,6 +35,16 @@ def net_imbalance(tbq: float, tsq: float) -> tuple[float, float]:
     denom = max(float(tbq), float(tsq), 1e-9)
     imb_pct = abs(net) / denom * 100.0
     return net, imb_pct
+
+
+def _median(values: deque[float] | list[float]) -> float:
+    if not values:
+        return 0.0
+    xs = sorted(values)
+    mid = len(xs) // 2
+    if len(xs) % 2:
+        return float(xs[mid])
+    return float(xs[mid - 1] + xs[mid]) / 2.0
 
 
 @dataclass
@@ -53,6 +64,17 @@ class NestedTrendConfig:
     # Optional fee gate (usually OFF for research; 1-lot zigzags rarely cover ~50pt fees)
     use_fee_gate: bool = False
     fee_be_points: float = 50.0
+    # --- Microstructure filters (LTQ + bid1-5 / sell1-5) ---
+    # Require buy1-5 vs sell1-5 to agree with session bias at entry
+    require_depth: bool = False
+    depth_ratio: float = 1.15  # long: buy_sum >= ratio * sell_sum
+    # Require last_traded_quantity to show participation
+    require_ltq: bool = False
+    ltq_min: float = 1.0  # absolute floor
+    ltq_vs_median: float = 1.0  # LTQ >= median(recent) * this (0=disable median gate)
+    ltq_window: int = 50
+    # Optional: exit if depth flips hard against position
+    depth_exit: bool = False
 
 
 class NestedTrendStrategy:
@@ -71,8 +93,13 @@ class NestedTrendStrategy:
         self.last_imb: float = 0.0
         self.last_tbq: float = 0.0
         self.last_tsq: float = 0.0
+        self.last_ltq: float = 0.0
+        self.last_buy_sum: float = 0.0
+        self.last_sell_sum: float = 0.0
+        self.last_depth_ratio: float = 1.0
 
         self.prices: deque[float] = deque(maxlen=max(10, self.cfg.swing_ticks))
+        self.ltqs: deque[float] = deque(maxlen=max(10, self.cfg.ltq_window))
         # Session extreme / pullback tracking
         self.session_extreme: float | None = None  # high in bull, low in bear
         self.pullback_extreme: float | None = None  # low in bull pullback, high in bear
@@ -88,11 +115,17 @@ class NestedTrendStrategy:
     @property
     def status_line(self) -> str:
         c = self.cfg
+        micro = []
+        if c.require_depth:
+            micro.append(f"depth>={c.depth_ratio:.2f}")
+        if c.require_ltq:
+            micro.append(f"ltq>={c.ltq_min:.0f}/med*{c.ltq_vs_median:.1f}")
+        micro_s = (" " + ",".join(micro)) if micro else ""
         return (
             f"imb>={c.min_imb_pct:.0f}% weaken>={c.weaken_pct:.0f}% "
             f"TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
             f"pb={c.pullback_points:.0f}/res={c.resume_points:.0f} "
-            f"fee_gate={c.use_fee_gate} "
+            f"fee_gate={c.use_fee_gate}{micro_s} "
             f"bias={self.session_bias} swing={self.swing} pos={self.position}"
         )
 
@@ -229,6 +262,47 @@ class NestedTrendStrategy:
             return True
         return False
 
+    def _update_micro(self, message: dict[str, Any]) -> None:
+        buy_sum, sell_sum, _ = depth_buy_sell_sums(message)
+        self.last_buy_sum = buy_sum
+        self.last_sell_sum = sell_sum
+        self.last_depth_ratio = buy_sum / max(sell_sum, 1e-9)
+
+        ltq_raw = message.get("last_traded_quantity")
+        try:
+            ltq = float(ltq_raw) if ltq_raw is not None else 0.0
+        except (TypeError, ValueError):
+            ltq = 0.0
+        self.last_ltq = ltq
+        if ltq > 0:
+            self.ltqs.append(ltq)
+
+    def _micro_ok(self, side: Position) -> tuple[bool, str]:
+        """Entry gate using bid1-5/sell1-5 + last_traded_quantity."""
+        c = self.cfg
+        if c.require_depth:
+            if side == "long":
+                if self.last_buy_sum < c.depth_ratio * max(self.last_sell_sum, 1e-9):
+                    return False, (
+                        f"depth_block long buy5={self.last_buy_sum:.0f} "
+                        f"sell5={self.last_sell_sum:.0f} need>={c.depth_ratio:.2f}x"
+                    )
+            else:
+                if self.last_sell_sum < c.depth_ratio * max(self.last_buy_sum, 1e-9):
+                    return False, (
+                        f"depth_block short sell5={self.last_sell_sum:.0f} "
+                        f"buy5={self.last_buy_sum:.0f} need>={c.depth_ratio:.2f}x"
+                    )
+        if c.require_ltq:
+            if self.last_ltq < c.ltq_min:
+                return False, f"ltq_block ltq={self.last_ltq:.0f}<{c.ltq_min:.0f}"
+            if c.ltq_vs_median > 0 and len(self.ltqs) >= max(10, c.ltq_window // 2):
+                med = _median(self.ltqs)
+                need = med * c.ltq_vs_median
+                if self.last_ltq < need:
+                    return False, f"ltq_block ltq={self.last_ltq:.0f}<med*{c.ltq_vs_median:.1f}={need:.1f}"
+        return True, "micro_ok"
+
     def _open(self, side: Position, ltp: float) -> None:
         self.position = side
         self.entry_price = ltp
@@ -299,6 +373,18 @@ class NestedTrendStrategy:
             return _close_result(
                 f"sl {move:.1f}<=-{self.cfg.sl_points:.0f} bias={self.session_bias}"
             )
+
+        # Depth flip exit: book turns against us while in trade
+        if self.cfg.depth_exit:
+            r = self.cfg.depth_ratio
+            if side == "long" and self.last_sell_sum >= r * max(self.last_buy_sum, 1e-9):
+                return _close_result(
+                    f"depth_exit long sell5={self.last_sell_sum:.0f}>={r:.2f}*buy5"
+                )
+            if side == "short" and self.last_buy_sum >= r * max(self.last_sell_sum, 1e-9):
+                return _close_result(
+                    f"depth_exit short buy5={self.last_buy_sum:.0f}>={r:.2f}*sell5"
+                )
         return None
 
     def on_tick(
@@ -314,6 +400,7 @@ class NestedTrendStrategy:
         self.prices.append(float(ltp))
         self._update_bias(tbq, tsq)
         self._update_swing(float(ltp))
+        self._update_micro(message)
 
         if self._tick_i % max(1, self.cfg.every_n_ticks) != 0:
             return None
@@ -336,6 +423,10 @@ class NestedTrendStrategy:
 
         if self._resume_long(float(ltp)):
             if self.swing == "PULLBACK_BULL" or (allow_first and self.swing == "UP"):
+                ok, micro_why = self._micro_ok("long")
+                if not ok:
+                    self.last_skip = micro_why
+                    return None
                 why = "pullback_resume" if self.swing == "PULLBACK_BULL" else "true_uptrend"
                 self._open("long", float(ltp))
                 return SignalResult(
@@ -347,12 +438,18 @@ class NestedTrendStrategy:
                     prev_net_delta=None,
                     reason=(
                         f"nested_long {why} bias=BULL swing={self.swing} "
-                        f"net={self.last_net:.0f} imb={self.last_imb:.1f}%"
+                        f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
+                        f"buy5={self.last_buy_sum:.0f} sell5={self.last_sell_sum:.0f} "
+                        f"ltq={self.last_ltq:.0f}"
                     ),
                 )
 
         if self._resume_short(float(ltp)):
             if self.swing == "PULLBACK_BEAR" or (allow_first and self.swing == "DOWN"):
+                ok, micro_why = self._micro_ok("short")
+                if not ok:
+                    self.last_skip = micro_why
+                    return None
                 why = "pullback_resume" if self.swing == "PULLBACK_BEAR" else "true_downtrend"
                 self._open("short", float(ltp))
                 return SignalResult(
@@ -364,7 +461,9 @@ class NestedTrendStrategy:
                     prev_net_delta=None,
                     reason=(
                         f"nested_short {why} bias=BEAR swing={self.swing} "
-                        f"net={self.last_net:.0f} imb={self.last_imb:.1f}%"
+                        f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
+                        f"buy5={self.last_buy_sum:.0f} sell5={self.last_sell_sum:.0f} "
+                        f"ltq={self.last_ltq:.0f}"
                     ),
                 )
 
@@ -402,5 +501,12 @@ def nested_trend_from_env() -> NestedTrendStrategy:
         every_n_ticks=int(_f("S8_EVERY_N_TICKS", 1)),
         use_fee_gate=_b("S8_USE_FEE_GATE", False),
         fee_be_points=_f("S8_FEE_BE_POINTS", 50.0),
+        require_depth=_b("S8_REQUIRE_DEPTH", False),
+        depth_ratio=_f("S8_DEPTH_RATIO", 1.15),
+        require_ltq=_b("S8_REQUIRE_LTQ", False),
+        ltq_min=_f("S8_LTQ_MIN", 1.0),
+        ltq_vs_median=_f("S8_LTQ_VS_MEDIAN", 1.0),
+        ltq_window=int(_f("S8_LTQ_WINDOW", 50)),
+        depth_exit=_b("S8_DEPTH_EXIT", False),
     )
     return NestedTrendStrategy(cfg)
