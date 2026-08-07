@@ -18,7 +18,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
-        "S8_NESTED_TREND",
+        "S8_NET_ZIGZAG",
     },
     "CHOP": {"S4_OVERNIGHT"},  # S5/S6/S8 skip chop by default
     "QUIET": {
@@ -26,7 +26,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S2_BALANCE",
         "S4_OVERNIGHT",
         "S6_MIN30",
-        "S8_NESTED_TREND",
+        "S8_NET_ZIGZAG",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -36,7 +36,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
-        "S8_NESTED_TREND",
+        "S8_NET_ZIGZAG",
     },
 }
 
@@ -91,9 +91,9 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S5_MINEDGE")
     if os.getenv("ENABLE_S6", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S6_MIN30")
-    # S8 nested trend: OFF by default until paper sim proves after-fee edge
-    if os.getenv("ENABLE_S8", "false").strip().lower() in {"1", "true", "yes", "y"}:
-        enabled.add("S8_NESTED_TREND")
+    # S8 fixed NET zigzag (best hist paper params) — ON by default for dry-run collect
+    if os.getenv("ENABLE_S8", "true").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S8_NET_ZIGZAG")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:
