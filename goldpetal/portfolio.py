@@ -18,9 +18,16 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
+        "S8_NESTED_TREND",
     },
-    "CHOP": {"S4_OVERNIGHT"},  # S5/S6 skip chop by edge size usually
-    "QUIET": {"S1_NETDELTA", "S2_BALANCE", "S4_OVERNIGHT", "S6_MIN30"},
+    "CHOP": {"S4_OVERNIGHT"},  # S5/S6/S8 skip chop by default
+    "QUIET": {
+        "S1_NETDELTA",
+        "S2_BALANCE",
+        "S4_OVERNIGHT",
+        "S6_MIN30",
+        "S8_NESTED_TREND",
+    },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
         "S1_NETDELTA",
@@ -29,6 +36,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
+        "S8_NESTED_TREND",
     },
 }
 
@@ -83,6 +91,9 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S5_MINEDGE")
     if os.getenv("ENABLE_S6", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S6_MIN30")
+    # S8 nested trend: OFF by default until paper sim proves after-fee edge
+    if os.getenv("ENABLE_S8", "false").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S8_NESTED_TREND")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:

@@ -47,6 +47,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S4", None)
     os.environ.pop("ENABLE_S5", None)
     os.environ.pop("ENABLE_S6", None)
+    os.environ.pop("ENABLE_S8", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
     assert "S2_BALANCE" in p.enabled
@@ -54,6 +55,12 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S4_OVERNIGHT" in p.enabled
     assert "S5_MINEDGE" in p.enabled
     assert "S6_MIN30" in p.enabled
+    assert "S8_NESTED_TREND" not in p.enabled  # OFF by default
+
+    os.environ["ENABLE_S8"] = "true"
+    p8 = portfolio_from_env()
+    assert "S8_NESTED_TREND" in p8.enabled
+    os.environ.pop("ENABLE_S8", None)
 
 
 if __name__ == "__main__":

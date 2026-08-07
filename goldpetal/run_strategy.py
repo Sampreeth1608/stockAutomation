@@ -24,6 +24,7 @@ from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_overnight import OvernightStrategy, overnight_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
+from strategy_nested_trend import NestedTrendStrategy, nested_trend_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -142,6 +143,7 @@ def run_once(
     strategy_s4: OvernightStrategy,
     strategy_s5: MinEdgeStrategy,
     strategy_s6: MinEdgeStrategy,
+    strategy_s8: NestedTrendStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -204,6 +206,12 @@ def run_once(
         f"S6       : min-30pts "
         f"[{'ON' if portfolio.is_enabled(strategy_s6.name) else 'OFF'}] "
         f"{strategy_s6.status_line}",
+        flush=True,
+    )
+    print(
+        f"S8       : nested-trend zigzag "
+        f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
+        f"{strategy_s8.status_line}",
         flush=True,
     )
     print(
@@ -586,6 +594,66 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s8_if_changed(now: datetime, message: dict) -> None:
+        """S8: session NET bias + nested zigzag pullback-resumes."""
+        if not portfolio.is_enabled(strategy_s8.name):
+            return
+        if latest["cmp"] is None:
+            return
+        if not portfolio.allows(strategy_s8.name, regime_det.last.regime):
+            if strategy_s8.position == "flat":
+                return
+        result = strategy_s8.on_tick(now, float(latest["cmp"]), message)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+            strategy_s8.name, regime_det.last.regime
+        ):
+            strategy_s8.position = "flat"
+            strategy_s8.entry_price = None
+            return
+        if (
+            strategy_s8.position != "flat"
+            and portfolio.should_flatten(strategy_s8.name, regime_det.last.regime)
+            and result.action != "CLOSE"
+        ):
+            # force flatten on bad regime
+            from strategy import SignalResult as _SR
+
+            strategy_s8.position = "flat"
+            strategy_s8.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s8.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s8.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"bias={strategy_s8.session_bias} swing={strategy_s8.swing} "
+            f"net={strategy_s8.last_net:.0f} imb={strategy_s8.last_imb:.1f}% "
+            f"=> {result.action} (pos={strategy_s8.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -639,7 +707,8 @@ def run_once(
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "
-                    f"s6={strategy_s6.position}{s3_extra}"
+                    f"s6={strategy_s6.position} s8={strategy_s8.position}"
+                    f"/{strategy_s8.session_bias}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -654,6 +723,8 @@ def run_once(
             emit_s5_if_changed(now, message)
             # S6: min 30 points expected move
             emit_s6_if_changed(now, message)
+            # S8: nested trend zigzags (session NET bias)
+            emit_s8_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -708,6 +779,7 @@ def main() -> None:
     strategy_s4 = overnight_from_env()
     strategy_s5 = minedge_from_env()
     strategy_s6 = min30_from_env()
+    strategy_s8 = nested_trend_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
@@ -716,9 +788,10 @@ def main() -> None:
     print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(f"S5_MINEDGE: {strategy_s5.status_line}", flush=True)
     print(f"S6_MIN30: {strategy_s6.status_line}", flush=True)
+    print(f"S8_NESTED_TREND: {strategy_s8.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5/S6 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8 in .env)",
         flush=True,
     )
 
@@ -739,6 +812,7 @@ def main() -> None:
                 strategy_s4,
                 strategy_s5,
                 strategy_s6,
+                strategy_s8,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -757,6 +831,7 @@ def main() -> None:
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
             f"s3={strategy_s3.position} s4={strategy_s4.position} "
             f"s5={strategy_s5.position} s6={strategy_s6.position} "
+            f"s8={strategy_s8.position}/{strategy_s8.session_bias} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )
