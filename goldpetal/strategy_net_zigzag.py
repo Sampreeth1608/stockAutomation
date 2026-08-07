@@ -1,12 +1,14 @@
-"""S8_NET_ZIGZAG — best paper research params so far.
+"""S8_NET_ZIGZAG — NET bias zigzags with gated re-entry.
 
-Theory (user style, simplified / proven better than nested pullback):
-  - NET = TBQ − TSQ, IMB% = |NET| / max(TBQ, TSQ) * 100
-  - While NET>0 and IMB>=min → long-only zigzags
-  - While NET<0 and IMB>=min → short-only zigzags
-  - Enter when bias is set and flat; re-enter after exit if bias intact
-  - Exit: TP / SL / supporting-qty weaken vs entry / NET flip
-  - Defaults from hist sweep: imb10 / weaken10 / TP25 / SL20
+Core:
+  NET = TBQ − TSQ, IMB% = |NET| / max(TBQ, TSQ) * 100
+  Long-only while BULL; short-only while BEAR.
+  Exit: TP / SL / supporting-qty weaken / bias flip.
+
+Entry (anti-spam — immediate re-entry after SL was blowing up paper EV):
+  - require IMB rising-edge (cross above min_imb) OR pullback-resume
+  - cooldown ticks after any exit
+  - after SL: must see IMB fall below min then re-cross (reset)
 """
 
 from __future__ import annotations
@@ -36,9 +38,14 @@ class NetZigzagConfig:
     every_n_ticks: int = 1
     use_fee_gate: bool = False
     fee_be_points: float = 50.0
-    # Optional depth confirm (bid1-5 / sell1-5) — OFF by default (best was without)
     require_depth: bool = False
     depth_ratio: float = 1.15
+    # Re-entry controls
+    cooldown_ticks: int = 40
+    pullback_points: float = 8.0
+    resume_points: float = 5.0
+    # "edge" = IMB cross above min; "pullback" = only after dip+resume; "both"
+    entry_mode: str = "both"
 
 
 class NetZigzagStrategy:
@@ -58,13 +65,22 @@ class NetZigzagStrategy:
         self._tick_i = 0
         self.last_skip: str | None = None
 
+        self._prev_below: bool = True  # arm first IMB rising-edge
+        self._edge_latched: bool = False  # true on the tick IMB crosses up
+        self._cooldown_until: int = 0
+        self._need_reset: bool = False  # after SL
+        self._extreme: float | None = None  # high in bull / low in bear
+        self._pullback_ext: float | None = None
+        self._in_pullback: bool = False
+        self._last_exit_reason: str = ""
+
     @property
     def status_line(self) -> str:
         c = self.cfg
         return (
             f"imb>={c.min_imb_pct:.0f}% weaken>={c.weaken_pct:.0f}% "
             f"TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
-            f"fee_gate={c.use_fee_gate} depth={c.require_depth} "
+            f"cd={c.cooldown_ticks} mode={c.entry_mode} "
             f"bias={self.bias} pos={self.position}"
         )
 
@@ -84,14 +100,21 @@ class NetZigzagStrategy:
         self.last_imb = imb
         self.last_tbq = tbq
         self.last_tsq = tsq
-        if imb < self.cfg.min_imb_pct:
-            # Soft imbalance: keep prior bias only if NET sign still agrees
+
+        strong = imb >= self.cfg.min_imb_pct
+        self._edge_latched = bool(self._prev_below and strong)
+        if self._edge_latched and self._need_reset:
+            self._need_reset = False
+        self._prev_below = not strong
+
+        if not strong:
             if self.bias == "BULL" and net > 0:
                 return self.bias
             if self.bias == "BEAR" and net < 0:
                 return self.bias
             self.bias = "NEUTRAL"
             return self.bias
+
         if net > 0:
             self.bias = "BULL"
         elif net < 0:
@@ -99,6 +122,10 @@ class NetZigzagStrategy:
         else:
             self.bias = "NEUTRAL"
         return self.bias
+
+    def _imb_edge(self) -> bool:
+        """True on the tick IMB crosses from below min to >= min."""
+        return self._edge_latched
 
     def _depth_ok(self, side: Position, message: dict[str, Any]) -> bool:
         if not self.cfg.require_depth:
@@ -111,17 +138,86 @@ class NetZigzagStrategy:
             return buy >= r * max(sell, 1e-9)
         return sell >= r * max(buy, 1e-9)
 
+    def _update_pullback(self, ltp: float) -> None:
+        if self.bias == "BULL":
+            if self._extreme is None or ltp > self._extreme:
+                self._extreme = ltp
+                self._in_pullback = False
+                self._pullback_ext = None
+            elif self._extreme - ltp >= self.cfg.pullback_points:
+                self._in_pullback = True
+                if self._pullback_ext is None or ltp < self._pullback_ext:
+                    self._pullback_ext = ltp
+        elif self.bias == "BEAR":
+            if self._extreme is None or ltp < self._extreme:
+                self._extreme = ltp
+                self._in_pullback = False
+                self._pullback_ext = None
+            elif ltp - self._extreme >= self.cfg.pullback_points:
+                self._in_pullback = True
+                if self._pullback_ext is None or ltp > self._pullback_ext:
+                    self._pullback_ext = ltp
+        else:
+            self._extreme = ltp
+            self._in_pullback = False
+            self._pullback_ext = None
+
+    def _pullback_resume(self, ltp: float, side: Position) -> bool:
+        if not self._in_pullback or self._pullback_ext is None:
+            return False
+        if side == "long":
+            return (ltp - self._pullback_ext) >= self.cfg.resume_points
+        return (self._pullback_ext - ltp) >= self.cfg.resume_points
+
+    def _entry_allowed(self, ltp: float, side: Position) -> tuple[bool, str]:
+        if self._tick_i < self._cooldown_until:
+            return False, "cooldown"
+        if self._need_reset:
+            return False, "need_sl_reset"
+        if self.last_imb < self.cfg.min_imb_pct:
+            return False, "imb_soft"
+
+        mode = (self.cfg.entry_mode or "both").lower()
+        edge = self._imb_edge()
+        pb = self._pullback_resume(ltp, side)
+
+        if mode == "always":
+            # legacy spam: enter whenever flat + strong bias (research only)
+            return True, "always"
+        if mode == "edge":
+            return (edge, "imb_edge" if edge else "wait_edge")
+        if mode == "pullback":
+            return (pb, "pullback_resume" if pb else "wait_pullback")
+        # both: either
+        if edge:
+            return True, "imb_edge"
+        if pb:
+            return True, "pullback_resume"
+        return False, "wait_edge_or_pullback"
+
     def _open(self, side: Position, ltp: float) -> None:
         self.position = side
         self.entry_price = float(ltp)
         self.entry_tbq = self.last_tbq
         self.entry_tsq = self.last_tsq
+        self._extreme = float(ltp)
+        self._pullback_ext = None
+        self._in_pullback = False
+        self._edge_latched = False
 
-    def _close(self) -> None:
+    def _close(self, reason: str) -> None:
         self.position = "flat"
         self.entry_price = None
         self.entry_tbq = None
         self.entry_tsq = None
+        self._last_exit_reason = reason
+        self._cooldown_until = self._tick_i + max(0, self.cfg.cooldown_ticks)
+        if reason.startswith("sl"):
+            # must see IMB go soft then re-cross before next entry
+            self._need_reset = True
+            self._prev_below = False
+        self._in_pullback = False
+        self._pullback_ext = None
 
     def _manage(self, ltp: float) -> SignalResult | None:
         assert self.entry_price is not None
@@ -130,7 +226,7 @@ class NetZigzagStrategy:
         move = (ltp - ep) if side == "long" else (ep - ltp)
 
         def done(reason: str) -> SignalResult:
-            self._close()
+            self._close(reason)
             return SignalResult(
                 action="CLOSE",
                 position_after="flat",
@@ -172,6 +268,7 @@ class NetZigzagStrategy:
             return None
         tbq, tsq = qs
         self._update_bias(tbq, tsq)
+        self._update_pullback(float(ltp))
 
         if self._tick_i % max(1, self.cfg.every_n_ticks) != 0:
             return None
@@ -184,42 +281,47 @@ class NetZigzagStrategy:
             return None
 
         if self.bias == "BULL" and self.last_net > 0:
-            if not self._depth_ok("long", message):
+            ok, why = self._entry_allowed(float(ltp), "long")
+            if not ok:
+                self.last_skip = why
+            elif not self._depth_ok("long", message):
                 self.last_skip = "depth_block_long"
-                return None
-            self._open("long", float(ltp))
-            return SignalResult(
-                action="BUY",
-                position_after="long",
-                price_delta=None,
-                net=self.last_net,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"zigzag_long bias=BULL net={self.last_net:.0f} "
-                    f"imb={self.last_imb:.1f}% tbq={tbq:.0f} tsq={tsq:.0f}"
-                ),
-            )
+            else:
+                self._open("long", float(ltp))
+                return SignalResult(
+                    action="BUY",
+                    position_after="long",
+                    price_delta=None,
+                    net=self.last_net,
+                    net_delta=None,
+                    prev_net_delta=None,
+                    reason=(
+                        f"zigzag_long {why} net={self.last_net:.0f} "
+                        f"imb={self.last_imb:.1f}% tbq={tbq:.0f} tsq={tsq:.0f}"
+                    ),
+                )
 
         if self.bias == "BEAR" and self.last_net < 0:
-            if not self._depth_ok("short", message):
+            ok, why = self._entry_allowed(float(ltp), "short")
+            if not ok:
+                self.last_skip = why
+            elif not self._depth_ok("short", message):
                 self.last_skip = "depth_block_short"
-                return None
-            self._open("short", float(ltp))
-            return SignalResult(
-                action="SHORT",
-                position_after="short",
-                price_delta=None,
-                net=self.last_net,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"zigzag_short bias=BEAR net={self.last_net:.0f} "
-                    f"imb={self.last_imb:.1f}% tbq={tbq:.0f} tsq={tsq:.0f}"
-                ),
-            )
+            else:
+                self._open("short", float(ltp))
+                return SignalResult(
+                    action="SHORT",
+                    position_after="short",
+                    price_delta=None,
+                    net=self.last_net,
+                    net_delta=None,
+                    prev_net_delta=None,
+                    reason=(
+                        f"zigzag_short {why} net={self.last_net:.0f} "
+                        f"imb={self.last_imb:.1f}% tbq={tbq:.0f} tsq={tsq:.0f}"
+                    ),
+                )
 
-        self.last_skip = f"wait bias={self.bias}"
         return None
 
 
@@ -250,5 +352,9 @@ def net_zigzag_from_env() -> NetZigzagStrategy:
         fee_be_points=_f("S8_FEE_BE_POINTS", 50.0),
         require_depth=_b("S8_REQUIRE_DEPTH", False),
         depth_ratio=_f("S8_DEPTH_RATIO", 1.15),
+        cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", 40)),
+        pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
+        resume_points=_f("S8_RESUME_POINTS", 5.0),
+        entry_mode=os.getenv("S8_ENTRY_MODE", "both").strip().lower(),
     )
     return NetZigzagStrategy(cfg)

@@ -55,11 +55,11 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S4_OVERNIGHT" in p.enabled
     assert "S5_MINEDGE" in p.enabled
     assert "S6_MIN30" in p.enabled
-    assert "S8_NET_ZIGZAG" in p.enabled  # ON by default for dry-run
+    assert "S8_NET_ZIGZAG" not in p.enabled  # OFF until hist EV confirmed
 
-    os.environ["ENABLE_S8"] = "false"
+    os.environ["ENABLE_S8"] = "true"
     p8 = portfolio_from_env()
-    assert "S8_NET_ZIGZAG" not in p8.enabled
+    assert "S8_NET_ZIGZAG" in p8.enabled
     os.environ.pop("ENABLE_S8", None)
 
 

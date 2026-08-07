@@ -91,8 +91,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S5_MINEDGE")
     if os.getenv("ENABLE_S6", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S6_MIN30")
-    # S8 fixed NET zigzag (best hist paper params) — ON by default for dry-run collect
-    if os.getenv("ENABLE_S8", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    # S8 NET zigzag — OFF until gated entry proves after-fee hist EV again
+    if os.getenv("ENABLE_S8", "false").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S8_NET_ZIGZAG")
 
     # If user set none of the vars oddly empty, fall back
