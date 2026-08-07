@@ -8,3 +8,6 @@ pandas
 numpy
 scikit-learn
 joblib
+# optional: upload manual pack CSVs to Google Sheets
+# gspread
+# google-auth
