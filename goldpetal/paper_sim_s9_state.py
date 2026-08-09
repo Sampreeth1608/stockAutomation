@@ -151,7 +151,12 @@ def main() -> None:
     ap.add_argument("--sl", type=float, default=16.0)
     ap.add_argument("--min-imb", type=float, default=5.0)
     ap.add_argument("--allow-short", action="store_true")
-    ap.add_argument("--no-hlv", action="store_true", help="Disable H/L×V confirm+veto")
+    ap.add_argument(
+        "--hlv",
+        action="store_true",
+        help="Enable H/L×V confirm+veto (default off; lost edge on VM sample)",
+    )
+    ap.add_argument("--no-hlv", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--hlv-mode", choices=("any", "both"), default="any")
     ap.add_argument(
         "--compare",
@@ -195,8 +200,9 @@ def main() -> None:
         summarize("HLV_GATE", gate_t, gate_r, len(bars), args.tf)
         return
 
-    trades, reasons = run_once(bars, require_hlv=not args.no_hlv, **common)
-    label = "HLV_OFF" if args.no_hlv else "HLV_ON"
+    use_hlv = bool(args.hlv) and not args.no_hlv
+    trades, reasons = run_once(bars, require_hlv=use_hlv, **common)
+    label = "HLV_ON" if use_hlv else "HLV_OFF"
     summarize(label, trades, reasons, len(bars), args.tf)
 
 

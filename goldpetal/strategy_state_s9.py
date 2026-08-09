@@ -131,8 +131,9 @@ class StateS9Config:
     )
     # Exit long if we leave continue family for this many bars
     break_bars: int = 1
-    # High/Low × Volume filters (from hl_vol_study)
-    require_hlv_confirm: bool = True
+    # High/Low × Volume filters (from hl_vol_study).
+    # VM 30m replay @100 lots: NO_HLV sum₹≈+12k vs HLV_GATE ≈+0.4k — default OFF.
+    require_hlv_confirm: bool = False
     hlv_mode: str = "any"  # any = H+V+ OR L+V+ ; both = need both
     hlv_confirm_states: frozenset[str] = field(
         default_factory=lambda: HLV_LONG_CONFIRM_DEFAULT
@@ -604,7 +605,7 @@ def state_s9_from_env() -> StateS9Strategy:
         continue_long_states=_states("S9_CONTINUE_LONG", CONTINUE_LONG_DEFAULT),
         enter_short_states=_states("S9_ENTER_SHORT", ENTER_SHORT_DEFAULT),
         continue_short_states=_states("S9_CONTINUE_SHORT", CONTINUE_SHORT_DEFAULT),
-        require_hlv_confirm=_b("S9_REQUIRE_HLV", True),
+        require_hlv_confirm=_b("S9_REQUIRE_HLV", False),
         hlv_mode=os.getenv("S9_HLV_MODE", "any").strip().lower() or "any",
     )
     return StateS9Strategy(cfg)
