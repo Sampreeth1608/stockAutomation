@@ -148,6 +148,21 @@ class StateS9Config:
     vol_exp_require_up: bool = True
     vol_exp_require_h_plus: bool = False
     vol_trend_lookback: int = 2  # close vs close N bars ago
+    # Flip-reversal: on a *large* opposing bar with flip marks, close and reverse.
+    # Default OFF — must beat BASE in paper-sim before enabling.
+    enable_flip_reverse: bool = False
+    flip_large_pts: float = 23.0  # 30m study huge_thr ≈ 23 pts
+    flip_on_state_break: bool = True
+    flip_on_net_flip: bool = True
+    flip_on_sl: bool = False  # reversing into SL direction is usually bad
+    flip_on_proactive: bool = True  # large bar + flip marks before hard exit
+    # Vol stacks that often preceded flips / weak exits on the VM sample
+    flip_bear_stacks: frozenset[str] = field(
+        default_factory=lambda: frozenset({"DEC_INC", "DEC_DEC"})
+    )
+    flip_bull_stacks: frozenset[str] = field(
+        default_factory=lambda: frozenset({"INC_DEC", "INC_INC"})
+    )
 
 
 class StateS9Strategy:
@@ -201,7 +216,7 @@ class StateS9Strategy:
             f"TF={c.bar_minutes}m TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
             f"short={c.allow_short} net_gate={c.require_net_sign} "
             f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
-            f"volx={c.require_vol_expansion} "
+            f"volx={c.require_vol_expansion} flip={c.enable_flip_reverse} "
             f"state={self.last_label} stack={self.last_vol_stack}|{self.last_px_trend} "
             f"pos={self.position}"
         )
@@ -397,7 +412,7 @@ class StateS9Strategy:
                 extra = hook(bar, self)
                 if extra is not None:
                     return extra
-            return self._manage(c, st, net)
+            return self._manage(c, st, net, bar)
 
         if st == "START":
             self.last_skip = "warmup"
@@ -463,11 +478,50 @@ class StateS9Strategy:
         self.last_skip = f"wait state={self.last_label}"
         return None
 
-    def _manage(self, c: float, st: str, net: float) -> SignalResult | None:
+    def _bar_is_large(self, bar: dict[str, Any]) -> bool:
+        thr = float(self.cfg.flip_large_pts)
+        rng = float(bar["high"]) - float(bar["low"])
+        prev_c = self._close_hist[-2] if len(self._close_hist) >= 2 else float(bar["open"])
+        # _close_hist already includes current close (appended before manage)
+        if len(self._close_hist) >= 2:
+            prev_c = self._close_hist[-2]
+        d = abs(float(bar["close"]) - float(prev_c))
+        return rng >= thr or d >= thr
+
+    def _bear_flip_marks(self, st: str, net: float) -> bool:
+        if net < 0:
+            return True
+        if st in self.cfg.enter_short_states:
+            return True
+        if st not in self.cfg.continue_long_states:
+            return True
+        if self.last_vol_stack in self.cfg.flip_bear_stacks:
+            return True
+        if self.last_hv.startswith("H-") or self.last_hv in self.cfg.hlv_veto_states:
+            return True
+        return False
+
+    def _bull_flip_marks(self, st: str, net: float) -> bool:
+        if net > 0:
+            return True
+        if st in self.cfg.enter_long_states:
+            return True
+        if st not in self.cfg.continue_short_states:
+            return True
+        if self.last_vol_stack in self.cfg.flip_bull_stacks:
+            return True
+        if self.last_hv.startswith("H+") or self.last_lv in {"L+_V+", "L-_V+"}:
+            return True
+        return False
+
+    def _manage(
+        self, c: float, st: str, net: float, bar: dict[str, Any]
+    ) -> SignalResult | None:
         assert self.entry_price is not None
         ep = float(self.entry_price)
         side = self.position
         move = (c - ep) if side == "long" else (ep - c)
+        large = self._bar_is_large(bar)
 
         def done(reason: str) -> SignalResult:
             self._close()
@@ -481,33 +535,109 @@ class StateS9Strategy:
                 reason=reason,
             )
 
+        def reverse(to: Position, reason: str) -> SignalResult:
+            """Close current and open the opposite side on the same bar (large flip)."""
+            self._close()
+            self._open(to, c)
+            action = "REVERSE_SHORT" if to == "short" else "REVERSE_LONG"
+            return SignalResult(
+                action=action,
+                position_after=to,
+                price_delta=(c - ep) if side == "long" else (ep - c),
+                net=net,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=reason,
+            )
+
+        def maybe_flip(trigger: str, reason: str) -> SignalResult:
+            """Reverse on large flip bar; else flat exit."""
+            want = bool(self.cfg.enable_flip_reverse) and large
+            if side == "long" and want and self._bear_flip_marks(st, net):
+                return reverse(
+                    "short",
+                    f"flip_reverse_short {trigger} large={large} "
+                    f"stack={self.last_vol_stack}|{self.last_px_trend} {reason}",
+                )
+            if side == "short" and want and self._bull_flip_marks(st, net):
+                return reverse(
+                    "long",
+                    f"flip_reverse_long {trigger} large={large} "
+                    f"stack={self.last_vol_stack}|{self.last_px_trend} {reason}",
+                )
+            return done(reason)
+
         if move >= self.cfg.tp_points:
+            # take profit — do not reverse
             return done(f"tp +{move:.1f}>={self.cfg.tp_points:.0f} state={self.last_label}")
+
         if move <= -self.cfg.sl_points:
-            return done(f"sl {move:.1f}<=-{self.cfg.sl_points:.0f} state={self.last_label}")
+            reason = f"sl {move:.1f}<=-{self.cfg.sl_points:.0f} state={self.last_label}"
+            if self.cfg.enable_flip_reverse and self.cfg.flip_on_sl:
+                return maybe_flip("sl", reason)
+            return done(reason)
 
         if side == "long":
+            # Proactive: large opposing bar with flip marks → reverse now
+            if (
+                self.cfg.enable_flip_reverse
+                and self.cfg.flip_on_proactive
+                and large
+                and c < ep
+                and self._bear_flip_marks(st, net)
+            ):
+                return reverse(
+                    "short",
+                    f"flip_reverse_short proactive large "
+                    f"stack={self.last_vol_stack}|{self.last_px_trend} "
+                    f"state={self.last_label} net={net:.0f}",
+                )
             if self.cfg.require_net_sign and net < 0:
-                return done(f"net_flip_exit net={net:.0f} state={self.last_label}")
+                reason = f"net_flip_exit net={net:.0f} state={self.last_label}"
+                if self.cfg.flip_on_net_flip:
+                    return maybe_flip("net_flip", reason)
+                return done(reason)
             if st not in self.cfg.continue_long_states:
                 self.break_count += 1
                 if self.break_count >= self.cfg.break_bars:
-                    return done(
+                    reason = (
                         f"state_break_exit {self.last_label} "
                         f"not_in_continue_long x{self.break_count}"
                     )
+                    if self.cfg.flip_on_state_break:
+                        return maybe_flip("state_break", reason)
+                    return done(reason)
             else:
                 self.break_count = 0
         elif side == "short":
+            if (
+                self.cfg.enable_flip_reverse
+                and self.cfg.flip_on_proactive
+                and large
+                and c > ep
+                and self._bull_flip_marks(st, net)
+            ):
+                return reverse(
+                    "long",
+                    f"flip_reverse_long proactive large "
+                    f"stack={self.last_vol_stack}|{self.last_px_trend} "
+                    f"state={self.last_label} net={net:.0f}",
+                )
             if self.cfg.require_net_sign and net > 0:
-                return done(f"net_flip_exit net={net:.0f} state={self.last_label}")
+                reason = f"net_flip_exit net={net:.0f} state={self.last_label}"
+                if self.cfg.flip_on_net_flip:
+                    return maybe_flip("net_flip", reason)
+                return done(reason)
             if st not in self.cfg.continue_short_states:
                 self.break_count += 1
                 if self.break_count >= self.cfg.break_bars:
-                    return done(
+                    reason = (
                         f"state_break_exit {self.last_label} "
                         f"not_in_continue_short x{self.break_count}"
                     )
+                    if self.cfg.flip_on_state_break:
+                        return maybe_flip("state_break", reason)
+                    return done(reason)
             else:
                 self.break_count = 0
         return None
@@ -684,5 +814,11 @@ def state_s9_from_env() -> StateS9Strategy:
         vol_exp_require_up=_b("S9_VOL_EXP_REQUIRE_UP", True),
         vol_exp_require_h_plus=_b("S9_VOL_EXP_REQUIRE_H_PLUS", False),
         vol_trend_lookback=int(_f("S9_VOL_TREND_LOOKBACK", 2)),
+        enable_flip_reverse=_b("S9_ENABLE_FLIP_REVERSE", False),
+        flip_large_pts=_f("S9_FLIP_LARGE_PTS", 23.0),
+        flip_on_state_break=_b("S9_FLIP_ON_STATE_BREAK", True),
+        flip_on_net_flip=_b("S9_FLIP_ON_NET_FLIP", True),
+        flip_on_sl=_b("S9_FLIP_ON_SL", False),
+        flip_on_proactive=_b("S9_FLIP_ON_PROACTIVE", True),
     )
     return StateS9Strategy(cfg)

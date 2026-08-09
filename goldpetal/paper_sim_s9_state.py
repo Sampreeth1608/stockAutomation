@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Paper sim for S9_STATE30 on built bars (default 30m).
 
-Compares baseline vs HLV vs volume-expansion (INC_DEC|UP) gates.
+Compares BASE vs VOL_EXP vs HLV vs FLIP_REV gates.
 """
 
 from __future__ import annotations
@@ -85,6 +85,8 @@ def run_once(
     require_vol_expansion: bool = False,
     vol_exp_require_up: bool = True,
     vol_exp_require_h_plus: bool = False,
+    enable_flip_reverse: bool = False,
+    flip_large_pts: float = 23.0,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -98,6 +100,8 @@ def run_once(
         require_vol_expansion=require_vol_expansion,
         vol_exp_require_up=vol_exp_require_up,
         vol_exp_require_h_plus=vol_exp_require_h_plus,
+        enable_flip_reverse=enable_flip_reverse,
+        flip_large_pts=flip_large_pts,
     )
     s = StateS9Strategy(cfg)
     trades: list[tuple[float, float, str, str, str]] = []
@@ -105,32 +109,50 @@ def run_once(
     entry = None
     reasons: Counter = Counter()
 
+    def close_trade(close: float, reason: str) -> None:
+        nonlocal side, entry
+        assert side and entry is not None
+        gross = (close - entry) if side == "long" else (entry - close)
+        pnl = gross * lots - fee_rt(close, lots)
+        tag = "other"
+        if reason.startswith("tp"):
+            tag = "tp"
+        elif reason.startswith("sl"):
+            tag = "sl"
+        elif "net_flip" in reason:
+            tag = "net_flip"
+        elif "state_break" in reason:
+            tag = "state_break"
+        elif reason.startswith("flip_reverse"):
+            tag = "flip_rev"
+        reasons[tag] += 1
+        stack = f"{s.last_vol_stack}|{s.last_px_trend}"
+        trades.append((gross, pnl, s.last_label, stack, reason[:48]))
+        side = None
+        entry = None
+
     for br in bars:
         sig = s.on_bar_row(br)
         if not sig:
             continue
-        if sig.action in {"BUY", "SHORT"}:
+        px = float(br["close"])
+        if sig.action == "CLOSE":
+            if side and entry is not None:
+                close_trade(px, sig.reason or "CLOSE")
+        elif sig.action in {"REVERSE_SHORT", "REVERSE_LONG"}:
+            if side and entry is not None:
+                close_trade(px, sig.reason or sig.action)
+            side = "short" if sig.action == "REVERSE_SHORT" else "long"
+            entry = px
+        elif sig.action in {"BUY", "SHORT"}:
+            if side and entry is not None:
+                # unexpected re-entry while open — flatten first
+                close_trade(px, "reentry_flat")
             side = "long" if sig.action == "BUY" else "short"
-            entry = float(br["close"])
-        elif sig.action == "CLOSE" and side and entry is not None:
-            close = float(br["close"])
-            gross = (close - entry) if side == "long" else (entry - close)
-            pnl = gross * lots - fee_rt(close, lots)
-            r = sig.reason or ""
-            tag = "other"
-            if r.startswith("tp"):
-                tag = "tp"
-            elif r.startswith("sl"):
-                tag = "sl"
-            elif "net_flip" in r:
-                tag = "net_flip"
-            elif "state_break" in r:
-                tag = "state_break"
-            reasons[tag] += 1
-            stack = f"{s.last_vol_stack}|{s.last_px_trend}"
-            trades.append((gross, pnl, s.last_label, stack, s.last_hv))
-            side = None
-            entry = None
+            entry = px
+
+    if side and entry is not None and bars:
+        close_trade(float(bars[-1]["close"]), "EOD_FLAT")
     return trades, reasons
 
 
@@ -145,8 +167,8 @@ def summarize(label: str, trades: list, reasons: Counter, n_bars: int, tf: int) 
         f"avgG={sum(g for g, *_ in trades) / n:.2f} "
         f"sum₹={sum(p for _, p, *_ in trades):.1f} {dict(reasons)}"
     )
-    for g, p, lab, stack, hv in trades:
-        print(f"  pts={g:+.2f} ₹={p:+.1f} state={lab} stack={stack} hv={hv}")
+    for g, p, lab, stack, why in trades:
+        print(f"  pts={g:+.2f} ₹={p:+.1f} state={lab} stack={stack} why={why}")
 
 
 def main() -> None:
@@ -158,33 +180,23 @@ def main() -> None:
     ap.add_argument("--sl", type=float, default=16.0)
     ap.add_argument("--min-imb", type=float, default=5.0)
     ap.add_argument("--allow-short", action="store_true")
-    ap.add_argument(
-        "--hlv",
-        action="store_true",
-        help="Enable H/L×V confirm+veto (default off)",
-    )
+    ap.add_argument("--hlv", action="store_true")
     ap.add_argument("--no-hlv", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--hlv-mode", choices=("any", "both"), default="any")
+    ap.add_argument("--vol-exp", action="store_true")
+    ap.add_argument("--vol-exp-h-plus", action="store_true")
     ap.add_argument(
-        "--vol-exp",
+        "--flip-rev",
         action="store_true",
-        help="Require INC_DEC volume expansion (+ UP trend by default)",
+        help="Enable large-bar flip reverse (long↔short)",
     )
-    ap.add_argument(
-        "--vol-exp-h-plus",
-        action="store_true",
-        help="With --vol-exp, also require H+",
-    )
+    ap.add_argument("--flip-large", type=float, default=23.0)
     ap.add_argument(
         "--compare",
         action="store_true",
-        help="Print BASE vs VOL_EXP vs HLV side by side",
+        help="Print BASE vs VOL_EXP vs HLV vs FLIP_REV",
     )
-    ap.add_argument(
-        "--bars-csv",
-        default="",
-        help="Offline bars CSV (skips ticks.db). Use for fixtures / manual_pack.",
-    )
+    ap.add_argument("--bars-csv", default="")
     args = ap.parse_args()
 
     if args.bars_csv:
@@ -208,25 +220,19 @@ def main() -> None:
         allow_short=args.allow_short,
         hlv_mode=args.hlv_mode,
         min_imb_pct=args.min_imb,
+        flip_large_pts=args.flip_large,
     )
 
     if args.compare:
-        base_t, base_r = run_once(
-            bars, require_hlv=False, require_vol_expansion=False, **common
-        )
-        volx_t, volx_r = run_once(
-            bars,
-            require_hlv=False,
-            require_vol_expansion=True,
-            vol_exp_require_h_plus=args.vol_exp_h_plus,
-            **common,
-        )
-        hlv_t, hlv_r = run_once(
-            bars, require_hlv=True, require_vol_expansion=False, **common
-        )
-        summarize("BASE", base_t, base_r, len(bars), args.tf)
-        summarize("VOL_EXP", volx_t, volx_r, len(bars), args.tf)
-        summarize("HLV_GATE", hlv_t, hlv_r, len(bars), args.tf)
+        variants = [
+            ("BASE", dict(require_hlv=False, require_vol_expansion=False, enable_flip_reverse=False)),
+            ("VOL_EXP", dict(require_hlv=False, require_vol_expansion=True, enable_flip_reverse=False)),
+            ("HLV_GATE", dict(require_hlv=True, require_vol_expansion=False, enable_flip_reverse=False)),
+            ("FLIP_REV", dict(require_hlv=False, require_vol_expansion=False, enable_flip_reverse=True)),
+        ]
+        for label, kw in variants:
+            t, r = run_once(bars, **common, **kw)
+            summarize(label, t, r, len(bars), args.tf)
         return
 
     use_hlv = bool(args.hlv) and not args.no_hlv
@@ -235,11 +241,14 @@ def main() -> None:
         require_hlv=use_hlv,
         require_vol_expansion=bool(args.vol_exp),
         vol_exp_require_h_plus=bool(args.vol_exp_h_plus),
+        enable_flip_reverse=bool(args.flip_rev),
         **common,
     )
-    bits = []
-    bits.append("HLV_ON" if use_hlv else "HLV_OFF")
-    bits.append("VOLX_ON" if args.vol_exp else "VOLX_OFF")
+    bits = [
+        "HLV_ON" if use_hlv else "HLV_OFF",
+        "VOLX_ON" if args.vol_exp else "VOLX_OFF",
+        "FLIP_ON" if args.flip_rev else "FLIP_OFF",
+    ]
     summarize("+".join(bits), trades, reasons, len(bars), args.tf)
 
 

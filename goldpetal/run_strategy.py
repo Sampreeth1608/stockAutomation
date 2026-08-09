@@ -762,9 +762,15 @@ def run_once(
                 extra={"regime": regime_det.last.regime},
             )
 
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        if result is None or result.action not in {
+            "BUY",
+            "SHORT",
+            "CLOSE",
+            "REVERSE_LONG",
+            "REVERSE_SHORT",
+        }:
             return
-        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+        if result.action in {"BUY", "SHORT", "REVERSE_LONG", "REVERSE_SHORT"} and not portfolio.allows(
             strategy_s9.name, regime_det.last.regime
         ):
             strategy_s9.position = "flat"
@@ -773,7 +779,7 @@ def run_once(
         if (
             strategy_s9.position != "flat"
             and portfolio.should_flatten(strategy_s9.name, regime_det.last.regime)
-            and result.action != "CLOSE"
+            and result.action not in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}
         ):
             from strategy import SignalResult as _SR
 
@@ -801,7 +807,11 @@ def run_once(
             net=strategy_s9.last_net,
             imb_pct=strategy_s9.last_imb,
             position=result.position_after,
-            entry_ltp=entry_before if result.action == "CLOSE" else strategy_s9.entry_price,
+            entry_ltp=(
+                entry_before
+                if result.action in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}
+                else strategy_s9.entry_price
+            ),
             reason=result.reason,
             extra={"regime": regime_det.last.regime, "pos_before": pos_before},
         )

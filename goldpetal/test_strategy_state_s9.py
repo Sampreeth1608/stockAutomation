@@ -380,6 +380,69 @@ def test_vol_expansion_inc_dec_up_allows():
     assert s2.last_skip and "volx_need_stack" in s2.last_skip
 
 
+def test_flip_reverse_on_large_bear_bar():
+    """Long → reverse short on large bar with bear flip marks."""
+    s = StateS9Strategy(
+        _cfg(
+            enable_flip_reverse=True,
+            flip_large_pts=20,
+            flip_on_proactive=True,
+            tp_points=100,
+            sl_points=80,
+            min_imb_pct=0,
+        )
+    )
+    # warmup + enter long on B+S-P+
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:00:00",
+            "open": 10000,
+            "high": 10010,
+            "low": 9990,
+            "close": 10000,
+            "tbq_close": 10000,
+            "tsq_close": 9000,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 1000,
+        }
+    )
+    sig = s.on_bar_row(
+        {
+            "time": "2026-08-07 09:30:00",
+            "open": 10000,
+            "high": 10030,
+            "low": 9995,
+            "close": 10025,
+            "tbq_close": 13000,
+            "tsq_close": 8000,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 1200,
+        }
+    )
+    assert sig and sig.action == "BUY"
+    # large down bar, net flips / bear state → reverse short
+    sig2 = s.on_bar_row(
+        {
+            "time": "2026-08-07 10:00:00",
+            "open": 10025,
+            "high": 10030,
+            "low": 9990,
+            "close": 9995,  # ~30 pts down from prior close, underwater
+            "tbq_close": 7000,
+            "tsq_close": 14000,
+            "tbq_open": 13000,
+            "tsq_open": 8000,
+            "bar_volume": 900,
+        }
+    )
+    assert sig2 is not None
+    assert sig2.action == "REVERSE_SHORT"
+    assert s.position == "short"
+    assert "flip_reverse_short" in (sig2.reason or "")
+
+
 if __name__ == "__main__":
     test_state_code_and_label()
     test_enter_long_on_confirm_bar()
@@ -388,5 +451,7 @@ if __name__ == "__main__":
     test_hlv_confirm_allows_and_veto_blocks()
     test_hlv_l_plus_v_plus_confirm()
     test_vol_expansion_inc_dec_up_allows()
+    test_flip_reverse_on_large_bear_bar()
     print("ok")
+
 
