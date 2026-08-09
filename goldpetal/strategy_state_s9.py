@@ -19,22 +19,42 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo
 
+from almost_equal import clamp, sign_px, sign_rel
 from strategy import Position, SignalResult
 
 IST = ZoneInfo("Asia/Kolkata")
 Bias = Literal["BULL", "BEAR", "NEUTRAL"]
 
 
-def _sign(delta: float, eps: float) -> str:
-    if delta > eps:
-        return "+"
-    if delta < -eps:
-        return "-"
-    return "="
+def state_code_from_levels(
+    tbq_c: float,
+    tbq_p: float,
+    tsq_c: float,
+    tsq_p: float,
+    px_c: float,
+    px_p: float,
+    *,
+    equal_pct: float,
+    equal_px_pct: float,
+    equal_pts: float | None,
+) -> str:
+    """Build TBQ/TSQ/P state using almost-equal bands (not exact =)."""
+    b = sign_rel(tbq_c, tbq_p, equal_pct)
+    s = sign_rel(tsq_c, tsq_p, equal_pct)
+    p = sign_px(px_c, px_p, equal_px_pct=equal_px_pct, equal_pts=equal_pts)
+    return f"TBQ{b}_TSQ{s}_P{p}"
 
 
+# Back-compat alias used by tests (absolute eps on deltas)
 def state_code(dtbq: float, dtsq: float, dpx: float, eps_qty: float, eps_px: float) -> str:
-    return f"TBQ{_sign(dtbq, eps_qty)}_TSQ{_sign(dtsq, eps_qty)}_P{_sign(dpx, eps_px)}"
+    def _s(d: float, eps: float) -> str:
+        if d > eps:
+            return "+"
+        if d < -eps:
+            return "-"
+        return "="
+
+    return f"TBQ{_s(dtbq, eps_qty)}_TSQ{_s(dtsq, eps_qty)}_P{_s(dpx, eps_px)}"
 
 
 def short_label(code: str) -> str:
@@ -80,6 +100,11 @@ class StateS9Config:
     bar_minutes: int = 30
     tp_points: float = 26.0
     sl_points: float = 16.0
+    # Almost-equal: qty/vol relative (3–9%), price tighter fraction / optional pts
+    equal_pct: float = 0.05
+    equal_px_pct: float = 0.0005
+    equal_pts: float | None = None
+    # legacy absolute eps (only used by old state_code helper / tests)
     eps_qty: float = 1.0
     eps_px: float = 0.5
     min_imb_pct: float = 5.0  # soft NET quality gate
@@ -181,12 +206,16 @@ class StateS9Strategy:
         if self._prev_tbq is None:
             st = "START"
         else:
-            st = state_code(
-                tbq_c - self._prev_tbq,
-                tsq_c - self._prev_tsq,
-                c - float(self._prev_close or c),
-                self.cfg.eps_qty,
-                self.cfg.eps_px,
+            st = state_code_from_levels(
+                tbq_c,
+                self._prev_tbq,
+                tsq_c,
+                self._prev_tsq,
+                c,
+                float(self._prev_close or c),
+                equal_pct=self.cfg.equal_pct,
+                equal_px_pct=self.cfg.equal_px_pct,
+                equal_pts=self.cfg.equal_pts,
             )
         self.prev_state = self.last_state
         self.last_state = st
@@ -447,10 +476,16 @@ def state_s9_from_env() -> StateS9Strategy:
                 out.add(p)
         return frozenset(out) if out else default
 
+    eq_pct = clamp(_f("S9_EQUAL_PCT", 0.05), 0.03, 0.09)
+    eq_pts_raw = os.getenv("S9_EQUAL_PTS", "").strip()
+    eq_pts = float(eq_pts_raw) if eq_pts_raw else None
     cfg = StateS9Config(
         bar_minutes=int(_f("S9_BAR_MINUTES", 30)),
         tp_points=_f("S9_TP_POINTS", 26.0),
         sl_points=_f("S9_SL_POINTS", 16.0),
+        equal_pct=eq_pct,
+        equal_px_pct=_f("S9_EQUAL_PX_PCT", 0.0005),
+        equal_pts=eq_pts,
         eps_qty=_f("S9_EPS_QTY", 1.0),
         eps_px=_f("S9_EPS_PX", 0.5),
         min_imb_pct=_f("S9_MIN_IMB_PCT", 5.0),
