@@ -87,6 +87,9 @@ def run_once(
     vol_exp_require_h_plus: bool = False,
     enable_flip_reverse: bool = False,
     flip_large_pts: float = 23.0,
+    require_bias_align: bool = False,
+    bias_mode: str = "net",
+    exit_on_bias_flip: bool = True,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -102,6 +105,9 @@ def run_once(
         vol_exp_require_h_plus=vol_exp_require_h_plus,
         enable_flip_reverse=enable_flip_reverse,
         flip_large_pts=flip_large_pts,
+        require_bias_align=require_bias_align,
+        bias_mode=bias_mode,
+        exit_on_bias_flip=exit_on_bias_flip,
     )
     s = StateS9Strategy(cfg)
     trades: list[tuple[float, float, str, str, str]] = []
@@ -125,8 +131,10 @@ def run_once(
             tag = "state_break"
         elif reason.startswith("flip_reverse"):
             tag = "flip_rev"
+        elif "bias_flip" in reason:
+            tag = "bias_flip"
         reasons[tag] += 1
-        stack = f"{s.last_vol_stack}|{s.last_px_trend}"
+        stack = f"{s.bias}/{s.last_px_trend}|{s.last_vol_stack}"
         trades.append((gross, pnl, s.last_label, stack, reason[:48]))
         side = None
         entry = None
@@ -192,9 +200,15 @@ def main() -> None:
     )
     ap.add_argument("--flip-large", type=float, default=23.0)
     ap.add_argument(
+        "--bias-align",
+        action="store_true",
+        help="S8-style: BULL→long only, BEAR→short only",
+    )
+    ap.add_argument("--bias-mode", choices=("net", "px"), default="net")
+    ap.add_argument(
         "--compare",
         action="store_true",
-        help="Print BASE vs VOL_EXP vs HLV vs FLIP_REV",
+        help="Print BASE vs BIAS_NET vs BIAS_PX (and losing gates)",
     )
     ap.add_argument("--bars-csv", default="")
     args = ap.parse_args()
@@ -224,14 +238,50 @@ def main() -> None:
     )
 
     if args.compare:
+        off = dict(
+            require_hlv=False,
+            require_vol_expansion=False,
+            enable_flip_reverse=False,
+            require_bias_align=False,
+        )
         variants = [
-            ("BASE", dict(require_hlv=False, require_vol_expansion=False, enable_flip_reverse=False)),
-            ("VOL_EXP", dict(require_hlv=False, require_vol_expansion=True, enable_flip_reverse=False)),
-            ("HLV_GATE", dict(require_hlv=True, require_vol_expansion=False, enable_flip_reverse=False)),
-            ("FLIP_REV", dict(require_hlv=False, require_vol_expansion=False, enable_flip_reverse=True)),
+            ("BASE", {**off, "allow_short": False}),
+            # S8 mirror: NET bias, both sides when aligned
+            (
+                "BIAS_NET",
+                {
+                    **off,
+                    "allow_short": True,
+                    "require_bias_align": True,
+                    "bias_mode": "net",
+                },
+            ),
+            # Price-trend align (UP→long, DOWN→short)
+            (
+                "BIAS_PX",
+                {
+                    **off,
+                    "allow_short": True,
+                    "require_bias_align": True,
+                    "bias_mode": "px",
+                },
+            ),
+            # NET bias but long-only (no shorts even in BEAR)
+            (
+                "BIAS_NET_L",
+                {
+                    **off,
+                    "allow_short": False,
+                    "require_bias_align": True,
+                    "bias_mode": "net",
+                },
+            ),
         ]
         for label, kw in variants:
-            t, r = run_once(bars, **common, **kw)
+            # allow_short in kw overrides common
+            c = dict(common)
+            c.update(kw)
+            t, r = run_once(bars, **c)
             summarize(label, t, r, len(bars), args.tf)
         return
 
@@ -242,12 +292,15 @@ def main() -> None:
         require_vol_expansion=bool(args.vol_exp),
         vol_exp_require_h_plus=bool(args.vol_exp_h_plus),
         enable_flip_reverse=bool(args.flip_rev),
+        require_bias_align=bool(args.bias_align),
+        bias_mode=args.bias_mode,
         **common,
     )
     bits = [
         "HLV_ON" if use_hlv else "HLV_OFF",
         "VOLX_ON" if args.vol_exp else "VOLX_OFF",
         "FLIP_ON" if args.flip_rev else "FLIP_OFF",
+        f"BIAS_{args.bias_mode.upper()}" if args.bias_align else "BIAS_OFF",
     ]
     summarize("+".join(bits), trades, reasons, len(bars), args.tf)
 

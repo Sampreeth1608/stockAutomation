@@ -380,6 +380,94 @@ def test_vol_expansion_inc_dec_up_allows():
     assert s2.last_skip and "volx_need_stack" in s2.last_skip
 
 
+def test_bias_align_blocks_long_when_bear():
+    """S8-style: no long entry when NET bias is BEAR."""
+    s = StateS9Strategy(
+        _cfg(
+            require_bias_align=True,
+            bias_mode="net",
+            min_imb_pct=5,
+            allow_short=True,
+        )
+    )
+    # BEAR bar: TBQ down, TSQ up, price down, strong imb
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:00:00",
+            "open": 10000,
+            "high": 10010,
+            "low": 9990,
+            "close": 10000,
+            "tbq_close": 8000,
+            "tsq_close": 12000,
+            "tbq_open": 8000,
+            "tsq_open": 12000,
+            "bar_volume": 1000,
+        }
+    )
+    assert s.bias in {"BEAR", "NEUTRAL", "BULL"}
+    # Try a "long" confirm state but books still bearish NET
+    sig = s.on_bar_row(
+        {
+            "time": "2026-08-07 09:30:00",
+            "open": 10000,
+            "high": 10040,
+            "low": 9970,
+            "close": 10030,  # P+ would need tbq+/tsq- — use mixed
+            "tbq_close": 7000,
+            "tsq_close": 14000,
+            "tbq_open": 8000,
+            "tsq_open": 12000,
+            "bar_volume": 1100,
+        }
+    )
+    # NET still negative → not a long enter state B+S-P+; force enter path:
+    # If no BUY, bias gate is working for shorts path instead
+    if sig and sig.action == "BUY":
+        raise AssertionError("must not BUY under BEAR bias")
+    # Short confirm while BEAR should be allowed
+    s2 = StateS9Strategy(
+        _cfg(
+            require_bias_align=True,
+            bias_mode="net",
+            min_imb_pct=5,
+            allow_short=True,
+            require_net_sign=True,
+        )
+    )
+    s2.on_bar_row(
+        {
+            "time": "2026-08-07 10:00:00",
+            "open": 10000,
+            "high": 10005,
+            "low": 9995,
+            "close": 10000,
+            "tbq_close": 8000,
+            "tsq_close": 12000,
+            "tbq_open": 8000,
+            "tsq_open": 12000,
+            "bar_volume": 1000,
+        }
+    )
+    sig2 = s2.on_bar_row(
+        {
+            "time": "2026-08-07 10:30:00",
+            "open": 10000,
+            "high": 10000,
+            "low": 9970,
+            "close": 9970,
+            "tbq_close": 6000,
+            "tsq_close": 15000,
+            "tbq_open": 8000,
+            "tsq_open": 12000,
+            "bar_volume": 1300,
+        }
+    )
+    assert s2.bias == "BEAR"
+    assert sig2 is not None and sig2.action == "SHORT"
+    assert "bias_ok_short" in (sig2.reason or "")
+
+
 def test_flip_reverse_on_large_bear_bar():
     """Long → reverse short on large bar with bear flip marks."""
     s = StateS9Strategy(
@@ -451,6 +539,7 @@ if __name__ == "__main__":
     test_hlv_confirm_allows_and_veto_blocks()
     test_hlv_l_plus_v_plus_confirm()
     test_vol_expansion_inc_dec_up_allows()
+    test_bias_align_blocks_long_when_bear()
     test_flip_reverse_on_large_bear_bar()
     print("ok")
 

@@ -163,6 +163,11 @@ class StateS9Config:
     flip_bull_stacks: frozenset[str] = field(
         default_factory=lambda: frozenset({"INC_DEC", "INC_INC"})
     )
+    # S8-style trend alignment: BULL → long only; BEAR → short only.
+    # bias_mode: "net" = TBQ/TSQ imbalance (same as S8); "px" = close lookback trend.
+    require_bias_align: bool = False
+    bias_mode: str = "net"  # net | px
+    exit_on_bias_flip: bool = True
 
 
 class StateS9Strategy:
@@ -186,6 +191,7 @@ class StateS9Strategy:
         self.last_lv: str = "START"
         self.last_vol_stack: str = "START"
         self.last_px_trend: str = "NA"
+        self.bias: Bias = "NEUTRAL"
         self.break_count: int = 0
         self.last_skip: str | None = None
 
@@ -217,6 +223,7 @@ class StateS9Strategy:
             f"short={c.allow_short} net_gate={c.require_net_sign} "
             f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
             f"volx={c.require_vol_expansion} flip={c.enable_flip_reverse} "
+            f"bias_gate={c.require_bias_align}/{c.bias_mode} bias={self.bias} "
             f"state={self.last_label} stack={self.last_vol_stack}|{self.last_px_trend} "
             f"pos={self.position}"
         )
@@ -295,6 +302,49 @@ class StateS9Strategy:
             return False, f"volx_need_H+ got={self.last_hv}"
         return True, f"volx_ok {stack}|{self.last_px_trend}"
 
+    def _update_net_bias(self, net: float, imb: float) -> Bias:
+        """Same sticky NET/IMB bias as S8_NET_ZIGZAG."""
+        strong = imb >= self.cfg.min_imb_pct
+        if not strong:
+            if self.bias == "BULL" and net > 0:
+                return self.bias
+            if self.bias == "BEAR" and net < 0:
+                return self.bias
+            self.bias = "NEUTRAL"
+            return self.bias
+        if net > 0:
+            self.bias = "BULL"
+        elif net < 0:
+            self.bias = "BEAR"
+        else:
+            self.bias = "NEUTRAL"
+        return self.bias
+
+    def _trend_side(self) -> Bias:
+        """Effective trend for alignment: NET bias (S8) or price lookback."""
+        mode = (self.cfg.bias_mode or "net").lower()
+        if mode == "px":
+            if self.last_px_trend == "UP":
+                return "BULL"
+            if self.last_px_trend == "DOWN":
+                return "BEAR"
+            return "NEUTRAL"
+        return self.bias
+
+    def _bias_entry_ok(self, side: Position) -> tuple[bool, str]:
+        if not self.cfg.require_bias_align:
+            return True, "bias_off"
+        trend = self._trend_side()
+        if side == "long":
+            if trend != "BULL":
+                return False, f"bias_block_long got={trend}"
+            return True, f"bias_ok_long {trend}"
+        if side == "short":
+            if trend != "BEAR":
+                return False, f"bias_block_short got={trend}"
+            return True, f"bias_ok_short {trend}"
+        return False, "bias_flat"
+
     def _on_bar_close(
         self,
         bar_time: datetime,
@@ -317,6 +367,7 @@ class StateS9Strategy:
         self.last_tbq = tbq_c
         self.last_tsq = tsq_c
         self.last_close = c
+        self._update_net_bias(net, imb)
 
         # bar volume from cumulative day volume if needed
         if bar_volume is None:
@@ -403,6 +454,8 @@ class StateS9Strategy:
             "lv": self.last_lv,
             "vol_stack": self.last_vol_stack,
             "px_trend": self.last_px_trend,
+            "bias": self.bias,
+            "trend_side": self._trend_side(),
             "prev_state": self.prev_state,
         }
 
@@ -426,6 +479,10 @@ class StateS9Strategy:
             if self.cfg.min_imb_pct > 0 and imb < self.cfg.min_imb_pct:
                 self.last_skip = f"long_blocked_imb<{self.cfg.min_imb_pct}"
                 return None
+            ok_bias, bias_why = self._bias_entry_ok("long")
+            if not ok_bias:
+                self.last_skip = bias_why
+                return None
             ok_hlv, hlv_why = self._hlv_ok()
             if not ok_hlv:
                 self.last_skip = hlv_why
@@ -447,7 +504,7 @@ class StateS9Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"S9 enter_long {self.last_label} {hlv_why} {volx_why} "
+                    f"S9 enter_long {self.last_label} {bias_why} {hlv_why} {volx_why} "
                     f"net={net:.0f} imb={imb:.1f}% "
                     f"TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
                 ),
@@ -456,6 +513,10 @@ class StateS9Strategy:
         if self.cfg.allow_short and st in self.cfg.enter_short_states:
             if self.cfg.require_net_sign and net >= 0:
                 self.last_skip = "short_blocked_net>=0"
+                return None
+            ok_bias, bias_why = self._bias_entry_ok("short")
+            if not ok_bias:
+                self.last_skip = bias_why
                 return None
             for filt in self.extra_entry_filters:
                 if not filt(bar, self, "short"):
@@ -470,7 +531,7 @@ class StateS9Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"S9 enter_short {self.last_label} net={net:.0f} "
+                    f"S9 enter_short {self.last_label} {bias_why} net={net:.0f} "
                     f"imb={imb:.1f}% TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
                 ),
             )
@@ -570,6 +631,20 @@ class StateS9Strategy:
         if move >= self.cfg.tp_points:
             # take profit — do not reverse
             return done(f"tp +{move:.1f}>={self.cfg.tp_points:.0f} state={self.last_label}")
+
+        # S8-style: flatten when bias/trend flips against the open side
+        if self.cfg.require_bias_align and self.cfg.exit_on_bias_flip:
+            trend = self._trend_side()
+            if side == "long" and trend == "BEAR":
+                return done(
+                    f"bias_flip_exit long→{trend} mode={self.cfg.bias_mode} "
+                    f"state={self.last_label}"
+                )
+            if side == "short" and trend == "BULL":
+                return done(
+                    f"bias_flip_exit short→{trend} mode={self.cfg.bias_mode} "
+                    f"state={self.last_label}"
+                )
 
         if move <= -self.cfg.sl_points:
             reason = f"sl {move:.1f}<=-{self.cfg.sl_points:.0f} state={self.last_label}"
@@ -820,5 +895,8 @@ def state_s9_from_env() -> StateS9Strategy:
         flip_on_net_flip=_b("S9_FLIP_ON_NET_FLIP", True),
         flip_on_sl=_b("S9_FLIP_ON_SL", False),
         flip_on_proactive=_b("S9_FLIP_ON_PROACTIVE", True),
+        require_bias_align=_b("S9_REQUIRE_BIAS_ALIGN", False),
+        bias_mode=(os.getenv("S9_BIAS_MODE", "net").strip().lower() or "net"),
+        exit_on_bias_flip=_b("S9_EXIT_ON_BIAS_FLIP", True),
     )
     return StateS9Strategy(cfg)
