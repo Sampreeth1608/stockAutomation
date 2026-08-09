@@ -139,6 +139,15 @@ class StateS9Config:
         default_factory=lambda: HLV_LONG_CONFIRM_DEFAULT
     )
     hlv_veto_states: frozenset[str] = field(default_factory=lambda: HLV_LONG_VETO_DEFAULT)
+    # 3-bar volume expansion (study: INC_DEC|UP → higher huge-next rate on 30m).
+    # Default OFF — must beat TBQ-only (+₹12k) in paper-sim before enabling.
+    require_vol_expansion: bool = False
+    vol_expansion_stacks: frozenset[str] = field(
+        default_factory=lambda: frozenset({"INC_DEC"})
+    )
+    vol_exp_require_up: bool = True
+    vol_exp_require_h_plus: bool = False
+    vol_trend_lookback: int = 2  # close vs close N bars ago
 
 
 class StateS9Strategy:
@@ -160,6 +169,8 @@ class StateS9Strategy:
         self.last_close: float | None = None
         self.last_hv: str = "START"
         self.last_lv: str = "START"
+        self.last_vol_stack: str = "START"
+        self.last_px_trend: str = "NA"
         self.break_count: int = 0
         self.last_skip: str | None = None
 
@@ -175,7 +186,9 @@ class StateS9Strategy:
         self._prev_high: float | None = None
         self._prev_low: float | None = None
         self._prev_bar_vol: float | None = None
+        self._prev_prev_bar_vol: float | None = None
         self._prev_cum_vol: float | None = None
+        self._close_hist: list[float] = []
 
         # hooks for future extensions: fn(bar_dict, strategy) -> SignalResult|None
         self.extra_entry_filters: list[Callable[..., bool]] = []
@@ -188,7 +201,8 @@ class StateS9Strategy:
             f"TF={c.bar_minutes}m TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
             f"short={c.allow_short} net_gate={c.require_net_sign} "
             f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
-            f"state={self.last_label} hv={self.last_hv} lv={self.last_lv} "
+            f"volx={c.require_vol_expansion} "
+            f"state={self.last_label} stack={self.last_vol_stack}|{self.last_px_trend} "
             f"pos={self.position}"
         )
 
@@ -226,6 +240,46 @@ class StateS9Strategy:
             return False, f"hlv_need_confirm hv={self.last_hv} lv={self.last_lv}"
         return True, f"hlv_ok hv={self.last_hv} lv={self.last_lv}"
 
+    def _vol_stack_label(self, cv: float, pv: float | None, ppv: float | None) -> str:
+        if pv is None or ppv is None:
+            return "START"
+        s1 = sign_rel(cv, float(pv), self.cfg.equal_pct)
+        s2 = sign_rel(float(pv), float(ppv), self.cfg.equal_pct)
+        words = {"+": "INC", "-": "DEC", "=": "FLAT"}
+        if s1 == "-" and s2 == "-":
+            return "DEC_DEC"
+        if s1 == "+" and s2 == "+":
+            return "INC_INC"
+        if s1 == "=" and s2 == "=":
+            return "FLAT_FLAT"
+        return f"{words[s1]}_{words[s2]}"
+
+    def _px_trend_label(self, c: float) -> str:
+        lb = max(1, int(self.cfg.vol_trend_lookback))
+        if len(self._close_hist) < lb:
+            return "NA"
+        anchor = self._close_hist[-lb]
+        s = sign_px(
+            c,
+            float(anchor),
+            equal_px_pct=self.cfg.equal_px_pct,
+            equal_pts=self.cfg.equal_pts,
+        )
+        return {"+": "UP", "-": "DOWN", "=": "FLAT"}[s]
+
+    def _vol_exp_ok(self) -> tuple[bool, str]:
+        """Optional INC_DEC (+ UP) expansion confirm from vol_trend_study."""
+        if not self.cfg.require_vol_expansion:
+            return True, "volx_off"
+        stack = self.last_vol_stack
+        if stack not in self.cfg.vol_expansion_stacks:
+            return False, f"volx_need_stack got={stack}"
+        if self.cfg.vol_exp_require_up and self.last_px_trend != "UP":
+            return False, f"volx_need_UP got={self.last_px_trend}"
+        if self.cfg.vol_exp_require_h_plus and not self.last_hv.startswith("H+"):
+            return False, f"volx_need_H+ got={self.last_hv}"
+        return True, f"volx_ok {stack}|{self.last_px_trend}"
+
     def _on_bar_close(
         self,
         bar_time: datetime,
@@ -261,6 +315,8 @@ class StateS9Strategy:
             st = "START"
             self.last_hv = "START"
             self.last_lv = "START"
+            self.last_vol_stack = "START"
+            self.last_px_trend = "NA"
         else:
             st = state_code_from_levels(
                 tbq_c,
@@ -292,13 +348,23 @@ class StateS9Strategy:
             )
             self.last_hv = f"H{hs}_V{vs}"
             self.last_lv = f"L{ls}_V{vs}"
+            self.last_vol_stack = self._vol_stack_label(
+                bar_volume, self._prev_bar_vol, self._prev_prev_bar_vol
+            )
+            self.last_px_trend = self._px_trend_label(c)
 
         self.prev_state = self.last_state
         self.last_state = st
         self.last_label = short_label(st)
+
+        # shift history after labels computed
+        self._prev_prev_bar_vol = self._prev_bar_vol
         self._prev_tbq, self._prev_tsq, self._prev_close = tbq_c, tsq_c, c
         self._prev_high, self._prev_low = h, l
         self._prev_bar_vol = bar_volume
+        self._close_hist.append(c)
+        if len(self._close_hist) > 8:
+            self._close_hist = self._close_hist[-8:]
         if cum_vol is not None:
             self._prev_cum_vol = float(cum_vol)
 
@@ -320,6 +386,8 @@ class StateS9Strategy:
             "label": self.last_label,
             "hv": self.last_hv,
             "lv": self.last_lv,
+            "vol_stack": self.last_vol_stack,
+            "px_trend": self.last_px_trend,
             "prev_state": self.prev_state,
         }
 
@@ -347,6 +415,10 @@ class StateS9Strategy:
             if not ok_hlv:
                 self.last_skip = hlv_why
                 return None
+            ok_volx, volx_why = self._vol_exp_ok()
+            if not ok_volx:
+                self.last_skip = volx_why
+                return None
             for filt in self.extra_entry_filters:
                 if not filt(bar, self, "long"):
                     self.last_skip = "extra_entry_filter_long"
@@ -360,8 +432,9 @@ class StateS9Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"S9 enter_long {self.last_label} {hlv_why} net={net:.0f} "
-                    f"imb={imb:.1f}% TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
+                    f"S9 enter_long {self.last_label} {hlv_why} {volx_why} "
+                    f"net={net:.0f} imb={imb:.1f}% "
+                    f"TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
                 ),
             )
 
@@ -607,5 +680,9 @@ def state_s9_from_env() -> StateS9Strategy:
         continue_short_states=_states("S9_CONTINUE_SHORT", CONTINUE_SHORT_DEFAULT),
         require_hlv_confirm=_b("S9_REQUIRE_HLV", False),
         hlv_mode=os.getenv("S9_HLV_MODE", "any").strip().lower() or "any",
+        require_vol_expansion=_b("S9_REQUIRE_VOL_EXPANSION", False),
+        vol_exp_require_up=_b("S9_VOL_EXP_REQUIRE_UP", True),
+        vol_exp_require_h_plus=_b("S9_VOL_EXP_REQUIRE_H_PLUS", False),
+        vol_trend_lookback=int(_f("S9_VOL_TREND_LOOKBACK", 2)),
     )
     return StateS9Strategy(cfg)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Paper sim for S9_STATE30 on built bars (default 30m).
 
-Compares baseline (no HLV) vs H/L×Volume confirm+veto when --compare is set.
+Compares baseline vs HLV vs volume-expansion (INC_DEC|UP) gates.
 """
 
 from __future__ import annotations
@@ -82,6 +82,9 @@ def run_once(
     require_hlv: bool,
     hlv_mode: str,
     min_imb_pct: float,
+    require_vol_expansion: bool = False,
+    vol_exp_require_up: bool = True,
+    vol_exp_require_h_plus: bool = False,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -92,6 +95,9 @@ def run_once(
         min_imb_pct=min_imb_pct,
         require_hlv_confirm=require_hlv,
         hlv_mode=hlv_mode,
+        require_vol_expansion=require_vol_expansion,
+        vol_exp_require_up=vol_exp_require_up,
+        vol_exp_require_h_plus=vol_exp_require_h_plus,
     )
     s = StateS9Strategy(cfg)
     trades: list[tuple[float, float, str, str, str]] = []
@@ -121,7 +127,8 @@ def run_once(
             elif "state_break" in r:
                 tag = "state_break"
             reasons[tag] += 1
-            trades.append((gross, pnl, s.last_label, s.last_hv, s.last_lv))
+            stack = f"{s.last_vol_stack}|{s.last_px_trend}"
+            trades.append((gross, pnl, s.last_label, stack, s.last_hv))
             side = None
             entry = None
     return trades, reasons
@@ -138,8 +145,8 @@ def summarize(label: str, trades: list, reasons: Counter, n_bars: int, tf: int) 
         f"avgG={sum(g for g, *_ in trades) / n:.2f} "
         f"sum₹={sum(p for _, p, *_ in trades):.1f} {dict(reasons)}"
     )
-    for g, p, lab, hv, lv in trades:
-        print(f"  pts={g:+.2f} ₹={p:+.1f} state={lab} hv={hv} lv={lv}")
+    for g, p, lab, stack, hv in trades:
+        print(f"  pts={g:+.2f} ₹={p:+.1f} state={lab} stack={stack} hv={hv}")
 
 
 def main() -> None:
@@ -154,14 +161,24 @@ def main() -> None:
     ap.add_argument(
         "--hlv",
         action="store_true",
-        help="Enable H/L×V confirm+veto (default off; lost edge on VM sample)",
+        help="Enable H/L×V confirm+veto (default off)",
     )
     ap.add_argument("--no-hlv", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--hlv-mode", choices=("any", "both"), default="any")
     ap.add_argument(
+        "--vol-exp",
+        action="store_true",
+        help="Require INC_DEC volume expansion (+ UP trend by default)",
+    )
+    ap.add_argument(
+        "--vol-exp-h-plus",
+        action="store_true",
+        help="With --vol-exp, also require H+",
+    )
+    ap.add_argument(
         "--compare",
         action="store_true",
-        help="Print baseline (no HLV) vs HLV-gated side by side",
+        help="Print BASE vs VOL_EXP vs HLV side by side",
     )
     ap.add_argument(
         "--bars-csv",
@@ -194,16 +211,36 @@ def main() -> None:
     )
 
     if args.compare:
-        base_t, base_r = run_once(bars, require_hlv=False, **common)
-        gate_t, gate_r = run_once(bars, require_hlv=True, **common)
-        summarize("NO_HLV", base_t, base_r, len(bars), args.tf)
-        summarize("HLV_GATE", gate_t, gate_r, len(bars), args.tf)
+        base_t, base_r = run_once(
+            bars, require_hlv=False, require_vol_expansion=False, **common
+        )
+        volx_t, volx_r = run_once(
+            bars,
+            require_hlv=False,
+            require_vol_expansion=True,
+            vol_exp_require_h_plus=args.vol_exp_h_plus,
+            **common,
+        )
+        hlv_t, hlv_r = run_once(
+            bars, require_hlv=True, require_vol_expansion=False, **common
+        )
+        summarize("BASE", base_t, base_r, len(bars), args.tf)
+        summarize("VOL_EXP", volx_t, volx_r, len(bars), args.tf)
+        summarize("HLV_GATE", hlv_t, hlv_r, len(bars), args.tf)
         return
 
     use_hlv = bool(args.hlv) and not args.no_hlv
-    trades, reasons = run_once(bars, require_hlv=use_hlv, **common)
-    label = "HLV_ON" if use_hlv else "HLV_OFF"
-    summarize(label, trades, reasons, len(bars), args.tf)
+    trades, reasons = run_once(
+        bars,
+        require_hlv=use_hlv,
+        require_vol_expansion=bool(args.vol_exp),
+        vol_exp_require_h_plus=bool(args.vol_exp_h_plus),
+        **common,
+    )
+    bits = []
+    bits.append("HLV_ON" if use_hlv else "HLV_OFF")
+    bits.append("VOLX_ON" if args.vol_exp else "VOLX_OFF")
+    summarize("+".join(bits), trades, reasons, len(bars), args.tf)
 
 
 if __name__ == "__main__":

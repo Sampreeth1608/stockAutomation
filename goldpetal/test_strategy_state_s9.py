@@ -276,6 +276,110 @@ def test_hlv_l_plus_v_plus_confirm():
     assert s.last_lv == "L+_V+"
 
 
+def test_vol_expansion_inc_dec_up_allows():
+    """INC_DEC + UP passes vol-expansion gate; DEC_DEC is blocked."""
+    s = StateS9Strategy(
+        _cfg(require_vol_expansion=True, vol_exp_require_up=True, min_imb_pct=0)
+    )
+    # pp vol high, p vol dry, c vol back → INC_DEC; prices rising → UP
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:00:00",
+            "open": 10000,
+            "high": 10010,
+            "low": 9990,
+            "close": 10000,
+            "tbq_close": 10000,
+            "tsq_close": 9000,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 2000,
+        }
+    )
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:30:00",
+            "open": 10000,
+            "high": 10020,
+            "low": 9995,
+            "close": 10015,
+            "tbq_close": 10500,
+            "tsq_close": 8800,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 800,  # DEC vs pp
+        }
+    )
+    sig = s.on_bar_row(
+        {
+            "time": "2026-08-07 10:00:00",
+            "open": 10015,
+            "high": 10050,
+            "low": 10010,
+            "close": 10040,
+            "tbq_close": 13000,
+            "tsq_close": 8000,
+            "tbq_open": 10500,
+            "tsq_open": 8800,
+            "bar_volume": 1600,  # INC vs p → INC_DEC
+        }
+    )
+    assert s.last_vol_stack == "INC_DEC"
+    assert s.last_px_trend == "UP"
+    assert sig is not None and sig.action == "BUY"
+    assert "volx_ok" in (sig.reason or "")
+
+    # DEC_DEC should block
+    s2 = StateS9Strategy(
+        _cfg(require_vol_expansion=True, vol_exp_require_up=True, min_imb_pct=0)
+    )
+    s2.on_bar_row(
+        {
+            "time": "2026-08-07 11:00:00",
+            "open": 10000,
+            "high": 10010,
+            "low": 9990,
+            "close": 10000,
+            "tbq_close": 10000,
+            "tsq_close": 9000,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 2000,
+        }
+    )
+    s2.on_bar_row(
+        {
+            "time": "2026-08-07 11:30:00",
+            "open": 10000,
+            "high": 10020,
+            "low": 9995,
+            "close": 10015,
+            "tbq_close": 11000,
+            "tsq_close": 8500,
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 1200,
+        }
+    )
+    sig2 = s2.on_bar_row(
+        {
+            "time": "2026-08-07 12:00:00",
+            "open": 10015,
+            "high": 10050,
+            "low": 10010,
+            "close": 10040,
+            "tbq_close": 14000,
+            "tsq_close": 7000,
+            "tbq_open": 11000,
+            "tsq_open": 8500,
+            "bar_volume": 700,  # still DEC → DEC_DEC
+        }
+    )
+    assert s2.last_vol_stack == "DEC_DEC"
+    assert sig2 is None
+    assert s2.last_skip and "volx_need_stack" in s2.last_skip
+
+
 if __name__ == "__main__":
     test_state_code_and_label()
     test_enter_long_on_confirm_bar()
@@ -283,4 +387,6 @@ if __name__ == "__main__":
     test_tick_bar_boundary_emits()
     test_hlv_confirm_allows_and_veto_blocks()
     test_hlv_l_plus_v_plus_confirm()
+    test_vol_expansion_inc_dec_up_allows()
     print("ok")
+
