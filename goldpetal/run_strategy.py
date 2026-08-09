@@ -25,7 +25,9 @@ from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_overnight import OvernightStrategy, overnight_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
 from strategy_net_zigzag import NetZigzagStrategy, net_zigzag_from_env
+from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from zigzag_recorder import recorder_from_env
+from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -146,6 +148,8 @@ def run_once(
     strategy_s6: MinEdgeStrategy,
     strategy_s8: NetZigzagStrategy,
     zigzag_rec,
+    strategy_s9: StateS9Strategy,
+    s9_journal,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -219,6 +223,16 @@ def run_once(
     print(
         f"S8 record: retune db={zigzag_rec.db_path} enabled={zigzag_rec.enabled} "
         f"snap_every={zigzag_rec.snap_every_n}",
+        flush=True,
+    )
+    print(
+        f"S9       : state machine "
+        f"[{'ON' if portfolio.is_enabled(strategy_s9.name) else 'OFF'}] "
+        f"{strategy_s9.status_line}",
+        flush=True,
+    )
+    print(
+        f"S9 journal: db={s9_journal.db_path} enabled={s9_journal.enabled}",
         flush=True,
     )
     print(
@@ -713,6 +727,106 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s9_if_changed(now: datetime, message: dict) -> None:
+        """S9: 27-state TBQ/TSQ/Price machine on N-minute bar closes."""
+        if not portfolio.is_enabled(strategy_s9.name):
+            return
+        if latest["cmp"] is None:
+            return
+        if not portfolio.allows(strategy_s9.name, regime_det.last.regime):
+            if strategy_s9.position == "flat":
+                return
+        pos_before = strategy_s9.position
+        entry_before = strategy_s9.entry_price
+        result = strategy_s9.on_tick(now, float(latest["cmp"]), message)
+
+        # Journal every new bar state (even without trade)
+        if strategy_s9.last_state not in {"WARMUP"} and strategy_s9.last_state != getattr(
+            emit_s9_if_changed, "_last_logged_state", None
+        ):
+            emit_s9_if_changed._last_logged_state = strategy_s9.last_state  # type: ignore[attr-defined]
+            s9_journal.log(
+                ts=now.isoformat(timespec="seconds"),
+                event="STATE",
+                state=strategy_s9.last_state,
+                label=strategy_s9.last_label,
+                prev_state=strategy_s9.prev_state,
+                ltp=float(latest["cmp"]),
+                tbq=strategy_s9.last_tbq,
+                tsq=strategy_s9.last_tsq,
+                net=strategy_s9.last_net,
+                imb_pct=strategy_s9.last_imb,
+                position=strategy_s9.position,
+                entry_ltp=strategy_s9.entry_price,
+                reason=strategy_s9.last_skip,
+                extra={"regime": regime_det.last.regime},
+            )
+
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+            strategy_s9.name, regime_det.last.regime
+        ):
+            strategy_s9.position = "flat"
+            strategy_s9.entry_price = None
+            return
+        if (
+            strategy_s9.position != "flat"
+            and portfolio.should_flatten(strategy_s9.name, regime_det.last.regime)
+            and result.action != "CLOSE"
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy_s9.position = "flat"
+            strategy_s9.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+
+        s9_journal.log(
+            ts=now.isoformat(timespec="seconds"),
+            event=result.action,
+            state=strategy_s9.last_state,
+            label=strategy_s9.last_label,
+            prev_state=strategy_s9.prev_state,
+            ltp=float(latest["cmp"]),
+            tbq=strategy_s9.last_tbq,
+            tsq=strategy_s9.last_tsq,
+            net=strategy_s9.last_net,
+            imb_pct=strategy_s9.last_imb,
+            position=result.position_after,
+            entry_ltp=entry_before if result.action == "CLOSE" else strategy_s9.entry_price,
+            reason=result.reason,
+            extra={"regime": regime_det.last.regime, "pos_before": pos_before},
+        )
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s9.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s9.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"state={strategy_s9.last_label} net={strategy_s9.last_net:.0f} "
+            f"=> {result.action} (pos={strategy_s9.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -767,7 +881,8 @@ def run_once(
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "
                     f"s6={strategy_s6.position} s8={strategy_s8.position}"
-                    f"/{strategy_s8.bias}{s3_extra}"
+                    f"/{strategy_s8.bias} s9={strategy_s9.position}"
+                    f"/{strategy_s9.last_label}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -782,8 +897,10 @@ def run_once(
             emit_s5_if_changed(now, message)
             # S6: min 30 points expected move
             emit_s6_if_changed(now, message)
-            # S8: nested trend zigzags (session NET bias)
+            # S8: NET zigzag (unchanged)
             emit_s8_if_changed(now, message)
+            # S9: 27-state bar machine
+            emit_s9_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -841,6 +958,8 @@ def main() -> None:
     strategy_s8 = net_zigzag_from_env()
     zigzag_rec = recorder_from_env()
     zigzag_rec.record_params(strategy_s8.cfg)
+    strategy_s9 = state_s9_from_env()
+    s9_journal = s9_journal_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
@@ -851,9 +970,11 @@ def main() -> None:
     print(f"S6_MIN30: {strategy_s6.status_line}", flush=True)
     print(f"S8_NET_ZIGZAG: {strategy_s8.status_line}", flush=True)
     print(f"S8 retune recorder: {zigzag_rec.db_path} enabled={zigzag_rec.enabled}", flush=True)
+    print(f"S9_STATE30: {strategy_s9.status_line}", flush=True)
+    print(f"S9 journal: {s9_journal.db_path} enabled={s9_journal.enabled}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8/S9 in .env)",
         flush=True,
     )
 
@@ -876,6 +997,8 @@ def main() -> None:
                 strategy_s6,
                 strategy_s8,
                 zigzag_rec,
+                strategy_s9,
+                s9_journal,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -895,6 +1018,7 @@ def main() -> None:
             f"s3={strategy_s3.position} s4={strategy_s4.position} "
             f"s5={strategy_s5.position} s6={strategy_s6.position} "
             f"s8={strategy_s8.position}/{strategy_s8.bias} "
+            f"s9={strategy_s9.position}/{strategy_s9.last_label} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )

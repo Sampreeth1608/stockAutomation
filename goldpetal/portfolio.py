@@ -19,14 +19,16 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "S8_NET_ZIGZAG",
+        "S9_STATE30",
     },
-    "CHOP": {"S4_OVERNIGHT"},  # S5/S6/S8 skip chop by default
+    "CHOP": {"S4_OVERNIGHT"},  # S5/S6/S8/S9 skip chop by default
     "QUIET": {
         "S1_NETDELTA",
         "S2_BALANCE",
         "S4_OVERNIGHT",
         "S6_MIN30",
         "S8_NET_ZIGZAG",
+        "S9_STATE30",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -37,6 +39,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "S8_NET_ZIGZAG",
+        "S9_STATE30",
     },
 }
 
@@ -94,6 +97,9 @@ def portfolio_from_env() -> PortfolioConfig:
     # S8 NET zigzag — OFF until gated entry proves after-fee hist EV again
     if os.getenv("ENABLE_S8", "false").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S8_NET_ZIGZAG")
+    # S9 27-state TBQ/TSQ/Price machine (30m) — OFF by default; extend via env
+    if os.getenv("ENABLE_S9", "false").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S9_STATE30")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:

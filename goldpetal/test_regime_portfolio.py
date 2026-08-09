@@ -48,6 +48,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S5", None)
     os.environ.pop("ENABLE_S6", None)
     os.environ.pop("ENABLE_S8", None)
+    os.environ.pop("ENABLE_S9", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
     assert "S2_BALANCE" in p.enabled
@@ -56,11 +57,17 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S5_MINEDGE" in p.enabled
     assert "S6_MIN30" in p.enabled
     assert "S8_NET_ZIGZAG" not in p.enabled  # OFF until hist EV confirmed
+    assert "S9_STATE30" not in p.enabled
 
     os.environ["ENABLE_S8"] = "true"
     p8 = portfolio_from_env()
     assert "S8_NET_ZIGZAG" in p8.enabled
     os.environ.pop("ENABLE_S8", None)
+
+    os.environ["ENABLE_S9"] = "true"
+    p9 = portfolio_from_env()
+    assert "S9_STATE30" in p9.enabled
+    os.environ.pop("ENABLE_S9", None)
 
 
 if __name__ == "__main__":
