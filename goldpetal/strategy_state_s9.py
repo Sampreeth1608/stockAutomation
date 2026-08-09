@@ -164,9 +164,12 @@ class StateS9Config:
         default_factory=lambda: frozenset({"INC_DEC", "INC_INC"})
     )
     # S8-style trend alignment: BULL → long only; BEAR → short only.
-    # bias_mode: "net" = TBQ/TSQ imbalance (same as S8); "px" = close lookback trend.
+    # bias_mode:
+    #   net  = sign of (TBQ-TSQ) + IMB (same as S8)
+    #   dnet = sign of (current NET − previous NET)  ← netΔ
+    #   px   = close lookback trend
     require_bias_align: bool = False
-    bias_mode: str = "net"  # net | px
+    bias_mode: str = "net"  # net | dnet | px
     exit_on_bias_flip: bool = True
 
 
@@ -192,6 +195,8 @@ class StateS9Strategy:
         self.last_vol_stack: str = "START"
         self.last_px_trend: str = "NA"
         self.bias: Bias = "NEUTRAL"
+        self.last_net_delta: float | None = None
+        self._prev_net: float | None = None
         self.break_count: int = 0
         self.last_skip: str | None = None
 
@@ -303,7 +308,7 @@ class StateS9Strategy:
         return True, f"volx_ok {stack}|{self.last_px_trend}"
 
     def _update_net_bias(self, net: float, imb: float) -> Bias:
-        """Same sticky NET/IMB bias as S8_NET_ZIGZAG."""
+        """Same sticky NET/IMB bias as S8_NET_ZIGZAG (sign of absolute NET)."""
         strong = imb >= self.cfg.min_imb_pct
         if not strong:
             if self.bias == "BULL" and net > 0:
@@ -320,8 +325,34 @@ class StateS9Strategy:
             self.bias = "NEUTRAL"
         return self.bias
 
+    def _update_dnet_bias(self, net: float) -> Bias:
+        """Bias from current NET vs previous NET (netΔ), not absolute BP−SP."""
+        if self._prev_net is None:
+            self.last_net_delta = None
+            self.bias = "NEUTRAL"
+            return self.bias
+        prev = float(self._prev_net)
+        self.last_net_delta = float(net) - prev
+        # almost-equal band on NET level (same qty band as TBQ/TSQ)
+        s = sign_rel(float(net), prev, self.cfg.equal_pct)
+        if s == "+":
+            self.bias = "BULL"  # NET rising
+        elif s == "-":
+            self.bias = "BEAR"  # NET falling
+        else:
+            # NET ≈ previous → neutral (drop sticky absolute-net hold)
+            self.bias = "NEUTRAL"
+        return self.bias
+
+    def _refresh_bias(self, net: float, imb: float) -> Bias:
+        mode = (self.cfg.bias_mode or "net").lower()
+        if mode in {"dnet", "net_delta"}:
+            return self._update_dnet_bias(net)
+        # net / px: keep absolute NET label (px uses _trend_side from price)
+        return self._update_net_bias(net, imb)
+
     def _trend_side(self) -> Bias:
-        """Effective trend for alignment: NET bias (S8) or price lookback."""
+        """Effective trend for alignment: NET, netΔ, or price lookback."""
         mode = (self.cfg.bias_mode or "net").lower()
         if mode == "px":
             if self.last_px_trend == "UP":
@@ -329,6 +360,7 @@ class StateS9Strategy:
             if self.last_px_trend == "DOWN":
                 return "BEAR"
             return "NEUTRAL"
+        # net and dnet both stash result in self.bias
         return self.bias
 
     def _bias_entry_ok(self, side: Position) -> tuple[bool, str]:
@@ -367,7 +399,7 @@ class StateS9Strategy:
         self.last_tbq = tbq_c
         self.last_tsq = tsq_c
         self.last_close = c
-        self._update_net_bias(net, imb)
+        self._refresh_bias(net, imb)
 
         # bar volume from cumulative day volume if needed
         if bar_volume is None:
@@ -428,6 +460,7 @@ class StateS9Strategy:
         self._prev_tbq, self._prev_tsq, self._prev_close = tbq_c, tsq_c, c
         self._prev_high, self._prev_low = h, l
         self._prev_bar_vol = bar_volume
+        self._prev_net = net
         self._close_hist.append(c)
         if len(self._close_hist) > 8:
             self._close_hist = self._close_hist[-8:]
@@ -456,6 +489,7 @@ class StateS9Strategy:
             "px_trend": self.last_px_trend,
             "bias": self.bias,
             "trend_side": self._trend_side(),
+            "net_delta": self.last_net_delta,
             "prev_state": self.prev_state,
         }
 
@@ -473,10 +507,17 @@ class StateS9Strategy:
 
         # --- entries ---
         if st in self.cfg.enter_long_states:
-            if self.cfg.require_net_sign and net <= 0:
-                self.last_skip = "long_blocked_net<=0"
-                return None
+            if self.cfg.require_net_sign:
+                mode = (self.cfg.bias_mode or "net").lower()
+                if mode in {"dnet", "net_delta"}:
+                    if self.last_net_delta is None or self.last_net_delta <= 0:
+                        self.last_skip = "long_blocked_netΔ<=0"
+                        return None
+                elif net <= 0:
+                    self.last_skip = "long_blocked_net<=0"
+                    return None
             if self.cfg.min_imb_pct > 0 and imb < self.cfg.min_imb_pct:
+                # dnet mode: IMB gate optional soft — still apply for book quality
                 self.last_skip = f"long_blocked_imb<{self.cfg.min_imb_pct}"
                 return None
             ok_bias, bias_why = self._bias_entry_ok("long")
@@ -511,9 +552,15 @@ class StateS9Strategy:
             )
 
         if self.cfg.allow_short and st in self.cfg.enter_short_states:
-            if self.cfg.require_net_sign and net >= 0:
-                self.last_skip = "short_blocked_net>=0"
-                return None
+            if self.cfg.require_net_sign:
+                mode = (self.cfg.bias_mode or "net").lower()
+                if mode in {"dnet", "net_delta"}:
+                    if self.last_net_delta is None or self.last_net_delta >= 0:
+                        self.last_skip = "short_blocked_netΔ>=0"
+                        return None
+                elif net >= 0:
+                    self.last_skip = "short_blocked_net>=0"
+                    return None
             ok_bias, bias_why = self._bias_entry_ok("short")
             if not ok_bias:
                 self.last_skip = bias_why

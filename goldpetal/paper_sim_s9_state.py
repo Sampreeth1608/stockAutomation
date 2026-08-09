@@ -90,13 +90,14 @@ def run_once(
     require_bias_align: bool = False,
     bias_mode: str = "net",
     exit_on_bias_flip: bool = True,
+    require_net_sign: bool = True,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
         tp_points=tp,
         sl_points=sl,
         allow_short=allow_short,
-        require_net_sign=True,
+        require_net_sign=require_net_sign,
         min_imb_pct=min_imb_pct,
         require_hlv_confirm=require_hlv,
         hlv_mode=hlv_mode,
@@ -204,11 +205,11 @@ def main() -> None:
         action="store_true",
         help="S8-style: BULL→long only, BEAR→short only",
     )
-    ap.add_argument("--bias-mode", choices=("net", "px"), default="net")
+    ap.add_argument("--bias-mode", choices=("net", "dnet", "px"), default="net")
     ap.add_argument(
         "--compare",
         action="store_true",
-        help="Print BASE vs BIAS_NET vs BIAS_PX (and losing gates)",
+        help="Print BASE vs BIAS_NET vs BIAS_DNET vs BIAS_PX",
     )
     ap.add_argument("--bars-csv", default="")
     args = ap.parse_args()
@@ -246,7 +247,7 @@ def main() -> None:
         )
         variants = [
             ("BASE", {**off, "allow_short": False}),
-            # S8 mirror: NET bias, both sides when aligned
+            # S8 mirror: absolute NET (TBQ-TSQ) sign + IMB
             (
                 "BIAS_NET",
                 {
@@ -254,6 +255,27 @@ def main() -> None:
                     "allow_short": True,
                     "require_bias_align": True,
                     "bias_mode": "net",
+                },
+            ),
+            # Current NET vs previous NET (netΔ) — what you asked next
+            (
+                "BIAS_DNET",
+                {
+                    **off,
+                    "allow_short": True,
+                    "require_bias_align": True,
+                    "bias_mode": "dnet",
+                    "require_net_sign": True,
+                },
+            ),
+            (
+                "BIAS_DNET_L",
+                {
+                    **off,
+                    "allow_short": False,
+                    "require_bias_align": True,
+                    "bias_mode": "dnet",
+                    "require_net_sign": True,
                 },
             ),
             # Price-trend align (UP→long, DOWN→short)
@@ -264,16 +286,6 @@ def main() -> None:
                     "allow_short": True,
                     "require_bias_align": True,
                     "bias_mode": "px",
-                },
-            ),
-            # NET bias but long-only (no shorts even in BEAR)
-            (
-                "BIAS_NET_L",
-                {
-                    **off,
-                    "allow_short": False,
-                    "require_bias_align": True,
-                    "bias_mode": "net",
                 },
             ),
         ]

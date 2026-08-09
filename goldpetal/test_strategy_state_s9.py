@@ -468,6 +468,58 @@ def test_bias_align_blocks_long_when_bear():
     assert "bias_ok_short" in (sig2.reason or "")
 
 
+def test_dnet_bias_follows_net_delta():
+    """dnet mode: rising NET → BULL, falling NET → BEAR."""
+    s = StateS9Strategy(_cfg(require_bias_align=True, bias_mode="dnet", min_imb_pct=0))
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:00:00",
+            "open": 10000,
+            "high": 10010,
+            "low": 9990,
+            "close": 10000,
+            "tbq_close": 10000,
+            "tsq_close": 9000,  # net=+1000
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 1000,
+        }
+    )
+    assert s.bias == "NEUTRAL"  # no previous net yet
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 09:30:00",
+            "open": 10000,
+            "high": 10020,
+            "low": 9995,
+            "close": 10010,
+            "tbq_close": 12000,
+            "tsq_close": 8000,  # net=+4000 > prev → BULL
+            "tbq_open": 10000,
+            "tsq_open": 9000,
+            "bar_volume": 1100,
+        }
+    )
+    assert s.bias == "BULL"
+    assert s.last_net_delta is not None and s.last_net_delta > 0
+    s.on_bar_row(
+        {
+            "time": "2026-08-07 10:00:00",
+            "open": 10010,
+            "high": 10015,
+            "low": 9990,
+            "close": 9995,
+            "tbq_close": 9000,
+            "tsq_close": 11000,  # net=-2000 < prev → BEAR
+            "tbq_open": 12000,
+            "tsq_open": 8000,
+            "bar_volume": 900,
+        }
+    )
+    assert s.bias == "BEAR"
+    assert s.last_net_delta is not None and s.last_net_delta < 0
+
+
 def test_flip_reverse_on_large_bear_bar():
     """Long → reverse short on large bar with bear flip marks."""
     s = StateS9Strategy(
@@ -540,6 +592,7 @@ if __name__ == "__main__":
     test_hlv_l_plus_v_plus_confirm()
     test_vol_expansion_inc_dec_up_allows()
     test_bias_align_blocks_long_when_bear()
+    test_dnet_bias_follows_net_delta()
     test_flip_reverse_on_large_bear_bar()
     print("ok")
 
