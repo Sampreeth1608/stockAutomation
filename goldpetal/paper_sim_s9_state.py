@@ -99,6 +99,8 @@ def run_once(
     range_fee_be: float = 0.0,
     ml_p_by_time: dict | None = None,
     ml_min_proba: float = 0.55,
+    ml_allow_if_missing: bool = False,
+    ml_filter_stats: dict | None = None,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -125,11 +127,13 @@ def run_once(
     )
     s = StateS9Strategy(cfg)
     if ml_p_by_time is not None:
+        stats = ml_filter_stats if ml_filter_stats is not None else {}
         s.extra_entry_filters.append(
             make_entry_filter(
                 ml_p_by_time,
                 min_proba=ml_min_proba,
-                allow_if_missing=True,
+                allow_if_missing=ml_allow_if_missing,
+                stats=stats,
             )
         )
     trades: list[tuple[float, float, str, str, str]] = []
@@ -361,7 +365,17 @@ def main() -> None:
                 model_kind=args.ml_model,  # type: ignore[arg-type]
                 retrain_every=5,
             )
-            print(f"ML OOS scores ready for {len(ml_p)}/{len(bars)} bars")
+            ps = list(ml_p.values())
+            if ps:
+                import numpy as np
+
+                print(
+                    f"ML OOS scores ready for {len(ml_p)}/{len(bars)} bars | "
+                    f"p_up mean={np.mean(ps):.3f} p50={np.median(ps):.3f} "
+                    f"p10={np.quantile(ps,0.1):.3f} p90={np.quantile(ps,0.9):.3f}"
+                )
+            else:
+                print("ML OOS scores empty")
         except Exception as e:
             print(f"ML walk-forward failed: {e}")
             ml_p = {}
@@ -369,11 +383,16 @@ def main() -> None:
             c = dict(common)
             use_ml = bool(kw.pop("_use_ml", False))
             c.update(kw)
+            filt_stats: dict = {}
             if use_ml:
                 c["ml_p_by_time"] = ml_p
                 c["ml_min_proba"] = args.ml_min_proba
+                c["ml_allow_if_missing"] = False  # fail closed — expose key bugs
+                c["ml_filter_stats"] = filt_stats
             t, r = run_once(bars, **c)
             summarize(label, t, r, len(bars), args.tf)
+            if use_ml and filt_stats:
+                print(f"  ML filter stats: {dict(filt_stats)}")
         return
 
     use_hlv = bool(args.hlv) and not args.no_hlv

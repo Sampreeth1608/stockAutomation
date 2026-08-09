@@ -2,6 +2,10 @@
 
 Tabular models only (LogReg / RF / sklearn GB / optional LightGBM).
 Use as an *entry filter* on top of S9 rules — must beat BIAS_NET in paper-sim.
+
+Features are *relative* (deltas / ratios / z-scores), not raw TBQ/TSQ levels —
+absolute book sizes drift and make LogReg predict "up" almost always on a
+bullish sample.
 """
 
 from __future__ import annotations
@@ -20,11 +24,9 @@ from sklearn.preprocessing import StandardScaler
 
 ModelKind = Literal["logreg", "random_forest", "grad_boost", "lightgbm"]
 
-# Current + lag features from prev/current TBQ TSQ H L V
+# Relative features only (no raw tbq/tsq/net levels)
 BASE_COLS = [
-    "tbq",
-    "tsq",
-    "net",
+    "net_sign",
     "imb_pct",
     "dtbq",
     "dtsq",
@@ -33,14 +35,45 @@ BASE_COLS = [
     "range_pts",
     "bar_volume",
     "ret_1",
-    "hl_pos",  # close in [low, high]
+    "hl_pos",
+    "vol_ratio",
+    "range_ratio",
+    "net_z",
 ]
+
+
+def normalize_bar_time(ts: Any) -> str:
+    """Canonical key shared by mtf bars, S9, and ML walk-forward."""
+    if ts is None:
+        return ""
+    s = str(ts).strip()
+    if not s:
+        return ""
+    # "2026-08-07T09:00:00+05:30" / iso → "2026-08-07 09:00:00"
+    s = s.replace("T", " ")
+    if "+" in s:
+        s = s.split("+", 1)[0]
+    if s.endswith("Z"):
+        s = s[:-1]
+    if "." in s:
+        s = s.split(".", 1)[0]
+    return s.strip()
 
 
 def feature_columns(lags: int = 3) -> list[str]:
     cols = list(BASE_COLS)
     for lag in range(1, max(1, int(lags)) + 1):
-        for name in ("net", "imb_pct", "range_pts", "bar_volume", "dpx", "dtbq", "dtsq"):
+        for name in (
+            "imb_pct",
+            "range_pts",
+            "bar_volume",
+            "dpx",
+            "dtbq",
+            "dtsq",
+            "dnet",
+            "ret_1",
+            "vol_ratio",
+        ):
             cols.append(f"{name}_l{lag}")
     return cols
 
@@ -82,7 +115,7 @@ def bars_to_frame(bars: list[dict[str, Any]]) -> pd.DataFrame:
                 pass
         rows.append(
             {
-                "time": br.get("time"),
+                "time": normalize_bar_time(br.get("time")),
                 "open": o,
                 "high": h,
                 "low": l,
@@ -105,10 +138,29 @@ def build_features(df: pd.DataFrame, lags: int = 3) -> pd.DataFrame:
     out["dnet"] = out["net"].diff()
     out["dpx"] = out["close"].diff()
     out["ret_1"] = out["close"].pct_change()
+    out["net_sign"] = np.sign(out["net"]).replace(0.0, 0.0)
     span = (out["high"] - out["low"]).replace(0.0, np.nan)
     out["hl_pos"] = ((out["close"] - out["low"]) / span).fillna(0.5)
+    # Rolling context so absolute scale does not dominate
+    vol_ma = out["bar_volume"].rolling(10, min_periods=3).mean()
+    rng_ma = out["range_pts"].rolling(10, min_periods=3).mean()
+    out["vol_ratio"] = out["bar_volume"] / vol_ma.replace(0.0, np.nan)
+    out["range_ratio"] = out["range_pts"] / rng_ma.replace(0.0, np.nan)
+    net_mu = out["net"].rolling(20, min_periods=5).mean()
+    net_sd = out["net"].rolling(20, min_periods=5).std().replace(0.0, np.nan)
+    out["net_z"] = (out["net"] - net_mu) / net_sd
     for lag in range(1, max(1, int(lags)) + 1):
-        for name in ("net", "imb_pct", "range_pts", "bar_volume", "dpx", "dtbq", "dtsq"):
+        for name in (
+            "imb_pct",
+            "range_pts",
+            "bar_volume",
+            "dpx",
+            "dtbq",
+            "dtsq",
+            "dnet",
+            "ret_1",
+            "vol_ratio",
+        ):
             out[f"{name}_l{lag}"] = out[name].shift(lag)
     return out
 
@@ -165,7 +217,6 @@ def make_estimator(kind: ModelKind):
                 "lightgbm not installed. pip install lightgbm "
                 "or use --model logreg|random_forest|grad_boost"
             ) from e
-    # default / grad_boost
     return GradientBoostingClassifier(
         n_estimators=80,
         max_depth=3,
@@ -180,6 +231,10 @@ def _metrics(y_true: np.ndarray, y_prob: np.ndarray, y_pred: np.ndarray) -> dict
         "n": int(len(y_true)),
         "pred_up_rate": float(np.mean(y_pred)),
         "actual_up_rate": float(np.mean(y_true)),
+        "mean_p_up": float(np.mean(y_prob)),
+        "p_up_p50": float(np.median(y_prob)),
+        "p_up_p10": float(np.quantile(y_prob, 0.10)),
+        "p_up_p90": float(np.quantile(y_prob, 0.90)),
     }
     try:
         out["auc"] = float(roc_auc_score(y_true, y_prob))
@@ -220,6 +275,7 @@ def train_from_bars(
     metrics["model"] = model_kind
     metrics["lags"] = lags
     metrics["n_train"] = int(len(train_df))
+    metrics["train_up_rate"] = float(np.mean(y_tr))
     metrics["feature_cols"] = cols
 
     bundle = {
@@ -245,7 +301,6 @@ def load_bundle(path: Path) -> dict[str, Any]:
 def predict_p_up(bundle: dict[str, Any], feature_row: dict[str, float]) -> float:
     cols = bundle["feature_cols"]
     x = np.array([[float(feature_row.get(c, 0.0)) for c in cols]], dtype=float)
-    # NaN → 0
     x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     return float(bundle["model"].predict_proba(x)[0, 1])
 
@@ -258,10 +313,7 @@ def walk_forward_p_up(
     model_kind: ModelKind = "logreg",
     retrain_every: int = 5,
 ) -> dict[str, float]:
-    """Expanding-window P(up) at each bar time (no look-ahead).
-
-    At bar t, train on labeled rows 0..t-1 (y uses close up to t), predict p_up for t.
-    """
+    """Expanding-window P(up) at each bar time (no look-ahead)."""
     cols = feature_columns(lags)
     feat = add_labels(build_features(bars_to_frame(bars), lags=lags))
     n = len(feat)
@@ -270,8 +322,6 @@ def walk_forward_p_up(
     last_fit_t = -10**9
 
     for t in range(n):
-        # labeled training rows: indices j where j < t and y_up known
-        # y_up[j] uses close[j+1]; for j <= t-1, close[j+1] exists if j+1 <= t
         train_idx = [
             j
             for j in range(0, t)
@@ -291,9 +341,9 @@ def walk_forward_p_up(
         x = feat.loc[[t], cols].to_numpy(dtype=float)
         x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         p = float(model.predict_proba(x)[0, 1])
-        ts = feat.loc[t, "time"]
-        if ts is not None:
-            out[str(ts)] = p
+        ts = normalize_bar_time(feat.loc[t, "time"])
+        if ts:
+            out[ts] = p
     return out
 
 
@@ -301,19 +351,33 @@ def make_entry_filter(
     p_by_time: dict[str, float],
     *,
     min_proba: float = 0.55,
-    allow_if_missing: bool = True,
+    allow_if_missing: bool = False,
+    stats: dict[str, int] | None = None,
 ):
-    """S9 extra_entry_filters callback: (bar, strategy, side) -> bool."""
+    """S9 extra_entry_filters callback: (bar, strategy, side) -> bool.
+
+    Default allow_if_missing=False so a key mismatch cannot silently pass everything.
+    """
 
     def _filt(bar: dict, _strategy: Any, side: str) -> bool:
-        ts = str(bar.get("time", ""))
+        ts = normalize_bar_time(bar.get("time"))
         p = p_by_time.get(ts)
+        if stats is not None:
+            stats["checked"] = stats.get("checked", 0) + 1
         if p is None:
+            if stats is not None:
+                stats["missing"] = stats.get("missing", 0) + 1
             return bool(allow_if_missing)
+        if stats is not None:
+            stats["scored"] = stats.get("scored", 0) + 1
         if side == "long":
-            return p >= min_proba
-        if side == "short":
-            return (1.0 - p) >= min_proba
-        return False
+            ok = p >= min_proba
+        elif side == "short":
+            ok = (1.0 - p) >= min_proba
+        else:
+            ok = False
+        if stats is not None:
+            stats["pass" if ok else "block"] = stats.get("pass" if ok else "block", 0) + 1
+        return ok
 
     return _filt

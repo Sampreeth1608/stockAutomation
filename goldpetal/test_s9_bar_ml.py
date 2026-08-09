@@ -9,6 +9,7 @@ from s9_bar_ml import (
     build_features,
     feature_columns,
     make_entry_filter,
+    normalize_bar_time,
     train_from_bars,
     walk_forward_p_up,
 )
@@ -46,11 +47,17 @@ def _synth_bars(n: int = 80) -> list[dict]:
     return bars
 
 
+def test_normalize_bar_time():
+    assert normalize_bar_time("2026-08-07 09:00:00") == "2026-08-07 09:00:00"
+    assert normalize_bar_time("2026-08-07T09:00:00+05:30") == "2026-08-07 09:00:00"
+
+
 def test_feature_pipeline():
     bars = _synth_bars(40)
     df = build_features(bars_to_frame(bars), lags=3)
     cols = feature_columns(3)
     assert all(c in df.columns for c in cols)
+    assert "tbq" not in cols  # absolute levels dropped
     assert len(df) == 40
 
 
@@ -65,10 +72,18 @@ def test_walk_forward_and_filter():
     bars = _synth_bars(70)
     pmap = walk_forward_p_up(bars, lags=2, min_train=25, model_kind="logreg", retrain_every=10)
     assert len(pmap) > 5
-    filt = make_entry_filter(pmap, min_proba=0.01, allow_if_missing=True)
-    # very low threshold → almost always allow when scored
+    stats: dict = {}
+    filt = make_entry_filter(
+        pmap, min_proba=0.01, allow_if_missing=False, stats=stats
+    )
     some_t = next(iter(pmap))
     assert filt({"time": some_t}, None, "long") is True
+    # isoformat-style key must still match
+    assert filt({"time": some_t.replace(" ", "T") + "+05:30"}, None, "long") is True
+    assert stats.get("scored", 0) >= 2
+    # missing key + fail-closed → block
+    assert filt({"time": "1999-01-01 00:00:00"}, None, "long") is False
+    assert stats.get("missing", 0) >= 1
 
 
 def test_s9_ml_filter_blocks_low_proba(tmp_path: Path | None = None):
@@ -122,11 +137,11 @@ def test_s9_ml_filter_blocks_low_proba(tmp_path: Path | None = None):
 
 
 def main() -> None:
+    test_normalize_bar_time()
     test_feature_pipeline()
     test_train_logreg()
     test_walk_forward_and_filter()
     test_s9_ml_filter_blocks_low_proba()
-    # train CLI smoke on synth via module API already covered
     print("test_s9_bar_ml: OK")
 
 

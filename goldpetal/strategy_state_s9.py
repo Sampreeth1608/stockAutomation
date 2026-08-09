@@ -591,7 +591,8 @@ class StateS9Strategy:
             self._prev_cum_vol = float(cum_vol)
 
         bar = {
-            "time": bar_time.isoformat(timespec="seconds"),
+            # Match mtf_bars / walk-forward ML keys: "YYYY-MM-DD HH:MM:SS"
+            "time": bar_time.strftime("%Y-%m-%d %H:%M:%S"),
             "open": o,
             "high": h,
             "low": l,
