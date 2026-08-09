@@ -12,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 
 from mtf_bars import DB, build_rich_bars, load_tick_rows
+from s9_bar_ml import make_entry_filter, walk_forward_p_up
 from strategy_state_s9 import StateS9Config, StateS9Strategy
 
 
@@ -96,6 +97,8 @@ def run_once(
     tp_range_mult: float = 0.85,
     sl_range_mult: float = 0.55,
     range_fee_be: float = 0.0,
+    ml_p_by_time: dict | None = None,
+    ml_min_proba: float = 0.55,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -121,6 +124,14 @@ def run_once(
         range_fee_be=range_fee_be,
     )
     s = StateS9Strategy(cfg)
+    if ml_p_by_time is not None:
+        s.extra_entry_filters.append(
+            make_entry_filter(
+                ml_p_by_time,
+                min_proba=ml_min_proba,
+                allow_if_missing=True,
+            )
+        )
     trades: list[tuple[float, float, str, str, str]] = []
     side = None
     entry = None
@@ -226,6 +237,18 @@ def main() -> None:
         action="store_true",
         help="Map rolling median bar-range → TP/SL (vs fixed --tp/--sl)",
     )
+    ap.add_argument(
+        "--ml-min-proba",
+        type=float,
+        default=0.55,
+        help="Walk-forward ML filter threshold for BIAS_NET_ML*",
+    )
+    ap.add_argument(
+        "--ml-model",
+        choices=("logreg", "random_forest", "grad_boost", "lightgbm"),
+        default="logreg",
+    )
+    ap.add_argument("--ml-min-train", type=int, default=40)
     ap.add_argument("--bars-csv", default="")
     args = ap.parse_args()
 
@@ -314,11 +337,41 @@ def main() -> None:
                     "use_range_stops": True,
                 },
             ),
+            # Walk-forward bar ML filter on BIAS_NET (no look-ahead)
+            (
+                "BIAS_NET_ML",
+                {
+                    **off,
+                    "allow_short": True,
+                    "require_bias_align": True,
+                    "bias_mode": "net",
+                    "_use_ml": True,
+                },
+            ),
         ]
+        print(
+            f"ML walk-forward model={args.ml_model} min_train={args.ml_min_train} "
+            f"min_proba={args.ml_min_proba} …"
+        )
+        try:
+            ml_p = walk_forward_p_up(
+                bars,
+                lags=3,
+                min_train=args.ml_min_train,
+                model_kind=args.ml_model,  # type: ignore[arg-type]
+                retrain_every=5,
+            )
+            print(f"ML OOS scores ready for {len(ml_p)}/{len(bars)} bars")
+        except Exception as e:
+            print(f"ML walk-forward failed: {e}")
+            ml_p = {}
         for label, kw in variants:
-            # allow_short in kw overrides common
             c = dict(common)
+            use_ml = bool(kw.pop("_use_ml", False))
             c.update(kw)
+            if use_ml:
+                c["ml_p_by_time"] = ml_p
+                c["ml_min_proba"] = args.ml_min_proba
             t, r = run_once(bars, **c)
             summarize(label, t, r, len(bars), args.tf)
         return

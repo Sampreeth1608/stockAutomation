@@ -183,6 +183,12 @@ class StateS9Config:
     sl_max: float = 40.0
     range_fee_be: float = 0.0  # 0 = ignore; ~50 pts ≈ Angel RT on 1 lot @ ₹1/pt
     range_min_rr: float = 1.2
+    # Bar ML entry filter (TBQ/TSQ/H/L/Vol → P(next up)). Default OFF.
+    require_ml_filter: bool = False
+    ml_model_path: str = "data/models/s9_bar_ml.joblib"
+    ml_min_proba: float = 0.55
+    ml_lags: int = 3
+    ml_allow_if_missing: bool = True  # allow entry while features/model warm up
 
 
 class StateS9Strategy:
@@ -235,6 +241,10 @@ class StateS9Strategy:
         # hooks for future extensions: fn(bar_dict, strategy) -> SignalResult|None
         self.extra_entry_filters: list[Callable[..., bool]] = []
         self.extra_exit_hooks: list[Callable[..., SignalResult | None]] = []
+        self._ml_hist: list[dict[str, Any]] = []
+        self._ml_bundle: dict[str, Any] | None = None
+        if self.cfg.require_ml_filter:
+            self._load_ml_bundle()
 
     @property
     def status_line(self) -> str:
@@ -252,10 +262,59 @@ class StateS9Strategy:
             f"short={c.allow_short} net_gate={c.require_net_sign} "
             f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
             f"volx={c.require_vol_expansion} flip={c.enable_flip_reverse} "
-            f"bias_gate={c.require_bias_align}/{c.bias_mode} bias={self.bias} "
-            f"state={self.last_label} stack={self.last_vol_stack}|{self.last_px_trend} "
-            f"pos={self.position}"
-        )
+                f"bias_gate={c.require_bias_align}/{c.bias_mode} bias={self.bias} "
+                f"ml={c.require_ml_filter}/{c.ml_min_proba:.2f} "
+                f"state={self.last_label} stack={self.last_vol_stack}|{self.last_px_trend} "
+                f"pos={self.position}"
+            )
+
+    def _load_ml_bundle(self) -> None:
+        try:
+            from s9_bar_ml import load_bundle
+
+            path = self.cfg.ml_model_path
+            self._ml_bundle = load_bundle(path)
+        except Exception as e:
+            self._ml_bundle = None
+            self.last_skip = f"ml_load_fail {e}"
+
+    def _ml_entry_ok(self, side: Position, bar: dict[str, Any]) -> tuple[bool, str]:
+        if not self.cfg.require_ml_filter:
+            return True, "ml_off"
+        if self._ml_bundle is None:
+            if self.cfg.ml_allow_if_missing:
+                return True, "ml_missing_allow"
+            return False, "ml_missing_block"
+        try:
+            from s9_bar_ml import bars_to_frame, build_features, predict_p_up
+
+            hist = self._ml_hist + [bar]
+            feat = build_features(
+                bars_to_frame(hist), lags=int(self.cfg.ml_lags)
+            )
+            # last row = current bar features
+            row = feat.iloc[-1]
+            cols = self._ml_bundle["feature_cols"]
+            if row[cols].isna().any():
+                if self.cfg.ml_allow_if_missing:
+                    return True, "ml_warmup_allow"
+                return False, "ml_warmup_block"
+            p = predict_p_up(self._ml_bundle, {c: float(row[c]) for c in cols})
+            thr = float(self.cfg.ml_min_proba)
+            if side == "long":
+                ok = p >= thr
+                return ok, f"ml_long p={p:.2f}>={thr:.2f}" if ok else f"ml_block_long p={p:.2f}"
+            if side == "short":
+                ok = (1.0 - p) >= thr
+                return (
+                    ok,
+                    f"ml_short p_down={1-p:.2f}>={thr:.2f}" if ok else f"ml_block_short p={p:.2f}",
+                )
+            return False, "ml_flat"
+        except Exception as e:
+            if self.cfg.ml_allow_if_missing:
+                return True, f"ml_err_allow {e}"
+            return False, f"ml_err_block {e}"
 
     def _floor(self, ts: datetime) -> datetime:
         ts = ts.astimezone(IST)
@@ -556,6 +615,9 @@ class StateS9Strategy:
             "net_delta": self.last_net_delta,
             "prev_state": self.prev_state,
         }
+        self._ml_hist.append(bar)
+        if len(self._ml_hist) > 64:
+            self._ml_hist = self._ml_hist[-64:]
 
         # --- manage open ---
         if self.position != "flat" and self.entry_price is not None:
@@ -596,6 +658,10 @@ class StateS9Strategy:
             if not ok_volx:
                 self.last_skip = volx_why
                 return None
+            ok_ml, ml_why = self._ml_entry_ok("long", bar)
+            if not ok_ml:
+                self.last_skip = ml_why
+                return None
             for filt in self.extra_entry_filters:
                 if not filt(bar, self, "long"):
                     self.last_skip = "extra_entry_filter_long"
@@ -616,7 +682,7 @@ class StateS9Strategy:
                 prev_net_delta=None,
                 reason=(
                     f"S9 enter_long {self.last_label} {bias_why} {hlv_why} {volx_why} "
-                    f"net={net:.0f} imb={imb:.1f}% "
+                    f"{ml_why} net={net:.0f} imb={imb:.1f}% "
                     f"TP={tp:.0f} SL={sl:.0f}{rng_bit}"
                 ),
             )
@@ -634,6 +700,10 @@ class StateS9Strategy:
             ok_bias, bias_why = self._bias_entry_ok("short")
             if not ok_bias:
                 self.last_skip = bias_why
+                return None
+            ok_ml, ml_why = self._ml_entry_ok("short", bar)
+            if not ok_ml:
+                self.last_skip = ml_why
                 return None
             for filt in self.extra_entry_filters:
                 if not filt(bar, self, "short"):
@@ -654,8 +724,8 @@ class StateS9Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"S9 enter_short {self.last_label} {bias_why} net={net:.0f} "
-                    f"imb={imb:.1f}% TP={tp:.0f} SL={sl:.0f}{rng_bit}"
+                    f"S9 enter_short {self.last_label} {bias_why} {ml_why} "
+                    f"net={net:.0f} imb={imb:.1f}% TP={tp:.0f} SL={sl:.0f}{rng_bit}"
                 ),
             )
 
@@ -1032,5 +1102,10 @@ def state_s9_from_env() -> StateS9Strategy:
         sl_max=_f("S9_SL_MAX", 40.0),
         range_fee_be=_f("S9_RANGE_FEE_BE", 0.0),
         range_min_rr=_f("S9_RANGE_MIN_RR", 1.2),
+        require_ml_filter=_b("S9_REQUIRE_ML_FILTER", False),
+        ml_model_path=os.getenv("S9_ML_MODEL_PATH", "data/models/s9_bar_ml.joblib"),
+        ml_min_proba=_f("S9_ML_MIN_PROBA", 0.55),
+        ml_lags=int(_f("S9_ML_LAGS", 3)),
+        ml_allow_if_missing=_b("S9_ML_ALLOW_IF_MISSING", True),
     )
     return StateS9Strategy(cfg)
