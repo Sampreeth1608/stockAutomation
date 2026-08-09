@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo
 
 from almost_equal import clamp, sign_px, sign_rel
+from range_stops import expected_range, tp_sl_from_range
 from strategy import Position, SignalResult
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -171,6 +172,17 @@ class StateS9Config:
     require_bias_align: bool = False
     bias_mode: str = "net"  # net | dnet | px
     exit_on_bias_flip: bool = True
+    # Range-based TP/SL from rolling median bar range (expected fluctuation)
+    use_range_stops: bool = False
+    range_window: int = 20
+    tp_range_mult: float = 0.85
+    sl_range_mult: float = 0.55
+    tp_min: float = 12.0
+    tp_max: float = 60.0
+    sl_min: float = 10.0
+    sl_max: float = 40.0
+    range_fee_be: float = 0.0  # 0 = ignore; ~50 pts ≈ Angel RT on 1 lot @ ₹1/pt
+    range_min_rr: float = 1.2
 
 
 class StateS9Strategy:
@@ -182,6 +194,10 @@ class StateS9Strategy:
         self.cfg = cfg or StateS9Config()
         self.position: Position = "flat"
         self.entry_price: float | None = None
+        self.active_tp: float | None = None
+        self.active_sl: float | None = None
+        self.last_exp_range: float | None = None
+        self._ranges: list[float] = []
         self.last_state: str = "WARMUP"
         self.prev_state: str = "WARMUP"
         self.last_label: str = "WARMUP"
@@ -223,8 +239,16 @@ class StateS9Strategy:
     @property
     def status_line(self) -> str:
         c = self.cfg
+        tp = self.active_tp if self.active_tp is not None else c.tp_points
+        sl = self.active_sl if self.active_sl is not None else c.sl_points
+        rng = (
+            f" rng={self.last_exp_range:.0f}"
+            if self.last_exp_range is not None
+            else ""
+        )
         return (
-            f"TF={c.bar_minutes}m TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
+            f"TF={c.bar_minutes}m TP={tp:.0f} SL={sl:.0f}"
+            f"{'~R' if c.use_range_stops else ''}{rng} "
             f"short={c.allow_short} net_gate={c.require_net_sign} "
             f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
             f"volx={c.require_vol_expansion} flip={c.enable_flip_reverse} "
@@ -240,15 +264,48 @@ class StateS9Strategy:
         block = (mins // self.cfg.bar_minutes) * self.cfg.bar_minutes
         return midnight + timedelta(minutes=block)
 
+    def _set_active_stops(self) -> None:
+        """Fixed TP/SL, or map rolling expected bar-range → TP/SL."""
+        c = self.cfg
+        er = expected_range(self._ranges, c.range_window)
+        self.last_exp_range = float(er) if er == er else None
+        if c.use_range_stops and self.last_exp_range is not None:
+            tp, sl = tp_sl_from_range(
+                self.last_exp_range,
+                tp_mult=c.tp_range_mult,
+                sl_mult=c.sl_range_mult,
+                tp_min=c.tp_min,
+                tp_max=c.tp_max,
+                sl_min=c.sl_min,
+                sl_max=c.sl_max,
+                fee_be=c.range_fee_be,
+                min_rr=c.range_min_rr,
+            )
+            if tp == tp and sl == sl:
+                self.active_tp = float(tp)
+                self.active_sl = float(sl)
+                return
+        self.active_tp = float(c.tp_points)
+        self.active_sl = float(c.sl_points)
+
+    def _tp_sl(self) -> tuple[float, float]:
+        c = self.cfg
+        tp = self.active_tp if self.active_tp is not None else c.tp_points
+        sl = self.active_sl if self.active_sl is not None else c.sl_points
+        return float(tp), float(sl)
+
     def _open(self, side: Position, px: float) -> None:
         self.position = side
         self.entry_price = float(px)
         self.break_count = 0
+        self._set_active_stops()
 
     def _close(self) -> None:
         self.position = "flat"
         self.entry_price = None
         self.break_count = 0
+        self.active_tp = None
+        self.active_sl = None
 
     def _hlv_ok(self) -> tuple[bool, str]:
         """Long confirm via H+V+ / L+V+; veto H+V-."""
@@ -409,6 +466,13 @@ class StateS9Strategy:
                 bar_volume = 0.0
         bar_volume = float(bar_volume)
 
+        # Track high-low for expected-fluctuation TP/SL
+        bar_range = max(0.0, float(h) - float(l))
+        self._ranges.append(bar_range)
+        cap = max(self.cfg.range_window * 3, 64)
+        if len(self._ranges) > cap:
+            self._ranges = self._ranges[-cap:]
+
         if self._prev_tbq is None:
             st = "START"
             self.last_hv = "START"
@@ -537,6 +601,12 @@ class StateS9Strategy:
                     self.last_skip = "extra_entry_filter_long"
                     return None
             self._open("long", c)
+            tp, sl = self._tp_sl()
+            rng_bit = (
+                f" expR={self.last_exp_range:.0f}"
+                if self.cfg.use_range_stops and self.last_exp_range is not None
+                else ""
+            )
             return SignalResult(
                 action="BUY",
                 position_after="long",
@@ -547,7 +617,7 @@ class StateS9Strategy:
                 reason=(
                     f"S9 enter_long {self.last_label} {bias_why} {hlv_why} {volx_why} "
                     f"net={net:.0f} imb={imb:.1f}% "
-                    f"TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
+                    f"TP={tp:.0f} SL={sl:.0f}{rng_bit}"
                 ),
             )
 
@@ -570,6 +640,12 @@ class StateS9Strategy:
                     self.last_skip = "extra_entry_filter_short"
                     return None
             self._open("short", c)
+            tp, sl = self._tp_sl()
+            rng_bit = (
+                f" expR={self.last_exp_range:.0f}"
+                if self.cfg.use_range_stops and self.last_exp_range is not None
+                else ""
+            )
             return SignalResult(
                 action="SHORT",
                 position_after="short",
@@ -579,7 +655,7 @@ class StateS9Strategy:
                 prev_net_delta=None,
                 reason=(
                     f"S9 enter_short {self.last_label} {bias_why} net={net:.0f} "
-                    f"imb={imb:.1f}% TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
+                    f"imb={imb:.1f}% TP={tp:.0f} SL={sl:.0f}{rng_bit}"
                 ),
             )
 
@@ -675,9 +751,10 @@ class StateS9Strategy:
                 )
             return done(reason)
 
-        if move >= self.cfg.tp_points:
+        tp, sl = self._tp_sl()
+        if move >= tp:
             # take profit — do not reverse
-            return done(f"tp +{move:.1f}>={self.cfg.tp_points:.0f} state={self.last_label}")
+            return done(f"tp +{move:.1f}>={tp:.0f} state={self.last_label}")
 
         # S8-style: flatten when bias/trend flips against the open side
         if self.cfg.require_bias_align and self.cfg.exit_on_bias_flip:
@@ -693,8 +770,8 @@ class StateS9Strategy:
                     f"state={self.last_label}"
                 )
 
-        if move <= -self.cfg.sl_points:
-            reason = f"sl {move:.1f}<=-{self.cfg.sl_points:.0f} state={self.last_label}"
+        if move <= -sl:
+            reason = f"sl {move:.1f}<=-{sl:.0f} state={self.last_label}"
             if self.cfg.enable_flip_reverse and self.cfg.flip_on_sl:
                 return maybe_flip("sl", reason)
             return done(reason)
@@ -945,5 +1022,15 @@ def state_s9_from_env() -> StateS9Strategy:
         require_bias_align=_b("S9_REQUIRE_BIAS_ALIGN", False),
         bias_mode=(os.getenv("S9_BIAS_MODE", "net").strip().lower() or "net"),
         exit_on_bias_flip=_b("S9_EXIT_ON_BIAS_FLIP", True),
+        use_range_stops=_b("S9_USE_RANGE_STOPS", False),
+        range_window=int(_f("S9_RANGE_WINDOW", 20)),
+        tp_range_mult=_f("S9_TP_RANGE_MULT", 0.85),
+        sl_range_mult=_f("S9_SL_RANGE_MULT", 0.55),
+        tp_min=_f("S9_TP_MIN", 12.0),
+        tp_max=_f("S9_TP_MAX", 60.0),
+        sl_min=_f("S9_SL_MIN", 10.0),
+        sl_max=_f("S9_SL_MAX", 40.0),
+        range_fee_be=_f("S9_RANGE_FEE_BE", 0.0),
+        range_min_rr=_f("S9_RANGE_MIN_RR", 1.2),
     )
     return StateS9Strategy(cfg)

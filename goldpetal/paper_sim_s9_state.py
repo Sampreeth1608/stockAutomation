@@ -91,6 +91,11 @@ def run_once(
     bias_mode: str = "net",
     exit_on_bias_flip: bool = True,
     require_net_sign: bool = True,
+    use_range_stops: bool = False,
+    range_window: int = 20,
+    tp_range_mult: float = 0.85,
+    sl_range_mult: float = 0.55,
+    range_fee_be: float = 0.0,
 ) -> tuple[list[tuple[float, float, str, str, str]], Counter]:
     cfg = StateS9Config(
         bar_minutes=bar_minutes,
@@ -109,6 +114,11 @@ def run_once(
         require_bias_align=require_bias_align,
         bias_mode=bias_mode,
         exit_on_bias_flip=exit_on_bias_flip,
+        use_range_stops=use_range_stops,
+        range_window=range_window,
+        tp_range_mult=tp_range_mult,
+        sl_range_mult=sl_range_mult,
+        range_fee_be=range_fee_be,
     )
     s = StateS9Strategy(cfg)
     trades: list[tuple[float, float, str, str, str]] = []
@@ -209,7 +219,12 @@ def main() -> None:
     ap.add_argument(
         "--compare",
         action="store_true",
-        help="Print BASE vs BIAS_NET vs BIAS_DNET vs BIAS_PX",
+        help="Print BASE vs BIAS_* vs BIAS_NET_RANGE (expected-range TP/SL)",
+    )
+    ap.add_argument(
+        "--range-stops",
+        action="store_true",
+        help="Map rolling median bar-range → TP/SL (vs fixed --tp/--sl)",
     )
     ap.add_argument("--bars-csv", default="")
     args = ap.parse_args()
@@ -288,6 +303,17 @@ def main() -> None:
                     "bias_mode": "px",
                 },
             ),
+            # Expected fluctuation → adaptive TP/SL (default OFF until it beats FIXED)
+            (
+                "BIAS_NET_RANGE",
+                {
+                    **off,
+                    "allow_short": True,
+                    "require_bias_align": True,
+                    "bias_mode": "net",
+                    "use_range_stops": True,
+                },
+            ),
         ]
         for label, kw in variants:
             # allow_short in kw overrides common
@@ -306,6 +332,7 @@ def main() -> None:
         enable_flip_reverse=bool(args.flip_rev),
         require_bias_align=bool(args.bias_align),
         bias_mode=args.bias_mode,
+        use_range_stops=bool(args.range_stops),
         **common,
     )
     bits = [
@@ -313,6 +340,7 @@ def main() -> None:
         "VOLX_ON" if args.vol_exp else "VOLX_OFF",
         "FLIP_ON" if args.flip_rev else "FLIP_OFF",
         f"BIAS_{args.bias_mode.upper()}" if args.bias_align else "BIAS_OFF",
+        "RANGE_ON" if args.range_stops else "RANGE_OFF",
     ]
     summarize("+".join(bits), trades, reasons, len(bars), args.tf)
 
