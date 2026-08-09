@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from strategy import Action, Position, SignalResult
 
 Bias = Literal["BULL", "BEAR", "NEUTRAL"]
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def net_imbalance(tbq: float, tsq: float) -> tuple[float, float]:
@@ -45,7 +47,10 @@ class NetZigzagConfig:
     pullback_points: float = 8.0
     resume_points: float = 5.0
     # "edge" = IMB cross above min; "pullback" = only after dip+resume; "both"
+    # "always" = enter whenever flat + strong bias (30m bar paper: +₹42k row)
     entry_mode: str = "both"
+    # 0 = tick mode; 30 = decide only on 30m bar close (MTF paper path)
+    bar_minutes: int = 0
 
 
 class NetZigzagStrategy:
@@ -74,15 +79,29 @@ class NetZigzagStrategy:
         self._in_pullback: bool = False
         self._last_exit_reason: str = ""
 
+        # bar builder (when bar_minutes > 0)
+        self._bar_key: datetime | None = None
+        self._bar_o = self._bar_h = self._bar_l = self._bar_c = None
+        self._bar_tbq = self._bar_tsq = 0.0
+        self._bar_n = 0
+
     @property
     def status_line(self) -> str:
         c = self.cfg
+        tf = f"{c.bar_minutes}m" if c.bar_minutes and c.bar_minutes > 0 else "tick"
         return (
-            f"imb>={c.min_imb_pct:.0f}% weaken>={c.weaken_pct:.0f}% "
+            f"TF={tf} imb>={c.min_imb_pct:.0f}% weaken>={c.weaken_pct:.0f}% "
             f"TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
             f"cd={c.cooldown_ticks} mode={c.entry_mode} "
             f"bias={self.bias} pos={self.position}"
         )
+
+    def _floor_bar(self, ts: datetime) -> datetime:
+        ts = ts.astimezone(IST)
+        midnight = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+        mins = int((ts - midnight).total_seconds() // 60)
+        block = (mins // self.cfg.bar_minutes) * self.cfg.bar_minutes
+        return midnight + timedelta(minutes=block)
 
     def _parse_qty(self, message: dict[str, Any]) -> tuple[float, float] | None:
         tbq = message.get("total_buy_quantity")
@@ -257,22 +276,10 @@ class NetZigzagStrategy:
             return done(f"sl {move:.1f}<=-{self.cfg.sl_points:.0f}")
         return None
 
-    def on_tick(
-        self, now: datetime, ltp: float, message: dict[str, Any]
+    def _decide(
+        self, ltp: float, tbq: float, tsq: float, message: dict[str, Any]
     ) -> SignalResult | None:
-        del now
-        self._tick_i += 1
-        qs = self._parse_qty(message)
-        if qs is None:
-            self.last_skip = "no_tbq_tsq"
-            return None
-        tbq, tsq = qs
-        self._update_bias(tbq, tsq)
-        self._update_pullback(float(ltp))
-
-        if self._tick_i % max(1, self.cfg.every_n_ticks) != 0:
-            return None
-
+        """One decision step after bias/pullback already updated and tick counted."""
         if self.position != "flat" and self.entry_price is not None:
             return self._manage(float(ltp))
 
@@ -324,6 +331,82 @@ class NetZigzagStrategy:
 
         return None
 
+    def _step(
+        self, ltp: float, tbq: float, tsq: float, message: dict[str, Any]
+    ) -> SignalResult | None:
+        self._tick_i += 1
+        self._update_bias(tbq, tsq)
+        self._update_pullback(float(ltp))
+        return self._decide(ltp, tbq, tsq, message)
+
+    def _on_tick_bar(
+        self, now: datetime, ltp: float, message: dict[str, Any]
+    ) -> SignalResult | None:
+        """Accumulate ticks; decide only when a bar closes (MTF +₹42k path)."""
+        qs = self._parse_qty(message)
+        if qs is None:
+            self.last_skip = "no_tbq_tsq"
+            return None
+        tbq_f, tsq_f = qs
+        px = float(ltp)
+        key = self._floor_bar(now)
+        sig: SignalResult | None = None
+
+        if self._bar_key is None:
+            self._bar_key = key
+
+        if key != self._bar_key:
+            if self._bar_c is not None:
+                msg = {
+                    "total_buy_quantity": self._bar_tbq,
+                    "total_sell_quantity": self._bar_tsq,
+                }
+                sig = self._step(
+                    float(self._bar_c),
+                    float(self._bar_tbq),
+                    float(self._bar_tsq),
+                    msg,
+                )
+            self._bar_key = key
+            self._bar_o = self._bar_h = self._bar_l = self._bar_c = px
+            self._bar_tbq = tbq_f
+            self._bar_tsq = tsq_f
+            self._bar_n = 1
+            return sig
+
+        if self._bar_o is None:
+            self._bar_o = self._bar_h = self._bar_l = self._bar_c = px
+            self._bar_tbq = tbq_f
+            self._bar_tsq = tsq_f
+            self._bar_n = 1
+            return None
+
+        self._bar_h = max(float(self._bar_h), px)
+        self._bar_l = min(float(self._bar_l), px)
+        self._bar_c = px
+        self._bar_tbq = tbq_f
+        self._bar_tsq = tsq_f
+        self._bar_n += 1
+        return None
+
+    def on_tick(
+        self, now: datetime, ltp: float, message: dict[str, Any]
+    ) -> SignalResult | None:
+        if self.cfg.bar_minutes and self.cfg.bar_minutes > 0:
+            return self._on_tick_bar(now, ltp, message)
+
+        qs = self._parse_qty(message)
+        if qs is None:
+            self.last_skip = "no_tbq_tsq"
+            return None
+        tbq, tsq = qs
+        self._tick_i += 1
+        self._update_bias(tbq, tsq)
+        self._update_pullback(float(ltp))
+        if self._tick_i % max(1, self.cfg.every_n_ticks) != 0:
+            return None
+        return self._decide(float(ltp), tbq, tsq, message)
+
 
 def net_zigzag_from_env() -> NetZigzagStrategy:
     try:
@@ -342,6 +425,10 @@ def net_zigzag_from_env() -> NetZigzagStrategy:
             return default
         return raw.strip().lower() in {"1", "true", "yes", "y"}
 
+    # Paper +₹42k row defaults when bar mode on: 30m + always + cd0
+    bar_m = int(_f("S8_BAR_MINUTES", 0))
+    default_mode = "always" if bar_m > 0 else "both"
+    default_cd = 0 if bar_m > 0 else 40
     cfg = NetZigzagConfig(
         min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
         weaken_pct=_f("S8_WEAKEN_PCT", 10.0),
@@ -352,9 +439,10 @@ def net_zigzag_from_env() -> NetZigzagStrategy:
         fee_be_points=_f("S8_FEE_BE_POINTS", 50.0),
         require_depth=_b("S8_REQUIRE_DEPTH", False),
         depth_ratio=_f("S8_DEPTH_RATIO", 1.15),
-        cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", 40)),
+        cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", default_cd)),
         pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
         resume_points=_f("S8_RESUME_POINTS", 5.0),
-        entry_mode=os.getenv("S8_ENTRY_MODE", "both").strip().lower(),
+        entry_mode=os.getenv("S8_ENTRY_MODE", default_mode).strip().lower(),
+        bar_minutes=bar_m,
     )
     return NetZigzagStrategy(cfg)

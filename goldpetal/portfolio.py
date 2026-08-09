@@ -21,7 +21,8 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S8_NET_ZIGZAG",
         "S9_STATE30",
     },
-    "CHOP": {"S4_OVERNIGHT"},  # S5/S6/S8/S9 skip chop by default
+    # S8 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too
+    "CHOP": {"S4_OVERNIGHT", "S8_NET_ZIGZAG"},
     "QUIET": {
         "S1_NETDELTA",
         "S2_BALANCE",

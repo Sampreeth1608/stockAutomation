@@ -77,6 +77,30 @@ def test_flip_closes():
     assert "flip" in (sig.reason or "")
 
 
+def test_bar_mode_always_enters_on_bar_close():
+    """30m bar + always mode: decide only when bar boundary flips."""
+    s = NetZigzagStrategy(
+        NetZigzagConfig(
+            bar_minutes=30,
+            entry_mode="always",
+            cooldown_ticks=0,
+            min_imb_pct=10,
+            tp_points=25,
+            sl_points=20,
+        )
+    )
+    t0 = datetime(2026, 8, 7, 10, 5, tzinfo=IST)
+    # same 30m bar — no decision yet
+    assert s.on_tick(t0, 10000.0, _msg(12000, 8000)) is None
+    assert s.on_tick(t0.replace(minute=10), 10005.0, _msg(13000, 7000)) is None
+    assert s.position == "flat"
+    # next bar → close previous → BUY (BULL always)
+    sig = s.on_tick(datetime(2026, 8, 7, 10, 30, tzinfo=IST), 10010.0, _msg(14000, 6000))
+    assert sig is not None and sig.action == "BUY"
+    assert s.position == "long"
+    assert "30m" in s.status_line or "TF=30m" in s.status_line
+
+
 def test_recorder_writes(tmp_path: Path | None = None):
     base = Path(tmp_path) if tmp_path else Path("data") / "_test_zigzag_retune.db"
     if base.exists():
@@ -107,5 +131,6 @@ if __name__ == "__main__":
     test_long_entry_on_imb_edge_and_tp()
     test_no_immediate_reentry_after_sl()
     test_flip_closes()
+    test_bar_mode_always_enters_on_bar_close()
     test_recorder_writes()
     print("ok")

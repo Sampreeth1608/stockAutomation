@@ -215,7 +215,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S8       : NET zigzag (best paper params) "
+        f"S8       : NET zigzag (30m bar always = MTF +₹42k path when configured) "
         f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
         f"{strategy_s8.status_line}",
         flush=True,
