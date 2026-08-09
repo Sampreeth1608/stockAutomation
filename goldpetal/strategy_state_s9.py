@@ -71,7 +71,14 @@ def short_label(code: str) -> str:
 
 
 # Families from study (extensible)
-ENTER_LONG_DEFAULT = frozenset({"TBQ+_TSQ-_P+", "TBQ+_TSQ+_P+"})
+ENTER_LONG_DEFAULT = frozenset(
+    {
+        "TBQ+_TSQ-_P+",
+        "TBQ+_TSQ+_P+",
+        "TBQ+_TSQ=_P+",  # almost-equal study candidate
+        "TBQ+_TSQ+_P=",
+    }
+)
 CONTINUE_LONG_DEFAULT = frozenset(
     {
         "TBQ+_TSQ-_P+",
@@ -80,8 +87,12 @@ CONTINUE_LONG_DEFAULT = frozenset(
         "TBQ+_TSQ+_P+",
         "TBQ+_TSQ-_P=",
         "TBQ+_TSQ-_P-",  # bull pullback — hold, don't flip
+        "TBQ+_TSQ+_P=",
     }
 )
+# H/L × Volume confirms from 30m study
+HLV_LONG_CONFIRM_DEFAULT = frozenset({"H+_V+", "L+_V+"})
+HLV_LONG_VETO_DEFAULT = frozenset({"H+_V-"})
 ENTER_SHORT_DEFAULT = frozenset({"TBQ-_TSQ+_P-"})  # off unless allow_short
 CONTINUE_SHORT_DEFAULT = frozenset(
     {
@@ -120,7 +131,13 @@ class StateS9Config:
     )
     # Exit long if we leave continue family for this many bars
     break_bars: int = 1
-    # Optional: only trade TREND-like — left to portfolio regime
+    # High/Low × Volume filters (from hl_vol_study)
+    require_hlv_confirm: bool = True
+    hlv_mode: str = "any"  # any = H+V+ OR L+V+ ; both = need both
+    hlv_confirm_states: frozenset[str] = field(
+        default_factory=lambda: HLV_LONG_CONFIRM_DEFAULT
+    )
+    hlv_veto_states: frozenset[str] = field(default_factory=lambda: HLV_LONG_VETO_DEFAULT)
 
 
 class StateS9Strategy:
@@ -140,6 +157,8 @@ class StateS9Strategy:
         self.last_tbq: float = 0.0
         self.last_tsq: float = 0.0
         self.last_close: float | None = None
+        self.last_hv: str = "START"
+        self.last_lv: str = "START"
         self.break_count: int = 0
         self.last_skip: str | None = None
 
@@ -147,10 +166,15 @@ class StateS9Strategy:
         self._bar_key: datetime | None = None
         self._o = self._h = self._l = self._c = None
         self._tbq_o = self._tsq_o = self._tbq_c = self._tsq_c = 0.0
+        self._vol_c: float | None = None
         self._n = 0
         self._prev_tbq: float | None = None
         self._prev_tsq: float | None = None
         self._prev_close: float | None = None
+        self._prev_high: float | None = None
+        self._prev_low: float | None = None
+        self._prev_bar_vol: float | None = None
+        self._prev_cum_vol: float | None = None
 
         # hooks for future extensions: fn(bar_dict, strategy) -> SignalResult|None
         self.extra_entry_filters: list[Callable[..., bool]] = []
@@ -162,7 +186,9 @@ class StateS9Strategy:
         return (
             f"TF={c.bar_minutes}m TP={c.tp_points:.0f} SL={c.sl_points:.0f} "
             f"short={c.allow_short} net_gate={c.require_net_sign} "
-            f"state={self.last_label} pos={self.position}"
+            f"hlv={c.require_hlv_confirm}/{c.hlv_mode} "
+            f"state={self.last_label} hv={self.last_hv} lv={self.last_lv} "
+            f"pos={self.position}"
         )
 
     def _floor(self, ts: datetime) -> datetime:
@@ -182,6 +208,23 @@ class StateS9Strategy:
         self.entry_price = None
         self.break_count = 0
 
+    def _hlv_ok(self) -> tuple[bool, str]:
+        """Long confirm via H+V+ / L+V+; veto H+V-."""
+        if not self.cfg.require_hlv_confirm:
+            return True, "hlv_off"
+        if self.last_hv in self.cfg.hlv_veto_states:
+            return False, f"hlv_veto {self.last_hv}"
+        conf_h = self.last_hv in self.cfg.hlv_confirm_states
+        conf_l = self.last_lv in self.cfg.hlv_confirm_states
+        mode = (self.cfg.hlv_mode or "any").lower()
+        if mode == "both":
+            ok = conf_h and conf_l
+        else:
+            ok = conf_h or conf_l
+        if not ok:
+            return False, f"hlv_need_confirm hv={self.last_hv} lv={self.last_lv}"
+        return True, f"hlv_ok hv={self.last_hv} lv={self.last_lv}"
+
     def _on_bar_close(
         self,
         bar_time: datetime,
@@ -194,6 +237,8 @@ class StateS9Strategy:
         tbq_c: float,
         tsq_c: float,
         n_ticks: int,
+        cum_vol: float | None = None,
+        bar_volume: float | None = None,
     ) -> SignalResult | None:
         net = tbq_c - tsq_c
         imb = abs(net) / max(tbq_c, tsq_c, 1e-9) * 100.0
@@ -203,8 +248,18 @@ class StateS9Strategy:
         self.last_tsq = tsq_c
         self.last_close = c
 
+        # bar volume from cumulative day volume if needed
+        if bar_volume is None:
+            if cum_vol is not None and self._prev_cum_vol is not None:
+                bar_volume = max(0.0, float(cum_vol) - float(self._prev_cum_vol))
+            else:
+                bar_volume = 0.0
+        bar_volume = float(bar_volume)
+
         if self._prev_tbq is None:
             st = "START"
+            self.last_hv = "START"
+            self.last_lv = "START"
         else:
             st = state_code_from_levels(
                 tbq_c,
@@ -217,10 +272,34 @@ class StateS9Strategy:
                 equal_px_pct=self.cfg.equal_px_pct,
                 equal_pts=self.cfg.equal_pts,
             )
+            hs = sign_px(
+                h,
+                float(self._prev_high if self._prev_high is not None else h),
+                equal_px_pct=self.cfg.equal_px_pct,
+                equal_pts=self.cfg.equal_pts,
+            )
+            ls = sign_px(
+                l,
+                float(self._prev_low if self._prev_low is not None else l),
+                equal_px_pct=self.cfg.equal_px_pct,
+                equal_pts=self.cfg.equal_pts,
+            )
+            vs = sign_rel(
+                bar_volume,
+                float(self._prev_bar_vol if self._prev_bar_vol is not None else 0.0),
+                self.cfg.equal_pct,
+            )
+            self.last_hv = f"H{hs}_V{vs}"
+            self.last_lv = f"L{ls}_V{vs}"
+
         self.prev_state = self.last_state
         self.last_state = st
         self.last_label = short_label(st)
         self._prev_tbq, self._prev_tsq, self._prev_close = tbq_c, tsq_c, c
+        self._prev_high, self._prev_low = h, l
+        self._prev_bar_vol = bar_volume
+        if cum_vol is not None:
+            self._prev_cum_vol = float(cum_vol)
 
         bar = {
             "time": bar_time.isoformat(timespec="seconds"),
@@ -235,8 +314,11 @@ class StateS9Strategy:
             "net": net,
             "imb_pct": imb,
             "n_ticks": n_ticks,
+            "bar_volume": bar_volume,
             "state": st,
             "label": self.last_label,
+            "hv": self.last_hv,
+            "lv": self.last_lv,
             "prev_state": self.prev_state,
         }
 
@@ -260,6 +342,10 @@ class StateS9Strategy:
             if self.cfg.min_imb_pct > 0 and imb < self.cfg.min_imb_pct:
                 self.last_skip = f"long_blocked_imb<{self.cfg.min_imb_pct}"
                 return None
+            ok_hlv, hlv_why = self._hlv_ok()
+            if not ok_hlv:
+                self.last_skip = hlv_why
+                return None
             for filt in self.extra_entry_filters:
                 if not filt(bar, self, "long"):
                     self.last_skip = "extra_entry_filter_long"
@@ -273,7 +359,7 @@ class StateS9Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"S9 enter_long {self.last_label} net={net:.0f} "
+                    f"S9 enter_long {self.last_label} {hlv_why} net={net:.0f} "
                     f"imb={imb:.1f}% TP={self.cfg.tp_points:.0f} SL={self.cfg.sl_points:.0f}"
                 ),
             )
@@ -365,6 +451,11 @@ class StateS9Strategy:
             tbq_f, tsq_f, px = float(tbq), float(tsq), float(ltp)
         except (TypeError, ValueError):
             return None
+        vol_raw = message.get("volume_trade_for_the_day")
+        try:
+            vol_f = float(vol_raw) if vol_raw is not None else None
+        except (TypeError, ValueError):
+            vol_f = None
 
         key = self._floor(now)
         sig: SignalResult | None = None
@@ -385,6 +476,7 @@ class StateS9Strategy:
                     float(self._tbq_c),
                     float(self._tsq_c),
                     self._n,
+                    cum_vol=self._vol_c,
                 )
             self._bar_key = key
             self._o = self._h = self._l = self._c = px
@@ -392,6 +484,7 @@ class StateS9Strategy:
             self._tsq_o = tsq_f
             self._tbq_c = tbq_f
             self._tsq_c = tsq_f
+            self._vol_c = vol_f
             self._n = 1
             return sig
 
@@ -401,6 +494,7 @@ class StateS9Strategy:
             self._tsq_o = tsq_f
             self._tbq_c = tbq_f
             self._tsq_c = tsq_f
+            self._vol_c = vol_f
             self._n = 1
             return None
 
@@ -409,6 +503,8 @@ class StateS9Strategy:
         self._c = px
         self._tbq_c = tbq_f
         self._tsq_c = tsq_f
+        if vol_f is not None:
+            self._vol_c = vol_f
         self._n += 1
         return None
 
@@ -420,6 +516,16 @@ class StateS9Strategy:
             )
         except Exception:
             ts = datetime.now(IST)
+        cum = row.get("volume_close")
+        try:
+            cum_f = float(cum) if cum is not None else None
+        except (TypeError, ValueError):
+            cum_f = None
+        bv = row.get("bar_volume")
+        try:
+            bv_f = float(bv) if bv is not None else None
+        except (TypeError, ValueError):
+            bv_f = None
         return self._on_bar_close(
             ts,
             float(row["open"]),
@@ -431,6 +537,8 @@ class StateS9Strategy:
             float(row["tbq_close"]),
             float(row["tsq_close"]),
             int(row.get("n_ticks", 0) or 0),
+            cum_vol=cum_f,
+            bar_volume=bv_f,
         )
 
 
@@ -496,5 +604,7 @@ def state_s9_from_env() -> StateS9Strategy:
         continue_long_states=_states("S9_CONTINUE_LONG", CONTINUE_LONG_DEFAULT),
         enter_short_states=_states("S9_ENTER_SHORT", ENTER_SHORT_DEFAULT),
         continue_short_states=_states("S9_CONTINUE_SHORT", CONTINUE_SHORT_DEFAULT),
+        require_hlv_confirm=_b("S9_REQUIRE_HLV", True),
+        hlv_mode=os.getenv("S9_HLV_MODE", "any").strip().lower() or "any",
     )
     return StateS9Strategy(cfg)

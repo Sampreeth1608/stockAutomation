@@ -53,6 +53,7 @@ class RichBar:
     depth_imb_pct: float
     oi_close: float | None
     volume_close: float | None
+    bar_volume: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
@@ -81,6 +82,7 @@ class RichBar:
             "depth_imb_pct": round(self.depth_imb_pct, 2),
             "oi_close": self.oi_close,
             "volume_close": self.volume_close,
+            "bar_volume": self.bar_volume,
         }
 
 
@@ -205,6 +207,10 @@ def build_rich_bars(rows, tf_name: str, minutes: int) -> list[RichBar]:
         dimb = abs(dnet) / max(buy5, sell5, 1e-9) * 100.0
         prev_net = bars[-1].net if bars else None
         prev_close = bars[-1].close if bars else None
+        prev_vol = bars[-1].volume_close if bars else None
+        bar_vol = None
+        if vol is not None and prev_vol is not None:
+            bar_vol = max(0.0, float(vol) - float(prev_vol))
         bars.append(
             RichBar(
                 tf=tf_name,
@@ -231,6 +237,7 @@ def build_rich_bars(rows, tf_name: str, minutes: int) -> list[RichBar]:
                 depth_imb_pct=float(dimb),
                 oi_close=oi,
                 volume_close=vol,
+                bar_volume=bar_vol,
             )
         )
         o = h = l = c = None
