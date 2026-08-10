@@ -132,11 +132,108 @@ def test_score_prefers_profit():
     assert score_result({"n": 0, "dir_pct": 0, "sum_inr": 0}) < -1e6
 
 
+def test_report_real_vs_improved():
+    """Synthetic ticks + fake S8 signals → report totals."""
+    import os
+    import subprocess
+    import sys
+
+    db = _make_db(300)
+    # minimal signals table + one round trip
+    con = sqlite3.connect(db)
+    con.execute(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY,
+            time_label TEXT,
+            symbol TEXT,
+            strategy TEXT,
+            action TEXT,
+            position_after TEXT,
+            reason TEXT,
+            price_delta REAL,
+            net REAL,
+            net_delta REAL,
+            dry_run INTEGER,
+            cmp REAL
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO signals(time_label,symbol,strategy,action,position_after,reason,dry_run,cmp) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (
+            "2026-08-10T10:00:00+05:30",
+            "G",
+            "S8_NET_ZIGZAG",
+            "BUY",
+            "long",
+            "test",
+            1,
+            15000.0,
+        ),
+    )
+    con.execute(
+        "INSERT INTO signals(time_label,symbol,strategy,action,position_after,reason,dry_run,cmp) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (
+            "2026-08-10T10:10:00+05:30",
+            "G",
+            "S8_NET_ZIGZAG",
+            "CLOSE",
+            "flat",
+            "tp",
+            1,
+            15020.0,
+        ),
+    )
+    con.commit()
+    con.close()
+    out = Path(tempfile.mkdtemp())
+    cmd = [
+        sys.executable,
+        "learn_s8_align.py",
+        "report",
+        "--db",
+        str(db),
+        "--day",
+        "2026-08-10",
+        "--lots",
+        "100",
+        "--bar-minutes",
+        "0",
+        "--bar-ticks",
+        "20",
+        "--retrain",
+        "--quick",
+        "--budget-min",
+        "0.1",
+        "--out",
+        str(out),
+        "--preset",
+        str(out / "learned_latest.json"),
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
+    r = subprocess.run(
+        cmd,
+        cwd=str(Path(__file__).resolve().parent),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "SUMMARY" in r.stdout
+    assert "REAL paper" in r.stdout
+    assert "IMPROVED" in r.stdout
+
+
 def main() -> None:
     test_run_align_labeled_and_diagnose()
     test_search_and_preset_roundtrip()
     test_learned_model_loads_json()
     test_score_prefers_profit()
+    test_report_real_vs_improved()
     print("test_learn_s8_align: OK")
 
 

@@ -1,21 +1,37 @@
 #!/usr/bin/env python3
 """S8 ALIGN learning loop: real trades + ticks → better entry/hold/exit.
 
-Pipeline:
-  1) diagnose  — replay baseline on ticks.db; label MFE/MAE / exit quality
-  2) train     — sweep E/H/X × TF + knobs; pick best by paper ₹; write preset JSON
-  3) compare   — baseline vs learned on same ticks (optional holdout day)
-  4) apply     — print .env lines to paper-trade the learned reasoning model
+================================================================================
+HOW THIS WAS BUILT (inputs → outputs)
+================================================================================
+DATA SOURCES
+  1. data/ticks.db          live Angel ticks (ltp, bp/sp=TBQ/TSQ, raw_json)
+  2. ticks.db.signals       live paper S8 BUY/SHORT/CLOSE (strategy=S8_NET_ZIGZAG)
+  3. data/zigzag_retune.db  optional SNAP path (entry params / mid-trade book)
+  4. AlignS8Config          current E/H/X reasoning models (imb_sign_rise, book_rise, …)
 
-Also ingests live S8 signals from ticks.db / zigzag_retune.db when present
-and compares their outcomes on the tick path.
+ENGINE PIECES (existing Gold Petal code reused)
+  5. strategy_s8_align.py   live ALIGN entry/hold/exit formulas
+  6. storage.build_trades   pairs real signals into round-trip trades + charges
+  7. paper fee model        fee_rt() same as paper_sim_s8_align*.py
+  8. mtf / bar TF knobs     2m / 10m / 30m / 50t decision cadence
 
-Examples (on VM with data/ticks.db):
-  python3 learn_s8_align.py diagnose --db data/ticks.db --lots 100
-  python3 learn_s8_align.py train --db data/ticks.db --lots 100 --out data/s8_presets
-  python3 learn_s8_align.py compare --db data/ticks.db --lots 100 \\
-      --preset data/s8_presets/learned_latest.json
-  python3 learn_s8_align.py apply --preset data/s8_presets/learned_latest.json
+LEARNING STEPS
+  9. diagnose   replay baseline on ticks → MFE/MAE / exit-early / drop stats
+ 10. train      sweep E×H×X×TF (+ nudges); can run minutes→hours (--budget-min)
+ 11. report     TODAY real trades ₹  vs  improved counterfactual ₹ (all BUY/SHORT)
+ 12. apply      write S8_MODEL=learned + preset JSON for paper runner
+
+OUTPUT
+ 13. data/s8_presets/learned_latest.json   improved formula pack
+ 14. Console report: real vs improved with every trade listed
+
+================================================================================
+
+Examples (VM):
+  python3 learn_s8_align.py report --db data/ticks.db --lots 100 --day 2026-08-10
+  python3 learn_s8_align.py train  --db data/ticks.db --lots 100 --day 2026-08-10 --budget-min 30
+  python3 learn_s8_align.py apply
 """
 
 from __future__ import annotations
@@ -23,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import time
 from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -545,18 +562,25 @@ def cmd_train(args: argparse.Namespace) -> int:
         print(f"  • {tip}")
 
     cands = search_space(diag)
-    if args.quick:
-        # smaller slice for fast VM runs
+    budget_s = max(0.0, float(getattr(args, "budget_min", 0) or 0)) * 60.0
+    if args.quick and budget_s <= 0:
         cands = cands[:24]
-    print(f"sweeping {len(cands)} candidates…")
+    print(
+        f"sweeping up to {len(cands)} candidates "
+        f"(budget={getattr(args, 'budget_min', 0)} min)…"
+    )
 
     best_name = "baseline"
     best_cfg = base
     best_sum = base_sum
     best_score = score_result(base_sum)
     ranked: list[tuple[float, str, dict]] = []
+    t0 = time.time()
 
     for i, (name, cfg) in enumerate(cands, 1):
+        if budget_s > 0 and (time.time() - t0) >= budget_s:
+            print(f"budget reached after {i - 1} candidates")
+            break
         res = run_align_labeled(rows, cfg, args.lots)
         sm = summarize(f"[{i}/{len(cands)}] {name}", res)
         sc = score_result(sm)
@@ -582,9 +606,10 @@ def cmd_train(args: argparse.Namespace) -> int:
         "learned": best_sum,
         "delta_inr": round(best_sum["sum_inr"] - base_sum["sum_inr"], 1),
         "diagnosis": diag,
-        "search_n": len(cands),
+        "search_n": len(ranked),
         "day": args.day or "ALL",
         "lots": args.lots,
+        "elapsed_sec": round(time.time() - t0, 1),
     }
     preset = cfg_to_preset(best_name, best_cfg, meta)
     latest = out_dir / "learned_latest.json"
@@ -595,7 +620,7 @@ def cmd_train(args: argparse.Namespace) -> int:
     print(
         f"BEST {best_name} sum₹={best_sum['sum_inr']:+.1f} "
         f"(baseline {base_sum['sum_inr']:+.1f}, "
-        f"Δ={meta['delta_inr']:+.1f})"
+        f"Δ={meta['delta_inr']:+.1f}) elapsed={meta['elapsed_sec']}s"
     )
     print(f"wrote {latest}")
     print(f"wrote {stamped}")
@@ -647,6 +672,219 @@ def _print_env(preset: dict[str, Any]) -> None:
     print("S8_LEARNED_PRESET=data/s8_presets/learned_latest.json")
 
 
+def _print_trades_table(title: str, trades: list[dict[str, Any]], *, sim: bool) -> float:
+    print(f"\n=== {title} ===")
+    if not trades:
+        print("(no trades)")
+        return 0.0
+    total = 0.0
+    print(
+        f"{'#':>3} {'side':5} {'entry_ts':22} {'exit_ts':22} "
+        f"{'entry':>8} {'exit':>8} {'pts':>7} {'₹':>10} reason"
+    )
+    print("-" * 120)
+    for i, t in enumerate(trades, 1):
+        if sim:
+            side = t.get("side", "")
+            pts = float(t.get("gross_pts") or 0)
+            pnl = float(t.get("pnl_inr") or 0)
+            et = str(t.get("entry_ts") or "")[:22]
+            xt = str(t.get("exit_ts") or "")[:22]
+            ep = t.get("entry_px")
+            xp = t.get("exit_px")
+            reason = (t.get("exit_reason") or "")[:40]
+        else:
+            side = "long" if t.get("side") == "BUY" else "short"
+            pts = ""
+            pnl_raw = t.get("pnl_after_tax", t.get("net_pnl", t.get("gross_pnl", 0)))
+            try:
+                pnl = float(pnl_raw) if pnl_raw not in ("", None) else 0.0
+            except (TypeError, ValueError):
+                pnl = 0.0
+            try:
+                ep_f = float(t.get("entry_price") or 0)
+                xp_f = float(t.get("exit_price") or 0) if t.get("exit_price") not in ("", None) else 0.0
+                if ep_f and xp_f:
+                    pts = (xp_f - ep_f) if side == "long" else (ep_f - xp_f)
+            except (TypeError, ValueError):
+                pts = 0.0
+            et = str(t.get("entry_ts") or "")[:22]
+            xt = str(t.get("exit_ts") or "")[:22]
+            ep = t.get("entry_price")
+            xp = t.get("exit_price") or "-"
+            reason = (str(t.get("exit_reason") or t.get("status") or ""))[:40]
+        total += float(pnl)
+        pts_s = f"{float(pts):+.1f}" if pts != "" else "-"
+        print(
+            f"{i:3d} {side:5} {et:22} {xt:22} "
+            f"{ep!s:>8} {xp!s:>8} {pts_s:>7} {float(pnl):>+10.1f} {reason}"
+        )
+    print(f"TOTAL ₹ = {total:+.1f}  (n={len(trades)})")
+    return total
+
+
+def load_real_s8_trades(db: Path, day: str | None) -> list[dict[str, Any]]:
+    """Load closed S8 paper trades. Prefer storage.build_trades; fallback SQL."""
+    try:
+        from storage import build_trades
+
+        trades = build_trades(strategy="S8_NET_ZIGZAG", db_path=db)
+        if day:
+            trades = [t for t in trades if str(t.get("entry_ts") or "").startswith(day)]
+        return trades
+    except Exception:
+        pass
+
+    # Fallback: pair BUY/SHORT ↔ CLOSE from signals without init_db
+    if not db.exists():
+        return []
+    con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
+    try:
+        q = """
+            SELECT time_label, action, position_after, reason, cmp, dry_run
+            FROM signals WHERE strategy='S8_NET_ZIGZAG'
+        """
+        args: tuple = ()
+        if day:
+            q += " AND time_label LIKE ?"
+            args = (f"{day}%",)
+        q += " ORDER BY time_label ASC, id ASC"
+        rows = con.execute(q, args).fetchall()
+    except sqlite3.Error:
+        con.close()
+        return []
+    con.close()
+
+    trades: list[dict[str, Any]] = []
+    open_t: dict[str, Any] | None = None
+    for r in rows:
+        act = r["action"]
+        if act in {"BUY", "SHORT"}:
+            open_t = {
+                "side": act,
+                "entry_ts": r["time_label"],
+                "entry_price": r["cmp"],
+                "status": "OPEN",
+            }
+        elif act == "CLOSE" and open_t is not None:
+            ep = float(open_t["entry_price"] or 0)
+            xp = float(r["cmp"] or 0)
+            side = "long" if open_t["side"] == "BUY" else "short"
+            pts = (xp - ep) if side == "long" else (ep - xp)
+            # rough paper ₹ using fee_rt
+            pnl = pts * 100.0 - fee_rt(xp or ep, 100.0)
+            open_t.update(
+                {
+                    "exit_ts": r["time_label"],
+                    "exit_price": xp,
+                    "exit_reason": r["reason"],
+                    "status": "CLOSED",
+                    "gross_pnl": pts * 100.0,
+                    "net_pnl": pnl,
+                    "pnl_after_tax": pnl,
+                }
+            )
+            trades.append(open_t)
+            open_t = None
+    return trades
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """Today's REAL S8 trades vs IMPROVED counterfactual on the same ticks."""
+    day = args.day.strip() or datetime.now(IST).strftime("%Y-%m-%d")
+    db = Path(args.db)
+    rows = load_ticks(db, day=day)
+    print("=" * 72)
+    print(f"S8 LEARNING REPORT  day={day}  ticks={len(rows)}  lots={args.lots}")
+    print("=" * 72)
+    if not rows:
+        print("No ticks for this day — cannot compare.")
+        return 1
+
+    # --- REAL trades from live paper signals ---
+    real = load_real_s8_trades(db, day)
+    real_inr = _print_trades_table(
+        f"REAL paper trades (signals → S8_NET_ZIGZAG) day={day}",
+        real,
+        sim=False,
+    )
+
+    # --- Baseline replay (current E/H/X) on same ticks ---
+    base_cfg = baseline_cfg(
+        bar_minutes=args.bar_minutes,
+        bar_ticks=args.bar_ticks,
+        entry=args.entry,
+        hold=args.hold,
+        exit_m=args.exit,
+    )
+    base_res = run_align_labeled(rows, base_cfg, args.lots)
+    base_inr = _print_trades_table(
+        f"BASELINE replay on ticks  E={base_cfg.entry_model} "
+        f"H={base_cfg.hold_model} X={base_cfg.exit_model} "
+        f"TF={base_cfg.bar_minutes}m/{base_cfg.bar_ticks}t",
+        base_res["trades"],
+        sim=True,
+    )
+    diag = diagnose_rules(base_res["trades"])
+    print("\n--- diagnosis from tick-path trades ---")
+    for tip in diag["tips"]:
+        print(f"  • {tip}")
+
+    # --- Train / load improved ---
+    preset_path = Path(args.preset)
+    if args.retrain or not preset_path.exists():
+        print(
+            f"\nTraining improved model (budget={args.budget_min} min, "
+            f"quick={args.quick})…"
+        )
+        # reuse train with same day
+        ns = argparse.Namespace(
+            db=str(db),
+            lots=args.lots,
+            day=day,
+            bar_minutes=args.bar_minutes,
+            bar_ticks=args.bar_ticks,
+            entry=args.entry,
+            hold=args.hold,
+            exit=args.exit,
+            out=str(Path(args.out)),
+            quick=args.quick,
+            budget_min=args.budget_min,
+        )
+        rc = cmd_train(ns)
+        if rc != 0:
+            return rc
+        preset_path = Path(args.out) / "learned_latest.json"
+
+    if not preset_path.exists():
+        print(f"No learned preset at {preset_path}")
+        return 1
+    d = json.loads(preset_path.read_text(encoding="utf-8"))
+    learned = apply_preset_dict(d)
+    imp_res = run_align_labeled(rows, learned, args.lots)
+    imp_inr = _print_trades_table(
+        f"IMPROVED counterfactual  E={learned.entry_model} "
+        f"H={learned.hold_model} X={learned.exit_model} "
+        f"TF={learned.bar_minutes}m/{learned.bar_ticks}t "
+        f"preset={d.get('preset_name')}",
+        imp_res["trades"],
+        sim=True,
+    )
+
+    print("\n" + "=" * 72)
+    print("SUMMARY")
+    print(f"  REAL paper S8 day ₹     : {real_inr:+.1f}   (n={len(real)})")
+    print(f"  BASELINE replay ₹       : {base_inr:+.1f}   (n={len(base_res['trades'])})")
+    print(f"  IMPROVED counterfactual : {imp_inr:+.1f}   (n={len(imp_res['trades'])})")
+    print(f"  Δ improved − real       : {imp_inr - real_inr:+.1f}")
+    print(f"  Δ improved − baseline   : {imp_inr - base_inr:+.1f}")
+    print("=" * 72)
+    print("Note: IMPROVED is a what-if on the same ticks (paper), not filled fills.")
+    print("Enable with: python3 learn_s8_align.py apply   then S8_MODEL=learned")
+    return 0
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     path = Path(args.preset)
     if not path.exists():
@@ -695,6 +933,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fewer candidates (faster on VM)",
     )
+    p2.add_argument(
+        "--budget-min",
+        type=float,
+        default=0.0,
+        help="Stop sweep after N minutes (0 = no limit)",
+    )
     p2.set_defaults(func=cmd_train)
 
     p3 = sub.add_parser("compare", help="Baseline vs learned preset")
@@ -711,6 +955,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(PRESET_DIR / "learned_latest.json"),
     )
     p4.set_defaults(func=cmd_apply)
+
+    p5 = sub.add_parser(
+        "report",
+        help="REAL today trades vs IMPROVED counterfactual (full BUY/SHORT list)",
+    )
+    add_common(p5)
+    p5.add_argument(
+        "--preset",
+        default=str(PRESET_DIR / "learned_latest.json"),
+    )
+    p5.add_argument(
+        "--retrain",
+        action="store_true",
+        help="Train before reporting (uses --budget-min / --quick)",
+    )
+    p5.add_argument(
+        "--quick",
+        action="store_true",
+        help="With --retrain: smaller candidate set",
+    )
+    p5.add_argument(
+        "--budget-min",
+        type=float,
+        default=5.0,
+        help="With --retrain: minutes to search (default 5; use 30–120 for deeper)",
+    )
+    p5.set_defaults(func=cmd_report)
     return ap
 
 
