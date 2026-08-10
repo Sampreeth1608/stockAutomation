@@ -490,6 +490,40 @@ def test_tsq_drop_closes_short():
     assert sig is not None and "tsq_drop" in (sig.reason or "")
 
 
+def test_warmup_bar_does_not_enter_on_imb_vs_zero():
+    """First decision step has no previous IMB — must not BUY just because imb>0."""
+    s = AlignS8Strategy(
+        AlignS8Config(
+            bar_ticks=5,
+            require_pullback=False,
+            require_rising_imb=True,
+            require_rising_book=False,
+            min_imb_pct=3,
+            cooldown_ticks=0,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            close_on_book_drop=False,
+        )
+    )
+    # First 5-tick bar close → warmup only
+    for i in range(5):
+        sig = s.on_tick(_now(i), 10000.0 + i, _msg(12000, 9000))
+    assert sig is None
+    assert s.last_align == "warmup"
+    assert not s.imb_rising
+    # Second bar: IMB flat vs first bar → still no entry if not rising
+    for i in range(5):
+        sig = s.on_tick(_now(10 + i), 10005.0 + i, _msg(12000, 9000))
+    assert sig is None or "imb_not_rising" in (s.last_skip or "") or sig.action != "BUY"
+    # Third bar: TBQ up / TSQ flat → abs IMB rises + NET>0 → BUY
+    for i in range(5):
+        sig = s.on_tick(_now(20 + i), 10010.0 + i, _msg(13000 + i * 10, 9000))
+    assert sig is not None and sig.action == "BUY"
+    assert "imb+" in (sig.reason or "")
+    assert "(↑0.0)" not in (sig.reason or "")
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
@@ -507,6 +541,7 @@ def main() -> None:
     test_tbq_drop_closes_long()
     test_short_entry_on_negative_net_rising_imb()
     test_tsq_drop_closes_short()
+    test_warmup_bar_does_not_enter_on_imb_vs_zero()
     print("test_s8_align: OK")
 
 

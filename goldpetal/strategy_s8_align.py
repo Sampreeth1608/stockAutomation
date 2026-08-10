@@ -246,6 +246,12 @@ class AlignS8Strategy:
         if self._prev_px is None:
             self._prev_px, self._prev_tbq, self._prev_tsq = px, tbq, tsq
             self._prev_r_bt, self._prev_r_st = r_bt, r_st
+            # No real previous step yet — do not treat as rising (avoids imb>0 vs 0 entry)
+            self.imb_rising = False
+            self.tbq_rising = False
+            self.tsq_rising = False
+            self.tbq_falling = False
+            self.tsq_falling = False
             self.last_align = "warmup"
             self.last_combo = "warmup"
             return
