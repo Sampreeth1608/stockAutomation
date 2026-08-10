@@ -1,23 +1,24 @@
-"""S8_ALIGN — price ∩ TBQ ∩ TSQ individual + combined behaviour.
+"""S8_ALIGN — price ∩ TBQ ∩ TSQ with separable entry / hold / exit reasoning models.
 
-Entry (IMB sign + rising abs IMB):
-  NET>0 (IMB positive / TBQ>TSQ) + abs(IMB)_now > abs(IMB)_prev → BUY
-  NET<0 (IMB negative / TSQ>TBQ) + abs(IMB)_now > abs(IMB)_prev → SHORT
-  Optional pullback-resume gate (off by default). TBQ/TSQ rising is NOT an entry gate.
+Entry models (S8_ENTRY_MODEL):
+  imb_sign_rise  NET>0 buy / NET<0 short + abs(IMB)_now > abs(IMB)_prev   [default]
+  imb_sign       NET sign only (no rising-IMB gate)
+  align_widen    bias BULL/BEAR from px∩book widen + NET sign
 
-Hold / close on book step:
-  Long:  TBQ_now > TBQ_prev → HOLD; TBQ_now < TBQ_prev → close reason (tbq_drop)
-  Short: TSQ_now > TSQ_prev → HOLD; TSQ_now < TSQ_prev → close reason (tsq_drop)
+Hold models (S8_HOLD_MODEL):
+  book_rise         TBQ↑ long / TSQ↑ short → HOLD                       [default]
+  book_or_support   rising book OR dip/rally supported → HOLD
+  off               never hold (exits free to fire)
 
-SL / TP (book-driven — NOT bare price range):
-  Individually track Δprice, ΔTBQ, ΔTSQ and ratios price/TBQ, price/TSQ.
-  Combined:
-    widen_bull  = price↑ + TBQ↑   (support expanding with price)
-    dip_supported = price↓ + TBQ↑ (natural pullback under demand — allow deeper SL)
-    break_bull  = price↓ + TSQ↑ or TBQ compress (real stop)
-    same mirrored for shorts.
-  SL = typical adverse depth *while support held* (scientific fluctuation under book).
-  TP = typical impulse *while aligned*, or combined stall (price stops + book stops expanding).
+Exit models (S8_EXIT_MODEL):
+  fat_tp_flip    book_drop + gated break/flip + fat TP @ 50t            [default]
+  flip_gate_2m   same gates on 2m bars
+  hold_fat_flip  stricter break/flip + fatter TP @ 50t
+  book_drop      close mainly on TBQ/TSQ drop vs prev
+  break_flip     gated break+flip, no fat TP floor
+
+Bundle S8_MODEL=fat_tp_flip still sets exit TF + defaults; override with
+S8_ENTRY_MODEL / S8_HOLD_MODEL / S8_EXIT_MODEL.
 """
 
 from __future__ import annotations
@@ -69,53 +70,39 @@ class AlignS8Config:
     # Ratio overextension: price/TBQ rising while TBQ flat → take TP sooner
     ratio_overext_pct: float = 0.15  # 15% jump in px/tbq without TBQ expand
     # Cap per-step book threshold as fraction of max(TBQ,TSQ).
-    # Without this, large |NET| makes thr=frac*|NET| unreachable on ticks
-    # (e.g. NET=40k → need ΔTBQ≥4k every step) and bias stays NEUTRAL forever.
     book_thr_cap_pct: float = 0.002  # 0.2% of larger book side per step
-    # --- stabilize exits (stop break-eating noise) ---
-    # Ignore book_break until this many manage steps in the trade
+    # --- stabilize exits ---
     break_min_bars: int = 2
-    # Ignore book_break unless adverse move already >= this (pts); 0 = off
     break_min_adverse: float = 8.0
-    # If True: long break needs TSQ↑ AND TBQ↓ (stricter than OR)
     break_need_both: bool = False
-    # Require break flag true for this many consecutive steps
     break_persist: int = 1
-    # Never book_break while dip_supported / rally_supported (TBQ still buying dip)
     break_skip_if_supported: bool = True
-    # Min |dpx| to count as price_down/up for break (noise floor); 0 = use price_eps
     break_price_min: float = 1.5
-    # Prefer larger winners: floor on learned/fallback TP
     prefer_fat_tp: bool = False
     fat_tp_min: float = 35.0
     fat_stall_min: float = 30.0
-    # --- flip gate (bias flip was eating trades after break was gated) ---
     flip_min_bars: int = 2
     flip_min_adverse: float = 8.0
-    # If True: never flip-exit while in profit (let TP/stall work)
     flip_block_in_profit: bool = True
-    # Require opposite book allow for this many consecutive steps
     flip_persist: int = 1
-    # If True: flip only when opposite widen is active (stricter than bias+allow)
     flip_need_widen: bool = False
-    # Live/paper bar aggregation (0 = every tick)
     bar_minutes: int = 0
-    bar_ticks: int = 0  # e.g. 50 = decide every 50 ticks (hist best fat_tp_flip)
+    bar_ticks: int = 0
     model_name: str = "align"
-    # Only lock new entries after this many consecutive losing closes (not after 1–2 SLs)
+    # Reasoning-model names (entry / hold / exit)
+    entry_model: str = "imb_sign_rise"
+    hold_model: str = "book_rise"
+    exit_model: str = "fat_tp_flip"
+    # entry_mode: net_sign | align_widen
+    entry_mode: str = "net_sign"
     loss_lock_after: int = 5
-    # Stay locked this many decision steps, then auto-release
     loss_lock_cool_bars: int = 10
-    # If False: enter as soon as NET sign + rising IMB (no pullback wait)
     require_pullback: bool = False
-    # Entry: abs(IMB)_now must be strictly > abs(IMB)_prev
     require_rising_imb: bool = True
-    # Entry uses NET sign (positive→long, negative→short); kept False (legacy off)
     require_rising_book: bool = False
-    # While supporting book still rising (TBQ for long / TSQ for short): HOLD
-    # (skip break / flip / weaken / hard SL; TP/stall still allowed)
     hold_while_book_rises: bool = True
-    # If supporting book drops vs previous step → close (tbq_drop / tsq_drop)
+    # Also hold while dip_supported (long) / rally_supported (short)
+    hold_on_supported: bool = False
     close_on_book_drop: bool = True
 
 
@@ -145,6 +132,7 @@ class AlignS8Strategy:
         self.last_skip: str | None = None
         self.last_align: str = "NA"
         self.last_combo: str = "NA"
+        self.last_hold_reason: str | None = None
         self.px_over_tbq: float | None = None
         self.px_over_tsq: float | None = None
 
@@ -211,9 +199,20 @@ class AlignS8Strategy:
             else f" loss={self._loss_streak}/{c.loss_lock_after}"
         )
         return (
-            f"TF={tf} ALIGN[{c.model_name}] imb>={c.min_imb_pct:.0f}% "
-            f"TP={tp:.0f} SL={sl:.0f} combo={self.last_combo} "
-            f"bias={self.bias} align={self.last_align} pos={self.position}{lock}"
+            f"TF={tf} ALIGN[{c.model_name}] "
+            f"E={c.entry_model} H={c.hold_model} X={c.exit_model} "
+            f"imb>={c.min_imb_pct:.0f}% TP={tp:.0f} SL={sl:.0f} "
+            f"combo={self.last_combo} bias={self.bias} align={self.last_align} "
+            f"pos={self.position}{lock}"
+        )
+
+    def reasoning_line(self) -> str:
+        """Human-readable active reasoning models."""
+        c = self.cfg
+        return (
+            f"entry[{c.entry_model}/{c.entry_mode}] "
+            f"hold[{c.hold_model}] exit[{c.exit_model}] "
+            f"skip={self.last_skip or '-'} hold={self.last_hold_reason or '-'}"
         )
 
     def _parse_qty(self, message: dict[str, Any]) -> tuple[float, float] | None:
@@ -556,6 +555,8 @@ class AlignS8Strategy:
                     self._book_expand_since_ext = True
 
         def done(reason: str) -> SignalResult:
+            self.last_hold_reason = None
+            tagged = f"exit[{self.cfg.exit_model}] {reason}"
             self._close(move)
             return SignalResult(
                 action="CLOSE",
@@ -564,16 +565,27 @@ class AlignS8Strategy:
                 net=self.last_net,
                 net_delta=None,
                 prev_net_delta=None,
-                reason=reason,
+                reason=tagged,
             )
 
-        # Hold while supporting book still rising (TBQ↑ long / TSQ↑ short)
+        # Hold reasoning model
         book_hold = False
-        if self.cfg.hold_while_book_rises:
-            if side == "long" and self.tbq_rising:
+        self.last_hold_reason = None
+        hm = (self.cfg.hold_model or "book_rise").strip().lower()
+        if hm not in {"off", "none", "0"}:
+            if side == "long" and self.cfg.hold_while_book_rises and self.tbq_rising:
                 book_hold = True
-            if side == "short" and self.tsq_rising:
+                self.last_hold_reason = f"hold[{hm}] tbq↑"
+            elif side == "short" and self.cfg.hold_while_book_rises and self.tsq_rising:
                 book_hold = True
+                self.last_hold_reason = f"hold[{hm}] tsq↑"
+            elif self.cfg.hold_on_supported:
+                if side == "long" and self.dip_supported:
+                    book_hold = True
+                    self.last_hold_reason = f"hold[{hm}] dip_supported"
+                elif side == "short" and self.rally_supported:
+                    book_hold = True
+                    self.last_hold_reason = f"hold[{hm}] rally_supported"
 
         # Supporting book dropped vs previous step → exit
         if self.cfg.close_on_book_drop and not book_hold:
@@ -624,7 +636,7 @@ class AlignS8Strategy:
                 f"in={self._bars_in_trade} streak={self._break_streak}"
             )
 
-        # Bias flip exit — gated like break (was eating trades after break gate)
+        # Bias flip exit — gated like break (was eating trades after break was gated)
         raw_flip = (side == "long" and self.bias == "BEAR" and self.tsq_allows) or (
             side == "short" and self.bias == "BULL" and self.tbq_allows
         )
@@ -674,12 +686,11 @@ class AlignS8Strategy:
                 return done(f"tsq_weaken {drop:.1f}%")
 
         # Hard SL only if adverse beyond scientific supported depth
-        # If currently dip_supported, skip hard SL (book still buying the dip)
         if move <= -sl:
             if book_hold:
                 pass
             elif side == "long" and self.dip_supported:
-                pass  # allow supported fluctuation
+                pass
             elif side == "short" and self.rally_supported:
                 pass
             else:
@@ -694,7 +705,6 @@ class AlignS8Strategy:
                 f"impN={len(self._impulse_aligned)}"
             )
 
-        # Combined stall TP: price not making extreme AND supporting book not expanding
         if (
             move >= stall_min
             and self._bars_since_ext >= self.cfg.stall_bars
@@ -708,37 +718,54 @@ class AlignS8Strategy:
         return None
 
     def _try_enter(self, px: float) -> SignalResult | None:
+        em = self.cfg.entry_model or "imb_sign_rise"
+
+        def skip(why: str) -> None:
+            self.last_skip = f"entry[{em}]:{why}"
+
         if self._loss_locked:
             if self._tick_i >= self._loss_lock_until:
                 self._loss_locked = False
                 self._loss_streak = 0
-                self.last_skip = "loss_lock_released"
+                skip("loss_lock_released")
             else:
                 left = self._loss_lock_until - self._tick_i
-                self.last_skip = f"loss_lock streak={self._loss_streak} left={left}"
+                skip(f"loss_lock streak={self._loss_streak} left={left}")
                 return None
         if self._tick_i < self._cooldown_until:
-            self.last_skip = "cooldown"
+            skip("cooldown")
             return None
         if self.last_imb < self.cfg.min_imb_pct:
-            self.last_skip = "imb_soft"
+            skip("imb_soft")
             return None
         if self.cfg.require_rising_imb and not self.imb_rising:
-            self.last_skip = f"imb_not_rising {self.prev_imb:.1f}->{self.last_imb:.1f}"
+            skip(f"imb_not_rising {self.prev_imb:.1f}->{self.last_imb:.1f}")
             return None
 
-        # IMB positive (NET>0) → buy; IMB negative (NET<0) → short
-        # TBQ/TSQ rising is for HOLD only (not entry)
-        if self.last_net > 0:
+        mode = (self.cfg.entry_mode or "net_sign").strip().lower()
+
+        # --- long ---
+        want_long = False
+        if mode == "align_widen":
+            want_long = self.bias == "BULL" and self.last_net > 0
+            if want_long and self._tbq_allow_age > self.book_allow_memory:
+                skip("tbq_not_allow")
+                return None
+        else:
+            want_long = self.last_net > 0
+
+        if want_long:
             if self.cfg.require_rising_book and not self.tbq_rising:
-                self.last_skip = "tbq_not_rising"
+                skip("tbq_not_rising")
                 return None
             if self.cfg.require_pullback and not self._pullback_resume(px, "long"):
-                self.last_skip = "wait_bull_pullback"
+                skip("wait_bull_pullback")
                 return None
             self._open("long", px)
             tp, sl = self._tp_sl()
-            how = "pullback" if self.cfg.require_pullback else "imb+"
+            how = "pullback" if self.cfg.require_pullback else (
+                "widen" if mode == "align_widen" else "imb+"
+            )
             return SignalResult(
                 action="BUY",
                 position_after="long",
@@ -747,22 +774,34 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_long {how} net={self.last_net:.0f} "
+                    f"entry[{em}] align_long {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
                     f"TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
-        if self.last_net < 0:
+        # --- short ---
+        want_short = False
+        if mode == "align_widen":
+            want_short = self.bias == "BEAR" and self.last_net < 0
+            if want_short and self._tsq_allow_age > self.book_allow_memory:
+                skip("tsq_not_allow")
+                return None
+        else:
+            want_short = self.last_net < 0
+
+        if want_short:
             if self.cfg.require_rising_book and not self.tsq_rising:
-                self.last_skip = "tsq_not_rising"
+                skip("tsq_not_rising")
                 return None
             if self.cfg.require_pullback and not self._pullback_resume(px, "short"):
-                self.last_skip = "wait_bear_pullback"
+                skip("wait_bear_pullback")
                 return None
             self._open("short", px)
             tp, sl = self._tp_sl()
-            how = "pullback" if self.cfg.require_pullback else "imb-"
+            how = "pullback" if self.cfg.require_pullback else (
+                "widen" if mode == "align_widen" else "imb-"
+            )
             return SignalResult(
                 action="SHORT",
                 position_after="short",
@@ -771,13 +810,16 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_short {how} net={self.last_net:.0f} "
+                    f"entry[{em}] align_short {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
                     f"TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
-        self.last_skip = "wait net=0"
+        if mode == "align_widen":
+            skip(f"wait bias={self.bias} net={self.last_net:.0f}")
+        else:
+            skip("wait net=0")
         return None
 
     def _floor_bar(self, now: datetime) -> datetime:
@@ -868,15 +910,59 @@ class AlignS8Strategy:
         return self._step(float(row["close"]), tbq, tsq)
 
 
-def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
-    """Named paper models from hist sweep."""
-    n = (name or "").strip().lower()
-    if n in {"", "align", "default"}:
-        cfg.model_name = "align"
+def _apply_entry_model(name: str, cfg: AlignS8Config) -> AlignS8Config:
+    n = (name or "imb_sign_rise").strip().lower()
+    if n in {"", "default", "imb_sign_rise", "rise"}:
+        cfg.entry_model = "imb_sign_rise"
+        cfg.entry_mode = "net_sign"
+        cfg.require_rising_imb = True
+        cfg.require_rising_book = False
+        cfg.require_pullback = False
         return cfg
-    if n in {"fat_tp_flip", "fat50t", "best"}:
-        # Full-DB best ALIGN (~+₹6.8k) — still behind legacy 30m
-        cfg.model_name = "fat_tp_flip"
+    if n in {"imb_sign", "sign", "net_sign"}:
+        cfg.entry_model = "imb_sign"
+        cfg.entry_mode = "net_sign"
+        cfg.require_rising_imb = False
+        cfg.require_rising_book = False
+        cfg.require_pullback = False
+        return cfg
+    if n in {"align_widen", "widen", "bias"}:
+        cfg.entry_model = "align_widen"
+        cfg.entry_mode = "align_widen"
+        cfg.require_rising_imb = True
+        cfg.require_rising_book = False
+        cfg.require_pullback = False
+        return cfg
+    cfg.entry_model = n
+    return cfg
+
+
+def _apply_hold_model(name: str, cfg: AlignS8Config) -> AlignS8Config:
+    n = (name or "book_rise").strip().lower()
+    if n in {"", "default", "book_rise", "rise"}:
+        cfg.hold_model = "book_rise"
+        cfg.hold_while_book_rises = True
+        cfg.hold_on_supported = False
+        return cfg
+    if n in {"book_or_support", "support", "rise_or_support"}:
+        cfg.hold_model = "book_or_support"
+        cfg.hold_while_book_rises = True
+        cfg.hold_on_supported = True
+        return cfg
+    if n in {"off", "none", "0"}:
+        cfg.hold_model = "off"
+        cfg.hold_while_book_rises = False
+        cfg.hold_on_supported = False
+        return cfg
+    cfg.hold_model = n
+    return cfg
+
+
+def _apply_exit_model(name: str, cfg: AlignS8Config) -> AlignS8Config:
+    """Exit/TP reasoning presets (also set TF when named for live use)."""
+    n = (name or "fat_tp_flip").strip().lower()
+    if n in {"", "default", "fat_tp_flip", "fat50t", "best"}:
+        cfg.exit_model = "fat_tp_flip"
         cfg.bar_ticks = 50
         cfg.bar_minutes = 0
         cfg.min_imb_pct = 3.0
@@ -884,25 +970,23 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.break_min_adverse = 8.0
         cfg.break_skip_if_supported = True
         cfg.break_price_min = 1.5
+        cfg.break_persist = 1
+        cfg.break_need_both = False
         cfg.flip_min_bars = 2
         cfg.flip_min_adverse = 8.0
         cfg.flip_block_in_profit = True
+        cfg.flip_persist = 1
+        cfg.flip_need_widen = False
         cfg.prefer_fat_tp = True
         cfg.fat_tp_min = 35.0
         cfg.fat_stall_min = 30.0
         cfg.tp_points = 45.0
         cfg.tp_min = 35.0
         cfg.cooldown_ticks = 1
-        cfg.loss_lock_after = 5
-        cfg.loss_lock_cool_bars = 10
-        cfg.require_pullback = False  # enter on align (no pullback wait)
-        cfg.require_rising_imb = True
-        cfg.require_rising_book = False  # TBQ/TSQ rising = hold/close, not entry
-        cfg.hold_while_book_rises = True
         cfg.close_on_book_drop = True
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
-        cfg.model_name = "flip_gate_2m"
+        cfg.exit_model = "flip_gate_2m"
         cfg.bar_minutes = 2
         cfg.bar_ticks = 0
         cfg.break_min_bars = 2
@@ -914,16 +998,12 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.flip_block_in_profit = True
         cfg.prefer_fat_tp = False
         cfg.cooldown_ticks = 1
-        cfg.require_pullback = False
-        cfg.require_rising_imb = True
-        cfg.require_rising_book = False
-        cfg.hold_while_book_rises = True
         cfg.close_on_book_drop = True
         cfg.pullback_points = max(5.0, 4.0 + 2 * 0.3)
         cfg.resume_points = max(3.0, 3.0 + 2 * 0.15)
         return cfg
     if n in {"hold_fat_flip", "strict50t"}:
-        cfg.model_name = "hold_fat_flip"
+        cfg.exit_model = "hold_fat_flip"
         cfg.bar_ticks = 50
         cfg.bar_minutes = 0
         cfg.break_min_bars = 3
@@ -944,11 +1024,62 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.tp_min = 40.0
         cfg.stall_bars = 2
         cfg.cooldown_ticks = 1
-        cfg.require_pullback = False
-        cfg.require_rising_imb = True
-        cfg.require_rising_book = False
-        cfg.hold_while_book_rises = True
         cfg.close_on_book_drop = True
+        return cfg
+    if n in {"book_drop", "drop"}:
+        cfg.exit_model = "book_drop"
+        cfg.close_on_book_drop = True
+        cfg.break_min_bars = 99
+        cfg.flip_min_bars = 99
+        cfg.weaken_pct = 90.0
+        cfg.prefer_fat_tp = True
+        cfg.fat_tp_min = 35.0
+        cfg.tp_points = 45.0
+        return cfg
+    if n in {"break_flip", "gates"}:
+        cfg.exit_model = "break_flip"
+        cfg.close_on_book_drop = True
+        cfg.break_min_bars = 2
+        cfg.break_min_adverse = 8.0
+        cfg.break_skip_if_supported = True
+        cfg.break_price_min = 1.5
+        cfg.flip_min_bars = 2
+        cfg.flip_min_adverse = 8.0
+        cfg.flip_block_in_profit = True
+        cfg.prefer_fat_tp = False
+        return cfg
+    cfg.exit_model = n
+    return cfg
+
+
+def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
+    """Bundle preset: sets model_name + entry/hold/exit defaults + TF."""
+    n = (name or "").strip().lower()
+    if n in {"", "align", "default"}:
+        cfg.model_name = "align"
+        cfg = _apply_entry_model("imb_sign_rise", cfg)
+        cfg = _apply_hold_model("book_rise", cfg)
+        cfg = _apply_exit_model("break_flip", cfg)
+        return cfg
+    if n in {"fat_tp_flip", "fat50t", "best"}:
+        cfg.model_name = "fat_tp_flip"
+        cfg.loss_lock_after = 5
+        cfg.loss_lock_cool_bars = 10
+        cfg = _apply_entry_model("imb_sign_rise", cfg)
+        cfg = _apply_hold_model("book_rise", cfg)
+        cfg = _apply_exit_model("fat_tp_flip", cfg)
+        return cfg
+    if n in {"flip_gate_2m", "flip2m", "2m"}:
+        cfg.model_name = "flip_gate_2m"
+        cfg = _apply_entry_model("imb_sign_rise", cfg)
+        cfg = _apply_hold_model("book_rise", cfg)
+        cfg = _apply_exit_model("flip_gate_2m", cfg)
+        return cfg
+    if n in {"hold_fat_flip", "strict50t"}:
+        cfg.model_name = "hold_fat_flip"
+        cfg = _apply_entry_model("imb_sign_rise", cfg)
+        cfg = _apply_hold_model("book_or_support", cfg)
+        cfg = _apply_exit_model("hold_fat_flip", cfg)
         return cfg
     cfg.model_name = n
     return cfg
@@ -971,7 +1102,6 @@ def align_s8_from_env() -> AlignS8Strategy:
             return default
         return raw.strip().lower() in {"1", "true", "yes", "y"}
 
-    # Default paper secondary = hist-best ALIGN (fat_tp_flip @ 50t)
     model = os.getenv("S8_MODEL", "fat_tp_flip").strip().lower()
 
     cfg = AlignS8Config(
@@ -1015,23 +1145,33 @@ def align_s8_from_env() -> AlignS8Strategy:
         require_rising_imb=_b("S8_REQUIRE_RISING_IMB", True),
         require_rising_book=_b("S8_REQUIRE_RISING_BOOK", False),
         hold_while_book_rises=_b("S8_HOLD_WHILE_BOOK_RISES", True),
+        hold_on_supported=_b("S8_HOLD_ON_SUPPORTED", False),
         close_on_book_drop=_b("S8_CLOSE_ON_BOOK_DROP", True),
     )
     cfg = _apply_model_preset(model, cfg)
-    # Explicit env overrides still win for TF if set non-zero after preset
+
+    # Explicit entry/hold/exit reasoning models (override bundle)
+    if os.getenv("S8_ENTRY_MODEL") is not None:
+        cfg = _apply_entry_model(os.getenv("S8_ENTRY_MODEL", ""), cfg)
+    if os.getenv("S8_HOLD_MODEL") is not None:
+        cfg = _apply_hold_model(os.getenv("S8_HOLD_MODEL", ""), cfg)
+    if os.getenv("S8_EXIT_MODEL") is not None:
+        cfg = _apply_exit_model(os.getenv("S8_EXIT_MODEL", ""), cfg)
+
     env_ticks = os.getenv("S8_BAR_TICKS")
     env_mins = os.getenv("S8_BAR_MINUTES")
     if env_ticks is not None and str(env_ticks).strip() != "":
         cfg.bar_ticks = int(env_ticks)
     if env_mins is not None and str(env_mins).strip() != "":
         cfg.bar_minutes = int(env_mins)
-    # Explicit rising/hold env wins after preset (same pattern as TF)
     if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
         cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
     if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:
         cfg.require_rising_book = _b("S8_REQUIRE_RISING_BOOK", False)
     if os.getenv("S8_HOLD_WHILE_BOOK_RISES") is not None:
         cfg.hold_while_book_rises = _b("S8_HOLD_WHILE_BOOK_RISES", True)
+    if os.getenv("S8_HOLD_ON_SUPPORTED") is not None:
+        cfg.hold_on_supported = _b("S8_HOLD_ON_SUPPORTED", False)
     if os.getenv("S8_CLOSE_ON_BOOK_DROP") is not None:
         cfg.close_on_book_drop = _b("S8_CLOSE_ON_BOOK_DROP", True)
     return AlignS8Strategy(cfg)

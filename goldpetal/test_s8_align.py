@@ -104,7 +104,9 @@ def test_factory():
 
     os.environ["S8_LOGIC"] = "align"
     os.environ["S8_MODEL"] = "fat_tp_flip"
-    # clear TF overrides so preset wins
+    os.environ["S8_ENTRY_MODEL"] = "imb_sign_rise"
+    os.environ["S8_HOLD_MODEL"] = "book_rise"
+    os.environ["S8_EXIT_MODEL"] = "fat_tp_flip"
     os.environ.pop("S8_BAR_TICKS", None)
     os.environ.pop("S8_BAR_MINUTES", None)
     from strategy_net_zigzag import net_zigzag_from_env
@@ -113,8 +115,12 @@ def test_factory():
     assert "ALIGN" in s.status_line
     assert "50t" in s.status_line
     assert "fat_tp_flip" in s.status_line
-    os.environ.pop("S8_LOGIC", None)
-    os.environ.pop("S8_MODEL", None)
+    assert "E=imb_sign_rise" in s.status_line
+    assert "H=book_rise" in s.status_line
+    assert "X=fat_tp_flip" in s.status_line
+    assert "entry[imb_sign_rise" in s.reasoning_line()
+    for k in ("S8_LOGIC", "S8_MODEL", "S8_ENTRY_MODEL", "S8_HOLD_MODEL", "S8_EXIT_MODEL"):
+        os.environ.pop(k, None)
 
 
 def test_count_bar_closes_every_n():
@@ -355,6 +361,7 @@ def test_enter_aligned_without_pullback():
     sig = s._try_enter(10015.0)
     assert sig is not None and sig.action == "BUY"
     assert "imb+" in (sig.reason or "")
+    assert "entry[" in (sig.reason or "")
 
 
 def test_entry_net_sign_and_rising_imb():
@@ -381,6 +388,7 @@ def test_entry_net_sign_and_rising_imb():
     assert not s.imb_rising
     assert s._try_enter(10022.0) is None
     assert "imb_not_rising" in (s.last_skip or "")
+    assert "entry[" in (s.last_skip or "")
 
     # IMB rising + NET>0 even if TBQ flat → BUY
     s._prev_tbq, s._prev_tsq, s._prev_px = 15100.0, 12000.0, 10022.0
@@ -391,6 +399,7 @@ def test_entry_net_sign_and_rising_imb():
     sig = s._try_enter(10024.0)
     assert sig is not None and sig.action == "BUY"
     assert "imb+" in (sig.reason or "")
+    assert "entry[" in (sig.reason or "")
 
 
 def test_hold_while_tbq_rising_skips_break_and_sl():
@@ -441,6 +450,7 @@ def test_tbq_drop_closes_long():
     assert s.tbq_falling
     sig = s._manage(10005.0)
     assert sig is not None and "tbq_drop" in (sig.reason or "")
+    assert "exit[" in (sig.reason or "")
 
 
 def test_short_entry_on_negative_net_rising_imb():
@@ -466,6 +476,7 @@ def test_short_entry_on_negative_net_rising_imb():
     sig = s._try_enter(9995.0)
     assert sig is not None and sig.action == "SHORT"
     assert "imb-" in (sig.reason or "")
+    assert "entry[" in (sig.reason or "")
 
 
 def test_tsq_drop_closes_short():
@@ -488,6 +499,7 @@ def test_tsq_drop_closes_short():
     assert s.tsq_falling
     sig = s._manage(9995.0)
     assert sig is not None and "tsq_drop" in (sig.reason or "")
+    assert "exit[" in (sig.reason or "")
 
 
 def test_warmup_bar_does_not_enter_on_imb_vs_zero():
@@ -521,7 +533,49 @@ def test_warmup_bar_does_not_enter_on_imb_vs_zero():
         sig = s.on_tick(_now(20 + i), 10010.0 + i, _msg(13000 + i * 10, 9000))
     assert sig is not None and sig.action == "BUY"
     assert "imb+" in (sig.reason or "")
+    assert "entry[" in (sig.reason or "")
     assert "(↑0.0)" not in (sig.reason or "")
+
+
+def test_hold_model_sets_hold_reason():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            hold_model="book_rise",
+            hold_while_book_rises=True,
+            close_on_book_drop=True,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            stall_bars=10_000,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("long", 10000.0)
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 12000.0, 8000.0
+    s._update_behaviour(10010.0, 12500.0, 8000.0)
+    assert s.tbq_rising
+    assert s._manage(10010.0) is None
+    assert s.last_hold_reason and "hold[book_rise]" in s.last_hold_reason
+    assert "tbq↑" in s.last_hold_reason
+
+
+def test_reasoning_models_apply():
+    from strategy_s8_align import (
+        _apply_entry_model,
+        _apply_exit_model,
+        _apply_hold_model,
+    )
+
+    c = AlignS8Config()
+    c = _apply_entry_model("imb_sign", c)
+    assert c.entry_model == "imb_sign" and c.require_rising_imb is False
+    c = _apply_hold_model("off", c)
+    assert c.hold_model == "off" and c.hold_while_book_rises is False
+    c = _apply_exit_model("book_drop", c)
+    assert c.exit_model == "book_drop" and c.close_on_book_drop is True
+    c = _apply_hold_model("book_or_support", c)
+    assert c.hold_on_supported is True
 
 
 def main() -> None:
@@ -542,6 +596,8 @@ def main() -> None:
     test_short_entry_on_negative_net_rising_imb()
     test_tsq_drop_closes_short()
     test_warmup_bar_does_not_enter_on_imb_vs_zero()
+    test_hold_model_sets_hold_reason()
+    test_reasoning_models_apply()
     print("test_s8_align: OK")
 
 

@@ -77,16 +77,20 @@ def parse_ts(raw: str) -> datetime:
 
 def _tag(reason: str) -> str:
     r = reason or ""
-    if r.startswith("tp") or "stall" in r:
+    if "tbq_drop" in r or "tsq_drop" in r:
+        return "drop"
+    if "stall" in r or "tp +" in r or r.startswith("tp"):
         return "tp"
-    if r.startswith("sl"):
-        return "sl"
     if "book_break" in r:
         return "break"
     if "flip" in r:
         return "flip"
     if "weaken" in r:
         return "weaken"
+    if "<=-" in r or r.startswith("sl ") or " sl " in f" {r}":
+        return "sl"
+    if "entry[" in r:
+        return "entry"
     return "other"
 
 
