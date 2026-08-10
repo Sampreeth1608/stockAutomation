@@ -119,7 +119,25 @@ def test_factory():
     assert "H=book_rise" in s.status_line
     assert "X=fat_tp_flip" in s.status_line
     assert "entry[imb_sign_rise" in s.reasoning_line()
-    for k in ("S8_LOGIC", "S8_MODEL", "S8_ENTRY_MODEL", "S8_HOLD_MODEL", "S8_EXIT_MODEL"):
+
+    # Explicit 10m must clear fat_tp_flip's 50t
+    os.environ["S8_BAR_MINUTES"] = "10"
+    os.environ["S8_BAR_TICKS"] = "0"
+    s2 = net_zigzag_from_env()
+    assert s2.cfg.bar_minutes == 10
+    assert s2.cfg.bar_ticks == 0
+    assert "10m" in s2.status_line
+    assert "50t" not in s2.status_line
+
+    for k in (
+        "S8_LOGIC",
+        "S8_MODEL",
+        "S8_ENTRY_MODEL",
+        "S8_HOLD_MODEL",
+        "S8_EXIT_MODEL",
+        "S8_BAR_MINUTES",
+        "S8_BAR_TICKS",
+    ):
         os.environ.pop(k, None)
 
 

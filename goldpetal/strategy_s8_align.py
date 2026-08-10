@@ -932,10 +932,11 @@ class AlignS8Strategy:
             return None
         tbq, tsq = qs
         px = float(ltp)
-        if self.cfg.bar_ticks and self.cfg.bar_ticks > 0:
-            return self._on_tick_count_bar(px, tbq, tsq)
+        # Time bars win when configured (don't let leftover tick TF steal decisions)
         if self.cfg.bar_minutes and self.cfg.bar_minutes > 0:
             return self._on_tick_time_bar(now, px, tbq, tsq)
+        if self.cfg.bar_ticks and self.cfg.bar_ticks > 0:
+            return self._on_tick_count_bar(px, tbq, tsq)
         return self._step(px, tbq, tsq)
 
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
@@ -1199,10 +1200,17 @@ def align_s8_from_env() -> AlignS8Strategy:
 
     env_ticks = os.getenv("S8_BAR_TICKS")
     env_mins = os.getenv("S8_BAR_MINUTES")
-    if env_ticks is not None and str(env_ticks).strip() != "":
-        cfg.bar_ticks = int(env_ticks)
+    # TF overrides are mutually exclusive. Explicit minutes must clear fat_tp_flip's 50t.
     if env_mins is not None and str(env_mins).strip() != "":
-        cfg.bar_minutes = int(env_mins)
+        m = int(env_mins)
+        cfg.bar_minutes = m
+        if m > 0:
+            cfg.bar_ticks = 0
+    if env_ticks is not None and str(env_ticks).strip() != "":
+        t = int(env_ticks)
+        cfg.bar_ticks = t
+        if t > 0:
+            cfg.bar_minutes = 0
     if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
         cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
     if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:
