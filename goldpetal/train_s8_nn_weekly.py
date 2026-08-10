@@ -6,8 +6,8 @@ baseline vs NN-gated paper replay, appends evolution history, and writes CSVs
 you can File→Import into Google Sheets.
 
 Examples:
-  python3 train_s8_nn_weekly.py --db data/ticks.db --tf 10 --lots 100
-  python3 train_s8_nn_weekly.py --db data/ticks.db --tf 10 --budget-note "week-33"
+  python3 train_s8_nn_weekly.py --db data/ticks.db --tf 30 --lots 100
+  python3 train_s8_nn_weekly.py --db data/ticks.db --tf 30 --budget-note "week-33"
 
 Cron (Sunday 18:00 IST example):
   0 18 * * 0 cd ~/goldpetal && ./weekly_s8_nn.sh >> data/s8_nn/cron.log 2>&1
@@ -105,7 +105,7 @@ def run_nn_gated(
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(DB))
-    ap.add_argument("--tf", type=int, default=10, help="bar minutes for NN features")
+    ap.add_argument("--tf", type=int, default=30, help="bar minutes for NN features")
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--lags", type=int, default=3)
     ap.add_argument("--horizon", type=int, default=6)
@@ -115,7 +115,7 @@ def main() -> None:
     ap.add_argument("--out-model", default=str(DEFAULT_MODEL_PATH))
     ap.add_argument("--out-dir", default="data/s8_nn")
     ap.add_argument("--budget-note", default="", help="note stored in Sheets row")
-    ap.add_argument("--bar-minutes", type=int, default=10, help="S8 decision TF")
+    ap.add_argument("--bar-minutes", type=int, default=30, help="S8 decision TF")
     ap.add_argument("--bar-ticks", type=int, default=0)
     args = ap.parse_args()
 

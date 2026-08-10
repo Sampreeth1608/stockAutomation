@@ -11,7 +11,7 @@ This is the trading analogue of “reasoning at scale” — not a chat LLM.
   Multi-step    path labels over a horizon (enter→hold→exit quality)
 
 CLI:
-  python3 s8_scale_improve.py --db data/ticks.db --tf 10 --folds 5
+  python3 s8_scale_improve.py --db data/ticks.db --tf 30 --folds 5
 """
 
 from __future__ import annotations
@@ -462,7 +462,7 @@ def run_scale(
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(DB))
-    ap.add_argument("--tf", type=int, default=10)
+    ap.add_argument("--tf", type=int, default=30)
     ap.add_argument("--lags", type=int, default=3)
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--horizon", type=int, default=8)

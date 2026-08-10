@@ -145,7 +145,7 @@ def exit_tag(reason: str) -> str:
 
 def baseline_cfg(
     *,
-    bar_minutes: int = 10,
+    bar_minutes: int = 30,
     bar_ticks: int = 0,
     entry: str = "imb_sign_rise",
     hold: str = "book_rise",

@@ -7,7 +7,7 @@ Stages (see s8_ml_pipeline.STAGE_MAP):
 
 Examples:
   python3 evolve_s8_ml.py stages
-  python3 evolve_s8_ml.py train --db data/ticks.db --tf 10
+  python3 evolve_s8_ml.py train --db data/ticks.db --tf 30
   python3 evolve_s8_ml.py feedback-init
   python3 evolve_s8_ml.py apply-env
 """
@@ -329,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("train", help="full weekly evolve + Sheets pack")
     p.add_argument("--db", default=str(DB))
-    p.add_argument("--tf", type=int, default=10)
+    p.add_argument("--tf", type=int, default=30)
     p.add_argument("--lots", type=float, default=100.0)
     p.add_argument("--lags", type=int, default=3)
     p.add_argument("--horizon", type=int, default=6)
@@ -340,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-model", default=str(DEFAULT_MODEL_PATH))
     p.add_argument("--out-dir", default="data/s8_nn")
     p.add_argument("--budget-note", default="")
-    p.add_argument("--bar-minutes", type=int, default=10)
+    p.add_argument("--bar-minutes", type=int, default=30)
     p.add_argument("--bar-ticks", type=int, default=0)
     p.add_argument(
         "--scale",

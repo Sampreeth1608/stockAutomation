@@ -12,8 +12,8 @@ NOTE="week-$(date +%V)"
 # Scale walk-forward + reasoner features + multi-step paths + paper safety + Sheets
 exec "$PY" evolve_s8_ml.py train \
   --db data/ticks.db \
-  --tf 10 \
-  --bar-minutes 10 \
+  --tf 30 \
+  --bar-minutes 30 \
   --lots 100 \
   --min-proba 0.55 \
   --scale \

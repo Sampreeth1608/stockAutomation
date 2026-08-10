@@ -1295,7 +1295,7 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
             cfg = _apply_entry_model("imb_sign_rise", cfg)
             cfg = _apply_hold_model("book_rise", cfg)
             cfg = _apply_exit_model("fat_tp_flip", cfg)
-            cfg.bar_minutes = 10
+            cfg.bar_minutes = 30
             cfg.bar_ticks = 0
             cfg.model_name = "learned_missing"
         return cfg
