@@ -63,6 +63,10 @@ class AlignS8Config:
     weaken_pct: float = 20.0
     # Ratio overextension: price/TBQ rising while TBQ flat → take TP sooner
     ratio_overext_pct: float = 0.15  # 15% jump in px/tbq without TBQ expand
+    # Cap per-step book threshold as fraction of max(TBQ,TSQ).
+    # Without this, large |NET| makes thr=frac*|NET| unreachable on ticks
+    # (e.g. NET=40k → need ΔTBQ≥4k every step) and bias stays NEUTRAL forever.
+    book_thr_cap_pct: float = 0.002  # 0.2% of larger book side per step
 
 
 class AlignS8Strategy:
@@ -161,7 +165,9 @@ class AlignS8Strategy:
         dtbq = tbq - float(self._prev_tbq)
         dtsq = tsq - float(self._prev_tsq)
         abs_net = max(abs(net), 1e-9)
-        thr = self.cfg.book_frac_of_net * abs_net
+        thr_net = self.cfg.book_frac_of_net * abs_net
+        thr_cap = max(1.0, self.cfg.book_thr_cap_pct * max(tbq, tsq, 1.0))
+        thr = max(1.0, min(thr_net, thr_cap))
 
         # --- individual ---
         self.price_up = dpx > self.cfg.price_eps
@@ -614,6 +620,7 @@ def align_s8_from_env() -> AlignS8Strategy:
         stall_min_profit=_f("S8_STALL_MIN_PROFIT", 20.0),
         weaken_pct=_f("S8_WEAKEN_PCT", 20.0),
         ratio_overext_pct=_f("S8_RATIO_OVEREXT_PCT", 0.15),
+        book_thr_cap_pct=_f("S8_BOOK_THR_CAP_PCT", 0.002),
     )
     _ = _b  # reserved
     return AlignS8Strategy(cfg)

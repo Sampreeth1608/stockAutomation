@@ -152,6 +152,7 @@ def test_recorder_writes(tmp_path: Path | None = None):
 if __name__ == "__main__":
     test_long_entry_on_imb_edge_and_tp()
     test_no_immediate_reentry_after_sl()
+    test_always_mode_reenters_after_sl_while_imb_hot()
     test_flip_closes()
     test_bar_mode_always_enters_on_bar_close()
     test_recorder_writes()

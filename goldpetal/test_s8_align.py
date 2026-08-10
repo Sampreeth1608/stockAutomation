@@ -110,10 +110,33 @@ def test_factory():
     os.environ.pop("S8_LOGIC", None)
 
 
+def test_large_net_still_detects_widen():
+    """Book thr must be capped so large |NET| does not freeze bias."""
+    s = AlignS8Strategy(
+        AlignS8Config(
+            min_imb_pct=10,
+            book_frac_of_net=0.10,
+            book_thr_cap_pct=0.002,
+            price_eps=0.5,
+            cooldown_ticks=0,
+        )
+    )
+    # Seed huge NET
+    s.on_tick(_now(0), 10000.0, _msg(50000, 20000))
+    # Modest TBQ expand + price up — uncapped thr would be 0.1*30000=3000
+    sig_states = []
+    for i in range(5):
+        s.on_tick(_now(i + 1), 10000.0 + (i + 1) * 2, _msg(50000 + (i + 1) * 200, 20000))
+        sig_states.append((s.widen_bull, s.bias, s.tbq_expand))
+    assert any(w for w, _, _ in sig_states), sig_states
+    assert any(b == "BULL" for _, b, _ in sig_states), sig_states
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
     test_factory()
+    test_large_net_still_detects_widen()
     print("test_s8_align: OK")
 
 
