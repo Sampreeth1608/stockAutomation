@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""S8 ALIGN hist on tick + MTF bars: 1m,2m,3m,5m,10m,15m,30m,1h.
+"""S8 ALIGN hist on tick + time bars + count bars (5t…60t).
+
+Time TFs: 1m,2m,3m,5m,10m,15m,30m,1h
+Tick-count TFs: 5t,10t,15t,20t,30t,40t,50t,60t
 
 Uses book-driven SL/TP (price∩TBQ∩TSQ), not bare price-range stops.
 
   python3 paper_sim_s8_align_mtf.py --db data/ticks.db --lots 100
   python3 paper_sim_s8_align_mtf.py --db data/ticks.db --lots 100 --day 2026-08-10
+  python3 paper_sim_s8_align_mtf.py --db data/ticks.db --lots 100 --only ticks
   python3 paper_sim_s8_align_mtf.py --db data/ticks.db --lots 100 --json-out /tmp/s8_align_mtf.json
 """
 
@@ -12,19 +16,25 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from mtf_bars import INTERVALS, build_rich_bars, load_tick_rows
+from mtf_bars import (
+    INTERVALS,
+    TICK_INTERVALS,
+    build_rich_bars,
+    build_rich_bars_by_ticks,
+    load_tick_rows,
+)
 from strategy_net_zigzag import NetZigzagConfig, NetZigzagStrategy
 from strategy_s8_align import AlignS8Config, AlignS8Strategy
 
 IST = ZoneInfo("Asia/Kolkata")
 DB = Path("data/ticks.db")
 TFS = list(INTERVALS)  # 1m..1h
+TICK_TFS = list(TICK_INTERVALS)  # 5t..60t
 
 
 def fee_rt(ltp: float, lots: float) -> float:
@@ -222,8 +232,9 @@ def print_md_table(rows: list[dict]) -> None:
         )
 
 
-def align_cfg_for_tf(minutes: int | None) -> AlignS8Config:
-    if minutes is None:
+def align_cfg_for_scale(scale: float | None) -> AlignS8Config:
+    """scale=None → raw tick; else minutes or tick-count used to loosen pullbacks."""
+    if scale is None:
         return AlignS8Config(
             min_imb_pct=10.0,
             book_frac_of_net=0.10,
@@ -235,13 +246,14 @@ def align_cfg_for_tf(minutes: int | None) -> AlignS8Config:
             tp_min=20.0,
             weaken_pct=20.0,
         )
+    s = float(scale)
     return AlignS8Config(
         min_imb_pct=10.0,
         book_frac_of_net=0.10,
-        pullback_points=max(5.0, 4.0 + minutes * 0.3),
-        resume_points=max(3.0, 3.0 + minutes * 0.15),
+        pullback_points=max(5.0, 4.0 + s * 0.3),
+        resume_points=max(3.0, 3.0 + s * 0.15),
         stall_min_profit=20.0,
-        stall_bars=2 if minutes >= 15 else 3,
+        stall_bars=2 if s >= 15 else 3,
         sl_min=20.0,
         tp_min=20.0,
         weaken_pct=20.0,
@@ -249,28 +261,42 @@ def align_cfg_for_tf(minutes: int | None) -> AlignS8Config:
     )
 
 
-def run_report(rows, lots: float) -> dict:
+def run_report(rows, lots: float, only: str = "all") -> dict:
     results: list[dict] = []
+    only = (only or "all").strip().lower()
 
     print("\n=== S8 ALIGN book-driven SL/TP ===")
-    tick_pack = run_align_ticks(rows, lots, align_cfg_for_tf(None))
-    summarize("TICK", tick_pack)
-    results.append({"tf": "tick", "kind": "ALIGN", **tick_pack})
+    if only in {"all", "time", "raw"}:
+        tick_pack = run_align_ticks(rows, lots, align_cfg_for_scale(None))
+        summarize("TICK", tick_pack)
+        results.append({"tf": "tick", "kind": "ALIGN", **tick_pack})
 
-    for tf_name, minutes in TFS:
-        bars = [b.to_row() for b in build_rich_bars(rows, tf_name, minutes)]
-        pack = run_align_bars(bars, lots, align_cfg_for_tf(minutes))
-        summarize(f"ALIGN_{tf_name}", pack)
-        results.append({"tf": tf_name, "kind": "ALIGN", **pack})
+    if only in {"all", "time"}:
+        for tf_name, minutes in TFS:
+            bars = [b.to_row() for b in build_rich_bars(rows, tf_name, minutes)]
+            pack = run_align_bars(bars, lots, align_cfg_for_scale(minutes))
+            summarize(f"ALIGN_{tf_name}", pack)
+            results.append({"tf": tf_name, "kind": "ALIGN", **pack})
 
-    print("\n=== reference: legacy always (fixed TP25/SL20) ===")
-    leg30 = run_legacy_always(rows, lots, bar_minutes=30)
-    summarize("LEGACY_30m", leg30)
-    results.append({"tf": "30m", "kind": "LEGACY_ALWAYS", **leg30})
+    if only in {"all", "ticks"}:
+        print("\n=== S8 ALIGN on tick-count bars (5t…60t) ===")
+        for tf_name, n_ticks in TICK_TFS:
+            bars = [b.to_row() for b in build_rich_bars_by_ticks(rows, tf_name, n_ticks)]
+            # scale pullbacks gently with count (5t≈light, 60t≈heavier)
+            scale = max(1.0, n_ticks / 5.0)
+            pack = run_align_bars(bars, lots, align_cfg_for_scale(scale))
+            summarize(f"ALIGN_{tf_name}", pack)
+            results.append({"tf": tf_name, "kind": "ALIGN", **pack})
 
-    leg_tick = run_legacy_always(rows, lots, bar_minutes=0)
-    summarize("LEGACY_tick", leg_tick)
-    results.append({"tf": "tick", "kind": "LEGACY_ALWAYS", **leg_tick})
+    if only in {"all", "time"}:
+        print("\n=== reference: legacy always (fixed TP25/SL20) ===")
+        leg30 = run_legacy_always(rows, lots, bar_minutes=30)
+        summarize("LEGACY_30m", leg30)
+        results.append({"tf": "30m", "kind": "LEGACY_ALWAYS", **leg30})
+
+        leg_tick = run_legacy_always(rows, lots, bar_minutes=0)
+        summarize("LEGACY_tick", leg_tick)
+        results.append({"tf": "tick", "kind": "LEGACY_ALWAYS", **leg_tick})
 
     align_only = [r for r in results if r["kind"] == "ALIGN"]
     print("\n=== ALIGN markdown ===")
@@ -283,6 +309,12 @@ def main() -> None:
     ap.add_argument("--db", default=str(DB))
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--day", default="")
+    ap.add_argument(
+        "--only",
+        default="all",
+        choices=["all", "time", "ticks", "raw"],
+        help="all=tick+time+5t..60t; ticks=5t..60t only; time=tick+1m..1h",
+    )
     ap.add_argument("--json-out", default="")
     args = ap.parse_args()
     day = args.day.strip() or None
@@ -292,16 +324,17 @@ def main() -> None:
         raise SystemExit(f"DB missing or empty: {db_path}")
 
     rows = filter_rows_day(load_tick_rows(db_path), day)
-    print(f"db={args.db} day={day or 'ALL'} ticks={len(rows)} lots={args.lots}")
+    print(f"db={args.db} day={day or 'ALL'} ticks={len(rows)} lots={args.lots} only={args.only}")
     if len(rows) < 100:
         raise SystemExit("need more ticks")
 
-    report = run_report(rows, args.lots)
+    report = run_report(rows, args.lots, only=args.only)
     payload = {
         "db": str(args.db),
         "day": day or "ALL",
         "ticks": len(rows),
         "lots": args.lots,
+        "only": args.only,
         "results": report["rows"],
     }
     if args.json_out:

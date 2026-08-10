@@ -26,6 +26,18 @@ INTERVALS: list[tuple[str, int]] = [
     ("1h", 60),
 ]
 
+# Count-based bars (N ticks per bar), for ALIGN hist sweeps.
+TICK_INTERVALS: list[tuple[str, int]] = [
+    ("5t", 5),
+    ("10t", 10),
+    ("15t", 15),
+    ("20t", 20),
+    ("30t", 30),
+    ("40t", 40),
+    ("50t", 50),
+    ("60t", 60),
+]
+
 
 @dataclass
 class RichBar:
@@ -275,4 +287,95 @@ def build_rich_bars(rows, tf_name: str, minutes: int) -> list[RichBar]:
         n += 1
     if cur_key is not None:
         flush(cur_key)
+    return bars
+
+
+def build_rich_bars_by_ticks(rows, tf_name: str, n_per_bar: int) -> list[RichBar]:
+    """Aggregate every ``n_per_bar`` ticks into one RichBar (count-based TF)."""
+    n_per = max(1, int(n_per_bar))
+    bars: list[RichBar] = []
+    o = h = l = c = None
+    tbq_o = tsq_o = tbq_c = tsq_c = 0.0
+    ltq_sum = 0.0
+    n = 0
+    buy5 = sell5 = 0.0
+    oi = vol = None
+    bar_time: datetime | None = None
+
+    def flush() -> None:
+        nonlocal o, h, l, c, tbq_o, tsq_o, tbq_c, tsq_c, ltq_sum, n, buy5, sell5, oi, vol, bar_time
+        if o is None or c is None or h is None or l is None or bar_time is None:
+            return
+        net = tbq_c - tsq_c
+        imb = abs(net) / max(tbq_c, tsq_c, 1e-9) * 100.0
+        dnet = buy5 - sell5
+        dimb = abs(dnet) / max(buy5, sell5, 1e-9) * 100.0
+        prev_net = bars[-1].net if bars else None
+        prev_close = bars[-1].close if bars else None
+        prev_vol = bars[-1].volume_close if bars else None
+        bar_vol = None
+        if vol is not None and prev_vol is not None:
+            bar_vol = max(0.0, float(vol) - float(prev_vol))
+        bars.append(
+            RichBar(
+                tf=tf_name,
+                time=bar_time.strftime("%Y-%m-%d %H:%M:%S"),
+                open=float(o),
+                high=float(h),
+                low=float(l),
+                close=float(c),
+                range_pts=float(h - l),
+                n_ticks=n,
+                tbq_open=float(tbq_o),
+                tbq_close=float(tbq_c),
+                tsq_open=float(tsq_o),
+                tsq_close=float(tsq_c),
+                net=float(net),
+                net_delta=(float(net - prev_net) if prev_net is not None else None),
+                imb_pct=float(imb),
+                price_delta=(float(c - prev_close) if prev_close is not None else None),
+                ltq_sum=float(ltq_sum),
+                ltq_avg=float(ltq_sum / n) if n else 0.0,
+                buy5_sum=float(buy5),
+                sell5_sum=float(sell5),
+                depth_net=float(dnet),
+                depth_imb_pct=float(dimb),
+                oi_close=oi,
+                volume_close=vol,
+                bar_volume=bar_vol,
+            )
+        )
+        o = h = l = c = None
+        n = 0
+        ltq_sum = 0.0
+        bar_time = None
+
+    for row in rows:
+        m = tick_metrics(row)
+        if m["ltp"] is None:
+            continue
+        ts = parse_ts(row["received_at"])
+        ltp = float(m["ltp"])
+        if o is None:
+            o = h = l = c = ltp
+            tbq_o = float(m["tbq"])
+            tsq_o = float(m["tsq"])
+            n = 0
+            ltq_sum = 0.0
+            bar_time = ts
+        h = max(h, ltp)
+        l = min(l, ltp)
+        c = ltp
+        tbq_c = float(m["tbq"])
+        tsq_c = float(m["tsq"])
+        buy5 = float(m["buy5_sum"])
+        sell5 = float(m["sell5_sum"])
+        oi = m["oi"]
+        vol = m["volume"]
+        ltq_sum += float(m["ltq"] or 0.0)
+        n += 1
+        bar_time = ts  # close timestamp
+        if n >= n_per:
+            flush()
+    # drop incomplete trailing bar (partial count)
     return bars
