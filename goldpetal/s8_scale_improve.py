@@ -78,7 +78,7 @@ def make_mlp(*, hidden=(96, 48, 24), max_iter: int = 250) -> Pipeline:
                     activation="relu",
                     solver="adam",
                     alpha=1e-4,
-                    batch_size=128,
+                    batch_size=32,
                     learning_rate_init=1e-3,
                     max_iter=max_iter,
                     early_stopping=True,
