@@ -37,6 +37,7 @@ from s8_ml_pipeline import (
     write_pipeline_meta,
 )
 from s8_nn import DEFAULT_MODEL_PATH, save_bundle
+from s8_scale_improve import build_scale_frame, plan_curriculum, walk_forward_train
 from train_s8_nn_weekly import run_nn_gated
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -88,19 +89,51 @@ def cmd_train(args: argparse.Namespace) -> int:
     bars = [b.to_row() for b in build_rich_bars(rows, f"{args.tf}m", args.tf)]
     print(f"bars={len(bars)}")
 
-    bundle = train_full_pipeline(
-        bars,
-        lags=args.lags,
-        horizon=args.horizon,
-        tp_pts=args.tp_pts,
-        sl_pts=args.sl_pts,
-        feedback=fb,
-    )
+    curriculum: list[dict] = []
+    if getattr(args, "scale", True):
+        # At-scale: reasoner features + multi-step path labels + walk-forward
+        print("training scale walk-forward (math/logic/science/planning/multi-step)…")
+        frame = build_scale_frame(
+            bars,
+            lags=args.lags,
+            horizon=max(args.horizon, 8),
+            tp_pts=args.tp_pts,
+            sl_pts=args.sl_pts,
+            lots=args.lots,
+        )
+        bundle, fold_scores = walk_forward_train(
+            frame, lags=args.lags, folds=int(getattr(args, "folds", 5))
+        )
+        curriculum = plan_curriculum(bundle["metrics"], fold_scores)
+        # Also attach classic reasoning heads from v2 pipeline (optional enrichment)
+        try:
+            v2 = train_full_pipeline(
+                bars,
+                lags=args.lags,
+                horizon=args.horizon,
+                tp_pts=args.tp_pts,
+                sl_pts=args.sl_pts,
+                feedback=fb,
+            )
+            bundle["heads"] = v2.get("heads")
+            bundle["head_models"] = v2.get("head_models")
+        except Exception as exc:
+            journal("v2_heads_skip", {"error": str(exc)})
+            bundle.setdefault("heads", {})
+    else:
+        bundle = train_full_pipeline(
+            bars,
+            lags=args.lags,
+            horizon=args.horizon,
+            tp_pts=args.tp_pts,
+            sl_pts=args.sl_pts,
+            feedback=fb,
+        )
     model_path = Path(args.out_model)
-    # joblib needs head_models; metrics/heads stay JSON-serializable separately
     save_bundle(bundle, model_path)
     print(json.dumps(bundle["metrics"], indent=2))
-    print("heads:", json.dumps(bundle.get("heads"), indent=2))
+    if bundle.get("heads"):
+        print("heads:", json.dumps(bundle.get("heads"), indent=2))
     print(f"saved model {model_path}")
 
     con = sqlite3.connect(args.db)
@@ -162,6 +195,9 @@ def cmd_train(args: argparse.Namespace) -> int:
     _write_csv(week_dir / "trades_baseline.csv", trades_rows(base_res["trades"], "baseline"))
     nn_trade_rows = trades_rows(nn_res["trades"], "nn_gated")
     _write_csv(week_dir / "trades_nn.csv", nn_trade_rows)
+    if curriculum:
+        _write_csv(week_dir / "curriculum.csv", curriculum)
+        _write_csv(out_root / "curriculum_latest.csv", curriculum)
     # Sheets-ready feedback stub from this week's NN trades
     fb_week = [
         {
@@ -306,6 +342,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--budget-note", default="")
     p.add_argument("--bar-minutes", type=int, default=10)
     p.add_argument("--bar-ticks", type=int, default=0)
+    p.add_argument(
+        "--scale",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="walk-forward + reasoner features + multi-step path labels (default on)",
+    )
+    p.add_argument("--folds", type=int, default=5, help="walk-forward folds")
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("apply-env", help="print .env lines if safety passed")

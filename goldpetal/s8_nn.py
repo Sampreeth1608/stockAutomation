@@ -242,4 +242,35 @@ def features_from_hist(
     cols = feature_columns(lags)
     if last[cols].isna().any():
         return None
-    return {c: float(last[c]) for c in cols}
+    out = {c: float(last[c]) for c in cols}
+    # Scale / reasoner live features (s8_scale_improve.REASON_FEATURE_COLS)
+    try:
+        from s8_reasoner import fee_be_points
+
+        px = float(hist[-1]["px"])
+        imb = float(hist[-1].get("imb", last.get("imb_pct", 0.0)))
+        prev_imb = float(hist[-2].get("imb", imb)) if len(hist) >= 2 else imb
+        net = float(hist[-1].get("net", 0.0))
+        tp, sl, lots = 20.0, 25.0, 100.0
+        be = fee_be_points(px, lots)
+        dimb = imb - prev_imb
+        dtbq = float(hist[-1]["tbq"]) - float(hist[-2]["tbq"]) if len(hist) >= 2 else 0.0
+        dtsq = float(hist[-1]["tsq"]) - float(hist[-2]["tsq"]) if len(hist) >= 2 else 0.0
+        book_pressure = dtbq if net > 0 else (dtsq if net < 0 else 0.0)
+        out["rz_fee_be"] = float(be)
+        out["rz_rr"] = float(tp / sl)
+        out["rz_raw_edge"] = float(0.5 * tp - 0.5 * sl - be)
+        out["rz_imb_delta"] = float(dimb)
+        out["rz_imb_floor"] = 1.0 if imb >= 20.0 else 0.0
+        out["rz_net_sign"] = float(np.sign(net))
+        out["rz_imb_rising"] = 1.0 if dimb > 0 else 0.0
+        out["rz_book_pressure"] = float(book_pressure)
+        out["rz_plan_score"] = float(
+            0.25 * (max(-20.0, min(20.0, dimb)) / 20.0 + 1) / 2
+            + 0.25 * out["rz_imb_floor"]
+            + 0.25 * abs(out["rz_net_sign"])
+            + 0.25 * (1.0 if book_pressure > 0 else 0.0)
+        )
+    except Exception:
+        pass
+    return out
