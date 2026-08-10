@@ -132,11 +132,64 @@ def test_large_net_still_detects_widen():
     assert any(b == "BULL" for _, b, _ in sig_states), sig_states
 
 
+def test_book_break_skips_while_dip_supported():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            break_min_bars=1,
+            break_min_adverse=0.0,
+            break_skip_if_supported=True,
+            break_price_min=0.5,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s.bias = "BULL"
+    s.last_net = 2000
+    s.last_imb = 20
+    s.last_tbq = 12000
+    s.last_tsq = 8000
+    s._open("long", 10000.0)
+    # price down + TBQ up = dip_supported; also TSQ up would have been break
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 12000.0, 8000.0
+    s._update_behaviour(9980.0, 12500.0, 8500.0)
+    assert s.dip_supported
+    sig = s._manage(9980.0)
+    assert sig is None or "book_break" not in (sig.reason or "")
+
+
+def test_book_break_blocked_in_profit():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            break_min_bars=1,
+            break_min_adverse=8.0,
+            break_skip_if_supported=False,
+            break_price_min=0.5,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("long", 10000.0)
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10020.0, 12000.0, 8000.0
+    # in profit + noisy break pattern
+    s._update_behaviour(10015.0, 11500.0, 9000.0)  # px down a bit, still +15 vs entry; TBQ compress + TSQ up
+    assert s.break_bull or s.tbq_compress or s.tsq_expand
+    sig = s._manage(10015.0)
+    assert sig is None or "book_break" not in (sig.reason or "")
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
     test_factory()
     test_large_net_still_detects_widen()
+    test_book_break_skips_while_dip_supported()
+    test_book_break_blocked_in_profit()
     print("test_s8_align: OK")
 
 

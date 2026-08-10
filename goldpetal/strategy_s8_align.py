@@ -67,6 +67,23 @@ class AlignS8Config:
     # Without this, large |NET| makes thr=frac*|NET| unreachable on ticks
     # (e.g. NET=40k → need ΔTBQ≥4k every step) and bias stays NEUTRAL forever.
     book_thr_cap_pct: float = 0.002  # 0.2% of larger book side per step
+    # --- stabilize exits (stop break-eating noise) ---
+    # Ignore book_break until this many manage steps in the trade
+    break_min_bars: int = 2
+    # Ignore book_break unless adverse move already >= this (pts); 0 = off
+    break_min_adverse: float = 8.0
+    # If True: long break needs TSQ↑ AND TBQ↓ (stricter than OR)
+    break_need_both: bool = False
+    # Require break flag true for this many consecutive steps
+    break_persist: int = 1
+    # Never book_break while dip_supported / rally_supported (TBQ still buying dip)
+    break_skip_if_supported: bool = True
+    # Min |dpx| to count as price_down/up for break (noise floor); 0 = use price_eps
+    break_price_min: float = 1.5
+    # Prefer larger winners: floor on learned/fallback TP
+    prefer_fat_tp: bool = False
+    fat_tp_min: float = 35.0
+    fat_stall_min: float = 30.0
 
 
 class AlignS8Strategy:
@@ -124,6 +141,8 @@ class AlignS8Strategy:
         self._tbq_allow_age = 10**9
         self._tsq_allow_age = 10**9
         self.book_allow_memory = 30
+        self._bars_in_trade = 0
+        self._break_streak = 0
 
     @property
     def status_line(self) -> str:
@@ -192,9 +211,16 @@ class AlignS8Strategy:
         self.widen_bear = self.price_down and self.tsq_expand
         self.dip_supported = self.price_down and self.tbq_expand  # pullback under demand
         self.rally_supported = self.price_up and self.tsq_expand  # short squeeze risk / bear pullback
-        self.break_bull = self.price_down and (self.tsq_expand or self.tbq_compress)
-        self.break_bear = self.price_up and (self.tbq_expand or self.tsq_compress)
-
+        # Break uses a slightly larger price move than entry noise (break_price_min)
+        br_eps = max(self.cfg.price_eps, float(self.cfg.break_price_min))
+        px_down_br = dpx < -br_eps
+        px_up_br = dpx > br_eps
+        if self.cfg.break_need_both:
+            self.break_bull = px_down_br and self.tsq_expand and self.tbq_compress
+            self.break_bear = px_up_br and self.tbq_expand and self.tsq_compress
+        else:
+            self.break_bull = px_down_br and (self.tsq_expand or self.tbq_compress)
+            self.break_bear = px_up_br and (self.tbq_expand or self.tsq_compress)
         if self.widen_bull:
             self.last_combo = "widen_px↑TBQ↑"
         elif self.dip_supported:
@@ -280,18 +306,18 @@ class AlignS8Strategy:
         c = self.cfg
         adv = median(list(self._adverse_supported)) if self._adverse_supported else float("nan")
         imp = median(list(self._impulse_aligned)) if self._impulse_aligned else float("nan")
+        tp_floor = float(c.fat_tp_min if c.prefer_fat_tp else c.tp_min)
         if adv == adv and adv > 0:
             sl = clamp(float(adv), c.sl_min, c.sl_max)
         else:
             sl = float(c.sl_points)
         if imp == imp and imp > 0:
-            tp = clamp(float(imp), c.tp_min, c.tp_max)
+            tp = clamp(float(imp), tp_floor, c.tp_max)
         else:
-            tp = float(c.tp_points)
+            tp = max(float(c.tp_points), tp_floor)
         if tp < 1.1 * sl:
-            tp = clamp(1.1 * sl, c.tp_min, c.tp_max)
+            tp = clamp(1.1 * sl, tp_floor, c.tp_max)
         return round(tp, 1), round(sl, 1)
-
     def _retune_stops_in_trade(self, px: float, side: Position) -> None:
         """Widen SL if dip is book-supported; tighten/exit signals via manage."""
         assert self.entry_price is not None
@@ -382,6 +408,8 @@ class AlignS8Strategy:
         self._in_pullback = False
         self._bars_since_ext = 0
         self._book_expand_since_ext = False
+        self._bars_in_trade = 0
+        self._break_streak = 0
         tp, sl = self._book_stops()
         self.active_tp, self.active_sl = tp, sl
 
@@ -395,6 +423,8 @@ class AlignS8Strategy:
         self._cooldown_until = self._tick_i + max(0, self.cfg.cooldown_ticks)
         self._in_pullback = False
         self._pullback_ext = None
+        self._bars_in_trade = 0
+        self._break_streak = 0
 
     def _tp_sl(self) -> tuple[float, float]:
         c = self.cfg
@@ -407,8 +437,14 @@ class AlignS8Strategy:
         ep = float(self.entry_price)
         side = self.position
         move = (px - ep) if side == "long" else (ep - px)
+        self._bars_in_trade += 1
         self._retune_stops_in_trade(px, side)
         tp, sl = self._tp_sl()
+        stall_min = (
+            float(self.cfg.fat_stall_min)
+            if self.cfg.prefer_fat_tp
+            else float(self.cfg.stall_min_profit)
+        )
 
         if side == "long":
             if self._extreme is None or px > self._extreme:
@@ -441,11 +477,39 @@ class AlignS8Strategy:
                 reason=reason,
             )
 
-        # Combined break = stop (book says trend failed)
-        if side == "long" and self.break_bull:
-            return done(f"book_break_bull {self.last_combo} move={move:.1f}")
-        if side == "short" and self.break_bear:
-            return done(f"book_break_bear {self.last_combo} move={move:.1f}")
+        # Combined break = stop (book says trend failed) — gated to stop noise eats
+        raw_break = (side == "long" and self.break_bull) or (
+            side == "short" and self.break_bear
+        )
+        if raw_break:
+            self._break_streak += 1
+        else:
+            self._break_streak = 0
+
+        allow_break = True
+        if self._bars_in_trade < max(1, int(self.cfg.break_min_bars)):
+            allow_break = False
+        # Never book_break while in profit; wait until adverse >= break_min_adverse
+        if move >= 0 or move > -float(self.cfg.break_min_adverse):
+            allow_break = False
+        if self.cfg.break_skip_if_supported:
+            if side == "long" and self.dip_supported:
+                allow_break = False
+            if side == "short" and self.rally_supported:
+                allow_break = False
+        if self._break_streak < max(1, int(self.cfg.break_persist)):
+            allow_break = False
+
+        if allow_break and side == "long" and self.break_bull:
+            return done(
+                f"book_break_bull {self.last_combo} move={move:.1f} "
+                f"in={self._bars_in_trade} streak={self._break_streak}"
+            )
+        if allow_break and side == "short" and self.break_bear:
+            return done(
+                f"book_break_bear {self.last_combo} move={move:.1f} "
+                f"in={self._bars_in_trade} streak={self._break_streak}"
+            )
 
         if side == "long" and self.bias == "BEAR" and self.tsq_allows:
             return done(f"align_flip_to_BEAR {self.last_align}")
@@ -482,7 +546,7 @@ class AlignS8Strategy:
 
         # Combined stall TP: price not making extreme AND supporting book not expanding
         if (
-            move >= self.cfg.stall_min_profit
+            move >= stall_min
             and self._bars_since_ext >= self.cfg.stall_bars
             and not self._book_expand_since_ext
         ):
@@ -621,6 +685,14 @@ def align_s8_from_env() -> AlignS8Strategy:
         weaken_pct=_f("S8_WEAKEN_PCT", 20.0),
         ratio_overext_pct=_f("S8_RATIO_OVEREXT_PCT", 0.15),
         book_thr_cap_pct=_f("S8_BOOK_THR_CAP_PCT", 0.002),
+        break_min_bars=int(_f("S8_BREAK_MIN_BARS", 2)),
+        break_min_adverse=_f("S8_BREAK_MIN_ADVERSE", 8.0),
+        break_need_both=_b("S8_BREAK_NEED_BOTH", False),
+        break_persist=int(_f("S8_BREAK_PERSIST", 1)),
+        break_skip_if_supported=_b("S8_BREAK_SKIP_IF_SUPPORTED", True),
+        break_price_min=_f("S8_BREAK_PRICE_MIN", 1.5),
+        prefer_fat_tp=_b("S8_PREFER_FAT_TP", False),
+        fat_tp_min=_f("S8_FAT_TP_MIN", 35.0),
+        fat_stall_min=_f("S8_FAT_STALL_MIN", 30.0),
     )
-    _ = _b  # reserved
     return AlignS8Strategy(cfg)

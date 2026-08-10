@@ -245,6 +245,10 @@ def align_cfg_for_scale(scale: float | None) -> AlignS8Config:
             sl_min=20.0,
             tp_min=20.0,
             weaken_pct=20.0,
+            break_min_bars=2,
+            break_min_adverse=8.0,
+            break_skip_if_supported=True,
+            break_price_min=1.5,
         )
     s = float(scale)
     return AlignS8Config(
@@ -258,6 +262,10 @@ def align_cfg_for_scale(scale: float | None) -> AlignS8Config:
         tp_min=20.0,
         weaken_pct=20.0,
         cooldown_ticks=1,
+        break_min_bars=2,
+        break_min_adverse=8.0,
+        break_skip_if_supported=True,
+        break_price_min=1.5,
     )
 
 
