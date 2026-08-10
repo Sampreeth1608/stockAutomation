@@ -45,6 +45,10 @@ STAGE_MAP = {
     "human_feedback": "Sheets feedback.csv prefer|reject|keep",
     "preference_optimization": "Adam fit with sample_weight from prefs + PnL",
     "reasoning_training": "Heads: entry_edge, hold_ok, exit_soon",
+    "reasoning_capabilities": (
+        "Multi-step s8_reasoner: math, logic, science/ML, planning "
+        "(S8_REASONING=true)"
+    ),
     "safety_training": "Enable gate only if AUC/₹ safety checks pass",
     "tool_use": "CLI tools: diagnose, train, sheets, apply",
     "conversation": "session_journal.jsonl stage log for human notes",

@@ -114,6 +114,10 @@ class AlignS8Config:
     nn_model_path: str = "data/models/s8_nn_mlp.joblib"
     nn_min_proba: float = 0.55
     nn_lags: int = 3
+    # Multi-step reasoner (math/logic/science/planning) — s8_reasoner.py
+    require_reasoning: bool = False
+    reasoning_min_score: float = 0.45
+    reasoning_lots: float = 100.0
 
 
 class AlignS8Strategy:
@@ -189,6 +193,8 @@ class AlignS8Strategy:
         self._nn_bundle: Any = None
         self.last_nn_proba: float | None = None
         self.nn_skip_count = 0
+        self.last_reasoning: Any = None
+        self.reasoning_skip_count = 0
         # time / count bar accumulators
         self._bar_key: datetime | None = None
         self._bar_c: float | None = None
@@ -216,22 +222,30 @@ class AlignS8Strategy:
             if self._loss_locked
             else f" loss={self._loss_streak}/{c.loss_lock_after}"
         )
+        rz = " RZ" if c.require_reasoning else ""
+        nn = " NN" if c.require_nn_filter else ""
         return (
             f"TF={tf} ALIGN[{c.model_name}] "
             f"E={c.entry_model} H={c.hold_model} X={c.exit_model} "
             f"imb>={c.min_imb_pct:.0f}% TP={tp:.0f} SL={sl:.0f} "
             f"combo={self.last_combo} bias={self.bias} align={self.last_align} "
-            f"pos={self.position}{lock}"
+            f"pos={self.position}{lock}{nn}{rz}"
         )
 
     def reasoning_line(self) -> str:
-        """Human-readable active reasoning models."""
+        """Human-readable active reasoning models + last multi-step trace."""
         c = self.cfg
-        return (
+        base = (
             f"entry[{c.entry_model}/{c.entry_mode}] "
             f"hold[{c.hold_model}] exit[{c.exit_model}] "
             f"skip={self.last_skip or '-'} hold={self.last_hold_reason or '-'}"
         )
+        if self.last_reasoning is not None:
+            try:
+                return base + " | " + self.last_reasoning.line()
+            except Exception:
+                return base
+        return base
 
     def _parse_qty(self, message: dict[str, Any]) -> tuple[float, float] | None:
         tbq = message.get("total_buy_quantity")
@@ -435,6 +449,63 @@ class AlignS8Strategy:
             self.last_skip = (
                 f"nn_low_proba {proba:.2f}<{float(self.cfg.nn_min_proba):.2f}"
             )
+            return False
+        return True
+
+    def _reasoning_allows_entry(self, side: str) -> bool:
+        """Optional multi-step math/logic/science/planning gate."""
+        if not self.cfg.require_reasoning:
+            return True
+        try:
+            from s8_reasoner import reason_entry
+        except Exception as exc:  # pragma: no cover
+            self.last_skip = f"reasoning_import_error {exc}"
+            return False
+        tp, sl = self._tp_sl()
+        entry_p = self.last_nn_proba
+        hold_p = exit_p = None
+        if self.cfg.require_nn_filter and self._nn_bundle is not None:
+            try:
+                from s8_ml_pipeline import predict_reasoning
+                from s8_nn import features_from_hist
+
+                feats = features_from_hist(
+                    list(self._feat_hist), lags=max(1, int(self.cfg.nn_lags))
+                )
+                if feats is not None:
+                    scores = predict_reasoning(self._nn_bundle, feats)
+                    entry_p = scores.get("entry_edge")
+                    hold_p = scores.get("hold_ok")
+                    exit_p = scores.get("exit_soon")
+                    if entry_p is not None:
+                        self.last_nn_proba = float(entry_p)
+            except Exception:
+                pass
+        trace = reason_entry(
+            px=float(self.last_px or 0.0),
+            net=float(self.last_net),
+            imb=float(self.last_imb),
+            prev_imb=float(self.prev_imb),
+            tp=float(tp),
+            sl=float(sl),
+            min_imb=float(self.cfg.min_imb_pct),
+            imb_rising=bool(self.imb_rising),
+            require_rising_imb=bool(self.cfg.require_rising_imb),
+            tbq_rising=bool(self.tbq_rising),
+            tsq_rising=bool(self.tsq_rising),
+            loss_locked=bool(self._loss_locked),
+            in_cooldown=self._tick_i < self._cooldown_until,
+            lots=float(self.cfg.reasoning_lots),
+            entry_proba=entry_p,
+            hold_proba=hold_p,
+            exit_soon_proba=exit_p,
+            min_entry_proba=float(self.cfg.nn_min_proba),
+        )
+        self.last_reasoning = trace
+        want = "ENTER_LONG" if side == "long" else "ENTER_SHORT"
+        if trace.action != want or trace.score < float(self.cfg.reasoning_min_score):
+            self.reasoning_skip_count += 1
+            self.last_skip = f"reasoning:{trace.summary}"
             return False
         return True
 
@@ -851,6 +922,8 @@ class AlignS8Strategy:
                 return None
             if not self._nn_allows_entry():
                 return None
+            if not self._reasoning_allows_entry("long"):
+                return None
             self._open("long", px)
             tp, sl = self._tp_sl()
             how = "pullback" if self.cfg.require_pullback else (
@@ -858,9 +931,13 @@ class AlignS8Strategy:
             )
             nn_bit = (
                 f" nn={self.last_nn_proba:.2f}"
-                if self.cfg.require_nn_filter and self.last_nn_proba is not None
+                if self.last_nn_proba is not None
+                and (self.cfg.require_nn_filter or self.cfg.require_reasoning)
                 else ""
             )
+            rz_bit = ""
+            if self.cfg.require_reasoning and self.last_reasoning is not None:
+                rz_bit = f" rz={self.last_reasoning.score:.2f}"
             return SignalResult(
                 action="BUY",
                 position_after="long",
@@ -871,7 +948,7 @@ class AlignS8Strategy:
                 reason=(
                     f"entry[{em}] align_long {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
-                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}"
+                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}{rz_bit}"
                 ),
             )
 
@@ -894,6 +971,8 @@ class AlignS8Strategy:
                 return None
             if not self._nn_allows_entry():
                 return None
+            if not self._reasoning_allows_entry("short"):
+                return None
             self._open("short", px)
             tp, sl = self._tp_sl()
             how = "pullback" if self.cfg.require_pullback else (
@@ -901,9 +980,13 @@ class AlignS8Strategy:
             )
             nn_bit = (
                 f" nn={self.last_nn_proba:.2f}"
-                if self.cfg.require_nn_filter and self.last_nn_proba is not None
+                if self.last_nn_proba is not None
+                and (self.cfg.require_nn_filter or self.cfg.require_reasoning)
                 else ""
             )
+            rz_bit = ""
+            if self.cfg.require_reasoning and self.last_reasoning is not None:
+                rz_bit = f" rz={self.last_reasoning.score:.2f}"
             return SignalResult(
                 action="SHORT",
                 position_after="short",
@@ -914,7 +997,7 @@ class AlignS8Strategy:
                 reason=(
                     f"entry[{em}] align_short {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
-                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}"
+                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}{rz_bit}"
                 ),
             )
 
@@ -1288,6 +1371,9 @@ def align_s8_from_env() -> AlignS8Strategy:
         nn_model_path=os.getenv("S8_NN_MODEL_PATH", "data/models/s8_nn_mlp.joblib"),
         nn_min_proba=_f("S8_NN_MIN_PROBA", 0.55),
         nn_lags=int(_f("S8_NN_LAGS", 3)),
+        require_reasoning=_b("S8_REASONING", False),
+        reasoning_min_score=_f("S8_REASONING_MIN_SCORE", 0.45),
+        reasoning_lots=_f("S8_REASONING_LOTS", 100.0),
     )
     cfg = _apply_model_preset(model, cfg)
 
@@ -1334,4 +1420,10 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.nn_min_proba = _f("S8_NN_MIN_PROBA", 0.55)
     if os.getenv("S8_NN_LAGS") is not None:
         cfg.nn_lags = int(_f("S8_NN_LAGS", 3))
+    if os.getenv("S8_REASONING") is not None:
+        cfg.require_reasoning = _b("S8_REASONING", False)
+    if os.getenv("S8_REASONING_MIN_SCORE") is not None:
+        cfg.reasoning_min_score = _f("S8_REASONING_MIN_SCORE", 0.45)
+    if os.getenv("S8_REASONING_LOTS") is not None:
+        cfg.reasoning_lots = _f("S8_REASONING_LOTS", 100.0)
     return AlignS8Strategy(cfg)
