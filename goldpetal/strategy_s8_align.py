@@ -84,6 +84,15 @@ class AlignS8Config:
     prefer_fat_tp: bool = False
     fat_tp_min: float = 35.0
     fat_stall_min: float = 30.0
+    # --- flip gate (bias flip was eating trades after break was gated) ---
+    flip_min_bars: int = 2
+    flip_min_adverse: float = 8.0
+    # If True: never flip-exit while in profit (let TP/stall work)
+    flip_block_in_profit: bool = True
+    # Require opposite book allow for this many consecutive steps
+    flip_persist: int = 1
+    # If True: flip only when opposite widen is active (stricter than bias+allow)
+    flip_need_widen: bool = False
 
 
 class AlignS8Strategy:
@@ -143,6 +152,7 @@ class AlignS8Strategy:
         self.book_allow_memory = 30
         self._bars_in_trade = 0
         self._break_streak = 0
+        self._flip_streak = 0
 
     @property
     def status_line(self) -> str:
@@ -410,6 +420,7 @@ class AlignS8Strategy:
         self._book_expand_since_ext = False
         self._bars_in_trade = 0
         self._break_streak = 0
+        self._flip_streak = 0
         tp, sl = self._book_stops()
         self.active_tp, self.active_sl = tp, sl
 
@@ -425,6 +436,7 @@ class AlignS8Strategy:
         self._pullback_ext = None
         self._bars_in_trade = 0
         self._break_streak = 0
+        self._flip_streak = 0
 
     def _tp_sl(self) -> tuple[float, float]:
         c = self.cfg
@@ -511,10 +523,43 @@ class AlignS8Strategy:
                 f"in={self._bars_in_trade} streak={self._break_streak}"
             )
 
-        if side == "long" and self.bias == "BEAR" and self.tsq_allows:
-            return done(f"align_flip_to_BEAR {self.last_align}")
-        if side == "short" and self.bias == "BULL" and self.tbq_allows:
-            return done(f"align_flip_to_BULL {self.last_align}")
+        # Bias flip exit — gated like break (was eating trades after break gate)
+        raw_flip = (side == "long" and self.bias == "BEAR" and self.tsq_allows) or (
+            side == "short" and self.bias == "BULL" and self.tbq_allows
+        )
+        if self.cfg.flip_need_widen:
+            raw_flip = (side == "long" and self.bias == "BEAR" and self.widen_bear) or (
+                side == "short" and self.bias == "BULL" and self.widen_bull
+            )
+        if raw_flip:
+            self._flip_streak += 1
+        else:
+            self._flip_streak = 0
+
+        allow_flip = True
+        if self._bars_in_trade < max(1, int(self.cfg.flip_min_bars)):
+            allow_flip = False
+        if self.cfg.flip_block_in_profit and move >= 0:
+            allow_flip = False
+        if move > -float(self.cfg.flip_min_adverse):
+            allow_flip = False
+        if self._flip_streak < max(1, int(self.cfg.flip_persist)):
+            allow_flip = False
+
+        if allow_flip and side == "long" and self.bias == "BEAR" and (
+            self.widen_bear if self.cfg.flip_need_widen else self.tsq_allows
+        ):
+            return done(
+                f"align_flip_to_BEAR {self.last_align} move={move:.1f} "
+                f"in={self._bars_in_trade} streak={self._flip_streak}"
+            )
+        if allow_flip and side == "short" and self.bias == "BULL" and (
+            self.widen_bull if self.cfg.flip_need_widen else self.tbq_allows
+        ):
+            return done(
+                f"align_flip_to_BULL {self.last_align} move={move:.1f} "
+                f"in={self._bars_in_trade} streak={self._flip_streak}"
+            )
 
         if side == "long" and self.entry_tbq and self.entry_tbq > 0:
             drop = (self.entry_tbq - self.last_tbq) / self.entry_tbq * 100.0
@@ -694,5 +739,10 @@ def align_s8_from_env() -> AlignS8Strategy:
         prefer_fat_tp=_b("S8_PREFER_FAT_TP", False),
         fat_tp_min=_f("S8_FAT_TP_MIN", 35.0),
         fat_stall_min=_f("S8_FAT_STALL_MIN", 30.0),
+        flip_min_bars=int(_f("S8_FLIP_MIN_BARS", 2)),
+        flip_min_adverse=_f("S8_FLIP_MIN_ADVERSE", 8.0),
+        flip_block_in_profit=_b("S8_FLIP_BLOCK_IN_PROFIT", True),
+        flip_persist=int(_f("S8_FLIP_PERSIST", 1)),
+        flip_need_widen=_b("S8_FLIP_NEED_WIDEN", False),
     )
     return AlignS8Strategy(cfg)

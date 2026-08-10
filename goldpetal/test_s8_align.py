@@ -172,6 +172,9 @@ def test_book_break_blocked_in_profit():
             cooldown_ticks=0,
             tp_points=100,
             sl_points=50,
+            flip_min_bars=1,
+            flip_min_adverse=0.0,
+            flip_block_in_profit=False,
         )
     )
     s._open("long", 10000.0)
@@ -183,6 +186,54 @@ def test_book_break_blocked_in_profit():
     assert sig is None or "book_break" not in (sig.reason or "")
 
 
+def test_flip_blocked_in_profit():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            break_min_bars=99,
+            break_min_adverse=100,
+            flip_min_bars=1,
+            flip_min_adverse=8.0,
+            flip_block_in_profit=True,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("long", 10000.0)
+    s.bias = "BEAR"
+    s.tsq_allows = True
+    s.last_align = "px↓+TSQ↑"
+    # in profit — flip must not close
+    sig = s._manage(10020.0)
+    assert sig is None or "flip" not in (sig.reason or "")
+
+
+def test_flip_fires_when_adverse_enough():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            break_min_bars=99,
+            break_min_adverse=100,
+            flip_min_bars=1,
+            flip_min_adverse=8.0,
+            flip_block_in_profit=True,
+            flip_persist=1,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("long", 10000.0)
+    s.bias = "BEAR"
+    s.tsq_allows = True
+    s.last_align = "px↓+TSQ↑"
+    sig = s._manage(9985.0)  # -15 adverse >= 8
+    assert sig is not None and "flip" in (sig.reason or "")
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
@@ -190,6 +241,8 @@ def main() -> None:
     test_large_net_still_detects_widen()
     test_book_break_skips_while_dip_supported()
     test_book_break_blocked_in_profit()
+    test_flip_blocked_in_profit()
+    test_flip_fires_when_adverse_enough()
     print("test_s8_align: OK")
 
 

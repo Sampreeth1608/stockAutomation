@@ -91,7 +91,7 @@ def _tag(reason: str) -> str:
 
 
 def models() -> dict[str, AlignS8Config]:
-    """Named exit/TP models to compare."""
+    """Named exit/TP models to compare (break-gate + flip-gate)."""
     base = AlignS8Config(
         min_imb_pct=10.0,
         book_frac_of_net=0.10,
@@ -103,7 +103,7 @@ def models() -> dict[str, AlignS8Config]:
         tp_min=20.0,
         weaken_pct=20.0,
         cooldown_ticks=1,
-        # old noisy defaults for baseline comparison
+        # noisy: no break/flip gates
         break_min_bars=1,
         break_min_adverse=0.0,
         break_skip_if_supported=False,
@@ -111,45 +111,48 @@ def models() -> dict[str, AlignS8Config]:
         break_persist=1,
         break_need_both=False,
         prefer_fat_tp=False,
+        flip_min_bars=1,
+        flip_min_adverse=0.0,
+        flip_block_in_profit=False,
+        flip_persist=1,
+        flip_need_widen=False,
+    )
+    break_gate = dict(
+        break_min_bars=2,
+        break_min_adverse=8.0,
+        break_skip_if_supported=True,
+        break_price_min=1.5,
+    )
+    flip_gate = dict(
+        flip_min_bars=2,
+        flip_min_adverse=8.0,
+        flip_block_in_profit=True,
+        flip_persist=1,
+        flip_need_widen=False,
+    )
+    flip_strict = dict(
+        flip_min_bars=3,
+        flip_min_adverse=12.0,
+        flip_block_in_profit=True,
+        flip_persist=2,
+        flip_need_widen=True,
     )
     return {
         "baseline_noisy": base,
-        "hold2_adv8": replace(
+        "break_only": replace(base, **break_gate),
+        "flip_gate": replace(base, **break_gate, **flip_gate),
+        "flip_strict": replace(base, **break_gate, **flip_strict),
+        "fat_tp_flip": replace(
             base,
-            break_min_bars=2,
-            break_min_adverse=8.0,
-            break_skip_if_supported=True,
-            break_price_min=1.5,
-        ),
-        "hold3_adv12": replace(
-            base,
-            break_min_bars=3,
-            break_min_adverse=12.0,
-            break_skip_if_supported=True,
-            break_price_min=2.0,
-            break_persist=2,
-        ),
-        "strict_both": replace(
-            base,
-            break_min_bars=2,
-            break_min_adverse=8.0,
-            break_skip_if_supported=True,
-            break_price_min=1.5,
-            break_need_both=True,
-        ),
-        "fat_tp": replace(
-            base,
-            break_min_bars=2,
-            break_min_adverse=8.0,
-            break_skip_if_supported=True,
-            break_price_min=1.5,
+            **break_gate,
+            **flip_gate,
             prefer_fat_tp=True,
             fat_tp_min=35.0,
             fat_stall_min=30.0,
             tp_points=45.0,
             tp_min=35.0,
         ),
-        "hold_fat_strict": replace(
+        "hold_fat_flip": replace(
             base,
             break_min_bars=3,
             break_min_adverse=12.0,
@@ -163,6 +166,7 @@ def models() -> dict[str, AlignS8Config]:
             tp_points=50.0,
             tp_min=40.0,
             stall_bars=2,
+            **flip_strict,
         ),
     }
 

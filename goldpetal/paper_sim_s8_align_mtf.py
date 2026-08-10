@@ -249,6 +249,9 @@ def align_cfg_for_scale(scale: float | None) -> AlignS8Config:
             break_min_adverse=8.0,
             break_skip_if_supported=True,
             break_price_min=1.5,
+            flip_min_bars=2,
+            flip_min_adverse=8.0,
+            flip_block_in_profit=True,
         )
     s = float(scale)
     return AlignS8Config(
@@ -266,6 +269,9 @@ def align_cfg_for_scale(scale: float | None) -> AlignS8Config:
         break_min_adverse=8.0,
         break_skip_if_supported=True,
         break_price_min=1.5,
+        flip_min_bars=2,
+        flip_min_adverse=8.0,
+        flip_block_in_profit=True,
     )
 
 
