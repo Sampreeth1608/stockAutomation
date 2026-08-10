@@ -101,6 +101,28 @@ def test_bar_mode_always_enters_on_bar_close():
     assert "30m" in s.status_line or "TF=30m" in s.status_line
 
 
+def test_always_mode_reenters_after_sl_while_imb_hot():
+    """Bar/always path must not lock out after SL when IMB stays strong."""
+    s = NetZigzagStrategy(
+        NetZigzagConfig(
+            tp_points=100,
+            sl_points=10,
+            weaken_pct=90,
+            cooldown_ticks=0,
+            entry_mode="always",
+            min_imb_pct=10,
+        )
+    )
+    s.on_tick(_now(), 10000.0, _msg(12000, 8000))
+    assert s.position == "long"
+    sig = s.on_tick(_now(), 9989.0, _msg(12000, 8000))
+    assert sig and sig.action == "CLOSE" and "sl" in (sig.reason or "")
+    # still strong bull — always mode should re-enter next decide
+    sig2 = s.on_tick(_now(), 9990.0, _msg(12000, 8000))
+    assert sig2 is not None and sig2.action == "BUY"
+    assert s.position == "long"
+
+
 def test_recorder_writes(tmp_path: Path | None = None):
     base = Path(tmp_path) if tmp_path else Path("data") / "_test_zigzag_retune.db"
     if base.exists():

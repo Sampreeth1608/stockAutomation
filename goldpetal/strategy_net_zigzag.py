@@ -191,17 +191,18 @@ class NetZigzagStrategy:
     def _entry_allowed(self, ltp: float, side: Position) -> tuple[bool, str]:
         if self._tick_i < self._cooldown_until:
             return False, "cooldown"
-        if self._need_reset:
+        mode = (self.cfg.entry_mode or "both").lower()
+        # "always" = flat + strong bias (30m MTF path). Do NOT require post-SL
+        # IMB reset — that lockout left bar-mode dead after one stop while IMB stayed hot.
+        if mode != "always" and self._need_reset:
             return False, "need_sl_reset"
         if self.last_imb < self.cfg.min_imb_pct:
             return False, "imb_soft"
 
-        mode = (self.cfg.entry_mode or "both").lower()
         edge = self._imb_edge()
         pb = self._pullback_resume(ltp, side)
 
         if mode == "always":
-            # legacy spam: enter whenever flat + strong bias (research only)
             return True, "always"
         if mode == "edge":
             return (edge, "imb_edge" if edge else "wait_edge")
@@ -223,6 +224,7 @@ class NetZigzagStrategy:
         self._pullback_ext = None
         self._in_pullback = False
         self._edge_latched = False
+        self._need_reset = False
 
     def _close(self, reason: str) -> None:
         self.position = "flat"
