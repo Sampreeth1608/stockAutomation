@@ -39,7 +39,7 @@ def net_imbalance(tbq: float, tsq: float) -> tuple[float, float]:
 
 @dataclass
 class AlignS8Config:
-    min_imb_pct: float = 10.0
+    min_imb_pct: float = 3.0
     book_frac_of_net: float = 0.10
     pullback_points: float = 8.0
     resume_points: float = 5.0
@@ -813,6 +813,7 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.model_name = "fat_tp_flip"
         cfg.bar_ticks = 50
         cfg.bar_minutes = 0
+        cfg.min_imb_pct = 3.0
         cfg.break_min_bars = 2
         cfg.break_min_adverse = 8.0
         cfg.break_skip_if_supported = True
@@ -896,7 +897,7 @@ def align_s8_from_env() -> AlignS8Strategy:
     model = os.getenv("S8_MODEL", "fat_tp_flip").strip().lower()
 
     cfg = AlignS8Config(
-        min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
+        min_imb_pct=_f("S8_MIN_IMB_PCT", 3.0),
         book_frac_of_net=_f("S8_BOOK_FRAC_OF_NET", 0.10),
         pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
         resume_points=_f("S8_RESUME_POINTS", 5.0),
