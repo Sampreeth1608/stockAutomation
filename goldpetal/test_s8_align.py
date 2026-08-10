@@ -325,6 +325,33 @@ def test_no_lock_after_two_sl_only_after_five_losses():
     assert "loss_lock" in (s.last_skip or "")
 
 
+def test_enter_aligned_without_pullback():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            require_pullback=False,
+            min_imb_pct=5,
+            cooldown_ticks=0,
+            book_frac_of_net=0.05,
+            book_thr_cap_pct=0.002,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+        )
+    )
+    # Seed + widen bull so bias=BULL
+    s.on_tick(_now(0), 10000.0, _msg(12000, 9000))
+    for i in range(4):
+        s.on_tick(_now(i + 1), 10000.0 + (i + 1) * 3, _msg(12000 + (i + 1) * 200, 9000))
+    assert s.bias == "BULL"
+    # No pullback state — should still enter when require_pullback=False
+    s._in_pullback = False
+    s._pullback_ext = None
+    s._tbq_allow_age = 0
+    sig = s._try_enter(10015.0)
+    assert sig is not None and sig.action == "BUY"
+    assert "aligned" in (sig.reason or "")
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
@@ -336,6 +363,7 @@ def main() -> None:
     test_flip_blocked_in_profit()
     test_flip_fires_when_adverse_enough()
     test_no_lock_after_two_sl_only_after_five_losses()
+    test_enter_aligned_without_pullback()
     print("test_s8_align: OK")
 
 

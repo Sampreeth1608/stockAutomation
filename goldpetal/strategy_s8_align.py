@@ -101,6 +101,8 @@ class AlignS8Config:
     loss_lock_after: int = 5
     # Stay locked this many decision steps, then auto-release
     loss_lock_cool_bars: int = 10
+    # If False: enter as soon as bias+book aligned (no pullback wait)
+    require_pullback: bool = False
 
 
 class AlignS8Strategy:
@@ -663,11 +665,12 @@ class AlignS8Strategy:
             if self._tbq_allow_age > self.book_allow_memory:
                 self.last_skip = "tbq_not_allow"
                 return None
-            if not self._pullback_resume(px, "long"):
+            if self.cfg.require_pullback and not self._pullback_resume(px, "long"):
                 self.last_skip = "wait_bull_pullback"
                 return None
             self._open("long", px)
             tp, sl = self._tp_sl()
+            how = "pullback" if self.cfg.require_pullback else "aligned"
             return SignalResult(
                 action="BUY",
                 position_after="long",
@@ -676,7 +679,7 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_long pullback {self.last_align}/{self.last_combo} "
+                    f"align_long {how} {self.last_align}/{self.last_combo} "
                     f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
                     f"TP={tp:.0f} SL={sl:.0f} "
                     f"advN={len(self._adverse_supported)} impN={len(self._impulse_aligned)}"
@@ -687,11 +690,12 @@ class AlignS8Strategy:
             if self._tsq_allow_age > self.book_allow_memory:
                 self.last_skip = "tsq_not_allow"
                 return None
-            if not self._pullback_resume(px, "short"):
+            if self.cfg.require_pullback and not self._pullback_resume(px, "short"):
                 self.last_skip = "wait_bear_pullback"
                 return None
             self._open("short", px)
             tp, sl = self._tp_sl()
+            how = "pullback" if self.cfg.require_pullback else "aligned"
             return SignalResult(
                 action="SHORT",
                 position_after="short",
@@ -700,7 +704,7 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_short pullback {self.last_align}/{self.last_combo} "
+                    f"align_short {how} {self.last_align}/{self.last_combo} "
                     f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
                     f"TP={tp:.0f} SL={sl:.0f} "
                     f"advN={len(self._adverse_supported)} impN={len(self._impulse_aligned)}"
@@ -824,6 +828,7 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.cooldown_ticks = 1
         cfg.loss_lock_after = 5
         cfg.loss_lock_cool_bars = 10
+        cfg.require_pullback = False  # enter on align (no pullback wait)
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
         cfg.model_name = "flip_gate_2m"
@@ -838,6 +843,7 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.flip_block_in_profit = True
         cfg.prefer_fat_tp = False
         cfg.cooldown_ticks = 1
+        cfg.require_pullback = False
         cfg.pullback_points = max(5.0, 4.0 + 2 * 0.3)
         cfg.resume_points = max(3.0, 3.0 + 2 * 0.15)
         return cfg
@@ -863,6 +869,7 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.tp_min = 40.0
         cfg.stall_bars = 2
         cfg.cooldown_ticks = 1
+        cfg.require_pullback = False
         return cfg
     cfg.model_name = n
     return cfg
@@ -925,6 +932,7 @@ def align_s8_from_env() -> AlignS8Strategy:
         bar_ticks=int(_f("S8_BAR_TICKS", 0)),
         loss_lock_after=int(_f("S8_LOSS_LOCK_AFTER", 5)),
         loss_lock_cool_bars=int(_f("S8_LOSS_LOCK_COOL_BARS", 10)),
+        require_pullback=_b("S8_REQUIRE_PULLBACK", False),
     )
     cfg = _apply_model_preset(model, cfg)
     # Explicit env overrides still win for TF if set non-zero after preset
