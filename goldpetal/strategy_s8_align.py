@@ -97,6 +97,10 @@ class AlignS8Config:
     bar_minutes: int = 0
     bar_ticks: int = 0  # e.g. 50 = decide every 50 ticks (hist best fat_tp_flip)
     model_name: str = "align"
+    # Only lock new entries after this many consecutive losing closes (not after 1–2 SLs)
+    loss_lock_after: int = 5
+    # Stay locked this many decision steps, then auto-release
+    loss_lock_cool_bars: int = 10
 
 
 class AlignS8Strategy:
@@ -164,6 +168,9 @@ class AlignS8Strategy:
         self._bar_tsq = 0.0
         self._bar_n = 0
         self._count_n = 0
+        self._loss_streak = 0
+        self._loss_locked = False
+        self._loss_lock_until = 0
 
     @property
     def status_line(self) -> str:
@@ -176,10 +183,15 @@ class AlignS8Strategy:
             tf = f"{c.bar_minutes}m"
         else:
             tf = "tick"
+        lock = (
+            f" LOCK({self._loss_streak}/{c.loss_lock_after})"
+            if self._loss_locked
+            else f" loss={self._loss_streak}/{c.loss_lock_after}"
+        )
         return (
             f"TF={tf} ALIGN[{c.model_name}] imb>={c.min_imb_pct:.0f}% "
             f"TP={tp:.0f} SL={sl:.0f} combo={self.last_combo} "
-            f"bias={self.bias} align={self.last_align} pos={self.position}"
+            f"bias={self.bias} align={self.last_align} pos={self.position}{lock}"
         )
 
     def _parse_qty(self, message: dict[str, Any]) -> tuple[float, float] | None:
@@ -441,13 +453,25 @@ class AlignS8Strategy:
         tp, sl = self._book_stops()
         self.active_tp, self.active_sl = tp, sl
 
-    def _close(self) -> None:
+    def _close(self, move: float | None = None) -> None:
+        """Flat + short cooldown. Lock entries only after N consecutive losses."""
+        if move is not None:
+            if float(move) <= 0:
+                self._loss_streak += 1
+            else:
+                self._loss_streak = 0
+            if self._loss_streak >= max(1, int(self.cfg.loss_lock_after)):
+                self._loss_locked = True
+                self._loss_lock_until = self._tick_i + max(
+                    1, int(self.cfg.loss_lock_cool_bars)
+                )
         self.position = "flat"
         self.entry_price = None
         self.entry_tbq = None
         self.entry_tsq = None
         self.active_tp = None
         self.active_sl = None
+        # Short pause only (1 bar default) — NOT a multi-SL lock
         self._cooldown_until = self._tick_i + max(0, self.cfg.cooldown_ticks)
         self._in_pullback = False
         self._pullback_ext = None
@@ -495,7 +519,7 @@ class AlignS8Strategy:
                     self._book_expand_since_ext = True
 
         def done(reason: str) -> SignalResult:
-            self._close()
+            self._close(move)
             return SignalResult(
                 action="CLOSE",
                 position_after="flat",
@@ -619,6 +643,15 @@ class AlignS8Strategy:
         return None
 
     def _try_enter(self, px: float) -> SignalResult | None:
+        if self._loss_locked:
+            if self._tick_i >= self._loss_lock_until:
+                self._loss_locked = False
+                self._loss_streak = 0
+                self.last_skip = "loss_lock_released"
+            else:
+                left = self._loss_lock_until - self._tick_i
+                self.last_skip = f"loss_lock streak={self._loss_streak} left={left}"
+                return None
         if self._tick_i < self._cooldown_until:
             self.last_skip = "cooldown"
             return None
@@ -789,6 +822,8 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.tp_points = 45.0
         cfg.tp_min = 35.0
         cfg.cooldown_ticks = 1
+        cfg.loss_lock_after = 5
+        cfg.loss_lock_cool_bars = 10
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
         cfg.model_name = "flip_gate_2m"
@@ -888,6 +923,8 @@ def align_s8_from_env() -> AlignS8Strategy:
         flip_need_widen=_b("S8_FLIP_NEED_WIDEN", False),
         bar_minutes=int(_f("S8_BAR_MINUTES", 0)),
         bar_ticks=int(_f("S8_BAR_TICKS", 0)),
+        loss_lock_after=int(_f("S8_LOSS_LOCK_AFTER", 5)),
+        loss_lock_cool_bars=int(_f("S8_LOSS_LOCK_COOL_BARS", 10)),
     )
     cfg = _apply_model_preset(model, cfg)
     # Explicit env overrides still win for TF if set non-zero after preset

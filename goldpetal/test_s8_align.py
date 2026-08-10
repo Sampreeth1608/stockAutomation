@@ -276,6 +276,55 @@ def test_flip_fires_when_adverse_enough():
     assert sig is not None and "flip" in (sig.reason or "")
 
 
+def test_no_lock_after_two_sl_only_after_five_losses():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            loss_lock_after=5,
+            loss_lock_cool_bars=3,
+            cooldown_ticks=0,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            stall_bars=10_000,
+            tp_points=100,
+            sl_points=10,
+            min_imb_pct=1,
+            pullback_points=1,
+            resume_points=1,
+        )
+    )
+    s.bias = "BULL"
+    s.last_net = 1000
+    s.last_imb = 20
+    s._tbq_allow_age = 0
+    # 2 losses — must still allow entries
+    for _ in range(2):
+        s._open("long", 10000.0)
+        s._close(-15.0)
+    assert s._loss_streak == 2
+    assert not s._loss_locked
+    # force pullback state for enter
+    s._extreme = 10020.0
+    s._in_pullback = True
+    s._pullback_ext = 10010.0
+    assert s._try_enter(10016.0) is not None or s.last_skip != "loss_lock"
+
+    # 3 more losses → lock at 5
+    for _ in range(3):
+        s.position = "flat"
+        s._open("long", 10000.0)
+        s._close(-12.0)
+    assert s._loss_streak >= 5
+    assert s._loss_locked
+    s.position = "flat"
+    s.entry_price = None
+    s._extreme = 10020.0
+    s._in_pullback = True
+    s._pullback_ext = 10010.0
+    assert s._try_enter(10016.0) is None
+    assert "loss_lock" in (s.last_skip or "")
+
+
 def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
@@ -286,6 +335,7 @@ def main() -> None:
     test_book_break_blocked_in_profit()
     test_flip_blocked_in_profit()
     test_flip_fires_when_adverse_enough()
+    test_no_lock_after_two_sl_only_after_five_losses()
     print("test_s8_align: OK")
 
 
