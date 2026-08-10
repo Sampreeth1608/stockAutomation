@@ -23,6 +23,7 @@ S8_ENTRY_MODEL / S8_HOLD_MODEL / S8_EXIT_MODEL.
 
 from __future__ import annotations
 
+import json
 import os
 from collections import deque
 from dataclasses import dataclass
@@ -1118,6 +1119,36 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg = _apply_entry_model("imb_sign_rise", cfg)
         cfg = _apply_hold_model("book_or_support", cfg)
         cfg = _apply_exit_model("hold_fat_flip", cfg)
+        return cfg
+    if n in {"learned", "s8_learned", "ml"}:
+        # Load improved reasoning preset from learn_s8_align.py train
+        path = os.getenv(
+            "S8_LEARNED_PRESET",
+            os.path.join(os.path.dirname(__file__), "data", "s8_presets", "learned_latest.json"),
+        )
+        cfg.model_name = "learned"
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            skip = {"preset_name", "meta", "created_at"}
+            for k, v in data.items():
+                if k in skip:
+                    continue
+                if hasattr(cfg, k):
+                    setattr(cfg, k, v)
+            cfg.model_name = "learned"
+            if int(getattr(cfg, "bar_minutes", 0) or 0) > 0:
+                cfg.bar_ticks = 0
+            if int(getattr(cfg, "bar_ticks", 0) or 0) > 0:
+                cfg.bar_minutes = 0
+        except FileNotFoundError:
+            # fall back to current paper default if no train output yet
+            cfg = _apply_entry_model("imb_sign_rise", cfg)
+            cfg = _apply_hold_model("book_rise", cfg)
+            cfg = _apply_exit_model("fat_tp_flip", cfg)
+            cfg.bar_minutes = 10
+            cfg.bar_ticks = 0
+            cfg.model_name = "learned_missing"
         return cfg
     cfg.model_name = n
     return cfg
