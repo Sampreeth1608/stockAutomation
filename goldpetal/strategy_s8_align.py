@@ -93,6 +93,10 @@ class AlignS8Config:
     flip_persist: int = 1
     # If True: flip only when opposite widen is active (stricter than bias+allow)
     flip_need_widen: bool = False
+    # Live/paper bar aggregation (0 = every tick)
+    bar_minutes: int = 0
+    bar_ticks: int = 0  # e.g. 50 = decide every 50 ticks (hist best fat_tp_flip)
+    model_name: str = "align"
 
 
 class AlignS8Strategy:
@@ -153,14 +157,27 @@ class AlignS8Strategy:
         self._bars_in_trade = 0
         self._break_streak = 0
         self._flip_streak = 0
+        # time / count bar accumulators
+        self._bar_key: datetime | None = None
+        self._bar_c: float | None = None
+        self._bar_tbq = 0.0
+        self._bar_tsq = 0.0
+        self._bar_n = 0
+        self._count_n = 0
 
     @property
     def status_line(self) -> str:
         c = self.cfg
         tp = self.active_tp if self.active_tp is not None else c.tp_points
         sl = self.active_sl if self.active_sl is not None else c.sl_points
+        if c.bar_ticks and c.bar_ticks > 0:
+            tf = f"{c.bar_ticks}t"
+        elif c.bar_minutes and c.bar_minutes > 0:
+            tf = f"{c.bar_minutes}m"
+        else:
+            tf = "tick"
         return (
-            f"TF=tick ALIGN-BOOK imb>={c.min_imb_pct:.0f}% "
+            f"TF={tf} ALIGN[{c.model_name}] imb>={c.min_imb_pct:.0f}% "
             f"TP={tp:.0f} SL={sl:.0f} combo={self.last_combo} "
             f"bias={self.bias} align={self.last_align} pos={self.position}"
         )
@@ -660,15 +677,18 @@ class AlignS8Strategy:
         self.last_skip = f"wait bias={self.bias}"
         return None
 
-    def on_tick(
-        self, now: datetime, ltp: float, message: dict[str, Any]
-    ) -> SignalResult | None:
-        qs = self._parse_qty(message)
-        if qs is None:
-            self.last_skip = "no_tbq_tsq"
-            return None
-        tbq, tsq = qs
-        px = float(ltp)
+    def _floor_bar(self, now: datetime) -> datetime:
+        minutes = max(1, int(self.cfg.bar_minutes))
+        local = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+        mins = int((local - midnight).total_seconds() // 60)
+        block = (mins // minutes) * minutes
+        from datetime import timedelta
+
+        return midnight + timedelta(minutes=block)
+
+    def _step(self, px: float, tbq: float, tsq: float) -> SignalResult | None:
+        """One decision step (tick or bar close)."""
         self._tick_i += 1
         self._update_behaviour(px, tbq, tsq)
         self._update_pullback(px)
@@ -678,20 +698,139 @@ class AlignS8Strategy:
             return self._manage(px)
         return self._try_enter(px)
 
+    def _on_tick_time_bar(
+        self, now: datetime, ltp: float, tbq: float, tsq: float
+    ) -> SignalResult | None:
+        px = float(ltp)
+        key = self._floor_bar(now)
+        sig: SignalResult | None = None
+        if self._bar_key is None:
+            self._bar_key = key
+        if key != self._bar_key:
+            if self._bar_c is not None:
+                sig = self._step(float(self._bar_c), float(self._bar_tbq), float(self._bar_tsq))
+            self._bar_key = key
+            self._bar_c = px
+            self._bar_tbq = tbq
+            self._bar_tsq = tsq
+            self._bar_n = 1
+            return sig
+        self._bar_c = px
+        self._bar_tbq = tbq
+        self._bar_tsq = tsq
+        self._bar_n += 1
+        return None
+
+    def _on_tick_count_bar(
+        self, ltp: float, tbq: float, tsq: float
+    ) -> SignalResult | None:
+        px = float(ltp)
+        n_per = max(1, int(self.cfg.bar_ticks))
+        if self._bar_c is None:
+            self._bar_c = px
+            self._bar_tbq = tbq
+            self._bar_tsq = tsq
+            self._count_n = 1
+            return None
+        self._bar_c = px
+        self._bar_tbq = tbq
+        self._bar_tsq = tsq
+        self._count_n += 1
+        if self._count_n < n_per:
+            return None
+        sig = self._step(float(self._bar_c), float(self._bar_tbq), float(self._bar_tsq))
+        self._bar_c = None
+        self._count_n = 0
+        return sig
+
+    def on_tick(
+        self, now: datetime, ltp: float, message: dict[str, Any]
+    ) -> SignalResult | None:
+        qs = self._parse_qty(message)
+        if qs is None:
+            self.last_skip = "no_tbq_tsq"
+            return None
+        tbq, tsq = qs
+        px = float(ltp)
+        if self.cfg.bar_ticks and self.cfg.bar_ticks > 0:
+            return self._on_tick_count_bar(px, tbq, tsq)
+        if self.cfg.bar_minutes and self.cfg.bar_minutes > 0:
+            return self._on_tick_time_bar(now, px, tbq, tsq)
+        return self._step(px, tbq, tsq)
+
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
         """MTF path: one decision per bar close (same behaviour math)."""
-        try:
-            ts = datetime.strptime(str(row["time"]), "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=IST
-            )
-        except Exception:
-            ts = datetime.now(IST)
-        msg = {
-            "total_buy_quantity": row.get("tbq_close", row.get("tbq", 0)),
-            "total_sell_quantity": row.get("tsq_close", row.get("tsq", 0)),
-        }
-        # Use close as decision price; behaviour uses bar-to-bar deltas via prev state
-        return self.on_tick(ts, float(row["close"]), msg)
+        tbq = float(row.get("tbq_close", row.get("tbq", 0)) or 0)
+        tsq = float(row.get("tsq_close", row.get("tsq", 0)) or 0)
+        return self._step(float(row["close"]), tbq, tsq)
+
+
+def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
+    """Named paper models from hist sweep."""
+    n = (name or "").strip().lower()
+    if n in {"", "align", "default"}:
+        cfg.model_name = "align"
+        return cfg
+    if n in {"fat_tp_flip", "fat50t", "best"}:
+        # Full-DB best ALIGN (~+₹6.8k) — still behind legacy 30m
+        cfg.model_name = "fat_tp_flip"
+        cfg.bar_ticks = 50
+        cfg.bar_minutes = 0
+        cfg.break_min_bars = 2
+        cfg.break_min_adverse = 8.0
+        cfg.break_skip_if_supported = True
+        cfg.break_price_min = 1.5
+        cfg.flip_min_bars = 2
+        cfg.flip_min_adverse = 8.0
+        cfg.flip_block_in_profit = True
+        cfg.prefer_fat_tp = True
+        cfg.fat_tp_min = 35.0
+        cfg.fat_stall_min = 30.0
+        cfg.tp_points = 45.0
+        cfg.tp_min = 35.0
+        cfg.cooldown_ticks = 1
+        return cfg
+    if n in {"flip_gate_2m", "flip2m", "2m"}:
+        cfg.model_name = "flip_gate_2m"
+        cfg.bar_minutes = 2
+        cfg.bar_ticks = 0
+        cfg.break_min_bars = 2
+        cfg.break_min_adverse = 8.0
+        cfg.break_skip_if_supported = True
+        cfg.break_price_min = 1.5
+        cfg.flip_min_bars = 2
+        cfg.flip_min_adverse = 8.0
+        cfg.flip_block_in_profit = True
+        cfg.prefer_fat_tp = False
+        cfg.cooldown_ticks = 1
+        cfg.pullback_points = max(5.0, 4.0 + 2 * 0.3)
+        cfg.resume_points = max(3.0, 3.0 + 2 * 0.15)
+        return cfg
+    if n in {"hold_fat_flip", "strict50t"}:
+        cfg.model_name = "hold_fat_flip"
+        cfg.bar_ticks = 50
+        cfg.bar_minutes = 0
+        cfg.break_min_bars = 3
+        cfg.break_min_adverse = 12.0
+        cfg.break_skip_if_supported = True
+        cfg.break_price_min = 2.0
+        cfg.break_persist = 2
+        cfg.break_need_both = True
+        cfg.flip_min_bars = 3
+        cfg.flip_min_adverse = 12.0
+        cfg.flip_block_in_profit = True
+        cfg.flip_persist = 2
+        cfg.flip_need_widen = True
+        cfg.prefer_fat_tp = True
+        cfg.fat_tp_min = 40.0
+        cfg.fat_stall_min = 35.0
+        cfg.tp_points = 50.0
+        cfg.tp_min = 40.0
+        cfg.stall_bars = 2
+        cfg.cooldown_ticks = 1
+        return cfg
+    cfg.model_name = n
+    return cfg
 
 
 def align_s8_from_env() -> AlignS8Strategy:
@@ -711,13 +850,16 @@ def align_s8_from_env() -> AlignS8Strategy:
             return default
         return raw.strip().lower() in {"1", "true", "yes", "y"}
 
+    # Default paper secondary = hist-best ALIGN (fat_tp_flip @ 50t)
+    model = os.getenv("S8_MODEL", "fat_tp_flip").strip().lower()
+
     cfg = AlignS8Config(
         min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
         book_frac_of_net=_f("S8_BOOK_FRAC_OF_NET", 0.10),
         pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
         resume_points=_f("S8_RESUME_POINTS", 5.0),
         every_n_ticks=int(_f("S8_EVERY_N_TICKS", 1)),
-        cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", 5)),
+        cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", 1)),
         sl_min=_f("S8_SL_MIN", 20.0),
         sl_max=_f("S8_SL_MAX", 55.0),
         tp_min=_f("S8_TP_MIN", 20.0),
@@ -744,5 +886,15 @@ def align_s8_from_env() -> AlignS8Strategy:
         flip_block_in_profit=_b("S8_FLIP_BLOCK_IN_PROFIT", True),
         flip_persist=int(_f("S8_FLIP_PERSIST", 1)),
         flip_need_widen=_b("S8_FLIP_NEED_WIDEN", False),
+        bar_minutes=int(_f("S8_BAR_MINUTES", 0)),
+        bar_ticks=int(_f("S8_BAR_TICKS", 0)),
     )
+    cfg = _apply_model_preset(model, cfg)
+    # Explicit env overrides still win for TF if set non-zero after preset
+    env_ticks = os.getenv("S8_BAR_TICKS")
+    env_mins = os.getenv("S8_BAR_MINUTES")
+    if env_ticks is not None and str(env_ticks).strip() != "":
+        cfg.bar_ticks = int(env_ticks)
+    if env_mins is not None and str(env_mins).strip() != "":
+        cfg.bar_minutes = int(env_mins)
     return AlignS8Strategy(cfg)

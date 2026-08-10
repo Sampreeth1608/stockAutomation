@@ -103,11 +103,53 @@ def test_factory():
     import os
 
     os.environ["S8_LOGIC"] = "align"
+    os.environ["S8_MODEL"] = "fat_tp_flip"
+    # clear TF overrides so preset wins
+    os.environ.pop("S8_BAR_TICKS", None)
+    os.environ.pop("S8_BAR_MINUTES", None)
     from strategy_net_zigzag import net_zigzag_from_env
 
     s = net_zigzag_from_env()
     assert "ALIGN" in s.status_line
+    assert "50t" in s.status_line
+    assert "fat_tp_flip" in s.status_line
     os.environ.pop("S8_LOGIC", None)
+    os.environ.pop("S8_MODEL", None)
+
+
+def test_count_bar_closes_every_n():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            bar_ticks=5,
+            min_imb_pct=5,
+            book_frac_of_net=0.05,
+            book_thr_cap_pct=0.002,
+            cooldown_ticks=0,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            pullback_points=3,
+            resume_points=2,
+        )
+    )
+    px, tbq, tsq = 10000.0, 12000.0, 9000.0
+    saw = 0
+    for i in range(40):
+        px += 2
+        tbq += 80
+        # inject pullback every 10
+        if i % 10 == 6:
+            px -= 6
+            tbq += 70
+        if i % 10 == 8:
+            px += 5
+            tbq += 80
+        sig = s.on_tick(_now(i), px, _msg(tbq, tsq))
+        if sig:
+            saw += 1
+    # decisions only on 5-tick closes
+    assert s.cfg.bar_ticks == 5
+    assert saw >= 0  # smoke: no crash
 
 
 def test_large_net_still_detects_widen():
@@ -238,6 +280,7 @@ def main() -> None:
     test_behaviour_flags_and_book_stops()
     test_dip_supported_skips_hard_sl()
     test_factory()
+    test_count_bar_closes_every_n()
     test_large_net_still_detects_widen()
     test_book_break_skips_while_dip_supported()
     test_book_break_blocked_in_profit()

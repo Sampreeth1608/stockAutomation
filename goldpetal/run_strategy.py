@@ -215,7 +215,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S8       : ALIGN price∩TBQ/TSQ book-SL/TP "
+        f"S8       : ALIGN paper model (fat_tp_flip@50t / flip_gate@2m) "
         f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
         f"{strategy_s8.status_line}",
         flush=True,
