@@ -104,6 +104,10 @@ class AlignS8Config:
     # Also hold while dip_supported (long) / rally_supported (short)
     hold_on_supported: bool = False
     close_on_book_drop: bool = True
+    # Ignore tiny TBQ/TSQ noise: require drop >= this % of previous step
+    book_drop_min_pct: float = 0.25
+    # Require supporting-book drop for this many consecutive steps
+    book_drop_persist: int = 1
 
 
 class AlignS8Strategy:
@@ -171,6 +175,9 @@ class AlignS8Strategy:
         self._bars_in_trade = 0
         self._break_streak = 0
         self._flip_streak = 0
+        self._book_drop_streak = 0
+        self._cmp_prev_tbq = 0.0
+        self._cmp_prev_tsq = 0.0
         # time / count bar accumulators
         self._bar_key: datetime | None = None
         self._bar_c: float | None = None
@@ -231,6 +238,8 @@ class AlignS8Strategy:
         self.prev_imb = float(self.last_imb)
         prev_tbq = float(self._prev_tbq) if self._prev_tbq is not None else float(tbq)
         prev_tsq = float(self._prev_tsq) if self._prev_tsq is not None else float(tsq)
+        self._cmp_prev_tbq = prev_tbq
+        self._cmp_prev_tsq = prev_tsq
         self.imb_rising = imb > self.prev_imb
         self.tbq_rising = float(tbq) > prev_tbq
         self.tsq_rising = float(tsq) > prev_tsq
@@ -486,6 +495,7 @@ class AlignS8Strategy:
         self._bars_in_trade = 0
         self._break_streak = 0
         self._flip_streak = 0
+        self._book_drop_streak = 0
         tp, sl = self._book_stops()
         self.active_tp, self.active_sl = tp, sl
 
@@ -514,6 +524,7 @@ class AlignS8Strategy:
         self._bars_in_trade = 0
         self._break_streak = 0
         self._flip_streak = 0
+        self._book_drop_streak = 0
 
     def _tp_sl(self) -> tuple[float, float]:
         c = self.cfg
@@ -587,18 +598,42 @@ class AlignS8Strategy:
                     book_hold = True
                     self.last_hold_reason = f"hold[{hm}] rally_supported"
 
-        # Supporting book dropped vs previous step → exit
+        # Supporting book dropped vs previous step → exit (noise-filtered)
         if self.cfg.close_on_book_drop and not book_hold:
+            raw_drop = (side == "long" and self.tbq_falling) or (
+                side == "short" and self.tsq_falling
+            )
+            meaningful = False
+            drop_pct = 0.0
             if side == "long" and self.tbq_falling:
+                prev = max(float(self._cmp_prev_tbq), 1e-9)
+                drop_pct = (prev - float(self.last_tbq)) / prev * 100.0
+                meaningful = drop_pct >= float(self.cfg.book_drop_min_pct)
+            elif side == "short" and self.tsq_falling:
+                prev = max(float(self._cmp_prev_tsq), 1e-9)
+                drop_pct = (prev - float(self.last_tsq)) / prev * 100.0
+                meaningful = drop_pct >= float(self.cfg.book_drop_min_pct)
+            if raw_drop and meaningful:
+                self._book_drop_streak += 1
+            else:
+                self._book_drop_streak = 0
+            if (
+                meaningful
+                and self._book_drop_streak >= max(1, int(self.cfg.book_drop_persist))
+            ):
+                if side == "long":
+                    return done(
+                        f"tbq_drop {self.last_tbq:.0f}<prev "
+                        f"(-{drop_pct:.2f}%) move={move:.1f} "
+                        f"combo={self.last_combo}"
+                    )
                 return done(
-                    f"tbq_drop {self.last_tbq:.0f}<prev move={move:.1f} "
+                    f"tsq_drop {self.last_tsq:.0f}<prev "
+                    f"(-{drop_pct:.2f}%) move={move:.1f} "
                     f"combo={self.last_combo}"
                 )
-            if side == "short" and self.tsq_falling:
-                return done(
-                    f"tsq_drop {self.last_tsq:.0f}<prev move={move:.1f} "
-                    f"combo={self.last_combo}"
-                )
+        else:
+            self._book_drop_streak = 0
 
         # Combined break = stop (book says trend failed) — gated to stop noise eats
         raw_break = (side == "long" and self.break_bull) or (
@@ -984,6 +1019,8 @@ def _apply_exit_model(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.tp_min = 35.0
         cfg.cooldown_ticks = 1
         cfg.close_on_book_drop = True
+        cfg.book_drop_min_pct = 0.25
+        cfg.book_drop_persist = 1
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
         cfg.exit_model = "flip_gate_2m"
@@ -1147,6 +1184,8 @@ def align_s8_from_env() -> AlignS8Strategy:
         hold_while_book_rises=_b("S8_HOLD_WHILE_BOOK_RISES", True),
         hold_on_supported=_b("S8_HOLD_ON_SUPPORTED", False),
         close_on_book_drop=_b("S8_CLOSE_ON_BOOK_DROP", True),
+        book_drop_min_pct=_f("S8_BOOK_DROP_MIN_PCT", 0.25),
+        book_drop_persist=int(_f("S8_BOOK_DROP_PERSIST", 1)),
     )
     cfg = _apply_model_preset(model, cfg)
 
@@ -1174,4 +1213,8 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.hold_on_supported = _b("S8_HOLD_ON_SUPPORTED", False)
     if os.getenv("S8_CLOSE_ON_BOOK_DROP") is not None:
         cfg.close_on_book_drop = _b("S8_CLOSE_ON_BOOK_DROP", True)
+    if os.getenv("S8_BOOK_DROP_MIN_PCT") is not None:
+        cfg.book_drop_min_pct = _f("S8_BOOK_DROP_MIN_PCT", 0.25)
+    if os.getenv("S8_BOOK_DROP_PERSIST") is not None:
+        cfg.book_drop_persist = int(_f("S8_BOOK_DROP_PERSIST", 1))
     return AlignS8Strategy(cfg)

@@ -435,6 +435,8 @@ def test_tbq_drop_closes_long():
         AlignS8Config(
             hold_while_book_rises=True,
             close_on_book_drop=True,
+            book_drop_min_pct=0.25,
+            book_drop_persist=1,
             break_min_bars=99,
             flip_min_bars=99,
             weaken_pct=90,
@@ -445,8 +447,18 @@ def test_tbq_drop_closes_long():
         )
     )
     s._open("long", 10000.0)
+    # Tiny noise (−0.05%) must NOT close
     s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 12000.0, 8000.0
-    s._update_behaviour(10005.0, 11500.0, 8000.0)  # TBQ↓
+    s._update_behaviour(10005.0, 11995.0, 8000.0)
+    assert s.tbq_falling
+    assert s._manage(10005.0) is None
+    # Meaningful drop (−0.5%) closes
+    s.position = "long"
+    s.entry_price = 10000.0
+    s.entry_tbq = 12000.0
+    s._bars_in_trade = 1
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10005.0, 12000.0, 8000.0
+    s._update_behaviour(10005.0, 11940.0, 8000.0)  # -0.5%
     assert s.tbq_falling
     sig = s._manage(10005.0)
     assert sig is not None and "tbq_drop" in (sig.reason or "")
@@ -484,6 +496,7 @@ def test_tsq_drop_closes_short():
         AlignS8Config(
             hold_while_book_rises=True,
             close_on_book_drop=True,
+            book_drop_min_pct=0.25,
             break_min_bars=99,
             flip_min_bars=99,
             weaken_pct=90,
@@ -495,7 +508,7 @@ def test_tsq_drop_closes_short():
     )
     s._open("short", 10000.0)
     s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 8000.0, 12000.0
-    s._update_behaviour(9995.0, 8000.0, 11500.0)  # TSQ↓
+    s._update_behaviour(9995.0, 8000.0, 11600.0)  # -3.3%
     assert s.tsq_falling
     sig = s._manage(9995.0)
     assert sig is not None and "tsq_drop" in (sig.reason or "")
