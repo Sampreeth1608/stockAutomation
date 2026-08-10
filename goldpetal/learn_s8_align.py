@@ -920,7 +920,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--db", default=str(DB))
         p.add_argument("--lots", type=float, default=100.0)
         p.add_argument("--day", default="", help="YYYY-MM-DD filter")
-        p.add_argument("--bar-minutes", type=int, default=10)
+        p.add_argument("--bar-minutes", type=int, default=30)
         p.add_argument("--bar-ticks", type=int, default=0)
         p.add_argument("--entry", default="imb_sign_rise")
         p.add_argument("--hold", default="book_rise")
