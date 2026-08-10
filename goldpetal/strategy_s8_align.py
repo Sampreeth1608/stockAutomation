@@ -109,6 +109,11 @@ class AlignS8Config:
     book_drop_min_pct: float = 0.25
     # Require supporting-book drop for this many consecutive steps
     book_drop_persist: int = 1
+    # Optional weekly MLP neural-net entry gate (train_s8_nn_weekly.py)
+    require_nn_filter: bool = False
+    nn_model_path: str = "data/models/s8_nn_mlp.joblib"
+    nn_min_proba: float = 0.55
+    nn_lags: int = 3
 
 
 class AlignS8Strategy:
@@ -179,6 +184,11 @@ class AlignS8Strategy:
         self._book_drop_streak = 0
         self._cmp_prev_tbq = 0.0
         self._cmp_prev_tsq = 0.0
+        # Need ≥25 steps for MLP rolling features (vol_ratio / net_z)
+        self._feat_hist: deque[dict[str, float]] = deque(maxlen=120)
+        self._nn_bundle: Any = None
+        self.last_nn_proba: float | None = None
+        self.nn_skip_count = 0
         # time / count bar accumulators
         self._bar_key: datetime | None = None
         self._bar_c: float | None = None
@@ -385,6 +395,48 @@ class AlignS8Strategy:
 
         self._prev_px, self._prev_tbq, self._prev_tsq = px, tbq, tsq
         self._prev_r_bt, self._prev_r_st = r_bt, r_st
+        self._feat_hist.append(
+            {
+                "px": float(px),
+                "tbq": float(tbq),
+                "tsq": float(tsq),
+                "imb": float(imb),
+                "net": float(net),
+            }
+        )
+
+    def _nn_allows_entry(self) -> bool:
+        """Optional MLP gate from weekly trainer."""
+        if not self.cfg.require_nn_filter:
+            return True
+        try:
+            from s8_nn import features_from_hist, load_bundle, predict_edge_proba
+        except Exception as exc:  # pragma: no cover
+            self.last_skip = f"nn_import_error {exc}"
+            return not self.cfg.require_nn_filter
+        if self._nn_bundle is None:
+            path = self.cfg.nn_model_path
+            try:
+                self._nn_bundle = load_bundle(path)
+            except Exception as exc:
+                self.last_skip = f"nn_missing {path}: {exc}"
+                return False
+        feats = features_from_hist(
+            list(self._feat_hist), lags=max(1, int(self.cfg.nn_lags))
+        )
+        if feats is None:
+            self.last_skip = "nn_warmup"
+            self.last_nn_proba = None
+            return False
+        proba = predict_edge_proba(self._nn_bundle, feats)
+        self.last_nn_proba = proba
+        if proba < float(self.cfg.nn_min_proba):
+            self.nn_skip_count += 1
+            self.last_skip = (
+                f"nn_low_proba {proba:.2f}<{float(self.cfg.nn_min_proba):.2f}"
+            )
+            return False
+        return True
 
     def _book_stops(self) -> tuple[float, float]:
         """SL/TP from supported adverse/impulse history (price∩book)."""
@@ -797,10 +849,17 @@ class AlignS8Strategy:
             if self.cfg.require_pullback and not self._pullback_resume(px, "long"):
                 skip("wait_bull_pullback")
                 return None
+            if not self._nn_allows_entry():
+                return None
             self._open("long", px)
             tp, sl = self._tp_sl()
             how = "pullback" if self.cfg.require_pullback else (
                 "widen" if mode == "align_widen" else "imb+"
+            )
+            nn_bit = (
+                f" nn={self.last_nn_proba:.2f}"
+                if self.cfg.require_nn_filter and self.last_nn_proba is not None
+                else ""
             )
             return SignalResult(
                 action="BUY",
@@ -812,7 +871,7 @@ class AlignS8Strategy:
                 reason=(
                     f"entry[{em}] align_long {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
-                    f"TP={tp:.0f} SL={sl:.0f}"
+                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}"
                 ),
             )
 
@@ -833,10 +892,17 @@ class AlignS8Strategy:
             if self.cfg.require_pullback and not self._pullback_resume(px, "short"):
                 skip("wait_bear_pullback")
                 return None
+            if not self._nn_allows_entry():
+                return None
             self._open("short", px)
             tp, sl = self._tp_sl()
             how = "pullback" if self.cfg.require_pullback else (
                 "widen" if mode == "align_widen" else "imb-"
+            )
+            nn_bit = (
+                f" nn={self.last_nn_proba:.2f}"
+                if self.cfg.require_nn_filter and self.last_nn_proba is not None
+                else ""
             )
             return SignalResult(
                 action="SHORT",
@@ -848,7 +914,7 @@ class AlignS8Strategy:
                 reason=(
                     f"entry[{em}] align_short {how} net={self.last_net:.0f} "
                     f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
-                    f"TP={tp:.0f} SL={sl:.0f}"
+                    f"TP={tp:.0f} SL={sl:.0f}{nn_bit}"
                 ),
             )
 
@@ -1218,6 +1284,10 @@ def align_s8_from_env() -> AlignS8Strategy:
         close_on_book_drop=_b("S8_CLOSE_ON_BOOK_DROP", True),
         book_drop_min_pct=_f("S8_BOOK_DROP_MIN_PCT", 0.25),
         book_drop_persist=int(_f("S8_BOOK_DROP_PERSIST", 1)),
+        require_nn_filter=_b("S8_REQUIRE_NN", False),
+        nn_model_path=os.getenv("S8_NN_MODEL_PATH", "data/models/s8_nn_mlp.joblib"),
+        nn_min_proba=_f("S8_NN_MIN_PROBA", 0.55),
+        nn_lags=int(_f("S8_NN_LAGS", 3)),
     )
     cfg = _apply_model_preset(model, cfg)
 
@@ -1256,4 +1326,12 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.book_drop_min_pct = _f("S8_BOOK_DROP_MIN_PCT", 0.25)
     if os.getenv("S8_BOOK_DROP_PERSIST") is not None:
         cfg.book_drop_persist = int(_f("S8_BOOK_DROP_PERSIST", 1))
+    if os.getenv("S8_REQUIRE_NN") is not None:
+        cfg.require_nn_filter = _b("S8_REQUIRE_NN", False)
+    if os.getenv("S8_NN_MODEL_PATH") is not None:
+        cfg.nn_model_path = os.getenv("S8_NN_MODEL_PATH", cfg.nn_model_path)
+    if os.getenv("S8_NN_MIN_PROBA") is not None:
+        cfg.nn_min_proba = _f("S8_NN_MIN_PROBA", 0.55)
+    if os.getenv("S8_NN_LAGS") is not None:
+        cfg.nn_lags = int(_f("S8_NN_LAGS", 3))
     return AlignS8Strategy(cfg)

@@ -283,7 +283,12 @@ def run_align_labeled(
             }
         )
 
-    return {"trades": trades, "reasons": dict(reasons), "n_ticks": len(rows)}
+    return {
+        "trades": trades,
+        "reasons": dict(reasons),
+        "n_ticks": len(rows),
+        "nn_skipped": int(getattr(s, "nn_skip_count", 0) or 0),
+    }
 
 
 def summarize(label: str, result: dict[str, Any]) -> dict[str, Any]:
