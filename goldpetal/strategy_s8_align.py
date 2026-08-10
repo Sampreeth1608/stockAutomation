@@ -1,8 +1,13 @@
 """S8_ALIGN — price ∩ TBQ ∩ TSQ individual + combined behaviour.
 
-Entry (unchanged idea):
-  Bull: price↑ WITH TBQ↑ (ΔTBQ ≥ frac·|NET|) → long on pullback-resume
-  Bear: price↓ WITH TSQ↑ → short on pullback-resume
+Entry:
+  Bull: bias BULL + NET>0 + TBQ allow, and (default) IMB↑ vs prev + TBQ↑ vs prev.
+  Bear: bias BEAR + NET<0 + TSQ allow, and (default) IMB↑ vs prev + TSQ↑ vs prev.
+  Optional pullback-resume gate (off by default).
+
+Hold:
+  While supporting book still rises (TBQ↑ long / TSQ↑ short), HOLD — skip break /
+  flip / weaken / hard SL / stall; TP still allowed.
 
 SL / TP (book-driven — NOT bare price range):
   Individually track Δprice, ΔTBQ, ΔTSQ and ratios price/TBQ, price/TSQ.
@@ -103,6 +108,13 @@ class AlignS8Config:
     loss_lock_cool_bars: int = 10
     # If False: enter as soon as bias+book aligned (no pullback wait)
     require_pullback: bool = False
+    # Entry: current IMB must be strictly > previous IMB
+    require_rising_imb: bool = True
+    # Entry: long needs TBQ↑ vs prev; short needs TSQ↑ vs prev
+    require_rising_book: bool = True
+    # While supporting book still rising (TBQ for long / TSQ for short): HOLD
+    # (skip break / flip / weaken / hard SL; TP/stall still allowed)
+    hold_while_book_rises: bool = True
 
 
 class AlignS8Strategy:
@@ -114,9 +126,13 @@ class AlignS8Strategy:
         self.bias: Bias = "NEUTRAL"
         self.last_net = 0.0
         self.last_imb = 0.0
+        self.prev_imb = 0.0
         self.last_tbq = 0.0
         self.last_tsq = 0.0
         self.last_px = 0.0
+        self.tbq_rising = False
+        self.tsq_rising = False
+        self.imb_rising = False
         self.entry_price: float | None = None
         self.entry_tbq: float | None = None
         self.entry_tsq: float | None = None
@@ -208,6 +224,13 @@ class AlignS8Strategy:
 
     def _update_behaviour(self, px: float, tbq: float, tsq: float) -> None:
         net, imb = net_imbalance(tbq, tsq)
+        # compare to previous step before overwriting
+        self.prev_imb = float(self.last_imb)
+        prev_tbq = float(self._prev_tbq) if self._prev_tbq is not None else float(tbq)
+        prev_tsq = float(self._prev_tsq) if self._prev_tsq is not None else float(tsq)
+        self.imb_rising = imb > self.prev_imb
+        self.tbq_rising = float(tbq) > prev_tbq
+        self.tsq_rising = float(tsq) > prev_tsq
         self.last_net, self.last_imb = net, imb
         self.last_tbq, self.last_tsq, self.last_px = tbq, tsq, px
         r_bt = px / max(tbq, 1e-9)
@@ -532,6 +555,14 @@ class AlignS8Strategy:
                 reason=reason,
             )
 
+        # Hold while supporting book still rising (TBQ↑ long / TSQ↑ short)
+        book_hold = False
+        if self.cfg.hold_while_book_rises:
+            if side == "long" and self.tbq_rising:
+                book_hold = True
+            if side == "short" and self.tsq_rising:
+                book_hold = True
+
         # Combined break = stop (book says trend failed) — gated to stop noise eats
         raw_break = (side == "long" and self.break_bull) or (
             side == "short" and self.break_bear
@@ -542,6 +573,8 @@ class AlignS8Strategy:
             self._break_streak = 0
 
         allow_break = True
+        if book_hold:
+            allow_break = False
         if self._bars_in_trade < max(1, int(self.cfg.break_min_bars)):
             allow_break = False
         # Never book_break while in profit; wait until adverse >= break_min_adverse
@@ -580,6 +613,8 @@ class AlignS8Strategy:
             self._flip_streak = 0
 
         allow_flip = True
+        if book_hold:
+            allow_flip = False
         if self._bars_in_trade < max(1, int(self.cfg.flip_min_bars)):
             allow_flip = False
         if self.cfg.flip_block_in_profit and move >= 0:
@@ -604,11 +639,11 @@ class AlignS8Strategy:
                 f"in={self._bars_in_trade} streak={self._flip_streak}"
             )
 
-        if side == "long" and self.entry_tbq and self.entry_tbq > 0:
+        if not book_hold and side == "long" and self.entry_tbq and self.entry_tbq > 0:
             drop = (self.entry_tbq - self.last_tbq) / self.entry_tbq * 100.0
             if drop >= self.cfg.weaken_pct:
                 return done(f"tbq_weaken {drop:.1f}%")
-        if side == "short" and self.entry_tsq and self.entry_tsq > 0:
+        if not book_hold and side == "short" and self.entry_tsq and self.entry_tsq > 0:
             drop = (self.entry_tsq - self.last_tsq) / self.entry_tsq * 100.0
             if drop >= self.cfg.weaken_pct:
                 return done(f"tsq_weaken {drop:.1f}%")
@@ -616,7 +651,9 @@ class AlignS8Strategy:
         # Hard SL only if adverse beyond scientific supported depth
         # If currently dip_supported, skip hard SL (book still buying the dip)
         if move <= -sl:
-            if side == "long" and self.dip_supported:
+            if book_hold:
+                pass
+            elif side == "long" and self.dip_supported:
                 pass  # allow supported fluctuation
             elif side == "short" and self.rally_supported:
                 pass
@@ -637,6 +674,7 @@ class AlignS8Strategy:
             move >= stall_min
             and self._bars_since_ext >= self.cfg.stall_bars
             and not self._book_expand_since_ext
+            and not book_hold
         ):
             return done(
                 f"stall_book_tp +{move:.1f} no_ext×{self._bars_since_ext} "
@@ -660,10 +698,16 @@ class AlignS8Strategy:
         if self.last_imb < self.cfg.min_imb_pct:
             self.last_skip = "imb_soft"
             return None
+        if self.cfg.require_rising_imb and not self.imb_rising:
+            self.last_skip = f"imb_not_rising {self.prev_imb:.1f}->{self.last_imb:.1f}"
+            return None
 
         if self.bias == "BULL" and self.last_net > 0:
             if self._tbq_allow_age > self.book_allow_memory:
                 self.last_skip = "tbq_not_allow"
+                return None
+            if self.cfg.require_rising_book and not self.tbq_rising:
+                self.last_skip = "tbq_not_rising"
                 return None
             if self.cfg.require_pullback and not self._pullback_resume(px, "long"):
                 self.last_skip = "wait_bull_pullback"
@@ -681,14 +725,16 @@ class AlignS8Strategy:
                 reason=(
                     f"align_long {how} {self.last_align}/{self.last_combo} "
                     f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
-                    f"TP={tp:.0f} SL={sl:.0f} "
-                    f"advN={len(self._adverse_supported)} impN={len(self._impulse_aligned)}"
+                    f"(↑{self.prev_imb:.1f}) tbq↑ TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
         if self.bias == "BEAR" and self.last_net < 0:
             if self._tsq_allow_age > self.book_allow_memory:
                 self.last_skip = "tsq_not_allow"
+                return None
+            if self.cfg.require_rising_book and not self.tsq_rising:
+                self.last_skip = "tsq_not_rising"
                 return None
             if self.cfg.require_pullback and not self._pullback_resume(px, "short"):
                 self.last_skip = "wait_bear_pullback"
@@ -706,8 +752,7 @@ class AlignS8Strategy:
                 reason=(
                     f"align_short {how} {self.last_align}/{self.last_combo} "
                     f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
-                    f"TP={tp:.0f} SL={sl:.0f} "
-                    f"advN={len(self._adverse_supported)} impN={len(self._impulse_aligned)}"
+                    f"(↑{self.prev_imb:.1f}) tsq↑ TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
@@ -830,6 +875,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.loss_lock_after = 5
         cfg.loss_lock_cool_bars = 10
         cfg.require_pullback = False  # enter on align (no pullback wait)
+        cfg.require_rising_imb = True
+        cfg.require_rising_book = True
+        cfg.hold_while_book_rises = True
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
         cfg.model_name = "flip_gate_2m"
@@ -845,6 +893,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.prefer_fat_tp = False
         cfg.cooldown_ticks = 1
         cfg.require_pullback = False
+        cfg.require_rising_imb = True
+        cfg.require_rising_book = True
+        cfg.hold_while_book_rises = True
         cfg.pullback_points = max(5.0, 4.0 + 2 * 0.3)
         cfg.resume_points = max(3.0, 3.0 + 2 * 0.15)
         return cfg
@@ -871,6 +922,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.stall_bars = 2
         cfg.cooldown_ticks = 1
         cfg.require_pullback = False
+        cfg.require_rising_imb = True
+        cfg.require_rising_book = True
+        cfg.hold_while_book_rises = True
         return cfg
     cfg.model_name = n
     return cfg
@@ -934,6 +988,9 @@ def align_s8_from_env() -> AlignS8Strategy:
         loss_lock_after=int(_f("S8_LOSS_LOCK_AFTER", 5)),
         loss_lock_cool_bars=int(_f("S8_LOSS_LOCK_COOL_BARS", 10)),
         require_pullback=_b("S8_REQUIRE_PULLBACK", False),
+        require_rising_imb=_b("S8_REQUIRE_RISING_IMB", True),
+        require_rising_book=_b("S8_REQUIRE_RISING_BOOK", True),
+        hold_while_book_rises=_b("S8_HOLD_WHILE_BOOK_RISES", True),
     )
     cfg = _apply_model_preset(model, cfg)
     # Explicit env overrides still win for TF if set non-zero after preset
@@ -943,4 +1000,11 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.bar_ticks = int(env_ticks)
     if env_mins is not None and str(env_mins).strip() != "":
         cfg.bar_minutes = int(env_mins)
+    # Explicit rising/hold env wins after preset (same pattern as TF)
+    if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
+        cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
+    if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:
+        cfg.require_rising_book = _b("S8_REQUIRE_RISING_BOOK", True)
+    if os.getenv("S8_HOLD_WHILE_BOOK_RISES") is not None:
+        cfg.hold_while_book_rises = _b("S8_HOLD_WHILE_BOOK_RISES", True)
     return AlignS8Strategy(cfg)
