@@ -117,10 +117,12 @@ def run_align(rows, cfg: AlignS8Config, lots: float, *, detail: bool):
             pnl = gross * lots - fee_rt(ltp, lots)
             r = sig.reason or ""
             tag = "other"
-            if r.startswith("tp") or "stall_tp" in r:
+            if r.startswith("tp") or "stall" in r:
                 tag = "tp"
             elif r.startswith("sl"):
                 tag = "sl"
+            elif "book_break" in r:
+                tag = "break"
             elif "weaken" in r:
                 tag = "weaken"
             elif "flip" in r or "align_flip" in r:
@@ -225,9 +227,11 @@ def main() -> None:
         book_frac_of_net=0.10,
         pullback_points=8.0,
         resume_points=5.0,
-        use_range_stops=True,
         cooldown_ticks=5,
-        weaken_pct=15.0,
+        weaken_pct=20.0,
+        stall_min_profit=20.0,
+        sl_min=20.0,
+        tp_min=20.0,
     )
     trades, reasons = run_align(rows, cfg, args.lots, detail=args.detail)
     summarize("ALIGN", trades, reasons, len(rows))
