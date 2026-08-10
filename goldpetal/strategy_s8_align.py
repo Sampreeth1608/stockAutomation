@@ -1,13 +1,13 @@
 """S8_ALIGN — price ∩ TBQ ∩ TSQ individual + combined behaviour.
 
-Entry:
-  Bull: bias BULL + NET>0 + TBQ allow, and (default) IMB↑ vs prev + TBQ↑ vs prev.
-  Bear: bias BEAR + NET<0 + TSQ allow, and (default) IMB↑ vs prev + TSQ↑ vs prev.
-  Optional pullback-resume gate (off by default).
+Entry (IMB sign + rising abs IMB):
+  NET>0 (IMB positive / TBQ>TSQ) + abs(IMB)_now > abs(IMB)_prev → BUY
+  NET<0 (IMB negative / TSQ>TBQ) + abs(IMB)_now > abs(IMB)_prev → SHORT
+  Optional pullback-resume gate (off by default). TBQ/TSQ rising is NOT an entry gate.
 
-Hold:
-  While supporting book still rises (TBQ↑ long / TSQ↑ short), HOLD — skip break /
-  flip / weaken / hard SL / stall; TP still allowed.
+Hold / close on book step:
+  Long:  TBQ_now > TBQ_prev → HOLD; TBQ_now < TBQ_prev → close reason (tbq_drop)
+  Short: TSQ_now > TSQ_prev → HOLD; TSQ_now < TSQ_prev → close reason (tsq_drop)
 
 SL / TP (book-driven — NOT bare price range):
   Individually track Δprice, ΔTBQ, ΔTSQ and ratios price/TBQ, price/TSQ.
@@ -106,15 +106,17 @@ class AlignS8Config:
     loss_lock_after: int = 5
     # Stay locked this many decision steps, then auto-release
     loss_lock_cool_bars: int = 10
-    # If False: enter as soon as bias+book aligned (no pullback wait)
+    # If False: enter as soon as NET sign + rising IMB (no pullback wait)
     require_pullback: bool = False
-    # Entry: current IMB must be strictly > previous IMB
+    # Entry: abs(IMB)_now must be strictly > abs(IMB)_prev
     require_rising_imb: bool = True
-    # Entry: long needs TBQ↑ vs prev; short needs TSQ↑ vs prev
-    require_rising_book: bool = True
+    # Entry uses NET sign (positive→long, negative→short); kept False (legacy off)
+    require_rising_book: bool = False
     # While supporting book still rising (TBQ for long / TSQ for short): HOLD
     # (skip break / flip / weaken / hard SL; TP/stall still allowed)
     hold_while_book_rises: bool = True
+    # If supporting book drops vs previous step → close (tbq_drop / tsq_drop)
+    close_on_book_drop: bool = True
 
 
 class AlignS8Strategy:
@@ -132,6 +134,8 @@ class AlignS8Strategy:
         self.last_px = 0.0
         self.tbq_rising = False
         self.tsq_rising = False
+        self.tbq_falling = False
+        self.tsq_falling = False
         self.imb_rising = False
         self.entry_price: float | None = None
         self.entry_tbq: float | None = None
@@ -231,6 +235,8 @@ class AlignS8Strategy:
         self.imb_rising = imb > self.prev_imb
         self.tbq_rising = float(tbq) > prev_tbq
         self.tsq_rising = float(tsq) > prev_tsq
+        self.tbq_falling = float(tbq) < prev_tbq
+        self.tsq_falling = float(tsq) < prev_tsq
         self.last_net, self.last_imb = net, imb
         self.last_tbq, self.last_tsq, self.last_px = tbq, tsq, px
         r_bt = px / max(tbq, 1e-9)
@@ -563,6 +569,19 @@ class AlignS8Strategy:
             if side == "short" and self.tsq_rising:
                 book_hold = True
 
+        # Supporting book dropped vs previous step → exit
+        if self.cfg.close_on_book_drop and not book_hold:
+            if side == "long" and self.tbq_falling:
+                return done(
+                    f"tbq_drop {self.last_tbq:.0f}<prev move={move:.1f} "
+                    f"combo={self.last_combo}"
+                )
+            if side == "short" and self.tsq_falling:
+                return done(
+                    f"tsq_drop {self.last_tsq:.0f}<prev move={move:.1f} "
+                    f"combo={self.last_combo}"
+                )
+
         # Combined break = stop (book says trend failed) — gated to stop noise eats
         raw_break = (side == "long" and self.break_bull) or (
             side == "short" and self.break_bear
@@ -702,10 +721,9 @@ class AlignS8Strategy:
             self.last_skip = f"imb_not_rising {self.prev_imb:.1f}->{self.last_imb:.1f}"
             return None
 
-        if self.bias == "BULL" and self.last_net > 0:
-            if self._tbq_allow_age > self.book_allow_memory:
-                self.last_skip = "tbq_not_allow"
-                return None
+        # IMB positive (NET>0) → buy; IMB negative (NET<0) → short
+        # TBQ/TSQ rising is for HOLD only (not entry)
+        if self.last_net > 0:
             if self.cfg.require_rising_book and not self.tbq_rising:
                 self.last_skip = "tbq_not_rising"
                 return None
@@ -714,7 +732,7 @@ class AlignS8Strategy:
                 return None
             self._open("long", px)
             tp, sl = self._tp_sl()
-            how = "pullback" if self.cfg.require_pullback else "aligned"
+            how = "pullback" if self.cfg.require_pullback else "imb+"
             return SignalResult(
                 action="BUY",
                 position_after="long",
@@ -723,16 +741,13 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_long {how} {self.last_align}/{self.last_combo} "
-                    f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
-                    f"(↑{self.prev_imb:.1f}) tbq↑ TP={tp:.0f} SL={sl:.0f}"
+                    f"align_long {how} net={self.last_net:.0f} "
+                    f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
+                    f"TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
-        if self.bias == "BEAR" and self.last_net < 0:
-            if self._tsq_allow_age > self.book_allow_memory:
-                self.last_skip = "tsq_not_allow"
-                return None
+        if self.last_net < 0:
             if self.cfg.require_rising_book and not self.tsq_rising:
                 self.last_skip = "tsq_not_rising"
                 return None
@@ -741,7 +756,7 @@ class AlignS8Strategy:
                 return None
             self._open("short", px)
             tp, sl = self._tp_sl()
-            how = "pullback" if self.cfg.require_pullback else "aligned"
+            how = "pullback" if self.cfg.require_pullback else "imb-"
             return SignalResult(
                 action="SHORT",
                 position_after="short",
@@ -750,13 +765,13 @@ class AlignS8Strategy:
                 net_delta=None,
                 prev_net_delta=None,
                 reason=(
-                    f"align_short {how} {self.last_align}/{self.last_combo} "
-                    f"net={self.last_net:.0f} imb={self.last_imb:.1f}% "
-                    f"(↑{self.prev_imb:.1f}) tsq↑ TP={tp:.0f} SL={sl:.0f}"
+                    f"align_short {how} net={self.last_net:.0f} "
+                    f"imb={self.last_imb:.1f}% (↑{self.prev_imb:.1f}) "
+                    f"TP={tp:.0f} SL={sl:.0f}"
                 ),
             )
 
-        self.last_skip = f"wait bias={self.bias}"
+        self.last_skip = "wait net=0"
         return None
 
     def _floor_bar(self, now: datetime) -> datetime:
@@ -876,8 +891,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.loss_lock_cool_bars = 10
         cfg.require_pullback = False  # enter on align (no pullback wait)
         cfg.require_rising_imb = True
-        cfg.require_rising_book = True
+        cfg.require_rising_book = False  # TBQ/TSQ rising = hold/close, not entry
         cfg.hold_while_book_rises = True
+        cfg.close_on_book_drop = True
         return cfg
     if n in {"flip_gate_2m", "flip2m", "2m"}:
         cfg.model_name = "flip_gate_2m"
@@ -894,8 +910,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.cooldown_ticks = 1
         cfg.require_pullback = False
         cfg.require_rising_imb = True
-        cfg.require_rising_book = True
+        cfg.require_rising_book = False
         cfg.hold_while_book_rises = True
+        cfg.close_on_book_drop = True
         cfg.pullback_points = max(5.0, 4.0 + 2 * 0.3)
         cfg.resume_points = max(3.0, 3.0 + 2 * 0.15)
         return cfg
@@ -923,8 +940,9 @@ def _apply_model_preset(name: str, cfg: AlignS8Config) -> AlignS8Config:
         cfg.cooldown_ticks = 1
         cfg.require_pullback = False
         cfg.require_rising_imb = True
-        cfg.require_rising_book = True
+        cfg.require_rising_book = False
         cfg.hold_while_book_rises = True
+        cfg.close_on_book_drop = True
         return cfg
     cfg.model_name = n
     return cfg
@@ -989,8 +1007,9 @@ def align_s8_from_env() -> AlignS8Strategy:
         loss_lock_cool_bars=int(_f("S8_LOSS_LOCK_COOL_BARS", 10)),
         require_pullback=_b("S8_REQUIRE_PULLBACK", False),
         require_rising_imb=_b("S8_REQUIRE_RISING_IMB", True),
-        require_rising_book=_b("S8_REQUIRE_RISING_BOOK", True),
+        require_rising_book=_b("S8_REQUIRE_RISING_BOOK", False),
         hold_while_book_rises=_b("S8_HOLD_WHILE_BOOK_RISES", True),
+        close_on_book_drop=_b("S8_CLOSE_ON_BOOK_DROP", True),
     )
     cfg = _apply_model_preset(model, cfg)
     # Explicit env overrides still win for TF if set non-zero after preset
@@ -1004,7 +1023,9 @@ def align_s8_from_env() -> AlignS8Strategy:
     if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
         cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
     if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:
-        cfg.require_rising_book = _b("S8_REQUIRE_RISING_BOOK", True)
+        cfg.require_rising_book = _b("S8_REQUIRE_RISING_BOOK", False)
     if os.getenv("S8_HOLD_WHILE_BOOK_RISES") is not None:
         cfg.hold_while_book_rises = _b("S8_HOLD_WHILE_BOOK_RISES", True)
+    if os.getenv("S8_CLOSE_ON_BOOK_DROP") is not None:
+        cfg.close_on_book_drop = _b("S8_CLOSE_ON_BOOK_DROP", True)
     return AlignS8Strategy(cfg)

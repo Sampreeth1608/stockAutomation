@@ -217,6 +217,8 @@ def test_book_break_blocked_in_profit():
             flip_min_bars=1,
             flip_min_adverse=0.0,
             flip_block_in_profit=False,
+            close_on_book_drop=False,
+            hold_while_book_rises=False,
         )
     )
     s._open("long", 10000.0)
@@ -343,94 +345,59 @@ def test_enter_aligned_without_pullback():
             weaken_pct=90,
         )
     )
-    # Seed + widen bull so bias=BULL
+    # Seed + NET>0 so positive IMB → buy
     s.on_tick(_now(0), 10000.0, _msg(12000, 9000))
     for i in range(4):
         s.on_tick(_now(i + 1), 10000.0 + (i + 1) * 3, _msg(12000 + (i + 1) * 200, 9000))
-    assert s.bias == "BULL"
-    # No pullback state — should still enter when require_pullback=False
+    assert s.last_net > 0
     s._in_pullback = False
     s._pullback_ext = None
-    s._tbq_allow_age = 0
     sig = s._try_enter(10015.0)
     assert sig is not None and sig.action == "BUY"
-    assert "aligned" in (sig.reason or "")
+    assert "imb+" in (sig.reason or "")
 
 
-def test_entry_requires_rising_imb_and_tbq():
+def test_entry_net_sign_and_rising_imb():
+    """Positive NET → buy, negative → short; need abs IMB rising. TBQ not entry gate."""
     s = AlignS8Strategy(
         AlignS8Config(
             require_pullback=False,
             require_rising_imb=True,
-            require_rising_book=True,
+            require_rising_book=False,
             min_imb_pct=5,
             cooldown_ticks=0,
-            book_frac_of_net=0.05,
-            book_thr_cap_pct=0.002,
             break_min_bars=99,
             flip_min_bars=99,
             weaken_pct=90,
-            hold_while_book_rises=True,
+            close_on_book_drop=False,
         )
     )
-    # Warmup + bull widen so bias BULL
-    s.on_tick(_now(0), 10000.0, _msg(12000, 9000))
-    for i in range(3):
-        s.on_tick(
-            _now(i + 1),
-            10000.0 + (i + 1) * 3,
-            _msg(12000 + (i + 1) * 250, 9000),
-        )
-    assert s.bias == "BULL"
-    s._tbq_allow_age = 0
-
-    # Flat IMB step (same ratio) → block
-    s._prev_px, s._prev_tbq, s._prev_tsq = s.last_px, s.last_tbq, s.last_tsq
-    s.last_imb = 25.0  # force prev
-    s._update_behaviour(s.last_px + 2, s.last_tbq * 1.1, s.last_tsq * 1.1)  # imb flat-ish
-    # Scale both sides equally → imb unchanged; TBQ still rises
-    # Re-seed: equal scale keeps imb
+    # IMB falling while NET>0 → blocked
     tbq0, tsq0 = 15000.0, 10000.0
     s.last_imb = abs(tbq0 - tsq0) / max(tbq0, tsq0) * 100.0
     s._prev_tbq, s._prev_tsq, s._prev_px = tbq0, tsq0, 10020.0
-    s.bias = "BULL"
-    s.last_net = tbq0 - tsq0
-    s._tbq_allow_age = 0
-    # TBQ up but IMB down (TSQ rises more) → imb_not_rising
-    s._update_behaviour(10022.0, 15100.0, 12000.0)
+    s._update_behaviour(10022.0, 15100.0, 12000.0)  # NET still +, abs IMB down
+    assert s.last_net > 0
     assert not s.imb_rising
     assert s._try_enter(10022.0) is None
     assert "imb_not_rising" in (s.last_skip or "")
 
-    # IMB up but TBQ flat → tbq_not_rising
+    # IMB rising + NET>0 even if TBQ flat → BUY
     s._prev_tbq, s._prev_tsq, s._prev_px = 15100.0, 12000.0, 10022.0
     s.last_imb = abs(15100 - 12000) / 15100 * 100.0
-    s.bias = "BULL"
-    s.last_net = 3100
-    s._tbq_allow_age = 0
     s._update_behaviour(10024.0, 15100.0, 11000.0)  # TBQ flat, TSQ down → IMB up
-    assert s.imb_rising
+    assert s.last_net > 0 and s.imb_rising
     assert not s.tbq_rising
-    assert s._try_enter(10024.0) is None
-    assert "tbq_not_rising" in (s.last_skip or "")
-
-    # Both rising → enter
-    s._prev_tbq, s._prev_tsq, s._prev_px = 15100.0, 11000.0, 10024.0
-    s.last_imb = abs(15100 - 11000) / 15100 * 100.0
-    s.bias = "BULL"
-    s.last_net = 4100
-    s._tbq_allow_age = 0
-    s._update_behaviour(10026.0, 16000.0, 11000.0)
-    assert s.imb_rising and s.tbq_rising
-    sig = s._try_enter(10026.0)
+    sig = s._try_enter(10024.0)
     assert sig is not None and sig.action == "BUY"
-    assert "tbq↑" in (sig.reason or "")
+    assert "imb+" in (sig.reason or "")
 
 
 def test_hold_while_tbq_rising_skips_break_and_sl():
     s = AlignS8Strategy(
         AlignS8Config(
             hold_while_book_rises=True,
+            close_on_book_drop=True,
             break_min_bars=1,
             break_min_adverse=0.0,
             break_skip_if_supported=False,
@@ -454,41 +421,73 @@ def test_hold_while_tbq_rising_skips_break_and_sl():
     assert sig is None  # hold: no break / no hard SL despite -30 and sl=15
 
 
-def test_short_entry_requires_rising_tsq():
+def test_tbq_drop_closes_long():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            hold_while_book_rises=True,
+            close_on_book_drop=True,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("long", 10000.0)
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 12000.0, 8000.0
+    s._update_behaviour(10005.0, 11500.0, 8000.0)  # TBQ↓
+    assert s.tbq_falling
+    sig = s._manage(10005.0)
+    assert sig is not None and "tbq_drop" in (sig.reason or "")
+
+
+def test_short_entry_on_negative_net_rising_imb():
     s = AlignS8Strategy(
         AlignS8Config(
             require_pullback=False,
             require_rising_imb=True,
-            require_rising_book=True,
+            require_rising_book=False,
             min_imb_pct=5,
             cooldown_ticks=0,
             break_min_bars=99,
             flip_min_bars=99,
             weaken_pct=90,
+            close_on_book_drop=False,
         )
     )
-    s.bias = "BEAR"
-    s.last_net = -3000
-    s._tsq_allow_age = 0
     s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 9000.0, 12000.0
     s.last_imb = abs(9000 - 12000) / 12000 * 100.0
-    # IMB up (more sell-heavy) but TSQ flat
+    # More sell-heavy: NET more negative, abs IMB up; TSQ can be flat
     s._update_behaviour(9995.0, 8000.0, 12000.0)
-    assert s.imb_rising
+    assert s.last_net < 0 and s.imb_rising
     assert not s.tsq_rising
-    assert s._try_enter(9995.0) is None
-    assert "tsq_not_rising" in (s.last_skip or "")
-
-    s._prev_px, s._prev_tbq, s._prev_tsq = 9995.0, 8000.0, 12000.0
-    s.last_imb = abs(8000 - 12000) / 12000 * 100.0
-    s.bias = "BEAR"
-    s.last_net = -4000
-    s._tsq_allow_age = 0
-    s._update_behaviour(9990.0, 8000.0, 13000.0)
-    assert s.imb_rising and s.tsq_rising
-    sig = s._try_enter(9990.0)
+    sig = s._try_enter(9995.0)
     assert sig is not None and sig.action == "SHORT"
-    assert "tsq↑" in (sig.reason or "")
+    assert "imb-" in (sig.reason or "")
+
+
+def test_tsq_drop_closes_short():
+    s = AlignS8Strategy(
+        AlignS8Config(
+            hold_while_book_rises=True,
+            close_on_book_drop=True,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=100,
+            sl_points=50,
+        )
+    )
+    s._open("short", 10000.0)
+    s._prev_px, s._prev_tbq, s._prev_tsq = 10000.0, 8000.0, 12000.0
+    s._update_behaviour(9995.0, 8000.0, 11500.0)  # TSQ↓
+    assert s.tsq_falling
+    sig = s._manage(9995.0)
+    assert sig is not None and "tsq_drop" in (sig.reason or "")
 
 
 def main() -> None:
@@ -503,9 +502,11 @@ def main() -> None:
     test_flip_fires_when_adverse_enough()
     test_no_lock_after_two_sl_only_after_five_losses()
     test_enter_aligned_without_pullback()
-    test_entry_requires_rising_imb_and_tbq()
+    test_entry_net_sign_and_rising_imb()
     test_hold_while_tbq_rising_skips_break_and_sl()
-    test_short_entry_requires_rising_tsq()
+    test_tbq_drop_closes_long()
+    test_short_entry_on_negative_net_rising_imb()
+    test_tsq_drop_closes_short()
     print("test_s8_align: OK")
 
 
