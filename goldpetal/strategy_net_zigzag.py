@@ -410,13 +410,24 @@ class NetZigzagStrategy:
         return self._decide(float(ltp), tbq, tsq, message)
 
 
-def net_zigzag_from_env() -> NetZigzagStrategy:
+def net_zigzag_from_env():
+    """Factory: ALIGN (default) = price∩TBQ/TSQ tick logic; else classic zigzag."""
     try:
         from dotenv import load_dotenv
 
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     except Exception:
         pass
+
+    logic = (
+        os.getenv("S8_LOGIC", "").strip().lower()
+        or os.getenv("S8_ENTRY_MODE", "align").strip().lower()
+    )
+    # New default path: remove 30m bar, use align flow
+    if logic in {"align", "flow", "price_book", ""}:
+        from strategy_s8_align import align_s8_from_env
+
+        return align_s8_from_env()
 
     def _f(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
@@ -427,10 +438,11 @@ def net_zigzag_from_env() -> NetZigzagStrategy:
             return default
         return raw.strip().lower() in {"1", "true", "yes", "y"}
 
-    # Paper +₹42k row defaults when bar mode on: 30m + always + cd0
+    # Legacy zigzag (edge/both/always + optional bar minutes)
     bar_m = int(_f("S8_BAR_MINUTES", 0))
     default_mode = "always" if bar_m > 0 else "both"
     default_cd = 0 if bar_m > 0 else 40
+    mode = os.getenv("S8_ENTRY_MODE", default_mode).strip().lower()
     cfg = NetZigzagConfig(
         min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
         weaken_pct=_f("S8_WEAKEN_PCT", 10.0),
@@ -444,7 +456,7 @@ def net_zigzag_from_env() -> NetZigzagStrategy:
         cooldown_ticks=int(_f("S8_COOLDOWN_TICKS", default_cd)),
         pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
         resume_points=_f("S8_RESUME_POINTS", 5.0),
-        entry_mode=os.getenv("S8_ENTRY_MODE", default_mode).strip().lower(),
+        entry_mode=mode,
         bar_minutes=bar_m,
     )
     return NetZigzagStrategy(cfg)
