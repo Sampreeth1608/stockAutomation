@@ -57,9 +57,28 @@ Requires valid `ANGEL_CLIENT_ID`, `ANGEL_PASSWORD`, `ANGEL_API_KEY`, and `ANGEL_
 
 ### Control panel (local / VM)
 
+**Preferred (safer):** SSH tunnel — no public firewall rule needed.
+
+On the VM:
+```bash
+cd ~/goldpetal && source venv/bin/activate
+pkill -f "control_panel.py" || true
+nohup python3 control_panel.py --host 127.0.0.1 --port 8787 > data/control_panel.log 2>&1 &
+```
+
+On your laptop:
+```bash
+ssh -N -L 8787:127.0.0.1:8787 sampreeth1608@<VM_EXTERNAL_IP>
+# open http://127.0.0.1:8787/
+```
+
+You can disable/delete the GCP firewall rule for TCP 8787 after switching.
+
+**Optional (less safe):** bind `--host 0.0.0.0` and open TCP 8787 in VPC firewall (prefer your home IP `/32`, not `0.0.0.0/0`).
+
 ```bash
 python3 control_panel.py --host 0.0.0.0 --port 8787
-# open http://<host>:8787/
+# open http://<vm-ip>:8787/
 ```
 
 State files live under `data/control/`:

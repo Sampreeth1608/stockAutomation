@@ -241,7 +241,7 @@ input[type="date"] {
         <button class="btn" id="btn-reason" type="button">Re-run reasoner</button>
       </div>
       <p class="flash" id="flash"></p>
-      <p class="muted" style="margin-top:.75rem">Host: same GCP/VM as <span class="mono">run_strategy.py</span>. Open <span class="mono">http://&lt;vm-ip&gt;:8787/</span>. Emergency blocks every new entry. Live path: Unlock live + <span class="mono">DRY_RUN=false</span> + Approve → live per strategy. Orders go through <span class="mono">live_orders.py</span> (default 1 lot).</p>
+      <p class="muted" style="margin-top:.75rem">Safer access: SSH tunnel (no public firewall). On your laptop run <span class="mono">ssh -N -L 8787:127.0.0.1:8787 USER@VM_IP</span> then open <span class="mono">http://127.0.0.1:8787/</span>. Bind panel with <span class="mono">--host 127.0.0.1</span>. Public <span class="mono">0.0.0.0/0</span> firewall is optional and less safe.</p>
     </section>
 
     <section class="panel span-7">
