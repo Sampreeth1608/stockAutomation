@@ -247,7 +247,14 @@ input[type="date"] {
     <section class="panel span-7">
       <h2>Capital management</h2>
       <div class="row" id="capital-stats"></div>
-      <div class="scroll" style="margin-top:.85rem">
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin:.75rem 0">
+        <label class="muted">Total capital ₹<br/><input type="number" id="cap-total" step="1000" style="margin-top:.25rem;width:9rem"/></label>
+        <label class="muted">Cash reserve %<br/><input type="number" id="cap-reserve" step="1" min="0" max="90" style="margin-top:.25rem;width:6rem"/></label>
+        <label class="muted">Day loss limit ₹<br/><input type="number" id="cap-dayloss" step="500" style="margin-top:.25rem;width:8rem"/></label>
+        <label class="muted">Max lots total<br/><input type="number" id="cap-maxlots" step="1" min="1" style="margin-top:.25rem;width:6rem"/></label>
+        <button class="btn ok" type="button" id="btn-cap-save">Save totals</button>
+      </div>
+      <div class="scroll" style="margin-top:.35rem">
         <table>
           <thead><tr><th>Strategy</th><th>Budget ₹</th><th>Max lots</th><th>Open</th><th>On</th></tr></thead>
           <tbody id="capital-body"></tbody>
