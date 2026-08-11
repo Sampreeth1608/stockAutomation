@@ -199,9 +199,10 @@ class NetZigzagStrategy:
         if self._tick_i < self._cooldown_until:
             return False, "cooldown"
         mode = (self.cfg.entry_mode or "both").lower()
-        # "always" = flat + strong bias (30m MTF path). Do NOT require post-SL
-        # IMB reset — that lockout left bar-mode dead after one stop while IMB stayed hot.
-        if mode != "always" and self._need_reset:
+        # "always" (S10 / MTF +₹42k): keep trading after SL — never lock out.
+        if mode == "always":
+            self._need_reset = False
+        elif self._need_reset:
             return False, "need_sl_reset"
         if self.last_imb < self.cfg.min_imb_pct:
             return False, "imb_soft"
