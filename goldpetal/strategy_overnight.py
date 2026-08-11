@@ -97,6 +97,10 @@ class OvernightStrategy:
         market_open: str = "09:00",
         market_close: str = "23:30",
         state_path: Path = DEFAULT_STATE_PATH,
+        *,
+        require_reasoning: bool = False,
+        reasoning_min_score: float = 0.45,
+        reasoning_lots: float = 1.0,
     ) -> None:
         self.buy_prob = buy_prob
         self.short_prob = short_prob
@@ -114,6 +118,10 @@ class OvernightStrategy:
         self._exited_today = False
         self.tick_rows: list[dict[str, Any]] = []
         self.state = self._load_state()
+        self.require_reasoning = bool(require_reasoning)
+        self.reasoning_min_score = float(reasoning_min_score)
+        self.reasoning_lots = float(reasoning_lots)
+        self.last_reason: str | None = None
 
         path = model_path or self._resolve_model()
         if path is None:
@@ -213,6 +221,7 @@ class OvernightStrategy:
                 f"model={self.model_path} "
                 f"buy>={self.buy_prob} short<={self.short_prob} "
                 f"entry={self.entry_minutes_before_close}m_before_close "
+                f"reason={'ON' if self.require_reasoning else 'off'} "
                 f"pos={self.state.side}"
             )
         return f"DISABLED ({self._load_error})"
@@ -329,6 +338,29 @@ class OvernightStrategy:
         else:
             return None
 
+        if self.require_reasoning:
+            from s4_reasoner import reason_entry
+
+            ml = self._score_ml()
+            trace = reason_entry(
+                px=float(cmp),
+                prob_bullish=float(prob),
+                bias=str(bias.bias),
+                buy_prob=self.buy_prob,
+                short_prob=self.short_prob,
+                in_entry_window=True,
+                already_in=False,
+                entered_today=False,
+                lots=self.reasoning_lots,
+                ml_proba=ml,
+                min_score=self.reasoning_min_score,
+            )
+            self.last_reason = trace.line()
+            want = "ENTER_LONG" if action == "BUY" else "ENTER_SHORT"
+            if trace.action != want or trace.score < self.reasoning_min_score:
+                return None
+            reason = f"{reason} | {trace.line()}"
+
         self.state = OvernightState(
             side=pos,
             entry_price=cmp,
@@ -358,6 +390,14 @@ def overnight_from_env() -> OvernightStrategy:
     exit_m = int(os.getenv("S4_EXIT_MINUTES_AFTER_OPEN", "5"))
     model = os.getenv("S4_MODEL_PATH", "").strip()
     path = Path(model) if model else None
+    reasoning = os.getenv("S4_REASONING", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+    min_score = float(os.getenv("S4_REASONING_MIN_SCORE", "0.45"))
+    lots = float(os.getenv("S4_REASONING_LOTS", "1"))
     return OvernightStrategy(
         model_path=path,
         buy_prob=buy,
@@ -366,4 +406,7 @@ def overnight_from_env() -> OvernightStrategy:
         exit_minutes_after_open=exit_m,
         market_open=load_open,
         market_close=load_close,
+        require_reasoning=reasoning,
+        reasoning_min_score=min_score,
+        reasoning_lots=lots,
     )

@@ -53,7 +53,9 @@ Requires valid `ANGEL_CLIENT_ID`, `ANGEL_PASSWORD`, `ANGEL_API_KEY`, and `ANGEL_
 | `retrain_daily.py` | Archive ticks + retrain ML models |
 | `train_models.py` / `train_overnight.py` | Model training pipelines |
 | `weekly_s8_nn.sh` / `evolve_s8_ml.py` | Weekend S8 improve → Sheets + control-panel proposal |
-| `control_panel.py` | Web UI: ticks, trades, capital, emergency, weekend approvals |
+| `weekly_s4.sh` / `evolve_s4_ml.py` | Weekend S4 overnight ML improve → proposal |
+| `weekly_s5.sh` / `evolve_s5_ml.py` | Weekend S5 minedge ML improve → proposal |
+| `control_panel.py` | Web UI (optional; stop to save RAM): ticks, trades, capital, approvals |
 
 ### Control panel (local / VM)
 
@@ -150,8 +152,8 @@ Import CSVs in Google Sheets: File → Import → Upload (start with `scoreboard
 |------|------|
 | Mon–Fri session | `supervise.sh` collects ticks + paper signals; panel shows tape/bars/reasoning |
 | After close | `paper_report.py` — check after-tax PnL |
-| Sunday | `./weekly_s8_nn.sh` — improve model → panel proposal |
-| Sunday night | Open panel → review paper Δ₹ → Approve paper / Reject |
+| Sunday | `./weekly_s8_nn.sh` + `./weekly_s4.sh` + `./weekly_s5.sh` — improve models → proposals JSON |
+| Sunday night | Review `data/control/proposals.json` or panel → Approve paper / Reject |
 | Only after stable paper | Unlock live + your explicit go |
 
 SQLite DB (`data/ticks.db`) is auto-created on first use. `data/` contents are gitignored.

@@ -252,6 +252,88 @@ def proposal_from_weekly_s8(
     )
 
 
+def proposal_from_weekly_s4(
+    *,
+    week_id: str,
+    summary: dict[str, Any],
+    safety_ok: bool,
+    safety_reasons: list[str],
+    model_path: str,
+    env_patch: dict[str, str] | None = None,
+) -> StrategyProposal:
+    """Build an improved S4 overnight proposal."""
+    auc = float(summary.get("best_auc") or 0)
+    n_days = int(summary.get("n_days") or 0)
+    best = str(summary.get("best_model") or "overnight")
+    paper = PaperResult(
+        n_trades=n_days,
+        win_rate=float(summary.get("best_accuracy") or 0) * 100.0,
+        extra=dict(summary),
+    )
+    return StrategyProposal(
+        id=uuid.uuid4().hex[:10],
+        week_id=week_id,
+        kind="improved",
+        strategy="S4_OVERNIGHT",
+        title=f"S4 overnight ML improve ({best}) — week {week_id}",
+        summary=f"best={best} auc={auc:.3f} days={n_days} safety_ok={safety_ok}",
+        paper=paper,
+        model_path=model_path,
+        safety_ok=safety_ok,
+        safety_reasons=list(safety_reasons),
+        status="pending",
+        created_at_ist=_now_iso(),
+        env_patch=env_patch
+        or {
+            "ENABLE_S4": "true",
+            "S4_MODEL_PATH": model_path,
+            "S4_REASONING": "true",
+            "DRY_RUN": "true",
+        },
+    )
+
+
+def proposal_from_weekly_s5(
+    *,
+    week_id: str,
+    summary: dict[str, Any],
+    safety_ok: bool,
+    safety_reasons: list[str],
+    model_path: str,
+    env_patch: dict[str, str] | None = None,
+) -> StrategyProposal:
+    """Build an improved S5 minedge proposal."""
+    auc = float(summary.get("auc") or 0)
+    acc = float(summary.get("accuracy") or 0)
+    paper = PaperResult(
+        n_trades=int(summary.get("n_test") or 0),
+        win_rate=acc * 100.0,
+        extra=dict(summary),
+    )
+    return StrategyProposal(
+        id=uuid.uuid4().hex[:10],
+        week_id=week_id,
+        kind="improved",
+        strategy="S5_MINEDGE",
+        title=f"S5 minedge ML improve — week {week_id}",
+        summary=f"auc={auc:.3f} acc={acc:.3f} safety_ok={safety_ok}",
+        paper=paper,
+        model_path=model_path,
+        safety_ok=safety_ok,
+        safety_reasons=list(safety_reasons),
+        status="pending",
+        created_at_ist=_now_iso(),
+        env_patch=env_patch
+        or {
+            "ENABLE_S5": "true",
+            "S5_ML_MODEL_PATH": model_path,
+            "S5_REQUIRE_ML": "true" if safety_ok else "false",
+            "S5_REASONING": "true",
+            "DRY_RUN": "true",
+        },
+    )
+
+
 def proposals_snapshot(path: Path = PROPOSALS_PATH) -> dict[str, Any]:
     items = load_proposals(path)
     pending = [p for p in items if p.status == "pending"]

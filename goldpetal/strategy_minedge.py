@@ -38,6 +38,12 @@ class MinEdgeStrategy:
         *,
         name: str | None = None,
         cover_fees: bool | None = None,
+        require_reasoning: bool = False,
+        reasoning_min_score: float = 0.45,
+        reasoning_lots: float = 1.0,
+        ml_model_path: str | None = None,
+        require_ml: bool = False,
+        min_ml_proba: float = 0.55,
     ) -> None:
         thr = edge_thresholds_from_env()
         if name:
@@ -60,6 +66,21 @@ class MinEdgeStrategy:
         self.last_expected: float | None = None
         self._tick_i = 0
         self.last_skip: str | None = None
+        self.require_reasoning = bool(require_reasoning)
+        self.reasoning_min_score = float(reasoning_min_score)
+        self.reasoning_lots = float(reasoning_lots)
+        self.require_ml = bool(require_ml)
+        self.min_ml_proba = float(min_ml_proba)
+        self.ml_model = None
+        self.last_reason: str | None = None
+        if ml_model_path:
+            try:
+                import joblib
+
+                bundle = joblib.load(ml_model_path)
+                self.ml_model = bundle.get("model") or bundle
+            except Exception:
+                self.ml_model = None
 
     @property
     def required_points(self) -> float:
@@ -74,7 +95,10 @@ class MinEdgeStrategy:
             f"fee_BE={self.fee_break_even:.0f}pt "
             f"required={self.required_points:.0f}pt "
             f"cover_fees={self.cover_fees} "
-            f"imb>={self.imbalance_ratio:.2f} pos={self.position}"
+            f"imb>={self.imbalance_ratio:.2f} "
+            f"reason={'ON' if self.require_reasoning else 'off'} "
+            f"ml={'ON' if self.ml_model else 'off'} "
+            f"pos={self.position}"
         )
 
     def _bias(self, message: dict[str, Any]) -> tuple[str, float]:
@@ -151,6 +175,42 @@ class MinEdgeStrategy:
             self.last_skip = f"weak_bias exp={expected:.1f} imb={imb:.2f}"
             return None
 
+        ml_proba = None
+        if self.ml_model is not None:
+            try:
+                import numpy as np
+
+                feat = np.array([[expected, req, imb, float(ltp)]], dtype=float)
+                proba = self.ml_model.predict_proba(feat)[0]
+                ml_proba = float(proba[1]) if len(proba) > 1 else float(proba[0])
+            except Exception:
+                ml_proba = None
+        if self.require_ml and (ml_proba is None or ml_proba < self.min_ml_proba):
+            self.last_skip = f"ml_gate p={ml_proba}"
+            return None
+
+        if self.require_reasoning:
+            from s5_reasoner import reason_entry
+
+            trace = reason_entry(
+                px=float(ltp),
+                expected_pts=float(expected),
+                required_pts=float(req),
+                bias=bias,
+                imb_ratio=float(imb),
+                imbalance_threshold=self.imbalance_ratio,
+                atr_ready=True,
+                lots=self.reasoning_lots,
+                ml_proba=ml_proba,
+                min_ml_proba=self.min_ml_proba,
+                min_score=self.reasoning_min_score,
+            )
+            self.last_reason = trace.line()
+            want = "ENTER_LONG" if bias == "long" else "ENTER_SHORT"
+            if trace.action != want or trace.score < self.reasoning_min_score:
+                self.last_skip = f"reason_skip {trace.line()}"
+                return None
+
         self.entry_price = ltp
         # Target at least required (fee-aware); use expected if larger
         self.target_points = max(req, expected * 0.85)
@@ -171,6 +231,8 @@ class MinEdgeStrategy:
                 f"imb={imb:.2f} "
                 f"(user_min={self.min_edge_points:.0f}, fee_BE={self.fee_break_even:.0f})"
             )
+        if self.last_reason:
+            reason = f"{reason} | {self.last_reason}"
         return SignalResult(
             action=action,
             position_after=self.position,
@@ -187,7 +249,33 @@ def minedge_from_env() -> MinEdgeStrategy:
     every = int(os.getenv("S5_EVERY_N_TICKS", "5"))
     window = int(os.getenv("S5_ATR_WINDOW", "120"))
     imb = float(os.getenv("S5_IMBALANCE_RATIO", "1.35"))
-    return MinEdgeStrategy(every_n_ticks=every, atr_window=window, imbalance_ratio=imb)
+    reasoning = os.getenv("S5_REASONING", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+    min_score = float(os.getenv("S5_REASONING_MIN_SCORE", "0.45"))
+    lots = float(os.getenv("S5_REASONING_LOTS", "1"))
+    ml_path = os.getenv("S5_ML_MODEL_PATH", "").strip() or None
+    require_ml = os.getenv("S5_REQUIRE_ML", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+    min_ml = float(os.getenv("S5_ML_MIN_PROBA", "0.55"))
+    return MinEdgeStrategy(
+        every_n_ticks=every,
+        atr_window=window,
+        imbalance_ratio=imb,
+        require_reasoning=reasoning,
+        reasoning_min_score=min_score,
+        reasoning_lots=lots,
+        ml_model_path=ml_path,
+        require_ml=require_ml,
+        min_ml_proba=min_ml,
+    )
 
 
 def min30_from_env() -> MinEdgeStrategy:
