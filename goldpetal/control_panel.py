@@ -206,9 +206,23 @@ input[type="date"] {
   font-family: "IBM Plex Mono", monospace;
 }
 .flash { margin: .5rem 0 0; color: var(--gold2); font-size: .85rem; min-height: 1.2em; }
+.toast {
+  position: fixed; top: 1rem; right: 1rem; z-index: 1000;
+  max-width: min(28rem, 92vw);
+  padding: .85rem 1.1rem; border-radius: 4px;
+  background: #1c2418; border: 1px solid var(--gold);
+  color: var(--gold2); font-size: .9rem; line-height: 1.35;
+  box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  display: none;
+}
+.toast.show { display: block; }
+.toast.bad { border-color: var(--bad); color: #ffb4ab; background: #2a1412; }
+.toast.ok { border-color: #2f6a4a; color: #a8efc6; background: #143224; }
+.btn:disabled { opacity: .55; cursor: wait; }
 </style>
 </head>
 <body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <header class="brand">
     <h1>Gold Petal</h1>
     <p class="tag">Control + reasoning cockpit on your trading VM. See ticks, 1m→day bars, entry/hold/exit plans, capital, and weekend approvals. Nothing goes live without you.</p>
@@ -334,18 +348,35 @@ input[type="date"] {
     <section class="panel">
       <h2>Weekend proposals — new &amp; improved strategies</h2>
       <p class="muted">Every Sunday job writes paper results here. Approve for paper first; approve live only after you are happy. Reject force-disables the strategy.</p>
+      <p class="flash" id="proposals-flash"></p>
       <div id="proposals"></div>
     </section>
   </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const flash = (msg) => { $("flash").textContent = msg || ""; };
+let _toastTimer = null;
+function toast(msg, kind) {
+  const el = $("toast");
+  el.textContent = msg || "";
+  el.className = "toast show" + (kind ? " " + kind : "");
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = "toast"; }, 8000);
+}
+const flash = (msg) => {
+  $("flash").textContent = msg || "";
+  if (msg) toast(msg, msg.toLowerCase().includes("fail") || msg.toLowerCase().includes("error") ? "bad" : "ok");
+};
+const propFlash = (msg) => {
+  const el = $("proposals-flash");
+  if (el) el.textContent = msg || "";
+  if (msg) toast(msg, msg.toLowerCase().includes("fail") || msg.toLowerCase().includes("error") ? "bad" : "ok");
+};
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText || ("HTTP " + res.status));
   return data;
 }
 
@@ -537,14 +568,42 @@ function renderProposals(p) {
   $("proposals").innerHTML = html;
   $("proposals").querySelectorAll("button[data-dec]").forEach(btn => {
     btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const dec = btn.dataset.dec;
+      const label = dec === "approved_paper" ? "Approve → paper"
+        : dec === "approved_live" ? "Approve → live" : "Reject";
+      if (dec === "approved_live") {
+        const ok = confirm("Approve this strategy for LIVE orders?\n\nStill needs: Unlock live + DRY_RUN=false + restart supervise.");
+        if (!ok) { propFlash("Live approve cancelled"); return; }
+      }
+      const siblings = btn.parentElement ? btn.parentElement.querySelectorAll("button") : [btn];
+      siblings.forEach(b => { b.disabled = true; });
+      btn.textContent = "Working…";
+      propFlash(`${label}…`);
       try {
-        await api(`/api/proposals/${btn.dataset.id}/decide`, {
+        const res = await api(`/api/proposals/${id}/decide`, {
           method: "POST",
-          body: JSON.stringify({ decision: btn.dataset.dec })
+          body: JSON.stringify({ decision: dec })
         });
-        flash(`Proposal ${btn.dataset.dec}`);
+        const strat = (res.proposal && res.proposal.strategy) || id;
+        let msg = "";
+        if (dec === "approved_paper") {
+          msg = `✓ ${strat} approved for PAPER. Keep DRY_RUN=true. Set ENABLE flags in .env if needed, then restart supervise.`;
+        } else if (dec === "approved_live") {
+          msg = `✓ ${strat} approved for LIVE list. Still locked until Unlock live + DRY_RUN=false.`;
+        } else {
+          msg = `✓ ${strat} rejected / force-disabled.`;
+        }
+        propFlash(msg);
+        flash(msg);
         await refresh();
-      } catch (e) { flash(String(e.message || e)); }
+      } catch (e) {
+        const err = String(e.message || e);
+        propFlash("Failed: " + err);
+        flash("Failed: " + err);
+        siblings.forEach(b => { b.disabled = false; });
+        btn.textContent = label;
+      }
     });
   });
 }
@@ -577,33 +636,48 @@ async function refresh() {
 }
 
 $("btn-emergency").onclick = async () => {
-  const s = await api("/api/status");
-  const off = !s.state.emergency_off;
-  await api("/api/emergency", { method: "POST", body: JSON.stringify({ off }) });
-  flash(off ? "EMERGENCY OFF engaged" : "Emergency cleared");
-  await refresh();
+  try {
+    const s = await api("/api/status");
+    const off = !s.state.emergency_off;
+    await api("/api/emergency", { method: "POST", body: JSON.stringify({ off }) });
+    flash(off ? "✓ EMERGENCY OFF engaged — new entries blocked" : "✓ Emergency cleared — entries allowed again");
+    await refresh();
+  } catch (e) { flash("Failed: " + (e.message || e)); }
 };
 $("btn-trading").onclick = async () => {
-  const s = await api("/api/status");
-  const enabled = !s.state.trading_enabled;
-  await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled }) });
-  flash(enabled ? "Trading enabled" : "Trading disabled");
-  await refresh();
+  try {
+    const s = await api("/api/status");
+    const enabled = !s.state.trading_enabled;
+    await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled }) });
+    flash(enabled ? "✓ Trading enabled" : "✓ Trading disabled");
+    await refresh();
+  } catch (e) { flash("Failed: " + (e.message || e)); }
 };
 $("btn-live").onclick = async () => {
-  const s = await api("/api/status");
-  const unlocked = !s.state.live_unlocked;
-  await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked }) });
-  flash(unlocked ? "Live unlocked (still need DRY_RUN=false + Approve → live)" : "Live locked");
-  await refresh();
+  try {
+    const s = await api("/api/status");
+    const unlocked = !s.state.live_unlocked;
+    if (unlocked) {
+      const ok = confirm("Unlock LIVE path?\n\nOrders still need DRY_RUN=false + Approve → live per strategy.");
+      if (!ok) { flash("Live unlock cancelled"); return; }
+    }
+    await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked }) });
+    flash(unlocked ? "✓ Live unlocked (still need DRY_RUN=false + Approve → live)" : "✓ Live locked");
+    await refresh();
+  } catch (e) { flash("Failed: " + (e.message || e)); }
 };
-$("btn-refresh").onclick = () => refresh().catch(e => flash(String(e)));
+$("btn-refresh").onclick = async () => {
+  try {
+    await refresh();
+    flash("✓ Refreshed");
+  } catch (e) { flash("Failed: " + (e.message || e)); }
+};
 $("btn-reason").onclick = async () => {
   try {
     const r = await api("/api/reasoning/refresh", { method: "POST", body: "{}" });
     renderReasoning(r);
-    flash(`Reasoner: ${r.recommended}`);
-  } catch (e) { flash(String(e.message || e)); }
+    flash(`✓ Reasoner: ${r.recommended}`);
+  } catch (e) { flash("Failed: " + (e.message || e)); }
 };
 
 function expRange() {
