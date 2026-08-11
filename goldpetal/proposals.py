@@ -205,11 +205,12 @@ def proposal_from_weekly_s8(
     nn_n = int(summary.get("nn_n") or 0)
     dir_pct = float(summary.get("nn_dir_pct") or 0)
     kind = "improved"
-    title = f"S8 NN weekly improve — week {week_id}"
+    arch = str(summary.get("deep_winner") or summary.get("nn_arch") or "mlp")
+    title = f"S8 deep-NN weekly improve ({arch}) — week {week_id}"
     summary_txt = (
         f"NN gated paper ₹{nn_sum:+.0f} vs baseline ₹{base_sum:+.0f} "
         f"(Δ₹{nn_sum - base_sum:+.0f}), trades={nn_n}, dir%={dir_pct:.1f}. "
-        f"safety_ok={safety_ok}"
+        f"arch={arch} deep={summary.get('deep_enabled')} safety_ok={safety_ok}"
     )
     paper = PaperResult(
         n_trades=nn_n,
@@ -224,6 +225,8 @@ def proposal_from_weekly_s8(
             "ticks": summary.get("ticks"),
             "bars": summary.get("bars"),
             "note": summary.get("note"),
+            "deep_winner": summary.get("deep_winner"),
+            "nn_arch": summary.get("nn_arch"),
         },
     )
     return StrategyProposal(

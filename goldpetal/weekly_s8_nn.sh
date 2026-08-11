@@ -9,7 +9,7 @@ if [[ -x ./venv/bin/python ]]; then
   PY=./venv/bin/python
 fi
 NOTE="week-$(date +%V)"
-# Scale walk-forward + reasoner features + multi-step paths + paper safety + Sheets
+# Scale walk-forward + deep NN bake-off (shallow/deep/deeper) + paper safety + Sheets
 # Writes a pending proposal into data/control/proposals.json for the control panel.
 exec "$PY" evolve_s8_ml.py train \
   --db data/ticks.db \
@@ -18,6 +18,8 @@ exec "$PY" evolve_s8_ml.py train \
   --lots 100 \
   --min-proba 0.55 \
   --scale \
+  --deep \
+  --nn-arch deep \
   --folds 5 \
   --budget-note "$NOTE" \
   "$@"

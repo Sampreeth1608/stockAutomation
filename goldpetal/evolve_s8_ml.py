@@ -90,9 +90,22 @@ def cmd_train(args: argparse.Namespace) -> int:
     print(f"bars={len(bars)}")
 
     curriculum: list[dict] = []
+    deep_report: dict | None = None
+    nn_arch = str(getattr(args, "nn_arch", "deep") or "deep")
+    use_deep = bool(getattr(args, "deep", True))
+
+    # Map arch name → hidden sizes for scale walk-forward
+    from deep_nn import ARCHS, compare_architectures
+
+    scale_hidden = ARCHS.get(nn_arch, ARCHS["deep"]) if use_deep else (96, 48, 24)
+
     if getattr(args, "scale", True):
         # At-scale: reasoner features + multi-step path labels + walk-forward
-        print("training scale walk-forward (math/logic/science/planning/multi-step)…")
+        print(
+            f"training scale walk-forward "
+            f"(arch={'deep:'+nn_arch if use_deep else 'scale-default'} "
+            f"hidden={list(scale_hidden)})…"
+        )
         frame = build_scale_frame(
             bars,
             lags=args.lags,
@@ -102,7 +115,10 @@ def cmd_train(args: argparse.Namespace) -> int:
             lots=args.lots,
         )
         bundle, fold_scores = walk_forward_train(
-            frame, lags=args.lags, folds=int(getattr(args, "folds", 5))
+            frame,
+            lags=args.lags,
+            folds=int(getattr(args, "folds", 5)),
+            hidden=scale_hidden,
         )
         curriculum = plan_curriculum(bundle["metrics"], fold_scores)
         # Also attach classic reasoning heads from v2 pipeline (optional enrichment)
@@ -129,6 +145,52 @@ def cmd_train(args: argparse.Namespace) -> int:
             sl_pts=args.sl_pts,
             feedback=fb,
         )
+
+    # Deep NN bake-off: shallow vs deep (+ deeper if enough bars) — keep best OOS AUC
+    if use_deep:
+        print("deep NN compare (shallow vs deep[+deeper])…")
+        try:
+            arches = ["shallow", "deep"]
+            if len(bars) >= 200:
+                arches.append("deeper")
+            deep_report = compare_architectures(
+                bars,
+                arches=arches,
+                lags=args.lags,
+                horizon=args.horizon,
+                tp_pts=args.tp_pts,
+                sl_pts=args.sl_pts,
+            )
+            win = deep_report["bundle"]
+            # Prefer deep winner if its AUC beats current bundle OOS AUC
+            cur_auc = float((bundle.get("metrics") or {}).get("auc") or 0.0)
+            win_auc = float((win.get("metrics") or {}).get("auc") or 0.0)
+            if win_auc >= cur_auc:
+                heads = bundle.get("heads")
+                head_models = bundle.get("head_models")
+                bundle = win
+                if heads is not None:
+                    bundle["heads"] = heads
+                if head_models is not None:
+                    bundle["head_models"] = head_models
+                print(
+                    f"deep winner={deep_report['winner']} auc={win_auc:.3f} "
+                    f"(beat scale auc={cur_auc:.3f}) — using deep bundle"
+                )
+            else:
+                print(
+                    f"keep scale bundle auc={cur_auc:.3f} "
+                    f"(deep winner {deep_report['winner']} auc={win_auc:.3f})"
+                )
+            bundle.setdefault("metrics", {})["deep_compare"] = {
+                "winner": deep_report["winner"],
+                "results": deep_report["results"],
+            }
+            journal("deep_nn_compare", bundle["metrics"]["deep_compare"])
+        except Exception as exc:
+            journal("deep_nn_compare_failed", {"error": str(exc)})
+            print(f"WARNING: deep NN compare skipped: {exc}")
+
     model_path = Path(args.out_model)
     save_bundle(bundle, model_path)
     print(json.dumps(bundle["metrics"], indent=2))
@@ -219,6 +281,10 @@ def cmd_train(args: argparse.Namespace) -> int:
         "ticks": len(tick_rows),
         "bars": len(bars),
         "tf_minutes": args.tf,
+        "nn_arch": (bundle.get("metrics") or {}).get("arch")
+        or (bundle.get("metrics") or {}).get("model"),
+        "deep_enabled": bool(use_deep),
+        "deep_winner": (deep_report or {}).get("winner") if deep_report else "",
         "nn_accuracy": bundle["metrics"].get("accuracy"),
         "nn_auc": bundle["metrics"].get("auc"),
         "nn_n_train": bundle["metrics"].get("n_train"),
@@ -233,7 +299,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         "safety_ok_enable_nn": safety.ok_to_enable_nn,
         "safety_reasons": " | ".join(safety.reasons),
         "model_path": str(model_path),
-        "pipeline": "v2_full_stages",
+        "pipeline": "v2_full_stages_deep_nn" if use_deep else "v2_full_stages",
     }
     _write_csv(week_dir / "summary.csv", [summary_row])
     (week_dir / "metrics.json").write_text(
@@ -373,6 +439,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="walk-forward + reasoner features + multi-step path labels (default on)",
     )
     p.add_argument("--folds", type=int, default=5, help="walk-forward folds")
+    p.add_argument(
+        "--deep",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="train deep neural nets (shallow/deep/deeper bake-off); default ON",
+    )
+    p.add_argument(
+        "--nn-arch",
+        default="deep",
+        choices=("shallow", "deep", "deeper"),
+        help="preferred deep arch for scale walk-forward hidden sizes",
+    )
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("apply-env", help="print .env lines if safety passed")

@@ -83,9 +83,11 @@ State files live under `data/control/`:
 ### Reasoning model plan (entry / hold / exit)
 
 1. **Live heads** (`s8_reasoner.py` + `reasoning_cockpit.py`): multi-step math → logic → science/ML → planning for ENTRY, HOLD, EXIT. Regime-aware; skips entries that look like quick losses.
-2. **Weekly improve** (`./weekly_s8_nn.sh`): retrains ML heads (`entry_edge`, `hold_ok`, `exit_soon`) from all ticks; writes a pending proposal to the panel.
+2. **Weekly improve** (`./weekly_s8_nn.sh`): deep neural-net bake-off (`shallow` / `deep` / `deeper` MLPs) + reasoning heads from all ticks; writes a pending proposal to the panel.
 3. **Enable on VM**: set `S8_REASONING=true` in `.env` (and `S8_LOGIC=align` for S8). Paper first.
 4. **You approve** weekend proposals in the panel before paper enable / live unlock.
+
+Deep learning note: we use multi-layer ReLU MLPs (Adam, early stopping) on tick-bar features — real neural nets sized for your data. Giant Transformer/LLM traders are not added until you have much more labeled history.
 
 ### How to plan the week
 
