@@ -14,14 +14,19 @@ from storage import build_trades, export_trades_csv
 
 
 def _summarize(strategy: str | None) -> dict:
-    trades = build_trades(strategy=strategy)
+    return summarize_trades(build_trades(strategy=strategy), strategy=strategy)
+
+
+def summarize_trades(trades: list[dict], strategy: str | None = None) -> dict:
+    """Summarize an already-built trade list (avoids re-scanning the DB)."""
+    if strategy is not None:
+        trades = [t for t in trades if t.get("strategy") == strategy]
     closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
     open_n = sum(1 for t in trades if t.get("status") == "OPEN")
 
     def _f(t: dict, key: str) -> float:
         v = t.get(key, "")
         if v == "" or v is None:
-            # fallback
             if key == "pnl_after_tax":
                 v = t.get("net_pnl", 0) or 0
             else:

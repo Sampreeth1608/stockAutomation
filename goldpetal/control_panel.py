@@ -37,7 +37,7 @@ from control_state import (
     set_trading_enabled,
 )
 from live_orders import live_lots, recent_orders
-from paper_report import _summarize
+from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 from panel_export import (
@@ -622,6 +622,7 @@ function renderScore(rows) {
 }
 
 async function refresh() {
+  flash("Loading dashboard…");
   const data = await api("/api/dashboard");
   renderStatus(data);
   renderCapital(data.capital);
@@ -632,7 +633,15 @@ async function refresh() {
   renderScore(data.scoreboard);
   renderReasoning(data.reasoning);
   renderTfButtons(data.timeframes || []);
-  await loadBars(currentTf);
+  flash(`✓ Updated · LTP=${data.ltp ?? "—"} · ticks=${data.tick_count}`);
+}
+
+async function refreshLight() {
+  // Fast path: status + ticks only (no full trade rebuild / bars).
+  const s = await api("/api/status");
+  renderStatus(s);
+  const t = await api("/api/ticks?limit=40");
+  renderTicks(t.ticks, `${t.count} ticks stored · showing latest ${(t.ticks||[]).length}`);
 }
 
 $("btn-emergency").onclick = async () => {
@@ -766,9 +775,11 @@ async function initExportDates() {
   await refreshExportMeta();
 }
 
-refresh().catch(e => flash(String(e)));
+refresh().then(() => loadBars(currentTf).catch(() => {})).catch(e => flash("Failed: " + e));
 initExportDates().catch(e => expFlash(String(e.message || e)));
-setInterval(() => refresh().catch(() => {}), 5000);
+// Light poll often; full dashboard less often (tunnel-friendly).
+setInterval(() => refreshLight().catch(() => {}), 5000);
+setInterval(() => refresh().catch(() => {}), 30000);
 </script>
 </body>
 </html>
@@ -789,15 +800,14 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, Any]:
     state = load_state()
     ticks = [_row_to_dict(r) for r in latest_ticks(limit=tick_limit)]
+    # One DB trade rebuild for the whole dashboard (was 10× before — timed out over tunnel).
     all_trades = build_trades(strategy=None)
-    # Prefer finished (closed) first, then open.
     closed = [t for t in all_trades if str(t.get("status", "")).startswith("CLOSED")]
     open_t = [t for t in all_trades if t.get("status") == "OPEN"]
     closed_sorted = list(reversed(closed))[:trade_limit]
     trades = closed_sorted + open_t[: max(0, trade_limit - len(closed_sorted))]
 
-    scoreboard = []
-    for strat in (
+    strat_names = (
         "S1_NETDELTA",
         "S2_BALANCE",
         "S3_ML",
@@ -807,18 +817,14 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
-        None,
-    ):
-        scoreboard.append(_summarize(strat))
+    )
+    scoreboard = [summarize_trades(all_trades, s) for s in strat_names]
+    scoreboard.append(summarize_trades(all_trades, None))
 
     live_ok, live_reason = is_live_mode_allowed()
     blocked = entries_blocked()
+    # Cached only — do not re-run reasoner on every poll (slow).
     reasoning = load_reasoning()
-    if reasoning is None:
-        try:
-            reasoning = refresh_and_save()
-        except Exception:
-            reasoning = None
     dry = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
     return {
         "state": state.to_dict(),
@@ -843,7 +849,7 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "timeframes": panel_timeframes(),
         "where": {
             "host": "Same trading VM as run_strategy.py / supervise.sh",
-            "url": "http://<vm-ip>:8787/",
+            "url": "SSH tunnel → http://127.0.0.1:8788/",
             "ticks_db": "goldpetal/data/ticks.db",
             "bars": "Built on the fly from ticks: 1m,2m,3m,5m,10m,15m,30m,1h,4h,1d",
             "reasoning": "data/control/reasoning_latest.json",
