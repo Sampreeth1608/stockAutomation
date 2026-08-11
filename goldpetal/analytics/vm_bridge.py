@@ -19,15 +19,25 @@ from typing import Any
 class VmConfig:
     vm: str = "sampreeth-love-story"
     zone: str = "asia-south1-c"
+    # Linux account that owns goldpetal on the VM (not your Mac username).
+    remote_user: str = "sampreeth1608"
     remote_dir: str = "/home/sampreeth1608/goldpetal"
 
     @classmethod
     def from_env(cls) -> "VmConfig":
+        user = os.getenv("GP_REMOTE_USER", "sampreeth1608")
         return cls(
             vm=os.getenv("GP_VM", "sampreeth-love-story"),
             zone=os.getenv("GP_ZONE", "asia-south1-c"),
-            remote_dir=os.getenv("GP_REMOTE_DIR", "/home/sampreeth1608/goldpetal"),
+            remote_user=user,
+            remote_dir=os.getenv("GP_REMOTE_DIR", f"/home/{user}/goldpetal"),
         )
+
+    @property
+    def ssh_target(self) -> str:
+        """gcloud compute ssh/scp target: user@instance."""
+        return f"{self.remote_user}@{self.vm}"
+
 
 
 def _run(cmd: list[str], *, timeout: int = 120) -> tuple[int, str, str]:
@@ -51,12 +61,13 @@ def ssh_python(cfg: VmConfig, py_source: str, *, timeout: int = 180) -> tuple[in
         "gcloud",
         "compute",
         "ssh",
-        cfg.vm,
+        cfg.ssh_target,
         f"--zone={cfg.zone}",
         "--command",
         remote,
     ]
     return _run(cmd, timeout=timeout)
+
 
 
 def decide_proposal_remote(
@@ -169,6 +180,7 @@ def sync_snapshot(data_dir: Path, cfg: VmConfig | None = None, *, skip_db: bool 
     env = os.environ.copy()
     env["VM"] = cfg.vm
     env["ZONE"] = cfg.zone
+    env["REMOTE_USER"] = cfg.remote_user
     env["REMOTE_DIR"] = cfg.remote_dir
     env["ANALYTICS_DIR"] = str(data_dir)
     args = [str(script)]

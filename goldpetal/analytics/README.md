@@ -35,18 +35,30 @@ gcloud auth login
 gcloud config set project sampreethlovestory
 ```
 
+Confirm you can read VM data **as** `sampreeth1608` (Mac login `sampreeth` alone gets Permission denied):
+
+```bash
+gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c \
+  --command 'ls -la /home/sampreeth1608/goldpetal/data | head'
+```
+
 ## Daily
 
 ```bash
 cd ~/stockAutomation/goldpetal
 source .venv-analytics/bin/activate
+git pull origin cursor/control-panel-capital-weekend-8bfa
 ./scripts/sync_analytics_mac.sh
 streamlit run analytics/app.py
 ```
 
+You should see `✓` lines (proposals, ticks.db, …), not `· missing …`.
+
 Or use the in-app **Sync from VM** button.
 
 Opens `http://localhost:8501`.
+
+If sync still shows Permission denied: `export REMOTE_USER=sampreeth1608` then re-run sync. Debug with `GP_SYNC_DEBUG=1 ./scripts/sync_analytics_mac.sh --skip-db`.
 
 ## Tabs (old panel → new desk)
 
