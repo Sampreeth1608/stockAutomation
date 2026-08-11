@@ -89,15 +89,14 @@ State files live under `data/control/`:
 
 Deep learning note: we use multi-layer ReLU MLPs (Adam, early stopping) on tick-bar features — real neural nets sized for your data. Giant Transformer/LLM traders are not added until you have much more labeled history.
 
-### How to plan the week
+### One-click export (ticks + all trades)
 
-| When | What |
-|------|------|
-| Mon–Fri session | `supervise.sh` collects ticks + paper signals; panel shows tape/bars/reasoning |
-| After close | `paper_report.py` — check after-tax PnL |
-| Sunday | `./weekly_s8_nn.sh` — improve model → panel proposal |
-| Sunday night | Open panel → review paper Δ₹ → Approve paper / Reject |
-| Only after stable paper | Unlock live + your explicit go |
+In the control panel section **One-click export**:
+1. Pick **From** / **To** dates (IST)
+2. **Download all (ZIP)** → ticks + trades_all + per-strategy CSVs to your laptop
+3. Or **Copy ticks/trades → Sheets** → paste into Google Sheets (Ctrl/Cmd+V)
+
+No SSH or manual CSV building required.
 
 SQLite DB (`data/ticks.db`) is auto-created on first use. `data/` contents are gitignored.
 
