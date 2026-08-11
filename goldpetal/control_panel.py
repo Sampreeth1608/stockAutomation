@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+"""Gold Petal control panel — ticks, finished trades, capital, weekend approvals.
+
+Run on the VM (bind localhost or LAN as you prefer):
+  cd ~/goldpetal && source .venv/bin/activate
+  python3 control_panel.py --host 0.0.0.0 --port 8787
+
+Open http://<vm-ip>:8787/
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from capital import (
+    capital_snapshot,
+    load_capital,
+    save_capital,
+    update_strategy_budget,
+)
+from control_state import (
+    entries_blocked,
+    is_live_mode_allowed,
+    load_state,
+    save_state,
+    set_emergency,
+    set_live_unlocked,
+    set_trading_enabled,
+)
+from paper_report import _summarize
+from proposals import decide_proposal, proposals_snapshot
+from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
+
+ROOT = Path(__file__).resolve().parent
+
+
+HTML_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gold Petal Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg0: #0c1410;
+  --bg1: #132019;
+  --bg2: #1a2c22;
+  --line: #2a4034;
+  --text: #e8f0ea;
+  --muted: #8aa394;
+  --gold: #d4a24c;
+  --gold2: #f0c674;
+  --ok: #3dba7a;
+  --warn: #e0a045;
+  --bad: #e05a4c;
+  --panel: rgba(19, 32, 25, 0.92);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; min-height: 100%;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1e3a2c 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #2a2410 0%, transparent 45%),
+    linear-gradient(165deg, var(--bg0), #0a100d 60%, #10180f);
+  color: var(--text);
+  font-family: "Manrope", system-ui, sans-serif;
+}
+body { padding: 1.25rem 1.5rem 3rem; }
+.brand {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem 1.25rem;
+  margin-bottom: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: .9rem;
+}
+.brand h1 {
+  margin: 0; font-family: "Fraunces", Georgia, serif;
+  font-weight: 700; font-size: clamp(1.8rem, 4vw, 2.6rem);
+  letter-spacing: -.02em; color: var(--gold2);
+}
+.brand .tag { color: var(--muted); font-size: .95rem; max-width: 36rem; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1rem;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1rem 1.1rem 1.15rem;
+  grid-column: span 12;
+}
+@media (min-width: 960px) {
+  .span-4 { grid-column: span 4; }
+  .span-5 { grid-column: span 5; }
+  .span-6 { grid-column: span 6; }
+  .span-7 { grid-column: span 7; }
+  .span-8 { grid-column: span 8; }
+}
+h2 {
+  margin: 0 0 .75rem; font-family: "Fraunces", Georgia, serif;
+  font-size: 1.15rem; font-weight: 500; color: var(--gold);
+}
+.muted { color: var(--muted); font-size: .85rem; }
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .82rem; }
+.row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.stat {
+  flex: 1 1 120px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  padding: .65rem .75rem;
+  border-radius: 3px;
+}
+.stat .k { display:block; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+.stat .v { display:block; margin-top: .2rem; font-family: "IBM Plex Mono", monospace; font-size: 1.05rem; }
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--bg2);
+  color: var(--text); font-family: inherit; font-weight: 600;
+  padding: .55rem .9rem; border-radius: 3px; cursor: pointer;
+}
+.btn:hover { border-color: var(--gold); color: var(--gold2); }
+.btn.danger { background: #3a1814; border-color: #6a2e28; color: #ffb4ab; }
+.btn.danger.on { background: var(--bad); color: #1a0504; border-color: var(--bad); }
+.btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
+.btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
+.pill {
+  display: inline-block; padding: .15rem .45rem; border-radius: 2px;
+  font-family: "IBM Plex Mono", monospace; font-size: .75rem;
+  border: 1px solid var(--line);
+}
+.pill.ok { color: var(--ok); border-color: #2f6a4a; }
+.pill.bad { color: var(--bad); border-color: #6a2e28; }
+.pill.warn { color: var(--warn); border-color: #6a5220; }
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  text-align: left; padding: .4rem .35rem; border-bottom: 1px solid var(--line);
+  font-family: "IBM Plex Mono", monospace; font-size: .78rem;
+}
+th { color: var(--muted); font-weight: 500; font-family: Manrope, sans-serif; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.scroll { max-height: 280px; overflow: auto; }
+.proposal {
+  border: 1px solid var(--line); background: var(--bg1);
+  padding: .85rem; margin-bottom: .75rem; border-radius: 3px;
+}
+.proposal h3 { margin: 0 0 .35rem; font-size: 1rem; color: var(--gold2); font-family: Fraunces, serif; font-weight: 500; }
+.proposal .actions { margin-top: .65rem; display: flex; flex-wrap: wrap; gap: .45rem; }
+input[type="number"] {
+  width: 7rem; background: var(--bg0); border: 1px solid var(--line);
+  color: var(--text); padding: .35rem .45rem; border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+}
+.flash { margin: .5rem 0 0; color: var(--gold2); font-size: .85rem; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <header class="brand">
+    <h1>Gold Petal</h1>
+    <p class="tag">Control panel — ticks, finished trades, capital, weekend strategy approvals. Live stays locked until you approve.</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel span-5">
+      <h2>Emergency &amp; trading</h2>
+      <div class="row" id="status-stats"></div>
+      <div class="row" style="margin-top:.85rem">
+        <button class="btn danger" id="btn-emergency" type="button">EMERGENCY OFF</button>
+        <button class="btn ok" id="btn-trading" type="button">Trading</button>
+        <button class="btn warn" id="btn-live" type="button">Live unlock</button>
+        <button class="btn" id="btn-refresh" type="button">Refresh</button>
+      </div>
+      <p class="flash" id="flash"></p>
+      <p class="muted" style="margin-top:.75rem">Emergency blocks every new entry. Trading off keeps tick archive but skips strategy emits. Live unlock alone is not enough — <span class="mono">DRY_RUN=false</span> + live order module still required.</p>
+    </section>
+
+    <section class="panel span-7">
+      <h2>Capital management</h2>
+      <div class="row" id="capital-stats"></div>
+      <div class="scroll" style="margin-top:.85rem">
+        <table>
+          <thead><tr><th>Strategy</th><th>Budget ₹</th><th>Max lots</th><th>Open</th><th>On</th></tr></thead>
+          <tbody id="capital-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel span-6">
+      <h2>Tick data</h2>
+      <p class="muted" id="tick-meta"></p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Time</th><th>LTP</th><th>Vol</th><th>TBQ</th><th>TSQ</th></tr></thead>
+          <tbody id="ticks-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel span-6">
+      <h2>Finished trades</h2>
+      <p class="muted" id="trades-meta"></p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Strat</th><th>Side</th><th>Entry</th><th>Exit</th><th>After tax</th><th>Status</th></tr></thead>
+          <tbody id="trades-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Weekend proposals — new &amp; improved strategies</h2>
+      <p class="muted">Every Sunday job writes paper results here. Approve for paper first; approve live only after you are happy. Reject force-disables the strategy.</p>
+      <div id="proposals"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Paper scoreboard</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Strategy</th><th>N</th><th>Closed</th><th>Win%</th><th>Gross</th><th>Fees</th><th>After tax</th></tr></thead>
+          <tbody id="score-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const flash = (msg) => { $("flash").textContent = msg || ""; };
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function pill(text, cls) {
+  return `<span class="pill ${cls||""}">${text}</span>`;
+}
+
+function money(n) {
+  const v = Number(n || 0);
+  const s = v.toFixed(2);
+  return (v >= 0 ? "+" : "") + s;
+}
+
+function renderStatus(s) {
+  const blocked = s.entries_blocked;
+  $("status-stats").innerHTML = `
+    <div class="stat"><span class="k">Emergency</span><span class="v">${s.state.emergency_off ? pill("OFF","bad") : pill("clear","ok")}</span></div>
+    <div class="stat"><span class="k">Trading</span><span class="v">${s.state.trading_enabled ? pill("ON","ok") : pill("OFF","warn")}</span></div>
+    <div class="stat"><span class="k">Live</span><span class="v">${s.state.live_unlocked ? pill("unlocked","warn") : pill("locked","ok")}</span></div>
+    <div class="stat"><span class="k">Entries</span><span class="v">${blocked[0] ? pill(blocked[1],"bad") : pill("allowed","ok")}</span></div>
+    <div class="stat"><span class="k">LTP</span><span class="v">${s.ltp ?? "—"}</span></div>
+    <div class="stat"><span class="k">Ticks</span><span class="v">${s.tick_count}</span></div>
+  `;
+  const em = $("btn-emergency");
+  em.textContent = s.state.emergency_off ? "CLEAR EMERGENCY" : "EMERGENCY OFF";
+  em.classList.toggle("on", !!s.state.emergency_off);
+  $("btn-trading").textContent = s.state.trading_enabled ? "Turn trading OFF" : "Turn trading ON";
+  $("btn-live").textContent = s.state.live_unlocked ? "Lock live" : "Unlock live";
+}
+
+function renderCapital(c) {
+  $("capital-stats").innerHTML = `
+    <div class="stat"><span class="k">Total</span><span class="v">₹${Number(c.total_capital_inr).toLocaleString()}</span></div>
+    <div class="stat"><span class="k">Deployable</span><span class="v">₹${Number(c.deployable_inr).toLocaleString()}</span></div>
+    <div class="stat"><span class="k">Today PnL</span><span class="v">${money(c.today_pnl_inr)}</span></div>
+    <div class="stat"><span class="k">Day loss limit</span><span class="v">₹${Number(c.daily_loss_limit_inr).toLocaleString()}</span></div>
+    <div class="stat"><span class="k">Max lots</span><span class="v">${c.max_lots_total}</span></div>
+  `;
+  const rows = Object.values(c.strategies || {}).map(sb => {
+    const open = (c.open_lots || {})[sb.strategy] || 0;
+    return `<tr>
+      <td>${sb.strategy}</td>
+      <td><input type="number" data-strat="${sb.strategy}" data-field="budget_inr" value="${sb.budget_inr}"/></td>
+      <td><input type="number" data-strat="${sb.strategy}" data-field="max_lots" value="${sb.max_lots}"/></td>
+      <td>${open}</td>
+      <td>${sb.enabled ? "Y" : "N"}</td>
+    </tr>`;
+  }).join("");
+  $("capital-body").innerHTML = rows || `<tr><td colspan="5">No budgets</td></tr>`;
+  $("capital-body").querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("change", async () => {
+      try {
+        const body = { strategy: inp.dataset.strat };
+        body[inp.dataset.field] = Number(inp.value);
+        await api("/api/capital/strategy", { method: "POST", body: JSON.stringify(body) });
+        flash(`Saved ${inp.dataset.strat} ${inp.dataset.field}`);
+        await refresh();
+      } catch (e) { flash(String(e.message || e)); }
+    });
+  });
+}
+
+function renderTicks(ticks, meta) {
+  $("tick-meta").textContent = meta;
+  $("ticks-body").innerHTML = (ticks || []).map(t => `
+    <tr>
+      <td>${t.received_at || ""}</td>
+      <td>${t.ltp ?? ""}</td>
+      <td>${t.volume ?? ""}</td>
+      <td>${t.bp ?? ""}</td>
+      <td>${t.sp ?? ""}</td>
+    </tr>`).join("") || `<tr><td colspan="5">No ticks yet</td></tr>`;
+}
+
+function renderTrades(trades, meta) {
+  $("trades-meta").textContent = meta;
+  $("trades-body").innerHTML = (trades || []).map(t => `
+    <tr>
+      <td>${t.strategy || ""}</td>
+      <td>${t.side || ""}</td>
+      <td>${t.entry_price ?? ""}</td>
+      <td>${t.exit_price ?? ""}</td>
+      <td>${t.pnl_after_tax !== "" && t.pnl_after_tax != null ? money(t.pnl_after_tax) : (t.net_pnl ?? "")}</td>
+      <td>${t.status || ""}</td>
+    </tr>`).join("") || `<tr><td colspan="6">No finished trades</td></tr>`;
+}
+
+function renderProposals(p) {
+  const pending = p.pending || [];
+  const decided = (p.decided || []).slice(0, 12);
+  if (!pending.length && !decided.length) {
+    $("proposals").innerHTML = `<p class="muted">No weekend proposals yet. Sunday job: <span class="mono">./weekly_s8_nn.sh</span></p>`;
+    return;
+  }
+  const card = (x, actions) => `
+    <div class="proposal">
+      <h3>${x.title || x.strategy} ${pill(x.kind)} ${pill(x.status, x.status.includes("approved") ? "ok" : x.status === "rejected" ? "bad" : "warn")}</h3>
+      <p class="muted">${x.summary || ""}</p>
+      <p class="mono">week=${x.week_id} trades=${x.paper?.n_trades ?? 0} afterTax=${money(x.paper?.after_tax_pnl_inr)} vsBase=${money(x.paper?.delta_vs_baseline_inr)} safety=${x.safety_ok}</p>
+      ${x.safety_reasons?.length ? `<p class="muted">${(x.safety_reasons||[]).join(" | ")}</p>` : ""}
+      ${actions}
+    </div>`;
+  let html = pending.map(x => card(x, `
+    <div class="actions">
+      <button class="btn ok" data-id="${x.id}" data-dec="approved_paper">Approve → paper</button>
+      <button class="btn warn" data-id="${x.id}" data-dec="approved_live">Approve → live</button>
+      <button class="btn danger" data-id="${x.id}" data-dec="rejected">Reject</button>
+    </div>`)).join("");
+  if (decided.length) {
+    html += `<p class="muted" style="margin-top:1rem">Recent decisions</p>` + decided.map(x => card(x, "")).join("");
+  }
+  $("proposals").innerHTML = html;
+  $("proposals").querySelectorAll("button[data-dec]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/proposals/${btn.dataset.id}/decide`, {
+          method: "POST",
+          body: JSON.stringify({ decision: btn.dataset.dec })
+        });
+        flash(`Proposal ${btn.dataset.dec}`);
+        await refresh();
+      } catch (e) { flash(String(e.message || e)); }
+    });
+  });
+}
+
+function renderScore(rows) {
+  $("score-body").innerHTML = (rows || []).map(s => `
+    <tr>
+      <td>${s.strategy}</td>
+      <td>${s.trades}</td>
+      <td>${s.closed}</td>
+      <td>${Number(s.win_rate).toFixed(1)}</td>
+      <td>${money(s.gross_pnl)}</td>
+      <td>${Number(s.charges).toFixed(2)}</td>
+      <td>${money(s.pnl_after_tax)}</td>
+    </tr>`).join("");
+}
+
+async function refresh() {
+  const data = await api("/api/dashboard");
+  renderStatus(data);
+  renderCapital(data.capital);
+  renderTicks(data.ticks, `${data.tick_count} ticks stored · showing latest ${data.ticks.length}`);
+  renderTrades(data.trades, `Closed/open from signals · showing latest ${data.trades.length}`);
+  renderProposals(data.proposals);
+  renderScore(data.scoreboard);
+}
+
+$("btn-emergency").onclick = async () => {
+  const s = await api("/api/status");
+  const off = !s.state.emergency_off;
+  await api("/api/emergency", { method: "POST", body: JSON.stringify({ off }) });
+  flash(off ? "EMERGENCY OFF engaged" : "Emergency cleared");
+  await refresh();
+};
+$("btn-trading").onclick = async () => {
+  const s = await api("/api/status");
+  const enabled = !s.state.trading_enabled;
+  await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled }) });
+  flash(enabled ? "Trading enabled" : "Trading disabled");
+  await refresh();
+};
+$("btn-live").onclick = async () => {
+  const s = await api("/api/status");
+  const unlocked = !s.state.live_unlocked;
+  await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked }) });
+  flash(unlocked ? "Live unlocked (still need DRY_RUN=false + live module)" : "Live locked");
+  await refresh();
+};
+$("btn-refresh").onclick = () => refresh().catch(e => flash(String(e)));
+
+refresh().catch(e => flash(String(e)));
+setInterval(() => refresh().catch(() => {}), 5000);
+</script>
+</body>
+</html>
+"""
+
+
+def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
+    body = json.dumps(payload, default=str).encode("utf-8")
+    return status, body, "application/json; charset=utf-8"
+
+
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    return dict(row)
+
+
+def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, Any]:
+    state = load_state()
+    ticks = [_row_to_dict(r) for r in latest_ticks(limit=tick_limit)]
+    all_trades = build_trades(strategy=None)
+    # Prefer finished (closed) first, then open.
+    closed = [t for t in all_trades if str(t.get("status", "")).startswith("CLOSED")]
+    open_t = [t for t in all_trades if t.get("status") == "OPEN"]
+    closed_sorted = list(reversed(closed))[:trade_limit]
+    trades = closed_sorted + open_t[: max(0, trade_limit - len(closed_sorted))]
+
+    scoreboard = []
+    for strat in (
+        "S1_NETDELTA",
+        "S2_BALANCE",
+        "S3_ML",
+        "S4_OVERNIGHT",
+        "S5_MINEDGE",
+        "S6_MIN30",
+        "S8_NET_ZIGZAG",
+        "S9_STATE30",
+        "S10_LEGACY30",
+        None,
+    ):
+        scoreboard.append(_summarize(strat))
+
+    live_ok, live_reason = is_live_mode_allowed()
+    blocked = entries_blocked()
+    return {
+        "state": state.to_dict(),
+        "entries_blocked": list(blocked),
+        "live_allowed": [live_ok, live_reason],
+        "ltp": latest_ltp(),
+        "tick_count": count_ticks(),
+        "ticks": ticks,
+        "trades": trades,
+        "signals": [_row_to_dict(r) for r in latest_signals(limit=25)],
+        "capital": capital_snapshot(),
+        "proposals": proposals_snapshot(),
+        "scoreboard": scoreboard,
+    }
+
+
+class ControlHandler(BaseHTTPRequestHandler):
+    server_version = "GoldPetalControl/1.0"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        # Keep stdout quiet; runner already logs heavily.
+        return
+
+    def _send(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        if not raw:
+            return {}
+        return json.loads(raw.decode("utf-8"))
+
+    def do_GET(self) -> None:  # noqa: N802
+        try:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            qs = parse_qs(parsed.query)
+            if path in {"/", "/index.html"}:
+                body = HTML_PAGE.encode("utf-8")
+                self._send(200, body, "text/html; charset=utf-8")
+                return
+            if path == "/api/dashboard":
+                status, body, ctype = _json_bytes(dashboard_payload())
+                self._send(status, body, ctype)
+                return
+            if path == "/api/status":
+                status, body, ctype = _json_bytes(
+                    {
+                        "state": load_state().to_dict(),
+                        "entries_blocked": list(entries_blocked()),
+                        "live_allowed": list(is_live_mode_allowed()),
+                        "ltp": latest_ltp(),
+                        "tick_count": count_ticks(),
+                    }
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/ticks":
+                limit = int((qs.get("limit") or ["40"])[0])
+                rows = [_row_to_dict(r) for r in latest_ticks(limit=limit)]
+                status, body, ctype = _json_bytes({"ticks": rows, "count": count_ticks()})
+                self._send(status, body, ctype)
+                return
+            if path == "/api/trades":
+                limit = int((qs.get("limit") or ["40"])[0])
+                trades = build_trades(strategy=None)
+                closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
+                status, body, ctype = _json_bytes(
+                    {"trades": list(reversed(closed))[:limit], "total_closed": len(closed)}
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/proposals":
+                status, body, ctype = _json_bytes(proposals_snapshot())
+                self._send(status, body, ctype)
+                return
+            if path == "/api/capital":
+                status, body, ctype = _json_bytes(capital_snapshot())
+                self._send(status, body, ctype)
+                return
+            self._send(*_json_bytes({"error": "not found"}, 404))
+        except Exception as exc:
+            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
+
+    def do_POST(self) -> None:  # noqa: N802
+        try:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            data = self._read_json()
+
+            if path == "/api/emergency":
+                st = set_emergency(bool(data.get("off")))
+                self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/trading":
+                st = set_trading_enabled(bool(data.get("enabled")))
+                self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/live":
+                st = set_live_unlocked(bool(data.get("unlocked")))
+                self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/capital":
+                plan = load_capital()
+                if "total_capital_inr" in data:
+                    plan.total_capital_inr = float(data["total_capital_inr"])
+                if "cash_reserve_pct" in data:
+                    plan.cash_reserve_pct = float(data["cash_reserve_pct"])
+                if "daily_loss_limit_inr" in data:
+                    plan.daily_loss_limit_inr = float(data["daily_loss_limit_inr"])
+                if "max_lots_total" in data:
+                    plan.max_lots_total = int(data["max_lots_total"])
+                save_capital(plan)
+                self._send(*_json_bytes({"ok": True, "capital": capital_snapshot()}))
+                return
+            if path == "/api/capital/strategy":
+                strategy = str(data.get("strategy") or "")
+                if not strategy:
+                    self._send(*_json_bytes({"error": "strategy required"}, 400))
+                    return
+                update_strategy_budget(
+                    strategy,
+                    budget_inr=float(data["budget_inr"]) if "budget_inr" in data else None,
+                    max_lots=int(data["max_lots"]) if "max_lots" in data else None,
+                    max_open_trades=int(data["max_open_trades"])
+                    if "max_open_trades" in data
+                    else None,
+                    enabled=bool(data["enabled"]) if "enabled" in data else None,
+                )
+                self._send(*_json_bytes({"ok": True, "capital": capital_snapshot()}))
+                return
+            if path.startswith("/api/proposals/") and path.endswith("/decide"):
+                proposal_id = path[len("/api/proposals/") : -len("/decide")]
+                decision = str(data.get("decision") or "")
+                note = str(data.get("note") or "")
+                prop = decide_proposal(proposal_id, decision, note=note)
+                self._send(*_json_bytes({"ok": True, "proposal": prop.to_dict()}))
+                return
+
+            self._send(*_json_bytes({"error": "not found"}, 404))
+        except Exception as exc:
+            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Gold Petal control panel")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8787)
+    args = ap.parse_args()
+    # Ensure default control files exist.
+    load_state()
+    load_capital()
+    httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
+    print(f"Gold Petal control panel → http://{args.host}:{args.port}/", flush=True)
+    print("Endpoints: /api/dashboard /api/ticks /api/trades /api/proposals /api/capital", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped", flush=True)
+
+
+if __name__ == "__main__":
+    main()

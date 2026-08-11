@@ -52,6 +52,22 @@ Requires valid `ANGEL_CLIENT_ID`, `ANGEL_PASSWORD`, `ANGEL_API_KEY`, and `ANGEL_
 | `paper_report.py` | PnL summary with Angel MCX fees + tax |
 | `retrain_daily.py` | Archive ticks + retrain ML models |
 | `train_models.py` / `train_overnight.py` | Model training pipelines |
+| `weekly_s8_nn.sh` / `evolve_s8_ml.py` | Weekend S8 improve → Sheets + control-panel proposal |
+| `control_panel.py` | Web UI: ticks, trades, capital, emergency, weekend approvals |
+
+### Control panel (local / VM)
+
+```bash
+python3 control_panel.py --host 0.0.0.0 --port 8787
+# open http://<host>:8787/
+```
+
+State files live under `data/control/`:
+- `state.json` — emergency / trading / live unlock
+- `capital.json` — total capital, per-strategy budgets, daily loss limit
+- `proposals.json` — weekend new/improved strategies awaiting your approval
+
+**Nothing auto-goes live.** Approve → paper or Approve → live in the panel; live still needs `live unlock` + `DRY_RUN=false` + live order module.
 
 SQLite DB (`data/ticks.db`) is auto-created on first use. `data/` contents are gitignored.
 

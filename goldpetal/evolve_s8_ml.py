@@ -295,6 +295,30 @@ def cmd_train(args: argparse.Namespace) -> int:
     print(f"Sheets pack: {week_dir}")
     print(f"Evolution:   {evo_path}")
     journal("tool_use_train_done", summary_row)
+
+    # Control-panel weekend proposal (needs operator approval before paper/live).
+    try:
+        from proposals import add_proposal, proposal_from_weekly_s8
+
+        prop = proposal_from_weekly_s8(
+            week_id=week_id,
+            summary=summary_row,
+            safety_ok=bool(safety.ok_to_enable_nn),
+            safety_reasons=list(safety.reasons),
+            model_path=str(model_path),
+            env_patch={
+                "ENABLE_S8": "true",
+                "S8_REQUIRE_NN": "true" if safety.ok_to_enable_nn else "false",
+                "S8_NN_MODEL_PATH": str(model_path),
+                "DRY_RUN": "true",
+            },
+        )
+        add_proposal(prop)
+        print(f"Control panel proposal: {prop.id} status=pending → open control_panel.py")
+        journal("proposal_created", {"id": prop.id, "strategy": prop.strategy})
+    except Exception as exc:
+        journal("proposal_create_failed", {"error": str(exc)})
+        print(f"WARNING: could not write control-panel proposal: {exc}")
     return 0
 
 

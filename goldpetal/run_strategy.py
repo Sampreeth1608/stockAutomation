@@ -15,10 +15,12 @@ from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
 from auth import login
 from depth import depth_buy_sell_sums
+from entry_gates import allow_new_entry
 from export_full_ticks import _depth_side
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
 from storage import init_db, latest_bar, save_bar, save_signal, save_tick
+from control_state import entries_blocked, load_state
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
@@ -176,6 +178,12 @@ def run_once(
     }
     closed = {"done": False}
 
+    def _may_enter(strategy_name: str, regime: str) -> tuple[bool, str]:
+        """Portfolio regime + control-panel emergency/capital gates for new entries."""
+        if not portfolio.allows(strategy_name, regime):
+            return False, f"regime={regime}"
+        return allow_new_entry(strategy_name)
+
     print("=== Gold Petal strategy runner ===", flush=True)
     print(f"Symbol   : {symbol}", flush=True)
     print(f"Token    : {token}", flush=True)
@@ -250,6 +258,16 @@ def run_once(
         f"Mode     : {'PAPER (DRY_RUN)' if dry_run else 'LIVE ORDERS NOT WIRED — staying signals-only'}",
         flush=True,
     )
+    ctrl = load_state()
+    print(
+        f"Control  : emergency_off={ctrl.emergency_off} "
+        f"trading_enabled={ctrl.trading_enabled} live_unlocked={ctrl.live_unlocked}",
+        flush=True,
+    )
+    print(
+        "Panel    : python3 control_panel.py --host 0.0.0.0 --port 8787",
+        flush=True,
+    )
     open_s, close_s = _market_window()
     print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
     print(f"Next bar : {state['next_bar_at'].isoformat(timespec='seconds')}", flush=True)
@@ -311,19 +329,21 @@ def run_once(
         )
         regime = regime_det.last.regime
         action = result_s1.action
-        # Block new entries when regime unfit; optionally flatten.
-        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s1.name, regime):
-            line = (
-                f"[{bar.time_label}] {strategy_s1.name} SKIP {action} "
-                f"regime={regime} ({regime_det.last.reason})"
-            )
-            print(line, flush=True)
-            logger.info(line)
-            # undo internal position open from on_bar
-            strategy_s1.position = "flat"
-            strategy_s1.entry_cmp = None
-            strategy_s1.entry_net_delta = None
-            action = "HOLD"
+        # Block new entries when regime unfit / emergency / capital; optionally flatten.
+        if action in {"BUY", "SHORT"}:
+            ok_enter, enter_why = _may_enter(strategy_s1.name, regime)
+            if not ok_enter:
+                line = (
+                    f"[{bar.time_label}] {strategy_s1.name} SKIP {action} "
+                    f"gate={enter_why} ({regime_det.last.reason})"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                # undo internal position open from on_bar
+                strategy_s1.position = "flat"
+                strategy_s1.entry_cmp = None
+                strategy_s1.entry_net_delta = None
+                action = "HOLD"
         elif (
             strategy_s1.position != "flat"
             and portfolio.should_flatten(strategy_s1.name, regime)
@@ -384,9 +404,11 @@ def run_once(
         buy_sum = float((strategy_s2.last_minute or {}).get("buy_sum", 0))
         sell_sum = float((strategy_s2.last_minute or {}).get("sell_sum", 0))
 
-        if action in {"BUY", "SHORT"} and not portfolio.allows(strategy_s2.name, regime):
-            strategy_s2.position = "flat"
-            return
+        if action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s2.name, regime)
+            if not ok_enter:
+                strategy_s2.position = "flat"
+                return
         if (
             strategy_s2.position != "flat"
             and portfolio.should_flatten(strategy_s2.name, regime)
@@ -447,7 +469,7 @@ def run_once(
         pos_before = strategy_s3.position
         result = strategy_s3.maybe_signal(now)
         regime = regime_det.last.regime
-        allowed = portfolio.allows(strategy_s3.name, regime)
+        allowed, _gate = _may_enter(strategy_s3.name, regime)
 
         if not allowed:
             # Model may have just opened — undo entry; only CLOSE if we were already in.
@@ -523,6 +545,11 @@ def run_once(
         result = strategy_s4.maybe_signal(now, float(latest["cmp"]))
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = allow_new_entry(strategy_s4.name)
+            if not ok_enter:
+                strategy_s4.position = "flat"
+                return
         save_signal(
             time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
@@ -557,12 +584,12 @@ def run_once(
         result = strategy_s5.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
-            strategy_s5.name, regime_det.last.regime
-        ):
-            strategy_s5.position = "flat"
-            strategy_s5.entry_price = None
-            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s5.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s5.position = "flat"
+                strategy_s5.entry_price = None
+                return
         save_signal(
             time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
@@ -595,12 +622,12 @@ def run_once(
         result = strategy_s6.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
-            strategy_s6.name, regime_det.last.regime
-        ):
-            strategy_s6.position = "flat"
-            strategy_s6.entry_price = None
-            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s6.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s6.position = "flat"
+                strategy_s6.entry_price = None
+                return
         save_signal(
             time_label=now.isoformat(timespec="seconds"),
             symbol=symbol,
@@ -662,12 +689,12 @@ def run_once(
 
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
-            strategy_s8.name, regime_det.last.regime
-        ):
-            strategy_s8.position = "flat"
-            strategy_s8.entry_price = None
-            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s8.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s8.position = "flat"
+                strategy_s8.entry_price = None
+                return
         if (
             strategy_s8.position != "flat"
             and portfolio.should_flatten(strategy_s8.name, regime_det.last.regime)
@@ -774,12 +801,12 @@ def run_once(
             "REVERSE_SHORT",
         }:
             return
-        if result.action in {"BUY", "SHORT", "REVERSE_LONG", "REVERSE_SHORT"} and not portfolio.allows(
-            strategy_s9.name, regime_det.last.regime
-        ):
-            strategy_s9.position = "flat"
-            strategy_s9.entry_price = None
-            return
+        if result.action in {"BUY", "SHORT", "REVERSE_LONG", "REVERSE_SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s9.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s9.position = "flat"
+                strategy_s9.entry_price = None
+                return
         if (
             strategy_s9.position != "flat"
             and portfolio.should_flatten(strategy_s9.name, regime_det.last.regime)
@@ -851,12 +878,12 @@ def run_once(
         result = strategy_s10.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
-            strategy_s10.name, regime_det.last.regime
-        ):
-            strategy_s10.position = "flat"
-            strategy_s10.entry_price = None
-            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s10.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s10.position = "flat"
+                strategy_s10.entry_price = None
+                return
         if (
             strategy_s10.position != "flat"
             and portfolio.should_flatten(strategy_s10.name, regime_det.last.regime)
