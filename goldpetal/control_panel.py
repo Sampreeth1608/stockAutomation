@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +34,7 @@ from control_state import (
     set_live_unlocked,
     set_trading_enabled,
 )
+from live_orders import live_lots, recent_orders
 from paper_report import _summarize
 from panel_export import (
     TRADE_CSV_FIELDS,
@@ -222,7 +224,7 @@ input[type="date"] {
         <button class="btn" id="btn-reason" type="button">Re-run reasoner</button>
       </div>
       <p class="flash" id="flash"></p>
-      <p class="muted" style="margin-top:.75rem">Host: same GCP/VM as <span class="mono">run_strategy.py</span>. Open <span class="mono">http://&lt;vm-ip&gt;:8787/</span>. Emergency blocks every new entry. Live unlock alone is not enough — <span class="mono">DRY_RUN=false</span> + live order module still required.</p>
+      <p class="muted" style="margin-top:.75rem">Host: same GCP/VM as <span class="mono">run_strategy.py</span>. Open <span class="mono">http://&lt;vm-ip&gt;:8787/</span>. Emergency blocks every new entry. Live path: Unlock live + <span class="mono">DRY_RUN=false</span> + Approve → live per strategy. Orders go through <span class="mono">live_orders.py</span> (default 1 lot).</p>
     </section>
 
     <section class="panel span-7">
@@ -273,6 +275,18 @@ input[type="date"] {
         <table>
           <thead><tr><th>Strat</th><th>Side</th><th>Entry</th><th>Exit</th><th>After tax</th><th>Status</th></tr></thead>
           <tbody id="trades-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel span-6">
+      <h2>Live Angel orders</h2>
+      <p class="muted" id="live-meta">Gates + recent placeOrder log (<span class="mono">data/control/live_orders.jsonl</span>)</p>
+      <div class="row" id="live-gates" style="margin-bottom:.55rem"></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Time</th><th>Strat</th><th>Tx</th><th>Qty</th><th>OK</th><th>Order</th><th>Reason</th></tr></thead>
+          <tbody id="live-body"></tbody>
         </table>
       </div>
     </section>
@@ -458,6 +472,30 @@ function renderTrades(trades, meta) {
     </tr>`).join("") || `<tr><td colspan="6">No finished trades</td></tr>`;
 }
 
+function renderLiveOrders(data) {
+  const ok = data.live_allowed && data.live_allowed[0];
+  const why = (data.live_allowed && data.live_allowed[1]) || "";
+  const env = data.live_env || {};
+  $("live-gates").innerHTML = `
+    <div class="stat"><span class="k">Gates</span><span class="v">${ok ? pill("READY","warn") : pill(why || "blocked","ok")}</span></div>
+    <div class="stat"><span class="k">DRY_RUN</span><span class="v">${env.dry_run ? "true" : "false"}</span></div>
+    <div class="stat"><span class="k">Lots</span><span class="v">${env.lots ?? 1}/${env.max_lots ?? 1}</span></div>
+    <div class="stat"><span class="k">Approved</span><span class="v">${(data.state.live_approved||[]).join(", ") || "—"}</span></div>
+  `;
+  const rows = data.live_orders || [];
+  $("live-meta").textContent = `${rows.length} recent order log rows · product=${env.producttype || "CARRYFORWARD"}`;
+  $("live-body").innerHTML = rows.map(o => `
+    <tr>
+      <td>${o.ts_ist || ""}</td>
+      <td>${o.strategy || ""}</td>
+      <td>${o.transaction || ""}</td>
+      <td>${o.quantity ?? ""}</td>
+      <td>${o.ok ? "Y" : (o.skipped ? "skip" : "N")}</td>
+      <td class="mono">${o.order_id || ""}</td>
+      <td>${o.reason || ""}</td>
+    </tr>`).join("") || `<tr><td colspan="7">No live orders yet (paper / gates closed)</td></tr>`;
+}
+
 function renderProposals(p) {
   const pending = p.pending || [];
   const decided = (p.decided || []).slice(0, 12);
@@ -516,6 +554,7 @@ async function refresh() {
   renderCapital(data.capital);
   renderTicks(data.ticks, `${data.tick_count} ticks stored · showing latest ${data.ticks.length}`);
   renderTrades(data.trades, `Closed/open from signals · showing latest ${data.trades.length}`);
+  renderLiveOrders(data);
   renderProposals(data.proposals);
   renderScore(data.scoreboard);
   renderReasoning(data.reasoning);
@@ -541,7 +580,7 @@ $("btn-live").onclick = async () => {
   const s = await api("/api/status");
   const unlocked = !s.state.live_unlocked;
   await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked }) });
-  flash(unlocked ? "Live unlocked (still need DRY_RUN=false + live module)" : "Live locked");
+  flash(unlocked ? "Live unlocked (still need DRY_RUN=false + Approve → live)" : "Live locked");
   await refresh();
 };
 $("btn-refresh").onclick = () => refresh().catch(e => flash(String(e)));
@@ -678,10 +717,18 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
             reasoning = refresh_and_save()
         except Exception:
             reasoning = None
+    dry = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
     return {
         "state": state.to_dict(),
         "entries_blocked": list(blocked),
         "live_allowed": [live_ok, live_reason],
+        "live_orders": recent_orders(limit=40),
+        "live_env": {
+            "dry_run": dry,
+            "lots": live_lots(),
+            "max_lots": int(os.getenv("LIVE_MAX_LOTS", "1") or "1"),
+            "producttype": (os.getenv("LIVE_PRODUCTTYPE", "CARRYFORWARD") or "CARRYFORWARD"),
+        },
         "ltp": latest_ltp(),
         "tick_count": count_ticks(),
         "ticks": ticks,

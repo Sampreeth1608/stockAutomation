@@ -71,7 +71,7 @@ def main() -> None:
         f"SEBI {cfg.sebi_rate*100:.4f}% | TAX {cfg.tax_rate*100:.0f}% | "
         f"lot={cfg.lot_size} turnover_mult={cfg.turnover_mult}"
     )
-    print("Mode: paper only until DRY_RUN=false + live order module")
+    print("Mode: paper until DRY_RUN=false + panel unlock + Approve → live")
     print()
     print(
         f"{'strategy':12} {'n':>4} {'cl':>4} {'win%':>6} "

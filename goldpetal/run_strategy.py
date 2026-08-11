@@ -1,4 +1,4 @@
-"""Run Gold Petal pressure strategy in DRY_RUN (signals only)."""
+"""Run Gold Petal strategies: paper by default; live Angel orders when gated."""
 
 from __future__ import annotations
 
@@ -17,10 +17,11 @@ from auth import login
 from depth import depth_buy_sell_sums
 from entry_gates import allow_new_entry
 from export_full_ticks import _depth_side
+from live_orders import broker_from_session
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
-from storage import init_db, latest_bar, save_bar, save_signal, save_tick
-from control_state import entries_blocked, load_state
+from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
+from control_state import entries_blocked, is_live_mode_allowed, load_state
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
@@ -166,6 +167,20 @@ def run_once(
     dry_run = _dry_run()
     contract = find_goldpetal_futures(force_refresh=True)
     session = login()
+    broker = broker_from_session(session, contract)
+    # Seed broker mirror from last DB signal per strategy so CLOSE/REVERSE work after restart.
+    try:
+        seeded: dict[str, str] = {}
+        for row in latest_signals(limit=200):
+            name = str(row["strategy"] or "")
+            pos = str(row["position_after"] or "").lower()
+            if name and name not in seeded and pos in {"long", "short", "flat"}:
+                seeded[name] = pos
+        if seeded and hasattr(broker, "seed_positions"):
+            broker.seed_positions(seeded)
+            print(f"Broker positions seeded: {seeded}", flush=True)
+    except Exception as exc:
+        logger.warning("Could not seed broker positions: %s", exc)
 
     symbol = contract["symbol"]
     token = contract["token"]
@@ -183,6 +198,45 @@ def run_once(
         if not portfolio.allows(strategy_name, regime):
             return False, f"regime={regime}"
         return allow_new_entry(strategy_name)
+
+    def _record_signal(
+        *,
+        time_label: str,
+        action: str,
+        position_after: str,
+        reason: str,
+        price_delta,
+        net,
+        net_delta,
+        strategy: str,
+        cmp,
+    ) -> None:
+        db_save_signal(
+            time_label=time_label,
+            action=action,
+            position_after=position_after,
+            reason=reason,
+            price_delta=price_delta,
+            net=net,
+            net_delta=net_delta,
+            strategy=strategy,
+            cmp=cmp,
+        )
+        if action in {"BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
+            res = broker.place_signal(
+                strategy=strategy,
+                action=action,
+                price=float(cmp) if cmp is not None else None,
+                tag=strategy[:12],
+            )
+            if not res.dry_run:
+                line = (
+                    f"[LIVE] {strategy} {action} tx={res.transaction} "
+                    f"qty={res.quantity} ok={res.ok} order={res.order_id} "
+                    f"| {res.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
 
     print("=== Gold Petal strategy runner ===", flush=True)
     print(f"Symbol   : {symbol}", flush=True)
@@ -254,14 +308,17 @@ def run_once(
         f"{strategy_s10.status_line}",
         flush=True,
     )
+    live_ok, live_why = is_live_mode_allowed()
     print(
-        f"Mode     : {'PAPER (DRY_RUN)' if dry_run else 'LIVE ORDERS NOT WIRED — staying signals-only'}",
+        f"Mode     : {'PAPER (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
         flush=True,
     )
+    print(f"Broker   : {broker.status_line}", flush=True)
     ctrl = load_state()
     print(
         f"Control  : emergency_off={ctrl.emergency_off} "
-        f"trading_enabled={ctrl.trading_enabled} live_unlocked={ctrl.live_unlocked}",
+        f"trading_enabled={ctrl.trading_enabled} live_unlocked={ctrl.live_unlocked} "
+        f"live_approved={ctrl.live_approved}",
         flush=True,
     )
     print(
@@ -364,16 +421,14 @@ def run_once(
             )
 
         if action in {"BUY", "SHORT", "CLOSE"}:
-            save_signal(
+            _record_signal(
                 time_label=bar.time_label,
-                symbol=symbol,
                 action=action,
                 position_after=result_s1.position_after if action != "CLOSE" else "flat",
                 reason=result_s1.reason,
                 price_delta=result_s1.price_delta,
                 net=result_s1.net,
                 net_delta=result_s1.net_delta,
-                dry_run=dry_run,
                 strategy=strategy_s1.name,
                 cmp=bar.cmp,
             )
@@ -431,16 +486,14 @@ def run_once(
 
         if action not in {"BUY", "SHORT", "CLOSE"}:
             return
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=action,
             position_after=result.position_after if action != "CLOSE" else "flat",
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s2.name,
             cmp=float(latest["cmp"]),
         )
@@ -496,16 +549,14 @@ def run_once(
             return
 
         action = result.action
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=action,
             position_after="flat" if action == "CLOSE" else result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s3.name,
             cmp=float(latest["cmp"]),
         )
@@ -550,16 +601,14 @@ def run_once(
             if not ok_enter:
                 strategy_s4.position = "flat"
                 return
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s4.name,
             cmp=float(latest["cmp"]),
         )
@@ -590,16 +639,14 @@ def run_once(
                 strategy_s5.position = "flat"
                 strategy_s5.entry_price = None
                 return
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s5.name,
             cmp=float(latest["cmp"]),
         )
@@ -628,16 +675,14 @@ def run_once(
                 strategy_s6.position = "flat"
                 strategy_s6.entry_price = None
                 return
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s6.name,
             cmp=float(latest["cmp"]),
         )
@@ -736,16 +781,14 @@ def run_once(
             exchange_timestamp=exch_ts_i,
             extra={"regime": regime_det.last.regime, "bias": strategy_s8.bias},
         )
-        save_signal(
+        _record_signal(
             time_label=ts,
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s8.name,
             cmp=ltp,
         )
@@ -846,16 +889,14 @@ def run_once(
             reason=result.reason,
             extra={"regime": regime_det.last.regime, "pos_before": pos_before},
         )
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s9.name,
             cmp=float(latest["cmp"]),
         )
@@ -902,16 +943,14 @@ def run_once(
                 prev_net_delta=result.prev_net_delta,
                 reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
             )
-        save_signal(
+        _record_signal(
             time_label=now.isoformat(timespec="seconds"),
-            symbol=symbol,
             action=result.action,
             position_after=result.position_after,
             reason=result.reason,
             price_delta=result.price_delta,
             net=result.net,
             net_delta=result.net_delta,
-            dry_run=dry_run,
             strategy=strategy_s10.name,
             cmp=float(latest["cmp"]),
         )

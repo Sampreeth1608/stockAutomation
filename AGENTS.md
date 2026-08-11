@@ -67,7 +67,19 @@ State files live under `data/control/`:
 - `capital.json` — total capital, per-strategy budgets, daily loss limit
 - `proposals.json` — weekend new/improved strategies awaiting your approval
 
-**Nothing auto-goes live.** Approve → paper or Approve → live in the panel; live still needs `live unlock` + `DRY_RUN=false` + live order module.
+**Nothing auto-goes live.** Approve → paper or Approve → live in the panel; live still needs `live unlock` + `DRY_RUN=false`. Orders are placed by `live_orders.py` (default `LIVE_LOTS=1`, capped by `LIVE_MAX_LOTS`).
+
+### Live Angel orders
+
+| Gate | How |
+|------|-----|
+| Paper default | `DRY_RUN=true` → `NullBroker` (no placeOrder) |
+| Arm runner | `DRY_RUN=false` in `.env`, restart `supervise.sh` |
+| Unlock | Panel → **Unlock live** |
+| Approve strategy | Panel → weekend proposal **Approve → live** (or `live_approved` in state) |
+| Size | `LIVE_LOTS=1` (hard-capped by `LIVE_MAX_LOTS`) |
+
+Log: `data/control/live_orders.jsonl` — also shown in panel **Live Angel orders**.
 
 ### Where the control panel lives
 
@@ -97,6 +109,16 @@ In the control panel section **One-click export**:
 3. Or **Copy ticks/trades → Sheets** → paste into Google Sheets (Ctrl/Cmd+V)
 
 No SSH or manual CSV building required.
+
+### How to plan the week
+
+| When | What |
+|------|------|
+| Mon–Fri session | `supervise.sh` collects ticks + paper signals; panel shows tape/bars/reasoning |
+| After close | `paper_report.py` — check after-tax PnL |
+| Sunday | `./weekly_s8_nn.sh` — improve model → panel proposal |
+| Sunday night | Open panel → review paper Δ₹ → Approve paper / Reject |
+| Only after stable paper | Unlock live + your explicit go |
 
 SQLite DB (`data/ticks.db`) is auto-created on first use. `data/` contents are gitignored.
 

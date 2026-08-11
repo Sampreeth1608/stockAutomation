@@ -34,7 +34,7 @@ class ControlState:
     live_unlocked: bool = False
     # Strategies the operator approved for paper after weekend review.
     paper_approved: list[str] = field(default_factory=list)
-    # Strategies approved to go live (still need live_unlocked + live module).
+    # Strategies approved to go live (still need live_unlocked + DRY_RUN=false).
     live_approved: list[str] = field(default_factory=list)
     # Strategies force-disabled from the panel (overrides ENABLE_* for entries).
     force_disabled: list[str] = field(default_factory=list)
