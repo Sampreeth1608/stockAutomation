@@ -524,6 +524,20 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
         f"Behavior: {best.behavior_summary[:220]} "
         f"Approve → S11_PACK_PATH + ENABLE_S11 (DRY_RUN). {note}"
     ).strip()
+    env_patch = {
+        "DRY_RUN": "true",
+    }
+    if best.safety_ok:
+        env_patch["ENABLE_S11"] = "true"
+        env_patch["S11_PACK_PATH"] = best.pack_path
+    else:
+        # Do not tempt operators to enable a failing pack
+        env_patch["ENABLE_S11"] = "false"
+        env_patch["S11_PACK_PATH"] = ""
+        summary = (
+            summary
+            + " DO NOT enable — safety_ok=False (after-tax/AUC/trades gates failed)."
+        )
     prop = StrategyProposal(
         id="",
         week_id=week,
@@ -561,11 +575,7 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
         model_path=best.model_path,
         safety_ok=best.safety_ok,
         safety_reasons=best.safety_reasons,
-        env_patch={
-            "DRY_RUN": "true",
-            "ENABLE_S11": "true",
-            "S11_PACK_PATH": best.pack_path,
-        },
+        env_patch=env_patch,
     )
     return add_proposal(prop)
 
