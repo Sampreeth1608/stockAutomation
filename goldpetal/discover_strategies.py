@@ -430,6 +430,7 @@ def run_discovery(
             ok, reasons = _safety(auc, sim)
             if (
                 tmpl.family != "baseline"
+                and behavior.fee_be_pts > 0
                 and behavior.atr_proxy_pts < behavior.fee_be_pts * 0.5
             ):
                 ok = False

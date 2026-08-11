@@ -58,6 +58,13 @@ class ReasoningTrace:
 
 def fee_be_points(ltp: float, lots: float = 100.0) -> float:
     """Rough Angel MCX goldpetal round-trip fee in points (math)."""
+    try:
+        from charges import ignore_fees_enabled
+
+        if ignore_fees_enabled():
+            return 0.0
+    except Exception:
+        pass
     # Align with learn_s8_align.fee_rt / lots → points
     notional = float(ltp) * float(lots)
     # simplified: ~₹50–60 per side-ish → use same structure as fee_rt if available

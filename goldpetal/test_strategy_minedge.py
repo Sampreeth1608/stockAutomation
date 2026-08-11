@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
+
+os.environ["IGNORE_FEES"] = "false"
 
 from edge import PointATR, EdgeThresholds, fee_break_even_points
 from strategy_minedge import MinEdgeStrategy

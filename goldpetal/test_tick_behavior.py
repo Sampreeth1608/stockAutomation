@@ -70,7 +70,7 @@ def test_analyze_ticks_builds_recipes(tmp_path: Path) -> None:
     csv_path = _synth_csv(tmp_path / "ticks.csv")
     report = analyze_ticks(csv_path)
     assert report.n_ticks > 100
-    assert report.fee_be_pts > 0
+    assert report.fee_be_pts >= 0  # 0 when IGNORE_FEES=true
     assert report.families
     assert report.recipes
     assert report.horizon >= 20
@@ -90,6 +90,10 @@ def test_pick_fee_aware_horizon() -> None:
     assert table
     assert mv >= 40.0
     assert h >= 60
+    # fees ignored → prefer 300
+    h0, mv0, _ = pick_fee_aware_horizon(ltp, fee_be=0.0)
+    assert h0 == 300
+    assert mv0 > 0
 
 
 def test_generate_recipes_chop() -> None:

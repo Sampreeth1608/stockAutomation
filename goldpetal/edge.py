@@ -26,6 +26,10 @@ class EdgeThresholds:
 
 def fee_break_even_points(price: float = 14380.0) -> float:
     """Points needed so gross ₹ PnL covers a typical round-trip fee."""
+    from charges import ignore_fees_enabled
+
+    if ignore_fees_enabled():
+        return 0.0
     cfg = charges_from_env()
     fee = round_trip_charges(
         side="BUY", entry_price=price, exit_price=price + 1.0, cfg=cfg
@@ -43,10 +47,21 @@ def edge_thresholds_from_env(price: float = 14380.0) -> EdgeThresholds:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     except Exception:
         pass
+    from charges import ignore_fees_enabled
+
     min_edge = float(os.getenv("MIN_EDGE_POINTS", "20"))
     safety = float(os.getenv("EDGE_SAFETY_MULT", "1.25"))
-    cover = os.getenv("COVER_FEES", "true").strip().lower() in {"1", "true", "yes", "y"}
-    be = fee_break_even_points(price)
+    if ignore_fees_enabled():
+        cover = False
+        be = 0.0
+    else:
+        cover = os.getenv("COVER_FEES", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+        }
+        be = fee_break_even_points(price)
     return EdgeThresholds(
         min_edge_points=min_edge,
         fee_break_even_points=be,

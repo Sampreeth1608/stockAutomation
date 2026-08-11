@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
-from charges import ChargeConfig, apply_charges_and_tax, round_trip_charges
+os.environ["IGNORE_FEES"] = "false"
+
+from charges import ChargeConfig, apply_charges_and_tax, ignore_fees_enabled, round_trip_charges
 
 
 def test_round_trip_has_brokerage_gst_ctt() -> None:
@@ -54,6 +56,7 @@ def test_small_move_loses_to_fees() -> None:
 
 
 def test_build_trades_angel_schedule() -> None:
+    os.environ["IGNORE_FEES"] = "false"
     os.environ["BROKERAGE_PER_ORDER"] = "20"
     os.environ["BROKERAGE_PROMO"] = "false"
     os.environ["TAX_RATE"] = "0.30"
@@ -86,10 +89,28 @@ def test_build_trades_angel_schedule() -> None:
     assert float(t["pnl_after_charges"]) > 0
 
 
+def test_ignore_fees_zeros_schedule() -> None:
+    os.environ["IGNORE_FEES"] = "true"
+    assert ignore_fees_enabled() is True
+    from charges import charges_from_env
+
+    cfg = charges_from_env()
+    assert cfg.brokerage_per_order == 0.0
+    assert cfg.tax_rate == 0.0
+    out = apply_charges_and_tax(
+        100.0, cfg, side="BUY", entry_price=14000.0, exit_price=14100.0
+    )
+    assert out["charges"] == 0.0
+    assert out["tax"] == 0.0
+    assert out["pnl_after_tax"] == 100.0
+    os.environ["IGNORE_FEES"] = "false"
+
+
 if __name__ == "__main__":
     test_round_trip_has_brokerage_gst_ctt()
     test_promo_zero_brokerage()
     test_profit_after_tax()
     test_small_move_loses_to_fees()
     test_build_trades_angel_schedule()
+    test_ignore_fees_zeros_schedule()
     print("ok")

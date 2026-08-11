@@ -15,12 +15,34 @@ Gold Petal contract (MCX official):
   - Turnover per lot ≈ price * LOT_SIZE * TURNOVER_MULT (default mult=1.0)
 
 Tax on trading profit (user request): TAX_RATE (default 30%) on profit after charges.
+
+IGNORE_FEES=true (default): paper PnL and strategy gates ignore all fees/tax so
+strategies optimize gross points. Set IGNORE_FEES=false to restore Angel schedule.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def ignore_fees_enabled() -> bool:
+    """Global switch: no fees/tax in paper math and no fee cover gates."""
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+    # Default ON — operator asked to remove fees/charges for all strategies.
+    return _env_flag("IGNORE_FEES", True)
 
 
 @dataclass(frozen=True)
@@ -36,6 +58,23 @@ class ChargeConfig:
     lot_size: float = 1.0
     # Quote is ₹/1g, lot=1g → multiplier 1.0 (1 point = ₹1)
     turnover_mult: float = 1.0
+    ignore_fees: bool = False
+
+
+def zero_charge_config(*, lot_size: float = 1.0, turnover_mult: float = 1.0) -> ChargeConfig:
+    return ChargeConfig(
+        brokerage_per_order=0.0,
+        brokerage_promo=True,
+        mcx_txn_rate=0.0,
+        ctt_sell_rate=0.0,
+        sebi_rate=0.0,
+        stamp_buy_rate=0.0,
+        gst_rate=0.0,
+        tax_rate=0.0,
+        lot_size=lot_size,
+        turnover_mult=turnover_mult,
+        ignore_fees=True,
+    )
 
 
 def charges_from_env() -> ChargeConfig:
@@ -46,12 +85,12 @@ def charges_from_env() -> ChargeConfig:
     except Exception:
         pass
 
-    promo = os.getenv("BROKERAGE_PROMO", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-    }
+    lot_size = float(os.getenv("LOT_SIZE", "1"))
+    turnover_mult = float(os.getenv("TURNOVER_MULT", "1.0"))
+    if ignore_fees_enabled():
+        return zero_charge_config(lot_size=lot_size, turnover_mult=turnover_mult)
+
+    promo = _env_flag("BROKERAGE_PROMO", False)
     brokerage = float(os.getenv("BROKERAGE_PER_ORDER", "20"))
     if promo:
         brokerage = 0.0
@@ -65,9 +104,11 @@ def charges_from_env() -> ChargeConfig:
         stamp_buy_rate=float(os.getenv("STAMP_BUY_RATE", "0.00002")),
         gst_rate=float(os.getenv("GST_RATE", "0.18")),
         tax_rate=float(os.getenv("TAX_RATE", "0.30")),
-        lot_size=float(os.getenv("LOT_SIZE", "1")),
-        turnover_mult=float(os.getenv("TURNOVER_MULT", "1.0")),
+        lot_size=lot_size,
+        turnover_mult=turnover_mult,
+        ignore_fees=False,
     )
+
 
 
 def _leg_charges(

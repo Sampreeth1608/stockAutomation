@@ -225,12 +225,15 @@ def reason_over_behavior(
         ReasonStep(
             "mathematics",
             "fee_be",
-            fee_be > 0,
-            f"RT fee BE≈{fee_be:.1f}pt @ LTP≈{mid_ltp:.0f}",
+            True,
+            (
+                f"RT fee BE≈{fee_be:.1f}pt @ LTP≈{mid_ltp:.0f}"
+                + (" (ignored)" if fee_be <= 0 else "")
+            ),
             fee_be,
         )
     )
-    edge_ok = atr_pts >= fee_be * 0.8
+    edge_ok = True if fee_be <= 0 else atr_pts >= fee_be * 0.8
     steps.append(
         ReasonStep(
             "mathematics",
@@ -443,11 +446,16 @@ def pick_fee_aware_horizon(
     *,
     candidates: tuple[int, ...] = (20, 60, 120, 300, 600, 1200, 2400, 4800),
 ) -> tuple[int, float, list[dict[str, float | int]]]:
-    """Choose the shortest horizon whose median |move| can cover ~80% of fee BE."""
+    """Choose horizon from median |move|.
+
+    When fees are ignored (fee_be<=0), prefer ~300 ticks (or best available).
+    Otherwise pick shortest horizon whose median |move| covers ~80% of fee BE.
+    """
     table: list[dict[str, float | int]] = []
     best_h = candidates[0]
     best_move = 0.0
     chosen: tuple[int, float] | None = None
+    target = 10.0 if fee_be <= 0 else fee_be * 0.8
     for h in candidates:
         if h >= len(ltp):
             continue
@@ -456,8 +464,12 @@ def pick_fee_aware_horizon(
         if mv > best_move:
             best_move = mv
             best_h = h
-        if chosen is None and mv >= fee_be * 0.8:
+        if chosen is None and mv >= target:
             chosen = (h, mv)
+    if fee_be <= 0:
+        prefer = 300
+        if prefer < len(ltp):
+            return prefer, median_horizon_move(ltp, prefer), table
     if chosen is not None:
         return chosen[0], chosen[1], table
     return best_h, best_move, table
