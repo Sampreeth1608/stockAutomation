@@ -466,7 +466,7 @@ def search_space(diag: dict[str, Any]) -> list[tuple[str, AlignS8Config]]:
 
 
 def score_result(summary: dict[str, Any], *, min_trades: int = 2) -> float:
-    """Primary objective: paper ₹ with light regularity penalties."""
+    """Primary objective: paper ₹; penalize cutting winners / overtrade."""
     if summary["n"] < min_trades:
         return -1e12
     score = float(summary["sum_inr"])
@@ -475,6 +475,15 @@ def score_result(summary: dict[str, Any], *, min_trades: int = 2) -> float:
     # mild penalty for overtrading
     if summary["n"] > 80:
         score -= (summary["n"] - 80) * 20.0
+    # H=off + book_drop can look good on one day but miss 100–200pt runs
+    avg_left = float(summary.get("avg_left") or 0.0)
+    early_n = int(summary.get("exit_early_n") or 0)
+    n = max(1, int(summary.get("n") or 1))
+    if avg_left >= 10.0:
+        # ~₹100/pt left × lots≈100 → strong push toward holding winners
+        score -= (avg_left - 10.0) * 250.0
+    if early_n / n >= 0.20:
+        score -= early_n * 400.0
     return score
 
 

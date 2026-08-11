@@ -109,6 +109,8 @@ class AlignS8Config:
     book_drop_min_pct: float = 0.25
     # Require supporting-book drop for this many consecutive steps
     book_drop_persist: int = 1
+    # Do NOT book_drop-exit while open P&L >= this (ride trends; default 25pt)
+    protect_profit_pts: float = 25.0
     # Optional weekly MLP neural-net entry gate (train_s8_nn_weekly.py)
     require_nn_filter: bool = False
     nn_model_path: str = "data/models/s8_nn_mlp.joblib"
@@ -722,8 +724,17 @@ class AlignS8Strategy:
                     book_hold = True
                     self.last_hold_reason = f"hold[{hm}] rally_supported"
 
-        # Supporting book dropped vs previous step → exit (noise-filtered)
-        if self.cfg.close_on_book_drop and not book_hold:
+        # Supporting book dropped vs previous step → exit (noise-filtered).
+        # Trend guard: never book_drop-exit while protect_profit_pts in the green
+        # (overnight H=off learned presets were cutting 100–200pt runners).
+        protect = float(getattr(self.cfg, "protect_profit_pts", 25.0) or 0.0)
+        in_protected_profit = protect > 0 and move >= protect
+        if in_protected_profit and self.cfg.close_on_book_drop:
+            self.last_hold_reason = (
+                f"hold[protect] move={move:.1f}>={protect:.0f} skip_book_drop"
+            )
+
+        if self.cfg.close_on_book_drop and not book_hold and not in_protected_profit:
             raw_drop = (side == "long" and self.tbq_falling) or (
                 side == "short" and self.tsq_falling
             )
@@ -1367,6 +1378,7 @@ def align_s8_from_env() -> AlignS8Strategy:
         close_on_book_drop=_b("S8_CLOSE_ON_BOOK_DROP", True),
         book_drop_min_pct=_f("S8_BOOK_DROP_MIN_PCT", 0.25),
         book_drop_persist=int(_f("S8_BOOK_DROP_PERSIST", 1)),
+        protect_profit_pts=_f("S8_PROTECT_PROFIT_PTS", 25.0),
         require_nn_filter=_b("S8_REQUIRE_NN", False),
         nn_model_path=os.getenv("S8_NN_MODEL_PATH", "data/models/s8_nn_mlp.joblib"),
         nn_min_proba=_f("S8_NN_MIN_PROBA", 0.55),
@@ -1412,6 +1424,8 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.book_drop_min_pct = _f("S8_BOOK_DROP_MIN_PCT", 0.25)
     if os.getenv("S8_BOOK_DROP_PERSIST") is not None:
         cfg.book_drop_persist = int(_f("S8_BOOK_DROP_PERSIST", 1))
+    if os.getenv("S8_PROTECT_PROFIT_PTS") is not None:
+        cfg.protect_profit_pts = _f("S8_PROTECT_PROFIT_PTS", 25.0)
     if os.getenv("S8_REQUIRE_NN") is not None:
         cfg.require_nn_filter = _b("S8_REQUIRE_NN", False)
     if os.getenv("S8_NN_MODEL_PATH") is not None:

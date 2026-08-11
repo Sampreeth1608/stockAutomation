@@ -515,6 +515,7 @@ def test_tsq_drop_closes_short():
             hold_while_book_rises=True,
             close_on_book_drop=True,
             book_drop_min_pct=0.25,
+            protect_profit_pts=0,  # allow drop exit even in small profit
             break_min_bars=99,
             flip_min_bars=99,
             weaken_pct=90,
@@ -531,6 +532,34 @@ def test_tsq_drop_closes_short():
     sig = s._manage(9995.0)
     assert sig is not None and "tsq_drop" in (sig.reason or "")
     assert "exit[" in (sig.reason or "")
+
+
+def test_protect_profit_blocks_book_drop():
+    """In a 200pt-style runner, TBQ noise must not force exit."""
+    s = AlignS8Strategy(
+        AlignS8Config(
+            hold_model="off",
+            hold_while_book_rises=False,
+            close_on_book_drop=True,
+            book_drop_min_pct=0.25,
+            protect_profit_pts=25.0,
+            break_min_bars=99,
+            flip_min_bars=99,
+            weaken_pct=90,
+            stall_bars=10_000,
+            cooldown_ticks=0,
+            tp_points=200,
+            sl_points=50,
+        )
+    )
+    s._open("long", 15000.0)
+    s._prev_px, s._prev_tbq, s._prev_tsq = 15040.0, 10000.0, 8000.0
+    s._update_behaviour(15050.0, 9700.0, 8000.0)  # tbq -3%, move=+50
+    assert s.tbq_falling
+    sig = s._manage(15050.0)
+    assert sig is None  # protected — stay in trade
+    assert s.position == "long"
+    assert s.last_hold_reason and "protect" in s.last_hold_reason
 
 
 def test_warmup_bar_does_not_enter_on_imb_vs_zero():
