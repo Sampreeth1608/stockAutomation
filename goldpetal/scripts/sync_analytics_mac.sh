@@ -10,7 +10,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ANALYTICS_DIR:-$ROOT/data/analytics_mac}"
 VM="${VM:-sampreeth-love-story}"
 ZONE="${ZONE:-asia-south1-c}"
-REMOTE_DIR="${REMOTE_DIR:-~/goldpetal}"
+# Absolute path — gcloud scp does not expand ~/
+REMOTE_DIR="${REMOTE_DIR:-/home/sampreeth1608/goldpetal}"
 SKIP_DB=0
 
 for arg in "$@"; do

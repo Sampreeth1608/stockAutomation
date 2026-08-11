@@ -19,14 +19,14 @@ from typing import Any
 class VmConfig:
     vm: str = "sampreeth-love-story"
     zone: str = "asia-south1-c"
-    remote_dir: str = "~/goldpetal"
+    remote_dir: str = "/home/sampreeth1608/goldpetal"
 
     @classmethod
     def from_env(cls) -> "VmConfig":
         return cls(
             vm=os.getenv("GP_VM", "sampreeth-love-story"),
             zone=os.getenv("GP_ZONE", "asia-south1-c"),
-            remote_dir=os.getenv("GP_REMOTE_DIR", "~/goldpetal"),
+            remote_dir=os.getenv("GP_REMOTE_DIR", "/home/sampreeth1608/goldpetal"),
         )
 
 
