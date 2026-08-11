@@ -128,6 +128,8 @@ def _regime_mix(df: pd.DataFrame, window: int = 60) -> dict[str, float]:
         direction = float(np.sum(rets))
         flips = int(np.sum(rets[1:] * rets[:-1] < 0))
         avg_spread = float(np.nanmean(spread[i - window : i]))
+        if not np.isfinite(avg_spread):
+            avg_spread = 0.0
         if avg_spread >= 8.0:
             counts["WIDE_SPREAD"] += 1
         elif abs(direction) >= 15.0 and flips < len(rets) * 0.35:

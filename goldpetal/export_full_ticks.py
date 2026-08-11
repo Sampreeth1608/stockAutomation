@@ -60,13 +60,19 @@ def _as_float(value: Any) -> float | None:
 
 
 def _price(value: Any) -> float | None:
-    """Angel websocket prices are usually in paise."""
+    """Angel websocket prices are in paise (÷100 → ₹).
+
+    Gold Petal quotes ~₹10k–20k/g. Raw feed is typically ~1_000_000–2_000_000
+    paise. Always scale websocket prices by 100 (same as run_strategy/storage).
+    Values already in rupees (5_000–200_000) are left as-is for CSV replays.
+    """
     number = _as_float(value)
     if number is None:
         return None
-    # If already looks like rupees for Gold Petal (~10000+), keep as-is.
-    if number > 1000:
+    # Already rupees (paper CSV / scaled export)
+    if 1_000.0 <= number <= 200_000.0:
         return number
+    # Paise / micro-units from Angel WS
     return number / 100.0
 
 

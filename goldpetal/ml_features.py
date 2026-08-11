@@ -83,6 +83,22 @@ def load_ticks_csv(path: str | Any) -> pd.DataFrame:
             continue
         df[col] = _num(df[col])
     df = df.dropna(subset=["ltp"]).sort_values("time").reset_index(drop=True)
+    # Safety: Angel paise accidentally left unscaled (LTP ~1e6)
+    med = float(df["ltp"].median()) if len(df) else 0.0
+    if med > 200_000:
+        price_cols = [
+            "ltp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "average_traded_price",
+            *[f"buy{i}_price" for i in range(1, 6)],
+            *[f"sell{i}_price" for i in range(1, 6)],
+        ]
+        for c in price_cols:
+            if c in df.columns:
+                df[c] = df[c] / 100.0
     return df
 
 
