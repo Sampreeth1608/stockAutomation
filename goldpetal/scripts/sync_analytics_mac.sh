@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Sync Gold Petal analytics snapshots from the GCP VM to this Mac.
-# Run on your Mac (not on the VM).
+# Sync Gold Petal control + analytics snapshots from the GCP VM → Mac.
+# Run on your Mac only.
 #
-# Usage:
 #   ./scripts/sync_analytics_mac.sh
-#   ./scripts/sync_analytics_mac.sh --skip-db          # light: no ticks.db
-#   VM=sampreeth-love-story ZONE=asia-south1-c ./scripts/sync_analytics_mac.sh
+#   ./scripts/sync_analytics_mac.sh --skip-db
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,63 +16,52 @@ SKIP_DB=0
 for arg in "$@"; do
   case "$arg" in
     --skip-db) SKIP_DB=1 ;;
-    -h|--help)
-      sed -n '1,20p' "$0"
-      exit 0
-      ;;
+    -h|--help) sed -n '1,18p' "$0"; exit 0 ;;
   esac
 done
 
-mkdir -p "$OUT" "$OUT/control" "$OUT/discover" "$OUT/logs"
+mkdir -p "$OUT" "$OUT/control" "$OUT/discover" "$OUT/logs" "$OUT/models"
 
-echo "→ syncing from $VM ($ZONE) : $REMOTE_DIR → $OUT"
+echo "→ sync $VM ($ZONE) $REMOTE_DIR → $OUT"
 
-# Small / high-value files first
-gcloud compute scp \
-  --zone="$ZONE" \
-  "$VM:$REMOTE_DIR/data/control/proposals.json" \
-  "$OUT/control/proposals.json" 2>/dev/null || echo "(no proposals.json yet)"
+pull() {
+  local remote="$1"
+  local local="$2"
+  mkdir -p "$(dirname "$local")"
+  if gcloud compute scp --zone="$ZONE" "$VM:$REMOTE_DIR/$remote" "$local" 2>/dev/null; then
+    echo "  ✓ $remote"
+  else
+    echo "  · missing $remote"
+  fi
+}
 
-gcloud compute scp \
-  --zone="$ZONE" \
-  "$VM:$REMOTE_DIR/data/discover/behavior_report.json" \
-  "$OUT/discover/behavior_report.json" 2>/dev/null || echo "(no behavior_report.json yet)"
+pull "data/control/proposals.json" "$OUT/control/proposals.json"
+pull "data/control/state.json" "$OUT/control/state.json"
+pull "data/control/capital.json" "$OUT/control/capital.json"
+pull "data/control/reasoning_latest.json" "$OUT/control/reasoning_latest.json"
+pull "data/control/live_orders.jsonl" "$OUT/control/live_orders.jsonl"
+pull "data/discover/behavior_report.json" "$OUT/discover/behavior_report.json"
+pull "data/discover/latest_report.json" "$OUT/discover/latest_report.json"
+pull "data/strategy_run.log" "$OUT/logs/strategy_run.log"
+pull "data/models/report.json" "$OUT/models/report.json"
+pull "data/models/overnight_report.json" "$OUT/models/overnight_report.json"
 
-gcloud compute scp \
-  --zone="$ZONE" \
-  "$VM:$REMOTE_DIR/data/discover/latest_report.json" \
-  "$OUT/discover/latest_report.json" 2>/dev/null || echo "(no latest_report.json yet)"
-
-gcloud compute scp \
-  --zone="$ZONE" \
-  "$VM:$REMOTE_DIR/data/strategy_run.log" \
-  "$OUT/logs/strategy_run.log" 2>/dev/null || echo "(no strategy_run.log yet)"
-
-gcloud compute scp \
-  --zone="$ZONE" \
-  "$VM:$REMOTE_DIR/.env" \
-  "$OUT/env.snapshot" 2>/dev/null || true
-
-# Strip secrets from env snapshot (keep flags only)
-if [[ -f "$OUT/env.snapshot" ]]; then
-  grep -E '^(DRY_RUN|IGNORE_FEES|COVER_FEES|ENABLE_|S4_|S5_|S8_|S11_|MODE)' \
-    "$OUT/env.snapshot" > "$OUT/env.flags" 2>/dev/null || true
-  rm -f "$OUT/env.snapshot"
+# env flags only (no secrets)
+TMP_ENV="$(mktemp)"
+if gcloud compute scp --zone="$ZONE" "$VM:$REMOTE_DIR/.env" "$TMP_ENV" 2>/dev/null; then
+  grep -E '^(DRY_RUN|IGNORE_FEES|COVER_FEES|ENABLE_|S4_|S5_|S6_|S8_|S9_|S10_|S11_|ML_|MODE)' \
+    "$TMP_ENV" > "$OUT/env.flags" 2>/dev/null || true
+  echo "  ✓ env.flags"
 fi
+rm -f "$TMP_ENV"
 
 if [[ "$SKIP_DB" -eq 0 ]]; then
-  echo "→ copying ticks.db (can take a minute)…"
-  gcloud compute scp \
-    --zone="$ZONE" \
-    "$VM:$REMOTE_DIR/data/ticks.db" \
-    "$OUT/ticks.db"
+  echo "→ ticks.db (may take a minute)…"
+  pull "data/ticks.db" "$OUT/ticks.db"
 else
-  echo "→ skipped ticks.db (--skip-db)"
+  echo "→ skipped ticks.db"
 fi
 
 echo
 echo "Synced → $OUT"
-echo "Open analytics:"
-echo "  cd $ROOT && source ../venv/bin/activate 2>/dev/null || true"
-echo "  pip install -r requirements-analytics.txt"
-echo "  streamlit run analytics/app.py -- --data-dir $OUT"
+echo "  streamlit run analytics/app.py"

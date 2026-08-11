@@ -1,69 +1,76 @@
-# Gold Petal · Mac analytics
+# Gold Petal · Mac desk (replaces VM control panel for daily use)
 
-Read-only research desk on your **Mac**. The trading VM stays light (bot only).
+Full panel features on your **Mac** — proposals/ML approvals, capital, emergency,
+trades, ticks, discovery — while the trading VM stays light.
 
-## Why this (not Sheets / VM panel)
+## Architecture
 
-| Old | This |
-|-----|------|
-| Google Sheets row limits | Local SQLite snapshot |
-| Control panel on VM (RAM) | Streamlit on Mac only |
-| Slow SSH tunnel UI | Fast local browser |
+```
+Mac Streamlit desk  --gcloud ssh/scp-->  GCP VM (bot + SQLite + proposals)
+        ▲                                      │
+        └──────── sync snapshot ←──────────────┘
+```
 
-## One-time setup (Mac)
+- **Reads:** local snapshot (`data/analytics_mac/`)
+- **Writes (approve / emergency / capital):** applied on the VM via `gcloud compute ssh`
+
+## Setup (Mac) — run one block at a time
 
 ```bash
-# clone if needed
+cd ~
 git clone https://github.com/Sampreeth1608/stockAutomation.git
-cd stockAutomation/goldpetal
+cd ~/stockAutomation/goldpetal
+git fetch origin
 git checkout cursor/control-panel-capital-weekend-8bfa
+git pull origin cursor/control-panel-capital-weekend-8bfa
 
 python3 -m venv .venv-analytics
 source .venv-analytics/bin/activate
 pip install -r requirements.txt -r requirements-analytics.txt
-
 chmod +x scripts/sync_analytics_mac.sh
 ```
-
-Install [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) and login once:
 
 ```bash
 gcloud auth login
 gcloud config set project sampreethlovestory
 ```
 
-## Daily use
+## Daily
 
 ```bash
-cd stockAutomation/goldpetal
+cd ~/stockAutomation/goldpetal
 source .venv-analytics/bin/activate
-
-# pull snapshot from VM (ticks.db + proposals + discovery + log)
 ./scripts/sync_analytics_mac.sh
-
-# light sync without the big DB
-# ./scripts/sync_analytics_mac.sh --skip-db
-
 streamlit run analytics/app.py
 ```
 
-Browser opens at `http://localhost:8501`.
+Or use the in-app **Sync from VM** button.
 
-## What you get
+Opens `http://localhost:8501`.
 
-- **PnL board** — gross / after-tax by strategy  
-- **Trades** — filter by strategy / today  
-- **Signals** — latest actions + reasons  
-- **Discovery** — behavior report, candidates, proposals  
-- **Log tail** — strategy_run.log snippet  
+## Tabs (old panel → new desk)
+
+| Old panel | Mac desk tab |
+|-----------|----------------|
+| Scoreboard / trades | Overview, Trades |
+| Ticks / signals | Signals / Ticks |
+| Weekend proposals | Proposals / ML |
+| Emergency / trading / live | Control |
+| Capital | Capital |
+| Reasoning | Reasoning |
+| Live orders | Live orders |
+| Weekly ML / discover | Models + Proposals |
+
+## Approvals
+
+1. Sync  
+2. **Proposals / ML** → Approve → paper / Reject  
+3. Decision runs on the VM  
+4. If `env_patch` is shown, paste into VM `.env` and restart `supervise`  
+5. Do **not** Approve → live unless you intend to unlock live later  
 
 ## Optional: DB Browser
 
-For raw SQL on the synced file:
+Open `data/analytics_mac/ticks.db` in [DB Browser for SQLite](https://sqlitebrowser.org/).
 
-1. Install [DB Browser for SQLite](https://sqlitebrowser.org/)
-2. Open `data/analytics_mac/ticks.db`
-
-## Do not run this on the trading VM
-
-Keep Streamlit off `sampreeth-love-story`. That box should only run `supervise` + `run_strategy`.
+## Do not run Streamlit on the trading VM
