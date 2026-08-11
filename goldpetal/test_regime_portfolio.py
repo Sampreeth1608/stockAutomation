@@ -35,6 +35,9 @@ def test_portfolio_gates() -> None:
     assert p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
     assert not p.allows("S3_ML", "CHOP")  # chop: overnight only by default
     assert p.allows("S5_MINEDGE", "UNKNOWN")
+    # Smooth rallies often label QUIET — S5 must still be eligible (own fee gate).
+    assert p.allows("S5_MINEDGE", "QUIET")
+    assert p.allows("S5_MINEDGE", "CHOP")
     assert not p.allows("S2_BALANCE", "CHOP")
 
 

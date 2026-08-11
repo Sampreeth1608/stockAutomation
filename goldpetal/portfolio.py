@@ -21,12 +21,15 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S8_NET_ZIGZAG",
         "S9_STATE30",
     },
-    # S8 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too
-    "CHOP": {"S4_OVERNIGHT", "S8_NET_ZIGZAG"},
+    # S8 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
+    # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
+    # 100–200pt Gold drift is not blocked while the short-window regime says QUIET.
+    "CHOP": {"S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG"},
     "QUIET": {
         "S1_NETDELTA",
         "S2_BALANCE",
         "S4_OVERNIGHT",
+        "S5_MINEDGE",
         "S6_MIN30",
         "S8_NET_ZIGZAG",
         "S9_STATE30",

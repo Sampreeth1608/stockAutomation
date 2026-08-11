@@ -540,10 +540,9 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
-        if not portfolio.allows(strategy_s5.name, regime_det.last.regime):
-            # still allow exits
-            if strategy_s5.position == "flat":
-                return
+        # Always feed ticks into ATR — never skip on_tick when regime blocks.
+        # Previously QUIET returned early while flat, so a 200pt smooth rally
+        # never updated expected-move and S5 stayed blind until too late.
         result = strategy_s5.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
@@ -581,9 +580,7 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
-        if not portfolio.allows(strategy_s6.name, regime_det.last.regime):
-            if strategy_s6.position == "flat":
-                return
+        # Always update ATR/state; gate entries below (same QUIET blind-spot fix as S5).
         result = strategy_s6.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
@@ -636,9 +633,7 @@ def run_once(
         except (TypeError, ValueError):
             exch_ts_i = None
 
-        if not portfolio.allows(strategy_s8.name, regime_det.last.regime):
-            if strategy_s8.position == "flat":
-                return
+        # Always process ticks (bars / zigzag state); gate entries below.
         pos_before = strategy_s8.position
         entry_before = strategy_s8.entry_price
         result = strategy_s8.on_tick(now, ltp, message)
@@ -733,9 +728,7 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
-        if not portfolio.allows(strategy_s9.name, regime_det.last.regime):
-            if strategy_s9.position == "flat":
-                return
+        # Always process ticks (30m bar state); gate entries below.
         pos_before = strategy_s9.position
         entry_before = strategy_s9.entry_price
         result = strategy_s9.on_tick(now, float(latest["cmp"]), message)
