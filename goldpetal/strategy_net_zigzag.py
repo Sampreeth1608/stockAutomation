@@ -241,10 +241,14 @@ class NetZigzagStrategy:
         self.entry_tsq = None
         self._last_exit_reason = reason
         self._cooldown_until = self._tick_i + max(0, self.cfg.cooldown_ticks)
-        if reason.startswith("sl"):
-            # must see IMB go soft then re-cross before next entry
+        mode = (self.cfg.entry_mode or "both").lower()
+        if reason.startswith("sl") and mode != "always":
+            # edge/both: must see IMB go soft then re-cross before next entry
             self._need_reset = True
             self._prev_below = False
+        elif reason.startswith("sl") and mode == "always":
+            # S10: SL closes the trade only — do not stop further entries
+            self._need_reset = False
         self._in_pullback = False
         self._pullback_ext = None
 
