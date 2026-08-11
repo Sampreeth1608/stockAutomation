@@ -20,11 +20,12 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S6_MIN30",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
+        "S10_LEGACY30",
     },
-    # S8 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
+    # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
     # 100–200pt Gold drift is not blocked while the short-window regime says QUIET.
-    "CHOP": {"S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG"},
+    "CHOP": {"S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG", "S10_LEGACY30"},
     "QUIET": {
         "S1_NETDELTA",
         "S2_BALANCE",
@@ -33,6 +34,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S6_MIN30",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
+        "S10_LEGACY30",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -44,6 +46,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S6_MIN30",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
+        "S10_LEGACY30",
     },
 }
 
@@ -104,6 +107,9 @@ def portfolio_from_env() -> PortfolioConfig:
     # S9 27-state TBQ/TSQ/Price machine (30m) — OFF by default; extend via env
     if os.getenv("ENABLE_S9", "false").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S9_STATE30")
+    # S10 legacy 30m always zigzag (MTF +₹42k paper row) — ON by default for paper
+    if os.getenv("ENABLE_S10", "true").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S10_LEGACY30")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:
@@ -113,6 +119,7 @@ def portfolio_from_env() -> PortfolioConfig:
             "S4_OVERNIGHT",
             "S5_MINEDGE",
             "S6_MIN30",
+            "S10_LEGACY30",
         }
 
     flatten = os.getenv("FLATTEN_ON_BAD_REGIME", "true").strip().lower() in {

@@ -56,8 +56,15 @@ class NetZigzagConfig:
 class NetZigzagStrategy:
     name = "S8_NET_ZIGZAG"
 
-    def __init__(self, cfg: NetZigzagConfig | None = None) -> None:
+    def __init__(
+        self,
+        cfg: NetZigzagConfig | None = None,
+        *,
+        name: str | None = None,
+    ) -> None:
         self.cfg = cfg or NetZigzagConfig()
+        if name:
+            self.name = name
         self.position: Position = "flat"
         self.bias: Bias = "NEUTRAL"
         self.last_net: float = 0.0
@@ -460,3 +467,43 @@ def net_zigzag_from_env():
         bar_minutes=bar_m,
     )
     return NetZigzagStrategy(cfg)
+
+
+def s10_legacy30_from_env() -> NetZigzagStrategy:
+    """S10: legacy 30m bar-close zigzag with entry_mode=always (MTF +₹42k row).
+
+    Independent of S8 ALIGN. Override with S10_* env vars.
+    """
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+
+    def _f(name: str, default: float) -> float:
+        return float(os.getenv(name, str(default)))
+
+    def _b(name: str, default: bool) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "y"}
+
+    cfg = NetZigzagConfig(
+        min_imb_pct=_f("S10_MIN_IMB_PCT", 10.0),
+        weaken_pct=_f("S10_WEAKEN_PCT", 10.0),
+        tp_points=_f("S10_TP_POINTS", 25.0),
+        sl_points=_f("S10_SL_POINTS", 20.0),
+        every_n_ticks=int(_f("S10_EVERY_N_TICKS", 1)),
+        use_fee_gate=_b("S10_USE_FEE_GATE", False),
+        fee_be_points=_f("S10_FEE_BE_POINTS", 50.0),
+        require_depth=_b("S10_REQUIRE_DEPTH", False),
+        depth_ratio=_f("S10_DEPTH_RATIO", 1.15),
+        cooldown_ticks=int(_f("S10_COOLDOWN_TICKS", 0)),
+        pullback_points=_f("S10_PULLBACK_POINTS", 8.0),
+        resume_points=_f("S10_RESUME_POINTS", 5.0),
+        entry_mode=os.getenv("S10_ENTRY_MODE", "always").strip().lower(),
+        bar_minutes=int(_f("S10_BAR_MINUTES", 30)),
+    )
+    return NetZigzagStrategy(cfg, name="S10_LEGACY30")

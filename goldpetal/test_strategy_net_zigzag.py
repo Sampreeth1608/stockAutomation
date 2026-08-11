@@ -6,7 +6,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from strategy_net_zigzag import NetZigzagConfig, NetZigzagStrategy
+from strategy_net_zigzag import (
+    NetZigzagConfig,
+    NetZigzagStrategy,
+    s10_legacy30_from_env,
+)
 from zigzag_recorder import ZigzagRecorder, init_zigzag_db
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -149,6 +153,22 @@ def test_recorder_writes(tmp_path: Path | None = None):
         out.unlink()
 
 
+def test_s10_legacy30_defaults():
+    import os
+
+    for k in list(os.environ):
+        if k.startswith("S10_"):
+            os.environ.pop(k, None)
+    s = s10_legacy30_from_env()
+    assert s.name == "S10_LEGACY30"
+    assert s.cfg.bar_minutes == 30
+    assert s.cfg.entry_mode == "always"
+    assert s.cfg.cooldown_ticks == 0
+    assert s.cfg.tp_points == 25.0
+    assert s.cfg.sl_points == 20.0
+    assert "TF=30m" in s.status_line
+
+
 if __name__ == "__main__":
     test_long_entry_on_imb_edge_and_tp()
     test_no_immediate_reentry_after_sl()
@@ -156,4 +176,5 @@ if __name__ == "__main__":
     test_flip_closes()
     test_bar_mode_always_enters_on_bar_close()
     test_recorder_writes()
+    test_s10_legacy30_defaults()
     print("ok")

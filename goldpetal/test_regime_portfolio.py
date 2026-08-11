@@ -39,6 +39,10 @@ def test_portfolio_gates() -> None:
     assert p.allows("S5_MINEDGE", "QUIET")
     assert p.allows("S5_MINEDGE", "CHOP")
     assert not p.allows("S2_BALANCE", "CHOP")
+    p10 = PortfolioConfig(enabled={"S10_LEGACY30"})
+    assert p10.allows("S10_LEGACY30", "TREND")
+    assert p10.allows("S10_LEGACY30", "QUIET")
+    assert p10.allows("S10_LEGACY30", "CHOP")
 
 
 def test_env_defaults_include_s2(monkeypatch=None) -> None:
@@ -52,6 +56,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S6", None)
     os.environ.pop("ENABLE_S8", None)
     os.environ.pop("ENABLE_S9", None)
+    os.environ.pop("ENABLE_S10", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" in p.enabled
     assert "S2_BALANCE" in p.enabled
@@ -61,6 +66,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S6_MIN30" in p.enabled
     assert "S8_NET_ZIGZAG" not in p.enabled  # OFF until hist EV confirmed
     assert "S9_STATE30" not in p.enabled
+    assert "S10_LEGACY30" in p.enabled  # legacy 30m always ON by default
 
     os.environ["ENABLE_S8"] = "true"
     p8 = portfolio_from_env()
@@ -71,6 +77,11 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     p9 = portfolio_from_env()
     assert "S9_STATE30" in p9.enabled
     os.environ.pop("ENABLE_S9", None)
+
+    os.environ["ENABLE_S10"] = "false"
+    p10 = portfolio_from_env()
+    assert "S10_LEGACY30" not in p10.enabled
+    os.environ.pop("ENABLE_S10", None)
 
 
 if __name__ == "__main__":
