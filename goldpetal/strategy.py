@@ -6,7 +6,16 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 Position = Literal["flat", "long", "short"]
-Action = Literal["BUY", "SHORT", "HOLD", "CLOSE", "FLAT", "WAIT"]
+Action = Literal[
+    "BUY",
+    "SHORT",
+    "HOLD",
+    "CLOSE",
+    "FLAT",
+    "WAIT",
+    "REVERSE_LONG",
+    "REVERSE_SHORT",
+]
 
 # Exhaustion: large price move from entry + netΔ stretched vs entry netΔ
 DEFAULT_EXHAUSTION_PRICE_PCT = 2.0

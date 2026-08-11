@@ -24,6 +24,14 @@ from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_overnight import OvernightStrategy, overnight_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
+from strategy_net_zigzag import (
+    NetZigzagStrategy,
+    net_zigzag_from_env,
+    s10_legacy30_from_env,
+)
+from strategy_state_s9 import StateS9Strategy, state_s9_from_env
+from zigzag_recorder import recorder_from_env
+from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -142,6 +150,11 @@ def run_once(
     strategy_s4: OvernightStrategy,
     strategy_s5: MinEdgeStrategy,
     strategy_s6: MinEdgeStrategy,
+    strategy_s8: NetZigzagStrategy,
+    zigzag_rec,
+    strategy_s9: StateS9Strategy,
+    s9_journal,
+    strategy_s10: NetZigzagStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -204,6 +217,33 @@ def run_once(
         f"S6       : min-30pts "
         f"[{'ON' if portfolio.is_enabled(strategy_s6.name) else 'OFF'}] "
         f"{strategy_s6.status_line}",
+        flush=True,
+    )
+    print(
+        f"S8       : ALIGN E/H/X models (default fat_tp_flip@50t) "
+        f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
+        f"{strategy_s8.status_line}",
+        flush=True,
+    )
+    print(
+        f"S8 record: retune db={zigzag_rec.db_path} enabled={zigzag_rec.enabled} "
+        f"snap_every={zigzag_rec.snap_every_n}",
+        flush=True,
+    )
+    print(
+        f"S9       : state machine "
+        f"[{'ON' if portfolio.is_enabled(strategy_s9.name) else 'OFF'}] "
+        f"{strategy_s9.status_line}",
+        flush=True,
+    )
+    print(
+        f"S9 journal: db={s9_journal.db_path} enabled={s9_journal.enabled}",
+        flush=True,
+    )
+    print(
+        f"S10      : legacy 30m always zigzag (MTF +₹42k) "
+        f"[{'ON' if portfolio.is_enabled(strategy_s10.name) else 'OFF'}] "
+        f"{strategy_s10.status_line}",
         flush=True,
     )
     print(
@@ -511,10 +551,9 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
-        if not portfolio.allows(strategy_s5.name, regime_det.last.regime):
-            # still allow exits
-            if strategy_s5.position == "flat":
-                return
+        # Always feed ticks into ATR — never skip on_tick when regime blocks.
+        # Previously QUIET returned early while flat, so a 200pt smooth rally
+        # never updated expected-move and S5 stayed blind until too late.
         result = strategy_s5.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
@@ -552,9 +591,7 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
-        if not portfolio.allows(strategy_s6.name, regime_det.last.regime):
-            if strategy_s6.position == "flat":
-                return
+        # Always update ATR/state; gate entries below (same QUIET blind-spot fix as S5).
         result = strategy_s6.on_tick(now, float(latest["cmp"]), message)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
@@ -582,6 +619,281 @@ def run_once(
             f"regime={regime_det.last.regime} CMP={latest['cmp']} "
             f"exp={strategy_s6.last_expected} "
             f"=> {result.action} (pos={strategy_s6.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
+    def emit_s8_if_changed(now: datetime, message: dict) -> None:
+        """S8: fixed NET zigzag (best hist params) + retune recorder."""
+        if not portfolio.is_enabled(strategy_s8.name):
+            return
+        if latest["cmp"] is None:
+            return
+        ts = now.isoformat(timespec="seconds")
+        ltp = float(latest["cmp"])
+        tbq = latest.get("bp")
+        tsq = latest.get("sp")
+        try:
+            tbq_f = float(tbq) if tbq is not None else None
+            tsq_f = float(tsq) if tsq is not None else None
+        except (TypeError, ValueError):
+            tbq_f = tsq_f = None
+        exch_ts = message.get("exchange_timestamp")
+        try:
+            exch_ts_i = int(exch_ts) if exch_ts is not None else None
+        except (TypeError, ValueError):
+            exch_ts_i = None
+
+        # Always process ticks (bars / zigzag state); gate entries below.
+        pos_before = strategy_s8.position
+        entry_before = strategy_s8.entry_price
+        result = strategy_s8.on_tick(now, ltp, message)
+
+        # Always keep retune path snapshots while in a trade
+        zigzag_rec.on_tick_snapshot(
+            ts=ts,
+            ltp=ltp,
+            tbq=tbq_f if tbq_f is not None else strategy_s8.last_tbq,
+            tsq=tsq_f if tsq_f is not None else strategy_s8.last_tsq,
+            position=strategy_s8.position if strategy_s8.position != "flat" else pos_before,
+            entry_ltp=strategy_s8.entry_price or entry_before,
+            exchange_timestamp=exch_ts_i,
+        )
+
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+            strategy_s8.name, regime_det.last.regime
+        ):
+            strategy_s8.position = "flat"
+            strategy_s8.entry_price = None
+            return
+        if (
+            strategy_s8.position != "flat"
+            and portfolio.should_flatten(strategy_s8.name, regime_det.last.regime)
+            and result.action != "CLOSE"
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy_s8.position = "flat"
+            strategy_s8.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+
+        if result.action == "BUY":
+            log_side = "long"
+        elif result.action == "SHORT":
+            log_side = "short"
+        else:
+            log_side = pos_before if pos_before != "flat" else None
+        zigzag_rec.log(
+            ts=ts,
+            action=result.action,
+            ltp=ltp,
+            tbq=strategy_s8.last_tbq,
+            tsq=strategy_s8.last_tsq,
+            net=strategy_s8.last_net,
+            imb_pct=strategy_s8.last_imb,
+            side=log_side,
+            position=result.position_after,
+            entry_ltp=entry_before if result.action == "CLOSE" else strategy_s8.entry_price,
+            unrealized_pts=result.price_delta,
+            reason=result.reason,
+            exchange_timestamp=exch_ts_i,
+            extra={"regime": regime_det.last.regime, "bias": strategy_s8.bias},
+        )
+        save_signal(
+            time_label=ts,
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s8.name,
+            cmp=ltp,
+        )
+        line = (
+            f"[{ts}] {strategy_s8.name} "
+            f"regime={regime_det.last.regime} CMP={ltp} "
+            f"bias={strategy_s8.bias} "
+            f"net={strategy_s8.last_net:.0f} imb={strategy_s8.last_imb:.1f}% "
+            f"tbq={strategy_s8.last_tbq:.0f} tsq={strategy_s8.last_tsq:.0f} "
+            f"=> {result.action} (pos={strategy_s8.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
+    def emit_s9_if_changed(now: datetime, message: dict) -> None:
+        """S9: 27-state TBQ/TSQ/Price machine on N-minute bar closes."""
+        if not portfolio.is_enabled(strategy_s9.name):
+            return
+        if latest["cmp"] is None:
+            return
+        # Always process ticks (30m bar state); gate entries below.
+        pos_before = strategy_s9.position
+        entry_before = strategy_s9.entry_price
+        result = strategy_s9.on_tick(now, float(latest["cmp"]), message)
+
+        # Journal every new bar state (even without trade)
+        if strategy_s9.last_state not in {"WARMUP"} and strategy_s9.last_state != getattr(
+            emit_s9_if_changed, "_last_logged_state", None
+        ):
+            emit_s9_if_changed._last_logged_state = strategy_s9.last_state  # type: ignore[attr-defined]
+            s9_journal.log(
+                ts=now.isoformat(timespec="seconds"),
+                event="STATE",
+                state=strategy_s9.last_state,
+                label=strategy_s9.last_label,
+                prev_state=strategy_s9.prev_state,
+                ltp=float(latest["cmp"]),
+                tbq=strategy_s9.last_tbq,
+                tsq=strategy_s9.last_tsq,
+                net=strategy_s9.last_net,
+                imb_pct=strategy_s9.last_imb,
+                position=strategy_s9.position,
+                entry_ltp=strategy_s9.entry_price,
+                reason=strategy_s9.last_skip,
+                extra={"regime": regime_det.last.regime},
+            )
+
+        if result is None or result.action not in {
+            "BUY",
+            "SHORT",
+            "CLOSE",
+            "REVERSE_LONG",
+            "REVERSE_SHORT",
+        }:
+            return
+        if result.action in {"BUY", "SHORT", "REVERSE_LONG", "REVERSE_SHORT"} and not portfolio.allows(
+            strategy_s9.name, regime_det.last.regime
+        ):
+            strategy_s9.position = "flat"
+            strategy_s9.entry_price = None
+            return
+        if (
+            strategy_s9.position != "flat"
+            and portfolio.should_flatten(strategy_s9.name, regime_det.last.regime)
+            and result.action not in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy_s9.position = "flat"
+            strategy_s9.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+
+        s9_journal.log(
+            ts=now.isoformat(timespec="seconds"),
+            event=result.action,
+            state=strategy_s9.last_state,
+            label=strategy_s9.last_label,
+            prev_state=strategy_s9.prev_state,
+            ltp=float(latest["cmp"]),
+            tbq=strategy_s9.last_tbq,
+            tsq=strategy_s9.last_tsq,
+            net=strategy_s9.last_net,
+            imb_pct=strategy_s9.last_imb,
+            position=result.position_after,
+            entry_ltp=(
+                entry_before
+                if result.action in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}
+                else strategy_s9.entry_price
+            ),
+            reason=result.reason,
+            extra={"regime": regime_det.last.regime, "pos_before": pos_before},
+        )
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s9.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s9.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"state={strategy_s9.last_label} net={strategy_s9.last_net:.0f} "
+            f"=> {result.action} (pos={strategy_s9.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
+    def emit_s10_if_changed(now: datetime, message: dict) -> None:
+        """S10: legacy 30m always zigzag (MTF +₹42k paper path)."""
+        if not portfolio.is_enabled(strategy_s10.name):
+            return
+        if latest["cmp"] is None:
+            return
+        # Always feed ticks for bar builder; gate entries below.
+        result = strategy_s10.on_tick(now, float(latest["cmp"]), message)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"} and not portfolio.allows(
+            strategy_s10.name, regime_det.last.regime
+        ):
+            strategy_s10.position = "flat"
+            strategy_s10.entry_price = None
+            return
+        if (
+            strategy_s10.position != "flat"
+            and portfolio.should_flatten(strategy_s10.name, regime_det.last.regime)
+            and result.action != "CLOSE"
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy_s10.position = "flat"
+            strategy_s10.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+        save_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            symbol=symbol,
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            dry_run=dry_run,
+            strategy=strategy_s10.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s10.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"bias={strategy_s10.bias} "
+            f"net={strategy_s10.last_net:.0f} imb={strategy_s10.last_imb:.1f}% "
+            f"=> {result.action} (pos={strategy_s10.position}) | {result.reason}"
         )
         print(line, flush=True)
         logger.info(line)
@@ -639,7 +951,10 @@ def run_once(
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "
-                    f"s6={strategy_s6.position}{s3_extra}"
+                    f"s6={strategy_s6.position} s8={strategy_s8.position}"
+                    f"/{strategy_s8.bias} s9={strategy_s9.position}"
+                    f"/{strategy_s9.last_label} s10={strategy_s10.position}"
+                    f"/{strategy_s10.bias}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -654,6 +969,12 @@ def run_once(
             emit_s5_if_changed(now, message)
             # S6: min 30 points expected move
             emit_s6_if_changed(now, message)
+            # S8: NET zigzag (unchanged)
+            emit_s8_if_changed(now, message)
+            # S9: 27-state bar machine
+            emit_s9_if_changed(now, message)
+            # S10: legacy 30m always zigzag (+₹42k MTF paper path)
+            emit_s10_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -708,6 +1029,12 @@ def main() -> None:
     strategy_s4 = overnight_from_env()
     strategy_s5 = minedge_from_env()
     strategy_s6 = min30_from_env()
+    strategy_s8 = net_zigzag_from_env()
+    zigzag_rec = recorder_from_env()
+    zigzag_rec.record_params(strategy_s8.cfg)
+    strategy_s9 = state_s9_from_env()
+    s9_journal = s9_journal_from_env()
+    strategy_s10 = s10_legacy30_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
@@ -716,9 +1043,14 @@ def main() -> None:
     print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(f"S5_MINEDGE: {strategy_s5.status_line}", flush=True)
     print(f"S6_MIN30: {strategy_s6.status_line}", flush=True)
+    print(f"S8_NET_ZIGZAG: {strategy_s8.status_line}", flush=True)
+    print(f"S8 retune recorder: {zigzag_rec.db_path} enabled={zigzag_rec.enabled}", flush=True)
+    print(f"S9_STATE30: {strategy_s9.status_line}", flush=True)
+    print(f"S9 journal: {s9_journal.db_path} enabled={s9_journal.enabled}", flush=True)
+    print(f"S10_LEGACY30: {strategy_s10.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5/S6 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8/S9/S10 in .env)",
         flush=True,
     )
 
@@ -739,6 +1071,11 @@ def main() -> None:
                 strategy_s4,
                 strategy_s5,
                 strategy_s6,
+                strategy_s8,
+                zigzag_rec,
+                strategy_s9,
+                s9_journal,
+                strategy_s10,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -757,6 +1094,9 @@ def main() -> None:
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
             f"s3={strategy_s3.position} s4={strategy_s4.position} "
             f"s5={strategy_s5.position} s6={strategy_s6.position} "
+            f"s8={strategy_s8.position}/{strategy_s8.bias} "
+            f"s9={strategy_s9.position}/{strategy_s9.last_label} "
+            f"s10={strategy_s10.position}/{strategy_s10.bias} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )
