@@ -1410,6 +1410,9 @@ def align_s8_from_env() -> AlignS8Strategy:
         cfg.bar_ticks = t
         if t > 0:
             cfg.bar_minutes = 0
+    # Knobs that must win over S8_MODEL=learned JSON
+    if os.getenv("S8_MIN_IMB_PCT") is not None:
+        cfg.min_imb_pct = _f("S8_MIN_IMB_PCT", 3.0)
     if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
         cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
     if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:
