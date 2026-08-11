@@ -33,6 +33,24 @@ def test_s4_entry_skip_outside_window() -> None:
     assert t.action == "SKIP"
 
 
+def test_s4_no_hard_gap_profit_gate() -> None:
+    """Tiny expected gap must not block entry (no ~25pt hard profit hurdle)."""
+    t = s4_entry(
+        px=15000,
+        prob_bullish=0.72,
+        bias="BULLISH",
+        buy_prob=0.58,
+        in_entry_window=True,
+        expected_gap_pts=3.0,  # << half of typical ~50pt fee BE
+        min_score=0.3,
+    )
+    assert t.action == "ENTER_LONG"
+    names = {s.name for s in t.steps}
+    assert "gap_info" in names
+    assert "gap_vs_fee" not in names
+    assert all(s.ok for s in t.steps if s.name in {"fee_be", "gap_info"})
+
+
 def test_s4_hold_exit() -> None:
     h = s4_hold(side="long", held_overnight=True, next_session=False)
     assert h.action == "HOLD"
@@ -73,6 +91,8 @@ if __name__ == "__main__":
     print("ok s4_entry_long")
     test_s4_entry_skip_outside_window()
     print("ok s4_skip")
+    test_s4_no_hard_gap_profit_gate()
+    print("ok s4_no_hard_gap")
     test_s4_hold_exit()
     print("ok s4_hold_exit")
     test_s5_entry_and_manage()

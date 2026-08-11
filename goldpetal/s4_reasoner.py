@@ -1,6 +1,8 @@
 """Multi-step reasoning for S4 overnight (math → logic → science → planning).
 
-Gates delivery entries near close using day-bias + ML gap prob + fee math.
+Gates delivery entries near close using day-bias + ML gap prob.
+S4 holds overnight and exits after next open — no fixed take-profit
+(e.g. no hard ~25pt / half-fee gap hurdle).
 """
 
 from __future__ import annotations
@@ -29,16 +31,29 @@ def reason_entry(
 ) -> ReasoningTrace:
     steps: list[ReasonStep] = []
     be = fee_be_points(px, lots)
-    gap = float(expected_gap_pts) if expected_gap_pts is not None else abs(prob_bullish - 0.5) * 40.0
+    gap = (
+        float(expected_gap_pts)
+        if expected_gap_pts is not None
+        else abs(prob_bullish - 0.5) * 40.0
+    )
+    # Fee / gap figures are informational only — do not hard-block on a
+    # ~25pt (half fee-BE) profit/cover target. Delivery PnL is realized at
+    # next-open exit, not an intraday point target.
     steps.append(
-        ReasonStep("mathematics", "fee_be", be > 0, f"overnight BE≈{be:.1f}pt", be)
+        ReasonStep(
+            "mathematics",
+            "fee_be",
+            True,
+            f"overnight BE≈{be:.1f}pt (info; no hard TP)",
+            be,
+        )
     )
     steps.append(
         ReasonStep(
             "mathematics",
-            "gap_vs_fee",
-            gap >= be * 0.5,
-            f"expected_gap≈{gap:.1f}pt vs BE={be:.1f}",
+            "gap_info",
+            True,
+            f"expected_gap≈{gap:.1f}pt vs BE={be:.1f} (info; hold to next open)",
             gap,
         )
     )

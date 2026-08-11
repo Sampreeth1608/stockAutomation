@@ -83,7 +83,11 @@ class OvernightState:
 
 
 class OvernightStrategy:
-    """BUY near close if P(gap up) high; SHORT if P(gap up) low; exit next open."""
+    """BUY near close if P(gap up) high; SHORT if P(gap up) low; exit next open.
+
+    No fixed take-profit (no hard 25pt / fee-cover TP). Position is carried
+    overnight and closed in the next-session open exit window only.
+    """
 
     name = "S4_OVERNIGHT"
 
