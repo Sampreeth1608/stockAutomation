@@ -10,3 +10,5 @@ data/models/
 data/archive/
 data/s4_state.json
 data/s8_presets/
+data/control/
+data/s8_nn/
