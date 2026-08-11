@@ -34,6 +34,18 @@ from control_state import (
     set_trading_enabled,
 )
 from paper_report import _summarize
+from panel_export import (
+    TRADE_CSV_FIELDS,
+    TICK_CSV_FIELDS,
+    default_date_range,
+    export_pack_zip,
+    export_summary,
+    export_ticks_csv,
+    export_trades_csv,
+    rows_to_tsv,
+    ticks_in_range,
+    trades_in_range,
+)
 from proposals import decide_proposal, proposals_snapshot
 from reasoning_cockpit import (
     bars_for_panel,
@@ -183,6 +195,11 @@ input[type="number"] {
   color: var(--text); padding: .35rem .45rem; border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
 }
+input[type="date"] {
+  background: var(--bg0); border: 1px solid var(--line);
+  color: var(--text); padding: .35rem .45rem; border-radius: 3px;
+  font-family: "IBM Plex Mono", monospace;
+}
 .flash { margin: .5rem 0 0; color: var(--gold2); font-size: .85rem; min-height: 1.2em; }
 </style>
 </head>
@@ -268,6 +285,22 @@ input[type="number"] {
           <tbody id="score-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>One-click export · ticks &amp; all trades</h2>
+      <p class="muted">Pick dates (IST) → download CSV/ZIP to your laptop, or copy TSV and paste straight into Google Sheets. No SSH / no manual SQL.</p>
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin:.6rem 0 .85rem">
+        <label class="muted">From<br/><input type="date" id="exp-from" style="margin-top:.25rem"/></label>
+        <label class="muted">To<br/><input type="date" id="exp-to" style="margin-top:.25rem"/></label>
+        <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
+        <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+        <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
+        <button class="btn warn" type="button" id="btn-copy-ticks">Copy ticks → Sheets</button>
+        <button class="btn warn" type="button" id="btn-copy-trades">Copy trades → Sheets</button>
+      </div>
+      <p class="mono" id="exp-meta">Select a range…</p>
+      <p class="flash" id="exp-flash"></p>
     </section>
 
     <section class="panel">
@@ -520,7 +553,80 @@ $("btn-reason").onclick = async () => {
   } catch (e) { flash(String(e.message || e)); }
 };
 
+function expRange() {
+  const from = $("exp-from").value;
+  const to = $("exp-to").value;
+  if (!from || !to) throw new Error("Pick From and To dates");
+  if (from > to) throw new Error("From date must be ≤ To date");
+  return { from, to };
+}
+function expFlash(msg) { $("exp-flash").textContent = msg || ""; }
+
+async function refreshExportMeta() {
+  try {
+    const { from, to } = expRange();
+    const s = await api(`/api/export/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const parts = Object.entries(s.trades_by_strategy || {}).map(([k,v]) => `${k}:${v}`).join(" · ");
+    $("exp-meta").textContent =
+      `${s.date_from} → ${s.date_to} · ticks=${s.tick_count} trades=${s.trade_count}` +
+      (parts ? ` · ${parts}` : "");
+  } catch (e) {
+    $("exp-meta").textContent = String(e.message || e);
+  }
+}
+
+function downloadUrl(path) {
+  const a = document.createElement("a");
+  a.href = path;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function copyExport(kind) {
+  const { from, to } = expRange();
+  const data = await api(`/api/export/tsv?kind=${encodeURIComponent(kind)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  await navigator.clipboard.writeText(data.tsv || "");
+  expFlash(`Copied ${data.rows} ${kind} rows — open Google Sheets and paste (Ctrl/Cmd+V)`);
+  flash(`Copied ${kind} for Sheets`);
+}
+
+$("btn-dl-pack").onclick = () => {
+  try {
+    const { from, to } = expRange();
+    downloadUrl(`/api/export/pack.zip?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    expFlash(`Downloading ZIP ${from} → ${to} (ticks + all strategy trades)`);
+  } catch (e) { expFlash(String(e.message || e)); }
+};
+$("btn-dl-ticks").onclick = () => {
+  try {
+    const { from, to } = expRange();
+    downloadUrl(`/api/export/ticks.csv?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    expFlash(`Downloading ticks.csv ${from} → ${to}`);
+  } catch (e) { expFlash(String(e.message || e)); }
+};
+$("btn-dl-trades").onclick = () => {
+  try {
+    const { from, to } = expRange();
+    downloadUrl(`/api/export/trades.csv?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    expFlash(`Downloading trades.csv (all strategies) ${from} → ${to}`);
+  } catch (e) { expFlash(String(e.message || e)); }
+};
+$("btn-copy-ticks").onclick = () => copyExport("ticks").catch(e => expFlash(String(e.message || e)));
+$("btn-copy-trades").onclick = () => copyExport("trades").catch(e => expFlash(String(e.message || e)));
+$("exp-from").onchange = () => refreshExportMeta();
+$("exp-to").onchange = () => refreshExportMeta();
+
+async function initExportDates() {
+  const d = await api("/api/export/defaults");
+  $("exp-from").value = d.date_from;
+  $("exp-to").value = d.date_to;
+  await refreshExportMeta();
+}
+
 refresh().catch(e => flash(String(e)));
+initExportDates().catch(e => expFlash(String(e.message || e)));
 setInterval(() => refresh().catch(() => {}), 5000);
 </script>
 </body>
@@ -603,11 +709,14 @@ class ControlHandler(BaseHTTPRequestHandler):
         # Keep stdout quiet; runner already logs heavily.
         return
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -681,6 +790,68 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/timeframes":
                 status, body, ctype = _json_bytes({"timeframes": panel_timeframes()})
+                self._send(status, body, ctype)
+                return
+            if path == "/api/export/defaults":
+                d0, d1 = default_date_range()
+                status, body, ctype = _json_bytes({"date_from": d0, "date_to": d1})
+                self._send(status, body, ctype)
+                return
+            if path == "/api/export/summary":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                status, body, ctype = _json_bytes(export_summary(d_from, d_to))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/export/ticks.csv":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                csv_text = export_ticks_csv(d_from, d_to)
+                name = f"goldpetal_ticks_{d_from}_to_{d_to}.csv"
+                self._send(
+                    200,
+                    csv_text.encode("utf-8"),
+                    "text/csv; charset=utf-8",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
+            if path == "/api/export/trades.csv":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                csv_text = export_trades_csv(d_from, d_to)
+                name = f"goldpetal_trades_{d_from}_to_{d_to}.csv"
+                self._send(
+                    200,
+                    csv_text.encode("utf-8"),
+                    "text/csv; charset=utf-8",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
+            if path == "/api/export/pack.zip":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                blob = export_pack_zip(d_from, d_to)
+                name = f"goldpetal_export_{d_from}_to_{d_to}.zip"
+                self._send(
+                    200,
+                    blob,
+                    "application/zip",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
+            if path == "/api/export/tsv":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                kind = ((qs.get("kind") or ["trades"])[0] or "trades").strip().lower()
+                if kind == "ticks":
+                    rows = ticks_in_range(d_from, d_to)
+                    tsv = rows_to_tsv(rows, TICK_CSV_FIELDS)
+                else:
+                    rows = trades_in_range(d_from, d_to)
+                    tsv = rows_to_tsv(rows, TRADE_CSV_FIELDS)
+                status, body, ctype = _json_bytes(
+                    {"kind": kind, "rows": len(rows), "tsv": tsv, "from": d_from, "to": d_to}
+                )
                 self._send(status, body, ctype)
                 return
             self._send(*_json_bytes({"error": "not found"}, 404))
