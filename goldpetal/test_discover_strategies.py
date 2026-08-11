@@ -83,8 +83,11 @@ def test_discovery_writes_pack_and_proposal(tmp_path: Path) -> None:
     pack = json.loads(Path(cands[0].pack_path).read_text(encoding="utf-8"))
     assert pack["strategy"] == "S11_DISCOVERED"
     assert "buy_prob" in pack
-    # proposal store under tmp control dir via env would be ideal; call propose_best
-    # with default path may write into repo data/control — use pack load instead
+    assert (out / "behavior_report.json").exists()
+    behavior = json.loads((out / "behavior_report.json").read_text(encoding="utf-8"))
+    assert behavior.get("families")
+    assert behavior.get("recipes")
+    assert behavior.get("reasoning")
     s = DiscoveredStrategy(
         pack_path=Path(cands[0].pack_path),
         model_path=Path(cands[0].model_path),
@@ -94,7 +97,6 @@ def test_discovery_writes_pack_and_proposal(tmp_path: Path) -> None:
         min_imb=pack.get("min_imb", 0),
     )
     assert s.name == "S11_DISCOVERED"
-    # model should load from discovery joblib
     assert s.enabled or s._load_error is not None
 
 

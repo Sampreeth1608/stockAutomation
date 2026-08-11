@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Multi-model ML discovery on tick data → new strategy packs + proposals.
 
-Reads ticks → trains several classifiers → sweeps entry templates →
-paper-simulates (fee-aware) → writes the best pack and a weekend proposal.
+Pipeline:
+  1) Mathematics / statistics / reasoning over ALL tick-data families
+     (price, book L1–L5, TBQ/TSQ, OI, volume, spread/microprice)
+  2) Generate strategy recipes from that behavior understanding
+  3) Train logreg / RF / GB on predictive features
+  4) Fee-aware paper sim → weekend proposal (S11)
 
   python3 discover_strategies.py run --db data/ticks.db
   ./weekly_discover.sh
@@ -23,6 +27,7 @@ from zoneinfo import ZoneInfo
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
@@ -36,10 +41,10 @@ from ml_features import (
     add_labels,
     build_features,
     load_ticks_csv,
-    model_matrix,
     time_split,
 )
 from proposals import PaperResult, StrategyProposal, add_proposal
+from tick_behavior import analyze_ticks, write_behavior_report
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_OUT = Path("data/discover")
@@ -54,6 +59,9 @@ class Template:
     min_hold: int
     min_imb: float = 0.0  # |imb_l1| gate; 0 = off
     every_n: int = 5
+    features: list[str] = field(default_factory=lambda: list(FEATURE_COLUMNS))
+    rationale: str = ""
+    family: str = "baseline"
 
 
 @dataclass
@@ -69,9 +77,9 @@ class Candidate:
     safety_reasons: list[str] = field(default_factory=list)
     pack_path: str = ""
     model_path: str = ""
+    behavior_summary: str = ""
 
     def score(self) -> float:
-        # Prefer after-tax with a mild trade-count prior
         return float(self.after_tax_pnl) + 0.5 * min(self.n_trades, 40)
 
 
@@ -128,6 +136,41 @@ def _auc(y_true: np.ndarray, y_prob: np.ndarray) -> float:
         return float("nan")
 
 
+def _feature_list(preferred: list[str] | None) -> list[str]:
+    cols = [c for c in (preferred or []) if c in FEATURE_COLUMNS]
+    if len(cols) < 4:
+        return list(FEATURE_COLUMNS)
+    return [c for c in FEATURE_COLUMNS if c in cols]
+
+
+def _xy(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, pd.Series]:
+    need = features + ["y_dir"]
+    clean = df.dropna(subset=need).copy()
+    return clean[features].astype(float), clean["y_dir"].astype(int)
+
+
+def recipes_to_templates(behavior_recipes: list[Any]) -> list[Template]:
+    out: list[Template] = []
+    for r in behavior_recipes:
+        out.append(
+            Template(
+                name=str(r.name),
+                buy_prob=float(r.buy_prob),
+                short_prob=float(r.short_prob),
+                min_hold=int(r.min_hold),
+                min_imb=float(r.min_imb),
+                every_n=int(r.every_n),
+                features=_feature_list(list(r.feature_focus or [])),
+                rationale=str(r.rationale or ""),
+                family=str(r.family or "generated"),
+            )
+        )
+    for t in TEMPLATES[:2]:
+        if all(x.name != t.name for x in out):
+            out.append(t)
+    return out
+
+
 def paper_sim(
     *,
     ltp: np.ndarray,
@@ -135,7 +178,6 @@ def paper_sim(
     imb: np.ndarray,
     template: Template,
 ) -> dict[str, float]:
-    """Simple long/short flip sim with Angel fee/tax on closed round-trips."""
     cfg = charges_from_env()
     buy_p = template.buy_prob
     short_p = template.short_prob
@@ -143,12 +185,12 @@ def paper_sim(
     min_imb = float(template.min_imb)
     every = max(1, int(template.every_n))
 
-    side = 0  # 1 long, -1 short, 0 flat
+    side = 0
     entry_px = 0.0
     entry_i = -10_000
     trades: list[dict[str, float]] = []
 
-    def _close(i: int, px: float) -> None:
+    def _close(px: float) -> None:
         nonlocal side, entry_px
         if side == 0:
             return
@@ -199,15 +241,14 @@ def paper_sim(
         if held < min_hold:
             continue
         if want == 0 or want == -side:
-            _close(i, px)
+            _close(px)
             if want != 0:
                 side = want
                 entry_px = px
                 entry_i = i
 
-    # force flat at end
     if side != 0 and len(ltp):
-        _close(len(ltp) - 1, float(ltp[-1]))
+        _close(float(ltp[-1]))
 
     n = len(trades)
     if n == 0:
@@ -263,6 +304,8 @@ def write_pack(
     safety_reasons: list[str],
     features: list[str],
     week_id: str,
+    behavior_summary: str = "",
+    behavior_path: str = "",
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(IST).strftime("%Y%m%d_%H%M%S")
@@ -294,10 +337,14 @@ def write_pack(
         "min_hold_sec": float(template.min_hold),
         "every_n_ticks": template.every_n,
         "min_imb": template.min_imb,
+        "family": template.family,
+        "rationale": template.rationale,
         "auc": auc,
         "paper": sim,
         "safety_ok": safety_ok,
         "safety_reasons": safety_reasons,
+        "behavior_summary": behavior_summary,
+        "behavior_report": behavior_path,
         "created_at_ist": datetime.now(IST).isoformat(timespec="seconds"),
     }
     pack_path.write_text(json.dumps(pack, indent=2), encoding="utf-8")
@@ -317,42 +364,88 @@ def run_discovery(
     if len(raw) < 400:
         raise SystemExit(f"need ≥400 ticks for discovery (have {len(raw)})")
 
+    behavior = analyze_ticks(
+        csv_path, horizon=horizon, threshold_bps=threshold_bps, lots=1.0
+    )
+    behavior_path = write_behavior_report(behavior, out_dir / "behavior_report.json")
+    templates = recipes_to_templates(behavior.recipes)
+    print(f"behavior: {behavior.summary}", flush=True)
+    print(
+        f"generated recipes: {[t.name for t in templates]} "
+        f"(predictive={[f.family for f in behavior.families if f.predictive]})",
+        flush=True,
+    )
+
     feat = build_features(raw)
     labeled = add_labels(feat, horizon=horizon, threshold_bps=threshold_bps)
     usable = labeled.dropna(subset=FEATURE_COLUMNS + ["y_dir", "y_ret"]).copy()
     train_df, test_df = time_split(usable, train_frac=train_frac)
-    X_train, y_train, _ = model_matrix(train_df)
-    X_test, y_test, _ = model_matrix(test_df)
-    if y_train.nunique() < 2:
+    if train_df["y_dir"].nunique() < 2:
         raise SystemExit("train labels single-class — collect more varied ticks")
-
-    ltp_test = test_df["ltp"].to_numpy(dtype=float)
-    imb_test = (
-        test_df["imb_l1"].to_numpy(dtype=float)
-        if "imb_l1" in test_df.columns
-        else np.zeros(len(test_df))
-    )
 
     week = _week_id()
     cands: list[Candidate] = []
-    for mname, model in _models().items():
-        model.fit(X_train, y_train.to_numpy())
-        prob = model.predict_proba(X_test)[:, 1]
-        auc = _auc(y_test.to_numpy(), prob)
-        for tmpl in TEMPLATES:
-            sim = paper_sim(ltp=ltp_test, prob=prob, imb=imb_test, template=tmpl)
+    fitted: dict[tuple[str, ...], dict[str, Any]] = {}
+    aucs: dict[tuple[str, ...], dict[str, float]] = {}
+    probs: dict[tuple[str, ...], dict[str, np.ndarray]] = {}
+
+    for tmpl in templates:
+        feats = tuple(_feature_list(tmpl.features))
+        if feats not in fitted:
+            X_train, y_train = _xy(train_df, list(feats))
+            need = list(feats) + ["y_dir", "ltp"]
+            if "imb_l1" in test_df.columns:
+                need.append("imb_l1")
+            clean_test = test_df.dropna(
+                subset=[c for c in need if c in test_df.columns]
+            ).copy()
+            X_test = clean_test[list(feats)].astype(float)
+            y_test = clean_test["y_dir"].astype(int)
+            ltp_aligned = clean_test["ltp"].to_numpy(dtype=float)
+            imb_aligned = (
+                clean_test["imb_l1"].to_numpy(dtype=float)
+                if "imb_l1" in clean_test.columns
+                else np.zeros(len(clean_test))
+            )
+            fitted[feats] = {}
+            aucs[feats] = {}
+            probs[feats] = {"__ltp__": ltp_aligned, "__imb__": imb_aligned}
+            for mname, model in _models().items():
+                m = clone(model)
+                m.fit(X_train, y_train.to_numpy())
+                prob = m.predict_proba(X_test)[:, 1]
+                fitted[feats][mname] = m
+                probs[feats][mname] = prob
+                aucs[feats][mname] = _auc(y_test.to_numpy(), prob)
+
+        ltp_use = probs[feats]["__ltp__"]
+        imb_use = probs[feats]["__imb__"]
+        for mname, model in fitted[feats].items():
+            prob = probs[feats][mname]
+            auc = aucs[feats][mname]
+            sim = paper_sim(ltp=ltp_use, prob=prob, imb=imb_use, template=tmpl)
             ok, reasons = _safety(auc, sim)
+            if (
+                tmpl.family != "baseline"
+                and behavior.atr_proxy_pts < behavior.fee_be_pts * 0.5
+            ):
+                ok = False
+                reasons.append(
+                    f"behavior_edge atr={behavior.atr_proxy_pts:.1f}<0.5*BE"
+                )
             pack_path, model_path = write_pack(
                 out_dir=out_dir,
                 model_name=mname,
                 model=model,
                 template=tmpl,
-                auc=auc,
+                auc=auc if np.isfinite(auc) else 0.0,
                 sim=sim,
                 safety_ok=ok,
                 safety_reasons=reasons,
-                features=list(FEATURE_COLUMNS),
+                features=list(feats),
                 week_id=week,
+                behavior_summary=behavior.summary,
+                behavior_path=str(behavior_path),
             )
             cands.append(
                 Candidate(
@@ -367,6 +460,7 @@ def run_discovery(
                     safety_reasons=reasons,
                     pack_path=str(pack_path),
                     model_path=str(model_path),
+                    behavior_summary=behavior.summary,
                 )
             )
 
@@ -377,10 +471,17 @@ def run_discovery(
         "horizon": horizon,
         "n_train": int(len(train_df)),
         "n_test": int(len(test_df)),
+        "behavior_report": str(behavior_path),
+        "behavior_summary": behavior.summary,
+        "reasoning": behavior.reasoning,
+        "predictive_families": [asdict(f) for f in behavior.families if f.predictive],
+        "recipes": [asdict(r) for r in behavior.recipes],
         "candidates": [
             {
                 "model": c.model_name,
                 "template": c.template.name,
+                "family": c.template.family,
+                "rationale": c.template.rationale,
                 "auc": c.auc,
                 "n_trades": c.n_trades,
                 "win_rate": c.win_rate,
@@ -406,15 +507,18 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
     best = cands[0]
     week = _week_id()
     title = (
-        f"S11 multi-model discover: {best.model_name}+{best.template.name} "
-        f"(AUC {best.auc:.3f})"
+        f"S11 behavior+ML: {best.model_name}+{best.template.name} "
+        f"[{best.template.family}] (AUC {best.auc:.3f})"
     )
     summary = (
-        f"Trained logreg/rf/gb on ticks; swept entry templates; "
-        f"best={best.model_name}/{best.template.name}. "
-        f"Paper test: trades={best.n_trades} win={best.win_rate:.0%} "
+        f"Analyzed all tick families (price/book/OI/volume/spread) with math+stats+reasoning; "
+        f"generated recipes; trained logreg/rf/gb. "
+        f"best={best.model_name}/{best.template.name} "
+        f"({best.template.rationale or best.template.family}). "
+        f"Paper: trades={best.n_trades} win={best.win_rate:.0%} "
         f"gross={best.gross_pnl:.1f} after_tax={best.after_tax_pnl:.1f}. "
-        f"Approve → set S11_PACK_PATH + ENABLE_S11 (DRY_RUN). {note}"
+        f"Behavior: {best.behavior_summary[:220]} "
+        f"Approve → S11_PACK_PATH + ENABLE_S11 (DRY_RUN). {note}"
     ).strip()
     prop = StrategyProposal(
         id="",
@@ -434,10 +538,14 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
                 "auc": best.auc,
                 "model": best.model_name,
                 "template": best.template.name,
+                "family": best.template.family,
+                "rationale": best.template.rationale,
+                "behavior_summary": best.behavior_summary,
                 "runners_up": [
                     {
                         "model": c.model_name,
                         "template": c.template.name,
+                        "family": c.template.family,
                         "after_tax": c.after_tax_pnl,
                         "auc": c.auc,
                         "safety_ok": c.safety_ok,
@@ -477,7 +585,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     for i, c in enumerate(cands):
         print(
-            f"[{i}] {c.model_name}/{c.template.name} "
+            f"[{i}] {c.model_name}/{c.template.name} ({c.template.family}) "
             f"auc={c.auc:.3f} trades={c.n_trades} "
             f"after_tax={c.after_tax_pnl:.1f} safety={c.safety_ok} "
             f"pack={c.pack_path}"
@@ -489,13 +597,34 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_behavior(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.csv:
+        csv_path = Path(args.csv)
+    else:
+        csv_path = out_dir / "ticks_export.csv"
+        n = export_full_ticks(csv_path, limit=args.limit)
+        print(f"exported {n} ticks → {csv_path}")
+    report = analyze_ticks(csv_path, horizon=args.horizon)
+    path = write_behavior_report(report, out_dir / "behavior_report.json")
+    print(report.summary)
+    print(f"wrote {path}")
+    print("recipes:", [r.name for r in report.recipes])
+    return 0
+
+
 def main() -> None:
-    p = argparse.ArgumentParser(description="Multi-model strategy discovery from ticks")
+    p = argparse.ArgumentParser(
+        description="Behavior-aware multi-model strategy discovery from ticks"
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
-    run_p = sub.add_parser("run", help="Train multi-models, sweep templates, propose best")
-    run_p.add_argument("--db", default=str(DEFAULT_DB), help="unused alias; export uses storage DB")
-    run_p.add_argument("--csv", default="", help="optional pre-exported ticks CSV")
-    run_p.add_argument("--limit", type=int, default=None, help="export last N ticks")
+    run_p = sub.add_parser(
+        "run", help="Analyze behavior, generate recipes, train models, propose best"
+    )
+    run_p.add_argument("--db", default=str(DEFAULT_DB))
+    run_p.add_argument("--csv", default="")
+    run_p.add_argument("--limit", type=int, default=None)
     run_p.add_argument("--out-dir", default=str(DEFAULT_OUT))
     run_p.add_argument("--horizon", type=int, default=20)
     run_p.add_argument("--threshold-bps", type=float, default=2.0)
@@ -503,6 +632,14 @@ def main() -> None:
     run_p.add_argument("--top-k", type=int, default=3)
     run_p.add_argument("--note", default="")
     run_p.set_defaults(func=cmd_run)
+
+    beh = sub.add_parser("behavior", help="Math/stats/reasoning over tick families only")
+    beh.add_argument("--csv", default="")
+    beh.add_argument("--limit", type=int, default=None)
+    beh.add_argument("--out-dir", default=str(DEFAULT_OUT))
+    beh.add_argument("--horizon", type=int, default=20)
+    beh.set_defaults(func=cmd_behavior)
+
     args = p.parse_args()
     raise SystemExit(args.func(args))
 
