@@ -21,6 +21,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
+        "S11_DISCOVERED",
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
@@ -35,6 +36,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
+        "S11_DISCOVERED",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -47,6 +49,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
+        "S11_DISCOVERED",
     },
 }
 
@@ -110,6 +113,9 @@ def portfolio_from_env() -> PortfolioConfig:
     # S10 legacy 30m always zigzag (MTF +₹42k paper row) — ON by default for paper
     if os.getenv("ENABLE_S10", "true").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S10_LEGACY30")
+    # S11 multi-model discovered pack — OFF until weekend proposal approved
+    if os.getenv("ENABLE_S11", "false").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S11_DISCOVERED")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:

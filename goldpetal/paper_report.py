@@ -93,6 +93,7 @@ def main() -> None:
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
+        "S11_DISCOVERED",
         None,
     ):
         s = _summarize(strat)
