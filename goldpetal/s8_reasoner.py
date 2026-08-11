@@ -292,6 +292,7 @@ def reason_entry(
     hold_proba: float | None = None,
     exit_soon_proba: float | None = None,
     min_entry_proba: float = 0.55,
+    regime: str = "UNKNOWN",
 ) -> ReasoningTrace:
     """Full multi-step reasoning for a flat→entry decision."""
     if net > 0:
@@ -302,6 +303,22 @@ def reason_entry(
         candidate = "flat"
 
     steps: list[ReasonStep] = []
+    # Market understanding first
+    align_ok = True
+    if regime == "TREND_UP" and candidate == "short":
+        align_ok = False
+    if regime == "TREND_DOWN" and candidate == "long":
+        align_ok = False
+    if regime in {"QUIET", "CHOP"} and abs(imb) < max(min_imb, 12.0):
+        align_ok = False
+    steps.append(
+        ReasonStep(
+            "science",
+            "regime_align",
+            align_ok,
+            f"regime={regime} candidate={candidate}",
+        )
+    )
     steps.extend(
         math_block(
             px=px, tp=tp, sl=sl, lots=lots, imb=imb, prev_imb=prev_imb
@@ -329,12 +346,35 @@ def reason_entry(
             min_entry_proba=min_entry_proba,
         )
     )
-    return plan_from_steps(
+    # Loss minimisation: refuse entry if exit_soon is already high
+    if exit_soon_proba is not None and exit_soon_proba >= 0.65:
+        steps.append(
+            ReasonStep(
+                "planning",
+                "loss_min_skip",
+                False,
+                f"P(exit_soon)={exit_soon_proba:.2f} — skip to avoid quick loss",
+                exit_soon_proba,
+            )
+        )
+    trace = plan_from_steps(
         candidate=candidate, steps=steps, entry_proba=entry_proba
     )
+    if not align_ok and trace.action.startswith("ENTER"):
+        trace.action = "SKIP"
+        trace.summary = f"regime_align fail ({regime}) — {trace.summary}"
+        trace.steps.append(
+            ReasonStep("planning", "override_skip", True, trace.summary, trace.score)
+        )
+    if exit_soon_proba is not None and exit_soon_proba >= 0.65 and trace.action.startswith(
+        "ENTER"
+    ):
+        trace.action = "SKIP"
+        trace.summary = f"loss_min: exit_soon high — {trace.summary}"
+    return trace
 
 
-def reason_manage(
+def reason_hold(
     *,
     side: Literal["long", "short"],
     move: float,
@@ -344,31 +384,48 @@ def reason_manage(
     tsq_falling: bool,
     hold_proba: float | None = None,
     exit_soon_proba: float | None = None,
+    regime: str = "UNKNOWN",
+    imb: float = 0.0,
+    net: float = 0.0,
 ) -> ReasoningTrace:
-    """Multi-step hold/exit reasoning while in a trade."""
+    """Dedicated HOLD head — keep position only while path + book + regime agree."""
     steps: list[ReasonStep] = [
         ReasonStep(
             "mathematics",
-            "pnl_path",
-            move > 0,
-            f"open P&L={move:+.1f}pt TP={tp:.0f} SL={sl:.0f}",
+            "open_pnl",
+            move > -sl * 0.85,
+            f"open P&L={move:+.1f}pt (soft SL buffer {sl * 0.85:.1f})",
             move,
         ),
         ReasonStep(
             "mathematics",
-            "sl_distance",
-            move > -sl,
-            f"above SL ({move:.1f} > {-sl:.1f})",
-            move + sl,
+            "room_to_tp",
+            move < tp,
+            f"not at TP yet ({move:.1f}<{tp:.0f})",
+            tp - move,
         ),
     ]
-    book_bad = tbq_falling if side == "long" else tsq_falling
+    book_ok = not (tbq_falling if side == "long" else tsq_falling)
     steps.append(
         ReasonStep(
             "logic",
             "supporting_book",
-            not book_bad,
-            "TBQ/TSQ support still intact" if not book_bad else "supporting book dropping",
+            book_ok,
+            "supporting TBQ/TSQ intact" if book_ok else "supporting book falling",
+        )
+    )
+    # Regime: hold with trend, tighten against it
+    with_trend = (
+        (side == "long" and regime == "TREND_UP")
+        or (side == "short" and regime == "TREND_DOWN")
+        or regime in {"UNKNOWN", "CHOP", "QUIET"}
+    )
+    steps.append(
+        ReasonStep(
+            "science",
+            "regime_hold",
+            with_trend or move > 0,
+            f"regime={regime} side={side}",
         )
     )
     if hold_proba is not None:
@@ -385,36 +442,176 @@ def reason_manage(
         steps.append(
             ReasonStep(
                 "science",
+                "ml_exit_soon_low",
+                exit_soon_proba < 0.55,
+                f"P(exit_soon)={exit_soon_proba:.2f} (want low to hold)",
+                exit_soon_proba,
+            )
+        )
+    # Side agrees with NET
+    net_ok = (side == "long" and net >= 0) or (side == "short" and net <= 0)
+    steps.append(ReasonStep("logic", "net_agrees", net_ok, f"net={net:.0f}"))
+
+    hard_fail = [s for s in steps if s.name in {"supporting_book", "open_pnl"} and not s.ok]
+    soft = [s for s in steps if s not in hard_fail]
+    soft_ok = sum(1 for s in soft if s.ok)
+    score = soft_ok / max(1, len(soft))
+    if hold_proba is not None:
+        score = 0.5 * score + 0.5 * float(hold_proba)
+
+    if hard_fail:
+        action: PlanAction = "EXIT"
+        summary = "hold head FAIL → prefer exit: " + ",".join(s.name for s in hard_fail)
+    elif score < 0.40:
+        action = "EXIT"
+        summary = f"hold score {score:.2f}<0.40 — cut"
+    else:
+        action = "HOLD"
+        summary = f"HOLD score={score:.2f} imb={imb:.1f}"
+    steps.append(ReasonStep("planning", "hold_decide", action == "HOLD", summary, score))
+    steps.append(ReasonStep("programming", "trace_ok", True, f"hold steps={len(steps)}"))
+    return ReasoningTrace(action=action, score=float(score), steps=steps, summary=summary)
+
+
+def reason_exit(
+    *,
+    side: Literal["long", "short"],
+    move: float,
+    tp: float,
+    sl: float,
+    tbq_falling: bool,
+    tsq_falling: bool,
+    hold_proba: float | None = None,
+    exit_soon_proba: float | None = None,
+    regime: str = "UNKNOWN",
+    imb: float = 0.0,
+    net: float = 0.0,
+    protect_profit_pts: float = 25.0,
+) -> ReasoningTrace:
+    """Dedicated EXIT head — minimise losses, lock profits, respect book/regime flips."""
+    steps: list[ReasonStep] = [
+        ReasonStep(
+            "mathematics",
+            "hit_sl",
+            move <= -sl,
+            f"SL check move={move:+.1f} vs -{sl:.0f}",
+            move,
+        ),
+        ReasonStep(
+            "mathematics",
+            "hit_tp",
+            move >= tp,
+            f"TP check move={move:+.1f} vs +{tp:.0f}",
+            move,
+        ),
+    ]
+    book_bad = tbq_falling if side == "long" else tsq_falling
+    steps.append(
+        ReasonStep(
+            "logic",
+            "book_drop",
+            book_bad,
+            "supporting book dropping" if book_bad else "book OK",
+        )
+    )
+    against = (side == "long" and regime == "TREND_DOWN") or (
+        side == "short" and regime == "TREND_UP"
+    )
+    steps.append(
+        ReasonStep(
+            "science",
+            "regime_against",
+            against,
+            f"regime={regime} against={against}",
+        )
+    )
+    if exit_soon_proba is not None:
+        steps.append(
+            ReasonStep(
+                "science",
                 "ml_exit_soon",
                 exit_soon_proba >= 0.55,
                 f"P(exit_soon)={exit_soon_proba:.2f}",
                 exit_soon_proba,
             )
         )
+    if hold_proba is not None:
+        steps.append(
+            ReasonStep(
+                "science",
+                "ml_hold_weak",
+                hold_proba < 0.35,
+                f"P(hold_ok)={hold_proba:.2f} weak?",
+                hold_proba,
+            )
+        )
 
-    want_exit = False
-    why = []
-    if move <= -sl:
-        want_exit = True
-        why.append("hit_sl")
-    if move >= tp:
-        want_exit = True
-        why.append("hit_tp")
-    if book_bad:
-        want_exit = True
-        why.append("book_drop")
-    if exit_soon_proba is not None and exit_soon_proba >= 0.70 and move < tp * 0.5:
-        want_exit = True
-        why.append("ml_exit_soon")
-    if hold_proba is not None and hold_proba < 0.35 and move > 0:
-        # weak hold in profit → prefer exit planning later; soft
-        why.append("weak_hold")
-
-    action: PlanAction = "EXIT" if want_exit else "HOLD"
-    score = 1.0 if want_exit else (hold_proba if hold_proba is not None else 0.6)
-    summary = f"{action}: " + (",".join(why) if why else "path_ok")
-    steps.append(ReasonStep("planning", "manage", True, summary, float(score)))
+    # Profit protection: if in decent profit and book drops → exit
+    protect = move >= protect_profit_pts and book_bad
     steps.append(
-        ReasonStep("programming", "trace_ok", True, f"manage steps={len(steps)}")
+        ReasonStep(
+            "planning",
+            "protect_profit",
+            protect,
+            f"protect≥{protect_profit_pts:.0f}pt & book_drop={book_bad}",
+            move,
+        )
     )
+
+    reasons: list[str] = []
+    if move <= -sl:
+        reasons.append("hit_sl")
+    if move >= tp:
+        reasons.append("hit_tp")
+    if book_bad and move < protect_profit_pts:
+        reasons.append("book_drop")
+    if protect:
+        reasons.append("protect_profit")
+    if against and move <= 0:
+        reasons.append("regime_against")
+    if exit_soon_proba is not None and exit_soon_proba >= 0.70 and move < tp * 0.5:
+        reasons.append("ml_exit_soon")
+    if hold_proba is not None and hold_proba < 0.30 and move < 5:
+        reasons.append("ml_hold_weak")
+
+    want_exit = bool(reasons)
+    score = 1.0 if want_exit else (
+        float(exit_soon_proba) if exit_soon_proba is not None else 0.25
+    )
+    action: PlanAction = "EXIT" if want_exit else "HOLD"
+    summary = f"{action}: " + (",".join(reasons) if reasons else "no_exit_trigger")
+    steps.append(ReasonStep("planning", "exit_decide", want_exit, summary, float(score)))
+    steps.append(ReasonStep("programming", "trace_ok", True, f"exit steps={len(steps)}"))
     return ReasoningTrace(action=action, score=float(score), steps=steps, summary=summary)
+
+
+def reason_manage(
+    *,
+    side: Literal["long", "short"],
+    move: float,
+    tp: float,
+    sl: float,
+    tbq_falling: bool,
+    tsq_falling: bool,
+    hold_proba: float | None = None,
+    exit_soon_proba: float | None = None,
+    regime: str = "UNKNOWN",
+    imb: float = 0.0,
+    net: float = 0.0,
+    protect_profit_pts: float = 25.0,
+) -> ReasoningTrace:
+    """Back-compat manage = exit head (hold/exit while in a trade)."""
+    return reason_exit(
+        side=side,
+        move=move,
+        tp=tp,
+        sl=sl,
+        tbq_falling=tbq_falling,
+        tsq_falling=tsq_falling,
+        hold_proba=hold_proba,
+        exit_soon_proba=exit_soon_proba,
+        regime=regime,
+        imb=imb,
+        net=net,
+        protect_profit_pts=protect_profit_pts,
+    )

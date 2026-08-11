@@ -69,6 +69,34 @@ State files live under `data/control/`:
 
 **Nothing auto-goes live.** Approve → paper or Approve → live in the panel; live still needs `live unlock` + `DRY_RUN=false` + live order module.
 
+### Where the control panel lives
+
+| Item | Location |
+|------|----------|
+| Process | Same trading VM as `run_strategy.py` |
+| URL | `http://<vm-ip>:8787/` (`--host 0.0.0.0 --port 8787`) |
+| Tick tape | Panel → **Tick tape** (from `data/ticks.db`) |
+| 1m → day bars | Panel → **Bars** buttons (`1m`…`1h`…`4h`…`1d`) built on the fly from ticks |
+| Entry/hold/exit reasoning | Panel → **Reasoning** (also `data/control/reasoning_latest.json`) |
+| Capital / emergency | Same panel; state in `data/control/` |
+
+### Reasoning model plan (entry / hold / exit)
+
+1. **Live heads** (`s8_reasoner.py` + `reasoning_cockpit.py`): multi-step math → logic → science/ML → planning for ENTRY, HOLD, EXIT. Regime-aware; skips entries that look like quick losses.
+2. **Weekly improve** (`./weekly_s8_nn.sh`): retrains ML heads (`entry_edge`, `hold_ok`, `exit_soon`) from all ticks; writes a pending proposal to the panel.
+3. **Enable on VM**: set `S8_REASONING=true` in `.env` (and `S8_LOGIC=align` for S8). Paper first.
+4. **You approve** weekend proposals in the panel before paper enable / live unlock.
+
+### How to plan the week
+
+| When | What |
+|------|------|
+| Mon–Fri session | `supervise.sh` collects ticks + paper signals; panel shows tape/bars/reasoning |
+| After close | `paper_report.py` — check after-tax PnL |
+| Sunday | `./weekly_s8_nn.sh` — improve model → panel proposal |
+| Sunday night | Open panel → review paper Δ₹ → Approve paper / Reject |
+| Only after stable paper | Unlock live + your explicit go |
+
 SQLite DB (`data/ticks.db`) is auto-created on first use. `data/` contents are gitignored.
 
 ### Linting

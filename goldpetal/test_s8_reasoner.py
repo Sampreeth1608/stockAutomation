@@ -1,8 +1,4 @@
-"""Tests for multi-step S8 reasoner (math/logic/science/planning)."""
-
-from __future__ import annotations
-
-from s8_reasoner import reason_entry, reason_manage
+from s8_reasoner import reason_entry, reason_exit, reason_hold, reason_manage
 
 
 def test_entry_long_plan():
@@ -73,6 +69,32 @@ def test_manage_hold_vs_exit():
     assert ex.action == "EXIT"
 
 
+def test_dedicated_hold_exit():
+    h = reason_hold(
+        side="long",
+        move=20.0,
+        tp=45,
+        sl=35,
+        tbq_falling=False,
+        tsq_falling=False,
+        hold_proba=0.7,
+        regime="TREND_UP",
+        net=100,
+        imb=15,
+    )
+    assert h.action == "HOLD"
+    e = reason_exit(
+        side="long",
+        move=30.0,
+        tp=45,
+        sl=35,
+        tbq_falling=True,
+        tsq_falling=False,
+        protect_profit_pts=25,
+    )
+    assert e.action == "EXIT"
+
+
 def test_trace_line():
     tr = reason_entry(
         px=15000.0,
@@ -98,5 +120,6 @@ if __name__ == "__main__":
     test_entry_long_plan()
     test_entry_skips_soft_imb()
     test_manage_hold_vs_exit()
+    test_dedicated_hold_exit()
     test_trace_line()
     print("test_s8_reasoner: OK")

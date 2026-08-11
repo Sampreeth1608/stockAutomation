@@ -35,6 +35,12 @@ from control_state import (
 )
 from paper_report import _summarize
 from proposals import decide_proposal, proposals_snapshot
+from reasoning_cockpit import (
+    bars_for_panel,
+    load_reasoning,
+    panel_timeframes,
+    refresh_and_save,
+)
 from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
 
 ROOT = Path(__file__).resolve().parent
@@ -84,7 +90,28 @@ body { padding: 1.25rem 1.5rem 3rem; }
   font-weight: 700; font-size: clamp(1.8rem, 4vw, 2.6rem);
   letter-spacing: -.02em; color: var(--gold2);
 }
-.brand .tag { color: var(--muted); font-size: .95rem; max-width: 36rem; }
+.brand .tag { color: var(--muted); font-size: .95rem; max-width: 42rem; }
+.brand .where {
+  margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: .78rem;
+  color: var(--gold); border: 1px solid var(--line); padding: .35rem .6rem; border-radius: 3px;
+}
+.tf-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--bg0);
+  color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: .75rem;
+  padding: .3rem .55rem; border-radius: 2px; cursor: pointer;
+}
+.tf-btn.active { color: var(--bg0); background: var(--gold); border-color: var(--gold); font-weight: 500; }
+.head-box {
+  flex: 1 1 220px; background: var(--bg2); border: 1px solid var(--line);
+  padding: .7rem .8rem; border-radius: 3px; min-height: 7rem;
+}
+.head-box h4 { margin: 0 0 .4rem; font-family: Fraunces, serif; font-weight: 500; color: var(--gold2); font-size: .95rem; }
+.step {
+  font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--muted);
+  padding: .1rem 0; border-bottom: 1px dashed #24362c;
+}
+.step.ok { color: var(--ok); }
+.step.bad { color: var(--bad); }
 .grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -162,7 +189,8 @@ input[type="number"] {
 <body>
   <header class="brand">
     <h1>Gold Petal</h1>
-    <p class="tag">Control panel — ticks, finished trades, capital, weekend strategy approvals. Live stays locked until you approve.</p>
+    <p class="tag">Control + reasoning cockpit on your trading VM. See ticks, 1m→day bars, entry/hold/exit plans, capital, and weekend approvals. Nothing goes live without you.</p>
+    <div class="where">Runs on VM · :8787</div>
   </header>
 
   <div class="grid">
@@ -174,9 +202,10 @@ input[type="number"] {
         <button class="btn ok" id="btn-trading" type="button">Trading</button>
         <button class="btn warn" id="btn-live" type="button">Live unlock</button>
         <button class="btn" id="btn-refresh" type="button">Refresh</button>
+        <button class="btn" id="btn-reason" type="button">Re-run reasoner</button>
       </div>
       <p class="flash" id="flash"></p>
-      <p class="muted" style="margin-top:.75rem">Emergency blocks every new entry. Trading off keeps tick archive but skips strategy emits. Live unlock alone is not enough — <span class="mono">DRY_RUN=false</span> + live order module still required.</p>
+      <p class="muted" style="margin-top:.75rem">Host: same GCP/VM as <span class="mono">run_strategy.py</span>. Open <span class="mono">http://&lt;vm-ip&gt;:8787/</span>. Emergency blocks every new entry. Live unlock alone is not enough — <span class="mono">DRY_RUN=false</span> + live order module still required.</p>
     </section>
 
     <section class="panel span-7">
@@ -190,13 +219,32 @@ input[type="number"] {
       </div>
     </section>
 
+    <section class="panel">
+      <h2>Reasoning — entry / hold / exit</h2>
+      <p class="muted" id="reason-meta">Multi-step math → logic → science/ML → planning. Weekly NN trains the ML heads; this cockpit applies them on live ticks.</p>
+      <div class="row" id="reason-heads" style="margin-top:.5rem"></div>
+      <p class="mono" id="reason-rec" style="margin-top:.75rem"></p>
+    </section>
+
     <section class="panel span-6">
-      <h2>Tick data</h2>
+      <h2>Tick tape</h2>
       <p class="muted" id="tick-meta"></p>
       <div class="scroll">
         <table>
           <thead><tr><th>Time</th><th>LTP</th><th>Vol</th><th>TBQ</th><th>TSQ</th></tr></thead>
           <tbody id="ticks-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel span-6">
+      <h2>Bars · 1m → day</h2>
+      <div class="row" id="tf-row" style="margin-bottom:.55rem"></div>
+      <p class="muted" id="bars-meta"></p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Time</th><th>O</th><th>H</th><th>L</th><th>C</th><th>NET</th><th>IMB%</th><th>ΔP</th></tr></thead>
+          <tbody id="bars-body"></tbody>
         </table>
       </div>
     </section>
@@ -212,13 +260,7 @@ input[type="number"] {
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Weekend proposals — new &amp; improved strategies</h2>
-      <p class="muted">Every Sunday job writes paper results here. Approve for paper first; approve live only after you are happy. Reject force-disables the strategy.</p>
-      <div id="proposals"></div>
-    </section>
-
-    <section class="panel">
+    <section class="panel span-6">
       <h2>Paper scoreboard</h2>
       <div class="scroll">
         <table>
@@ -226,6 +268,12 @@ input[type="number"] {
           <tbody id="score-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Weekend proposals — new &amp; improved strategies</h2>
+      <p class="muted">Every Sunday job writes paper results here. Approve for paper first; approve live only after you are happy. Reject force-disables the strategy.</p>
+      <div id="proposals"></div>
     </section>
   </div>
 
@@ -311,6 +359,59 @@ function renderTicks(ticks, meta) {
     </tr>`).join("") || `<tr><td colspan="5">No ticks yet</td></tr>`;
 }
 
+let currentTf = "5m";
+async function loadBars(tf) {
+  currentTf = tf || currentTf;
+  const data = await api(`/api/bars?tf=${encodeURIComponent(currentTf)}&limit=60`);
+  $("bars-meta").textContent = `${data.tf} · ${data.n_bars} bars from ${data.tick_count} ticks · showing latest ${data.bars.length}`;
+  $("bars-body").innerHTML = (data.bars || []).slice().reverse().map(b => `
+    <tr>
+      <td>${b.time || ""}</td>
+      <td>${b.open ?? ""}</td>
+      <td>${b.high ?? ""}</td>
+      <td>${b.low ?? ""}</td>
+      <td>${b.close ?? ""}</td>
+      <td>${b.net != null ? Number(b.net).toFixed(0) : ""}</td>
+      <td>${b.imb_pct ?? ""}</td>
+      <td>${b.price_delta != null ? Number(b.price_delta).toFixed(1) : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="8">No bars yet — need ticks in data/ticks.db</td></tr>`;
+  document.querySelectorAll(".tf-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tf === currentTf);
+  });
+}
+
+function renderTfButtons(tfs) {
+  $("tf-row").innerHTML = (tfs || []).map(t =>
+    `<button type="button" class="tf-btn${t.tf===currentTf?" active":""}" data-tf="${t.tf}">${t.tf}</button>`
+  ).join("");
+  $("tf-row").querySelectorAll(".tf-btn").forEach(btn => {
+    btn.addEventListener("click", () => loadBars(btn.dataset.tf).catch(e => flash(String(e.message||e))));
+  });
+}
+
+function renderReasoning(r) {
+  if (!r) {
+    $("reason-heads").innerHTML = `<p class="muted">No reasoning yet — click Re-run reasoner (needs ticks).</p>`;
+    $("reason-rec").textContent = "";
+    return;
+  }
+  const m = r.market || {};
+  $("reason-meta").textContent =
+    `regime=${m.regime_guess || "?"} LTP=${m.ltp ?? "—"} NET=${m.net ?? "—"} IMB=${m.imb_pct ?? "—"}% · asof ${m.asof_ist || ""}`;
+  const head = (title, block) => {
+    const steps = (block?.steps || []).slice(-6).map(s =>
+      `<div class="step ${s.ok ? "ok":"bad"}">${s.domain[0].toUpperCase()}:${s.name} — ${s.detail}</div>`
+    ).join("");
+    return `<div class="head-box"><h4>${title} ${pill(block?.action || "—", block?.action==="HOLD"||String(block?.action||"").startsWith("ENTER")?"ok": block?.action==="EXIT"||block?.action==="SKIP"?"bad":"warn")}</h4>
+      <p class="mono">score=${Number(block?.score||0).toFixed(2)}</p>
+      <p class="muted">${block?.summary || ""}</p>${steps}</div>`;
+  };
+  $("reason-heads").innerHTML =
+    head("ENTRY", r.entry) + head("HOLD", r.hold) + head("EXIT", r.exit);
+  $("reason-rec").textContent =
+    `RECOMMENDED: ${r.recommended || "—"} · ${r.loss_guard || ""}`;
+}
+
 function renderTrades(trades, meta) {
   $("trades-meta").textContent = meta;
   $("trades-body").innerHTML = (trades || []).map(t => `
@@ -384,6 +485,9 @@ async function refresh() {
   renderTrades(data.trades, `Closed/open from signals · showing latest ${data.trades.length}`);
   renderProposals(data.proposals);
   renderScore(data.scoreboard);
+  renderReasoning(data.reasoning);
+  renderTfButtons(data.timeframes || []);
+  await loadBars(currentTf);
 }
 
 $("btn-emergency").onclick = async () => {
@@ -408,6 +512,13 @@ $("btn-live").onclick = async () => {
   await refresh();
 };
 $("btn-refresh").onclick = () => refresh().catch(e => flash(String(e)));
+$("btn-reason").onclick = async () => {
+  try {
+    const r = await api("/api/reasoning/refresh", { method: "POST", body: "{}" });
+    renderReasoning(r);
+    flash(`Reasoner: ${r.recommended}`);
+  } catch (e) { flash(String(e.message || e)); }
+};
 
 refresh().catch(e => flash(String(e)));
 setInterval(() => refresh().catch(() => {}), 5000);
@@ -455,6 +566,12 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
 
     live_ok, live_reason = is_live_mode_allowed()
     blocked = entries_blocked()
+    reasoning = load_reasoning()
+    if reasoning is None:
+        try:
+            reasoning = refresh_and_save()
+        except Exception:
+            reasoning = None
     return {
         "state": state.to_dict(),
         "entries_blocked": list(blocked),
@@ -467,6 +584,15 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "capital": capital_snapshot(),
         "proposals": proposals_snapshot(),
         "scoreboard": scoreboard,
+        "reasoning": reasoning,
+        "timeframes": panel_timeframes(),
+        "where": {
+            "host": "Same trading VM as run_strategy.py / supervise.sh",
+            "url": "http://<vm-ip>:8787/",
+            "ticks_db": "goldpetal/data/ticks.db",
+            "bars": "Built on the fly from ticks: 1m,2m,3m,5m,10m,15m,30m,1h,4h,1d",
+            "reasoning": "data/control/reasoning_latest.json",
+        },
     }
 
 
@@ -542,6 +668,21 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(capital_snapshot())
                 self._send(status, body, ctype)
                 return
+            if path == "/api/bars":
+                tf = (qs.get("tf") or ["5m"])[0]
+                limit = int((qs.get("limit") or ["60"])[0])
+                status, body, ctype = _json_bytes(bars_for_panel(tf, limit=limit))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/reasoning":
+                payload = load_reasoning() or {}
+                status, body, ctype = _json_bytes(payload)
+                self._send(status, body, ctype)
+                return
+            if path == "/api/timeframes":
+                status, body, ctype = _json_bytes({"timeframes": panel_timeframes()})
+                self._send(status, body, ctype)
+                return
             self._send(*_json_bytes({"error": "not found"}, 404))
         except Exception as exc:
             self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
@@ -563,6 +704,14 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/live":
                 st = set_live_unlocked(bool(data.get("unlocked")))
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/reasoning/refresh":
+                payload = refresh_and_save(
+                    in_position=bool(data.get("in_position", False)),
+                    position_side=str(data.get("position_side") or "flat"),
+                    open_pnl_pts=float(data.get("open_pnl_pts") or 0),
+                )
+                self._send(*_json_bytes(payload))
                 return
             if path == "/api/capital":
                 plan = load_capital()
@@ -616,7 +765,11 @@ def main() -> None:
     load_capital()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
     print(f"Gold Petal control panel → http://{args.host}:{args.port}/", flush=True)
-    print("Endpoints: /api/dashboard /api/ticks /api/trades /api/proposals /api/capital", flush=True)
+    print(
+        "Endpoints: /api/dashboard /api/ticks /api/bars /api/reasoning "
+        "/api/trades /api/proposals /api/capital",
+        flush=True,
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
