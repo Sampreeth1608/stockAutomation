@@ -110,6 +110,21 @@ In the control panel section **One-click export**:
 
 No SSH or manual CSV building required.
 
+### Google Sheets pack (richer trade review)
+
+Sheets is better for reading PnL on phone/laptop. It does **not** replace the panel for emergency / live unlock / Approve.
+
+**From the panel:** section **Google Sheets pack** → Download ZIP or Copy scoreboard.
+
+**From the VM:**
+```bash
+cd ~/goldpetal && source venv/bin/activate
+python3 sheets_pack.py
+# → data/sheets_pack/goldpetal_sheets_*.zip
+```
+
+Import CSVs in Google Sheets: File → Import → Upload (start with `scoreboard.csv`, then `trades_all.csv` as a new sheet).
+
 ### How to plan the week
 
 | When | What |

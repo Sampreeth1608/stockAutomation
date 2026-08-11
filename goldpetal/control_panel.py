@@ -14,10 +14,12 @@ import argparse
 import json
 import os
 import traceback
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from capital import (
     capital_snapshot,
@@ -36,6 +38,8 @@ from control_state import (
 )
 from live_orders import live_lots, recent_orders
 from paper_report import _summarize
+from proposals import decide_proposal, proposals_snapshot
+from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 from panel_export import (
     TRADE_CSV_FIELDS,
     TICK_CSV_FIELDS,
@@ -48,7 +52,6 @@ from panel_export import (
     ticks_in_range,
     trades_in_range,
 )
-from proposals import decide_proposal, proposals_snapshot
 from reasoning_cockpit import (
     bars_for_panel,
     load_reasoning,
@@ -299,6 +302,17 @@ input[type="date"] {
           <tbody id="score-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Google Sheets pack · richer trade review</h2>
+      <p class="muted">Download a ZIP (scoreboard + all trades + open positions + signals). Import CSVs into Sheets. <strong>Sheets is for reading PnL</strong> — emergency / live unlock / Approve stay on this panel.</p>
+      <div class="row" style="margin:.6rem 0 .85rem">
+        <button class="btn ok" type="button" id="btn-sheets-pack">Download Sheets pack (ZIP)</button>
+        <button class="btn warn" type="button" id="btn-copy-score">Copy scoreboard → Sheets</button>
+      </div>
+      <p class="mono" id="sheets-meta">Ready</p>
+      <p class="flash" id="sheets-flash"></p>
     </section>
 
     <section class="panel">
@@ -657,6 +671,20 @@ $("btn-copy-trades").onclick = () => copyExport("trades").catch(e => expFlash(St
 $("exp-from").onchange = () => refreshExportMeta();
 $("exp-to").onchange = () => refreshExportMeta();
 
+const sheetsFlash = (msg) => { $("sheets-flash").textContent = msg || ""; };
+$("btn-sheets-pack").onclick = () => {
+  downloadUrl("/api/sheets/pack.zip");
+  sheetsFlash("Downloading Sheets pack ZIP (scoreboard + trades + opens + signals)");
+  $("sheets-meta").textContent = "Download started — Import CSVs in Google Sheets (File → Import)";
+};
+$("btn-copy-score").onclick = async () => {
+  try {
+    const data = await api("/api/sheets/scoreboard.tsv");
+    await navigator.clipboard.writeText(data.tsv || "");
+    sheetsFlash(`Copied ${data.rows} scoreboard rows — paste into Google Sheets`);
+  } catch (e) { sheetsFlash(String(e.message || e)); }
+};
+
 async function initExportDates() {
   const d = await api("/api/export/defaults");
   $("exp-from").value = d.date_from;
@@ -898,6 +926,25 @@ class ControlHandler(BaseHTTPRequestHandler):
                     tsv = rows_to_tsv(rows, TRADE_CSV_FIELDS)
                 status, body, ctype = _json_bytes(
                     {"kind": kind, "rows": len(rows), "tsv": tsv, "from": d_from, "to": d_to}
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/sheets/pack.zip":
+                blob = sheets_pack_zip_bytes()
+                stamp = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%d_%H%M%S")
+                name = f"goldpetal_sheets_{stamp}.zip"
+                self._send(
+                    200,
+                    blob,
+                    "application/zip",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
+            if path == "/api/sheets/scoreboard.tsv":
+                rows = build_scoreboard_rows()
+                tsv = rows_to_tsv(rows, SCORE_FIELDS)
+                status, body, ctype = _json_bytes(
+                    {"kind": "scoreboard", "rows": len(rows), "tsv": tsv}
                 )
                 self._send(status, body, ctype)
                 return
