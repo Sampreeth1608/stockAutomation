@@ -81,6 +81,8 @@ class BehaviorReport:
     recipes: list[StrategyRecipe]
     reasoning: dict[str, Any]
     summary: str
+    horizon: int = 20
+    horizon_table: list[dict[str, float | int]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +97,8 @@ class BehaviorReport:
             "recipes": [asdict(r) for r in self.recipes],
             "reasoning": self.reasoning,
             "summary": self.summary,
+            "horizon": self.horizon,
+            "horizon_table": self.horizon_table,
         }
 
 
@@ -127,9 +131,9 @@ def _regime_mix(df: pd.DataFrame, window: int = 60) -> dict[str, float]:
         vol = float(np.std(rets))
         direction = float(np.sum(rets))
         flips = int(np.sum(rets[1:] * rets[:-1] < 0))
-        avg_spread = float(np.nanmean(spread[i - window : i]))
-        if not np.isfinite(avg_spread):
-            avg_spread = 0.0
+        window_sp = spread[i - window : i]
+        finite = window_sp[np.isfinite(window_sp)]
+        avg_spread = float(np.mean(finite)) if len(finite) else 0.0
         if avg_spread >= 8.0:
             counts["WIDE_SPREAD"] += 1
         elif abs(direction) >= 15.0 and flips < len(rets) * 0.35:
@@ -427,34 +431,70 @@ def generate_recipes(
     return uniq
 
 
+def median_horizon_move(ltp: pd.Series, horizon: int) -> float:
+    move = (ltp.shift(-horizon) - ltp).abs().median()
+    v = float(move) if move == move else 0.0
+    return v if np.isfinite(v) else 0.0
+
+
+def pick_fee_aware_horizon(
+    ltp: pd.Series,
+    fee_be: float,
+    *,
+    candidates: tuple[int, ...] = (20, 60, 120, 300, 600, 1200, 2400, 4800),
+) -> tuple[int, float, list[dict[str, float | int]]]:
+    """Choose the shortest horizon whose median |move| can cover ~80% of fee BE."""
+    table: list[dict[str, float | int]] = []
+    best_h = candidates[0]
+    best_move = 0.0
+    chosen: tuple[int, float] | None = None
+    for h in candidates:
+        if h >= len(ltp):
+            continue
+        mv = median_horizon_move(ltp, h)
+        table.append({"horizon": h, "median_abs_move": round(mv, 2)})
+        if mv > best_move:
+            best_move = mv
+            best_h = h
+        if chosen is None and mv >= fee_be * 0.8:
+            chosen = (h, mv)
+    if chosen is not None:
+        return chosen[0], chosen[1], table
+    return best_h, best_move, table
+
+
 def analyze_ticks(
     csv_path: Path,
     *,
-    horizon: int = 20,
+    horizon: int = 0,
     threshold_bps: float = 2.0,
     lots: float = 1.0,
 ) -> BehaviorReport:
+    """Analyze tick families. horizon=0 → auto-pick fee-aware horizon."""
     raw = load_ticks_csv(csv_path)
-    # ensure raw families exist for coverage note
     for col in RAW_COLUMNS:
         if col not in raw.columns:
             raw[col] = np.nan
     feat = build_features(raw)
+    mid_ltp = float(feat["ltp"].median()) if len(feat) else 0.0
+    fee_be = float(fee_be_points(mid_ltp, lots=lots))
+
+    horizon_table: list[dict[str, float | int]] = []
+    if horizon <= 0:
+        horizon, atr_pts, horizon_table = pick_fee_aware_horizon(feat["ltp"], fee_be)
+    else:
+        atr_pts = median_horizon_move(feat["ltp"], horizon)
+        horizon_table = [{"horizon": horizon, "median_abs_move": round(atr_pts, 2)}]
+
     labeled = add_labels(feat, horizon=horizon, threshold_bps=threshold_bps)
     usable = labeled.dropna(subset=["y_ret"]).copy()
     if usable.empty:
         raise SystemExit("no labeled ticks for behavior analysis")
 
-    mid_ltp = float(usable["ltp"].median())
-    fee_be = float(fee_be_points(mid_ltp, lots=lots))
     ret1 = usable["ltp"].pct_change().dropna()
     ret_vol = float(ret1.std() * 1e4) if len(ret1) else 0.0
-    # ATR proxy in points over horizon window
-    atr_proxy = float(
-        (usable["ltp"].diff().abs().rolling(horizon).mean().median() or 0.0)
-    )
-    if not np.isfinite(atr_proxy):
-        atr_proxy = 0.0
+    # refresh move on labeled rows
+    atr_pts = median_horizon_move(usable["ltp"], horizon) or atr_pts
 
     families = analyze_families(usable, usable["y_ret"])
     tops = top_feature_corrs(usable, usable["y_ret"])
@@ -462,37 +502,21 @@ def analyze_ticks(
     recipes = generate_recipes(
         families=families,
         fee_be=fee_be,
-        atr_pts=atr_proxy * max(horizon, 1) * 0.5 + atr_proxy,
-        regime_mix=regimes,
-        top_features=tops,
-    )
-    # refine atr used for math: median abs move over horizon
-    horizon_move = float(
-        (usable["ltp"].shift(-horizon) - usable["ltp"]).abs().median() or 0.0
-    )
-    if np.isfinite(horizon_move) and horizon_move > 0:
-        atr_pts = horizon_move
-    else:
-        atr_pts = max(atr_proxy * 5, 1.0)
-
-    # regenerate with better atr
-    recipes = generate_recipes(
-        families=families,
-        fee_be=fee_be,
-        atr_pts=atr_pts,
+        atr_pts=max(atr_pts, 1.0),
         regime_mix=regimes,
         top_features=tops,
     )
     trace = reason_over_behavior(
         mid_ltp=mid_ltp,
         fee_be=fee_be,
-        atr_pts=atr_pts,
+        atr_pts=max(atr_pts, 1.0),
         families=families,
         regime_mix=regimes,
     )
     predictive = [f.family for f in families if f.predictive]
     summary = (
-        f"n={len(usable)} LTP≈{mid_ltp:.0f} BE≈{fee_be:.0f}pt horizon_move≈{atr_pts:.1f}pt | "
+        f"n={len(usable)} LTP≈{mid_ltp:.0f} BE≈{fee_be:.0f}pt "
+        f"horizon={horizon}ticks move≈{atr_pts:.1f}pt | "
         f"predictive_families={predictive or ['none']} | "
         f"regimes={regimes} | recipes={[r.name for r in recipes]} | {trace.line()}"
     )
@@ -501,13 +525,15 @@ def analyze_ticks(
         mid_ltp=mid_ltp,
         fee_be_pts=fee_be,
         ret_vol=ret_vol,
-        atr_proxy_pts=atr_pts,
+        atr_proxy_pts=float(atr_pts),
         regime_mix=regimes,
         families=families,
         top_features=tops,
         recipes=recipes,
         reasoning=trace.to_dict(),
         summary=summary,
+        horizon=int(horizon),
+        horizon_table=horizon_table,
     )
 
 

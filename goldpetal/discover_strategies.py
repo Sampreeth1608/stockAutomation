@@ -355,7 +355,7 @@ def run_discovery(
     *,
     csv_path: Path,
     out_dir: Path = DEFAULT_OUT,
-    horizon: int = 20,
+    horizon: int = 0,
     threshold_bps: float = 2.0,
     train_frac: float = 0.7,
     top_k: int = 1,
@@ -367,17 +367,20 @@ def run_discovery(
     behavior = analyze_ticks(
         csv_path, horizon=horizon, threshold_bps=threshold_bps, lots=1.0
     )
+    # Train/label on the fee-aware horizon chosen by behavior analysis
+    use_horizon = int(behavior.horizon)
     behavior_path = write_behavior_report(behavior, out_dir / "behavior_report.json")
     templates = recipes_to_templates(behavior.recipes)
     print(f"behavior: {behavior.summary}", flush=True)
     print(
         f"generated recipes: {[t.name for t in templates]} "
-        f"(predictive={[f.family for f in behavior.families if f.predictive]})",
+        f"(predictive={[f.family for f in behavior.families if f.predictive]}) "
+        f"horizon={use_horizon} table={behavior.horizon_table}",
         flush=True,
     )
 
     feat = build_features(raw)
-    labeled = add_labels(feat, horizon=horizon, threshold_bps=threshold_bps)
+    labeled = add_labels(feat, horizon=use_horizon, threshold_bps=threshold_bps)
     usable = labeled.dropna(subset=FEATURE_COLUMNS + ["y_dir", "y_ret"]).copy()
     train_df, test_df = time_split(usable, train_frac=train_frac)
     if train_df["y_dir"].nunique() < 2:
@@ -468,7 +471,8 @@ def run_discovery(
     report = {
         "week_id": week,
         "csv": str(csv_path),
-        "horizon": horizon,
+        "horizon": use_horizon,
+        "horizon_table": behavior.horizon_table,
         "n_train": int(len(train_df)),
         "n_test": int(len(test_df)),
         "behavior_report": str(behavior_path),
@@ -626,7 +630,12 @@ def main() -> None:
     run_p.add_argument("--csv", default="")
     run_p.add_argument("--limit", type=int, default=None)
     run_p.add_argument("--out-dir", default=str(DEFAULT_OUT))
-    run_p.add_argument("--horizon", type=int, default=20)
+    run_p.add_argument(
+        "--horizon",
+        type=int,
+        default=0,
+        help="label horizon in ticks; 0=auto fee-aware",
+    )
     run_p.add_argument("--threshold-bps", type=float, default=2.0)
     run_p.add_argument("--train-frac", type=float, default=0.7)
     run_p.add_argument("--top-k", type=int, default=3)
@@ -637,7 +646,12 @@ def main() -> None:
     beh.add_argument("--csv", default="")
     beh.add_argument("--limit", type=int, default=None)
     beh.add_argument("--out-dir", default=str(DEFAULT_OUT))
-    beh.add_argument("--horizon", type=int, default=20)
+    beh.add_argument(
+        "--horizon",
+        type=int,
+        default=0,
+        help="label horizon in ticks; 0=auto fee-aware",
+    )
     beh.set_defaults(func=cmd_behavior)
 
     args = p.parse_args()

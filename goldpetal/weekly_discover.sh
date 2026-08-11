@@ -12,5 +12,6 @@ NOTE="week-$(date +%V)"
 exec "$PY" discover_strategies.py run \
   --out-dir data/discover \
   --top-k 3 \
+  --horizon 0 \
   --note "$NOTE" \
   "$@"

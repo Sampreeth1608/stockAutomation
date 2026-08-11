@@ -7,7 +7,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from tick_behavior import analyze_ticks, generate_recipes, write_behavior_report
+from tick_behavior import (
+    FamilyStat,
+    analyze_ticks,
+    generate_recipes,
+    pick_fee_aware_horizon,
+    write_behavior_report,
+)
 
 
 def _synth_csv(path: Path, n: int = 600) -> Path:
@@ -67,6 +73,7 @@ def test_analyze_ticks_builds_recipes(tmp_path: Path) -> None:
     assert report.fee_be_pts > 0
     assert report.families
     assert report.recipes
+    assert report.horizon >= 20
     assert "reasoning" in report.to_dict()
     assert report.reasoning.get("steps")
     path = write_behavior_report(report, tmp_path / "behavior_report.json")
@@ -75,9 +82,17 @@ def test_analyze_ticks_builds_recipes(tmp_path: Path) -> None:
     assert "ml_topfeat" in names
 
 
-def test_generate_recipes_chop() -> None:
-    from tick_behavior import FamilyStat
+def test_pick_fee_aware_horizon() -> None:
+    # synthetic: ~0.5pt/tick drift → need ~100 ticks for 50pt
+    n = 5000
+    ltp = pd.Series(np.arange(n, dtype=float) * 0.5 + 15000.0)
+    h, mv, table = pick_fee_aware_horizon(ltp, fee_be=50.0)
+    assert table
+    assert mv >= 40.0
+    assert h >= 60
 
+
+def test_generate_recipes_chop() -> None:
     families = [
         FamilyStat(
             family="book_l1",
@@ -106,6 +121,8 @@ if __name__ == "__main__":
     t = P("/tmp/tick_behavior_test")
     test_analyze_ticks_builds_recipes(t)
     print("ok analyze")
+    test_pick_fee_aware_horizon()
+    print("ok horizon")
     test_generate_recipes_chop()
     print("ok recipes")
     print("ALL test_tick_behavior OK")
