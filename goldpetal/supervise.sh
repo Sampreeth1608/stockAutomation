@@ -5,11 +5,23 @@ cd "$(dirname "$0")"
 mkdir -p data
 LOG="data/strategy_run.log"
 
-echo "[$(date '+%F %T')] supervisor starting" | tee -a "$LOG"
+# Prefer project venv, then python3 (VMs often have no bare `python`).
+if [[ -x "./venv/bin/python" ]]; then
+  PY="./venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PY="python3"
+elif command -v python >/dev/null 2>&1; then
+  PY="python"
+else
+  echo "[$(date '+%F %T')] ERROR: no python/python3/venv found" | tee -a "$LOG"
+  exit 127
+fi
+
+echo "[$(date '+%F %T')] supervisor starting (PY=$PY)" | tee -a "$LOG"
 
 while true; do
   echo "[$(date '+%F %T')] launching run_strategy.py" | tee -a "$LOG"
-  PYTHONUNBUFFERED=1 python run_strategy.py 2>&1 | tee -a "$LOG"
+  PYTHONUNBUFFERED=1 "$PY" run_strategy.py 2>&1 | tee -a "$LOG"
   code=${PIPESTATUS[0]}
   echo "[$(date '+%F %T')] run_strategy exited code=${code}; restarting in 5s" | tee -a "$LOG"
   sleep 5
