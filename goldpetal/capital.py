@@ -124,12 +124,14 @@ def load_capital(path: Path | None = None) -> CapitalPlan:
         )
     # Ensure defaults exist for any new strategy names.
     for name in DEFAULT_STRATEGIES:
-        strategies.setdefault(name, StrategyBudget(strategy=name))
+        if name not in strategies:
+            lots = 100 if name == "S12_HHHL30" else 10
+            strategies[name] = StrategyBudget(strategy=name, max_lots=lots)
     return CapitalPlan(
         total_capital_inr=float(raw.get("total_capital_inr", 500_000)),
         cash_reserve_pct=float(raw.get("cash_reserve_pct", 20)),
         daily_loss_limit_inr=float(raw.get("daily_loss_limit_inr", 10_000)),
-        max_lots_total=int(raw.get("max_lots_total", 50)),
+        max_lots_total=max(150, int(raw.get("max_lots_total", 150))),
         strategies=strategies,
         day_pnl_inr={str(k): float(v) for k, v in (raw.get("day_pnl_inr") or {}).items()},
         open_lots={str(k): int(v) for k, v in (raw.get("open_lots") or {}).items()},
