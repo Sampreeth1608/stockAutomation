@@ -29,6 +29,16 @@ def _ensure_dotenv() -> None:
         from dotenv import load_dotenv
 
         load_dotenv(env_path, override=False)
+        # Desk secrets must come from the file if present (ignore stale shell exports).
+        for key in (
+            "DESK_AUTH",
+            "DESK_PASSWORD",
+            "DESK_PASSWORD_HASH",
+            "DESK_TOTP_SECRET",
+            "DESK_TOTP_REQUIRED",
+        ):
+            # force-refresh from file via side effect of later _desk_secret_from_file
+            pass
     except Exception:
         if env_path.exists():
             for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -47,14 +57,33 @@ def _now() -> str:
     return datetime.now(IST).isoformat(timespec="seconds")
 
 
+def _desk_secret_from_file(key: str) -> str:
+    """Read a desk secret from .env file (wins over stale shell env)."""
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        k, val = raw.split("=", 1)
+        if k.strip() == key:
+            return val.strip().strip('"').strip("'")
+    return ""
+
+
 def desk_password_configured() -> bool:
     _ensure_dotenv()
-    return bool(os.getenv("DESK_PASSWORD", "").strip() or os.getenv("DESK_PASSWORD_HASH", "").strip())
+    plain = _desk_secret_from_file("DESK_PASSWORD") or os.getenv("DESK_PASSWORD", "").strip()
+    hashed = _desk_secret_from_file("DESK_PASSWORD_HASH") or os.getenv("DESK_PASSWORD_HASH", "").strip()
+    return bool(plain or hashed)
 
 
 def desk_totp_configured() -> bool:
     _ensure_dotenv()
-    return bool(os.getenv("DESK_TOTP_SECRET", "").strip())
+    return bool(
+        _desk_secret_from_file("DESK_TOTP_SECRET") or os.getenv("DESK_TOTP_SECRET", "").strip()
+    )
 
 
 def _password_hash(password: str, salt: str) -> str:
@@ -70,10 +99,13 @@ def _password_hash(password: str, salt: str) -> str:
 def verify_password(password: str) -> bool:
     """Accept DESK_PASSWORD (plain) or DESK_PASSWORD_HASH=salt:hex."""
     _ensure_dotenv()
-    plain = os.getenv("DESK_PASSWORD", "").strip()
+    # Prefer .env file so stale exported shell vars cannot break login.
+    plain = _desk_secret_from_file("DESK_PASSWORD") or os.getenv("DESK_PASSWORD", "").strip()
     if plain:
         return hmac.compare_digest(password.strip(), plain)
-    hashed = os.getenv("DESK_PASSWORD_HASH", "").strip()
+    hashed = _desk_secret_from_file("DESK_PASSWORD_HASH") or os.getenv(
+        "DESK_PASSWORD_HASH", ""
+    ).strip()
     if not hashed or ":" not in hashed:
         return False
     salt, expect = hashed.split(":", 1)

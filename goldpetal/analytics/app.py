@@ -107,14 +107,16 @@ def require_desk_login() -> bool:
             "Set one, or DESK_AUTH=false for trusted localhost-only use."
         )
         return False
-    pw = st.text_input("Desk password", type="password", key="desk_login_pw")
-    if st.button("Unlock desk", type="primary"):
-        if verify_password(pw):
+    with st.form("desk_login_form"):
+        pw = st.text_input("Desk password", type="password")
+        submitted = st.form_submit_button("Unlock desk", type="primary")
+    if submitted:
+        if verify_password(pw or ""):
             st.session_state["desk_authed"] = True
             audit("desk_login", ok=True)
             st.rerun()
         audit("desk_login", ok=False)
-        st.error("Wrong password.")
+        st.error("Wrong password. Use the exact DESK_PASSWORD from ~/goldpetal/.env")
     return False
 
 
