@@ -20,7 +20,7 @@ def test_long_near_close_and_exit_next_open(tmp_path: Path | None = None) -> Non
     if state.exists():
         state.unlink()
     s = HhhlDayOvernightStrategy(
-        HhhlDayConfig(min_range=5, entry_minutes_before_close=1, exit_minutes_after_open=5),
+        HhhlDayConfig(min_range=5, entry_minutes_before_close=15, exit_minutes_after_open=5),
         state_path=state,
     )
     # Seed previous day manually
@@ -36,8 +36,8 @@ def test_long_near_close_and_exit_next_open(tmp_path: Path | None = None) -> Non
         r = s.on_tick(_ts("2026-08-11", t), px)
         assert r is None or r.action in {"BUY", "SHORT", "CLOSE"}
 
-    # Last minute before close (23:29–23:30)
-    buy = s.on_tick(_ts("2026-08-11", "23:29"), 15260)
+    # Last 15 minutes before close (23:15–23:30)
+    buy = s.on_tick(_ts("2026-08-11", "23:20"), 15260)
     assert buy is not None and buy.action == "BUY"
     assert s.position == "long"
     assert "same-day" in (buy.reason or "")
@@ -55,7 +55,7 @@ def test_no_entry_outside_window() -> None:
     if state.exists():
         state.unlink()
     s = HhhlDayOvernightStrategy(
-        HhhlDayConfig(min_range=5, entry_minutes_before_close=1),
+        HhhlDayConfig(min_range=5, entry_minutes_before_close=15),
         state_path=state,
     )
     s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)

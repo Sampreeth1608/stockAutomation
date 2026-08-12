@@ -3,7 +3,7 @@
 Same *same-candle* rule as S12, on the **trading day** vs **previous day**:
 
   During the day, if **today's high > yesterday's high**, watch the day candle.
-  In the **last minute(s) before market close**, if close > open → LONG overnight.
+  In the **last 15 minutes before market close** (configurable), if close > open → LONG overnight.
   Short: today's low < yesterday's low, last-minute close < open → SHORT overnight.
   EXIT after next open (delivery-style).
 
@@ -46,8 +46,8 @@ class DayOhlc:
 @dataclass
 class HhhlDayConfig:
     min_range: float = 5.0
-    # Confirm in the last N minutes of the day candle (default: last 1 minute).
-    entry_minutes_before_close: int = 1
+    # Confirm in the last N minutes of the day candle (default: last 15 minutes).
+    entry_minutes_before_close: int = 15
     exit_minutes_after_open: int = 5
     market_open: str = "09:00"
     market_close: str = "23:30"
@@ -369,7 +369,7 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         pass
     cfg = HhhlDayConfig(
         min_range=float(os.getenv("S13_MIN_RANGE", "5")),
-        entry_minutes_before_close=int(os.getenv("S13_ENTRY_MINUTES_BEFORE_CLOSE", "1")),
+        entry_minutes_before_close=int(os.getenv("S13_ENTRY_MINUTES_BEFORE_CLOSE", "15")),
         exit_minutes_after_open=int(os.getenv("S13_EXIT_MINUTES_AFTER_OPEN", "5")),
         market_open=os.getenv("MARKET_OPEN", "09:00"),
         market_close=os.getenv("MARKET_CLOSE", "23:30"),

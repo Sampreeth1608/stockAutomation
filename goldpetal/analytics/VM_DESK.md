@@ -38,14 +38,14 @@ tmux kill-session -t gp-desk 2>/dev/null || true
 ## S13 daily HH/LL overnight (paper)
 
 Same-day rule as S12: if today's high > yesterday's high, watch the day; in the
-**last minute before MARKET_CLOSE**, if close > open → long overnight (exit next open).
+**last 15 minutes before MARKET_CLOSE**, if close > open → long overnight (exit next open).
 Short is the mirror (LL + red close).
 
 ```bash
 # in .env
 ENABLE_S13=true
 S13_MIN_RANGE=5
-S13_ENTRY_MINUTES_BEFORE_CLOSE=1
+S13_ENTRY_MINUTES_BEFORE_CLOSE=15
 S13_EXIT_MINUTES_AFTER_OPEN=5
 ```
 
