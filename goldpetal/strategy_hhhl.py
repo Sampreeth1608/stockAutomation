@@ -11,7 +11,7 @@ Exits (still on last-minute of a later candle):
   SHORT exit: low  > prev_low  AND close > open
 
 Defaults: 30m bars, min_range=5, no_flip=True.
-Previous candle is seeded from ticks.db so the first live bar can signal.
+Previous + in-progress candle OHLC seeded from ticks.db.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class HhhlConfig:
 class HhhlCandleStrategy:
     name = "S12_HHHL30"
 
-    def __init__(self, cfg: HhhlConfig | None = None) -> None:
+    def __init__(self, cfg: HhhlConfig | None = None, *, seed: bool = True) -> None:
         self.cfg = cfg or HhhlConfig()
         self.position: Position = "flat"
         self.entry_price: float | None = None
@@ -51,9 +51,11 @@ class HhhlCandleStrategy:
         self._bar_key: datetime | None = None
         self._bar_o = self._bar_h = self._bar_l = self._bar_c = None
         self._bar_n = 0
+        # True only after we emitted a BUY/SHORT/CLOSE for this candle.
         self._decided_this_bar = False
-        self._watching: str | None = None  # "hh" | "ll" | None
-        self.seed_prev_from_ticks()
+        self._watching: str | None = None  # "hh" | "ll" | "both" | None
+        if seed:
+            self.seed_from_ticks()
 
     @property
     def status_line(self) -> str:
@@ -66,7 +68,9 @@ class HhhlCandleStrategy:
         return (
             f"TF={c.bar_minutes}m min_range={c.min_range:.0f} "
             f"confirm={c.confirm_minutes}m no_flip={c.no_flip} "
-            f"L={c.allow_long} S={c.allow_short} {prev} pos={self.position}"
+            f"L={c.allow_long} S={c.allow_short} {prev} "
+            f"watch={self._watching or '-'} skip={self.last_skip or '-'} "
+            f"pos={self.position}"
         )
 
     def _floor_bar(self, ts: datetime) -> datetime:
@@ -76,10 +80,8 @@ class HhhlCandleStrategy:
         block = (mins // max(1, self.cfg.bar_minutes)) * max(1, self.cfg.bar_minutes)
         return midnight + timedelta(minutes=block)
 
-    def seed_prev_from_ticks(self, db_path: Path | None = None) -> None:
-        """Load last *completed* S12 bar so the current 30m candle can signal."""
-        if self.prev_h is not None:
-            return
+    def seed_from_ticks(self, db_path: Path | None = None) -> None:
+        """Seed prev completed bar + hydrate the in-progress current bar from DB."""
         try:
             from mtf_bars import build_rich_bars, load_tick_rows
 
@@ -94,6 +96,7 @@ class HhhlCandleStrategy:
             now = datetime.now(IST)
             cur_key = self._floor_bar(now)
             completed = []
+            current = None
             for b in bars:
                 try:
                     bt = datetime.strptime(str(b.time)[:19], "%Y-%m-%d %H:%M:%S").replace(
@@ -103,15 +106,29 @@ class HhhlCandleStrategy:
                     continue
                 if bt < cur_key:
                     completed.append(b)
-            if not completed:
-                return
-            b = completed[-1]
-            self.prev_o = float(b.open)
-            self.prev_h = float(b.high)
-            self.prev_l = float(b.low)
-            self.prev_c = float(b.close)
+                elif bt == cur_key:
+                    current = b
+            if self.prev_h is None and completed:
+                b = completed[-1]
+                self.prev_o = float(b.open)
+                self.prev_h = float(b.high)
+                self.prev_l = float(b.low)
+                self.prev_c = float(b.close)
+            if self._bar_key is None and current is not None:
+                self._bar_key = cur_key
+                self._bar_o = float(current.open)
+                self._bar_h = float(current.high)
+                self._bar_l = float(current.low)
+                self._bar_c = float(current.close)
+                self._bar_n = max(1, int(getattr(current, "n_ticks", 1) or 1))
+                self._decided_this_bar = False
+                self._update_watching()
         except Exception:
             return
+
+    def seed_prev_from_ticks(self, db_path: Path | None = None) -> None:
+        """Back-compat alias."""
+        self.seed_from_ticks(db_path)
 
     def _in_confirm_window(self, now: datetime, bar_key: datetime) -> bool:
         """True in the last `confirm_minutes` of this candle."""
@@ -127,13 +144,16 @@ class HhhlCandleStrategy:
             return
         saw_hh = float(self._bar_h) > float(self.prev_h)
         saw_ll = float(self._bar_l) < float(self.prev_l)
-        if saw_hh and not saw_ll:
-            self._watching = "hh"
-        elif saw_ll and not saw_hh:
-            self._watching = "ll"
-        elif saw_hh and saw_ll:
+        if saw_hh and saw_ll:
             self._watching = "both"
-        # keep prior watch flag if only one side appeared earlier in the bar
+        elif saw_hh:
+            self._watching = "hh"
+        elif saw_ll:
+            self._watching = "ll"
+
+    def release_decision_lock(self) -> None:
+        """Allow another confirm-window attempt (e.g. after entry gate reject)."""
+        self._decided_this_bar = False
 
     def on_tick(
         self, now: datetime, ltp: float, message: dict[str, Any] | None = None
@@ -165,7 +185,8 @@ class HhhlCandleStrategy:
                     float(self._bar_l or px),
                     float(self._bar_c or px),
                 )
-                self._decided_this_bar = True
+                if result is not None:
+                    self._decided_this_bar = True
             self.prev_o = float(self._bar_o or px)
             self.prev_h = float(self._bar_h or px)
             self.prev_l = float(self._bar_l or px)
@@ -194,14 +215,16 @@ class HhhlCandleStrategy:
             self.last_skip = f"watching={self._watching or 'none'}"
             return None
 
-        # Last minute(s) of *this* candle: confirm close vs open
-        self._decided_this_bar = True
-        return self._decide(
+        # Last minute(s): re-check every tick until we get a real signal.
+        result = self._decide(
             float(self._bar_o or px),
             float(self._bar_h),
             float(self._bar_l),
             float(self._bar_c or px),
         )
+        if result is not None:
+            self._decided_this_bar = True
+        return result
 
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
         """Offline / paper-sim path from a completed OHLC row."""
@@ -331,7 +354,13 @@ class HhhlCandleStrategy:
                     f"L={l:.1f}<prevL={pl:.1f} C={c:.1f}<O={o:.1f}"
                 ),
             )
-        self.last_skip = "no_signal"
+        # Helpful skip while confirming
+        if self._watching == "hh" and not (c > o):
+            self.last_skip = "hh_but_not_green_yet"
+        elif self._watching == "ll" and not (c < o):
+            self.last_skip = "ll_but_not_red_yet"
+        else:
+            self.last_skip = "no_signal"
         return None
 
 

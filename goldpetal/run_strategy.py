@@ -1107,19 +1107,45 @@ def run_once(
         logger.info(line)
 
     def emit_s12_if_changed(now: datetime, message: dict) -> None:
-        """S12: HH/LL candle breakout on bar close."""
+        """S12: same-candle HH/LL confirm in last minute of the 30m bar."""
         if not _strategy_active(strategy_s12.name):
             return
         if latest["cmp"] is None:
             return
         result = strategy_s12.on_tick(now, float(latest["cmp"]), message)
+        # Surface why S12 is quiet during confirm window / watch state
+        skip = getattr(strategy_s12, "last_skip", None)
+        watching = getattr(strategy_s12, "_watching", None)
+        if (
+            result is None
+            and state["tick_count"] % 50 == 0
+            and (watching or (skip and "watching" not in str(skip)))
+        ):
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] S12_HHHL30 idle "
+                f"watch={watching} skip={skip} "
+                f"prevH={strategy_s12.prev_h} prevL={strategy_s12.prev_l} "
+                f"barH={strategy_s12._bar_h} barL={strategy_s12._bar_l} "
+                f"barO={strategy_s12._bar_o} barC={strategy_s12._bar_c}"
+            )
+            print(line, flush=True)
+            logger.info(line)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s12.name, regime_det.last.regime)
+            ok_enter, why = _may_enter(strategy_s12.name, regime_det.last.regime)
             if not ok_enter:
                 strategy_s12.position = "flat"
                 strategy_s12.entry_price = None
+                if hasattr(strategy_s12, "release_decision_lock"):
+                    strategy_s12.release_decision_lock()
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] S12_HHHL30 "
+                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
                 return
         if (
             strategy_s12.position != "flat"
