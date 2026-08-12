@@ -58,6 +58,11 @@ Or use the in-app **Sync from VM** button.
 
 Opens `http://localhost:8501`.
 
+### Fees on the desk
+Strategies can keep `IGNORE_FEES=true` (ride freely / no fee gates).  
+Closed trades on **Overview** and **Trades** always show Angel **charges + tax** after the fact.  
+Sidebar **Lots (fee display)** scales the board (try `100` for your size) — display only, does not change the VM bot.
+
 If sync still shows Permission denied: `export REMOTE_USER=sampreeth1608` then re-run sync. Debug with `GP_SYNC_DEBUG=1 ./scripts/sync_analytics_mac.sh --skip-db`.
 
 ## Tabs (old panel → new desk)
