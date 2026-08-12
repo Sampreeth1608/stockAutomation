@@ -42,21 +42,18 @@ gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c \
   --command 'ls -la /home/sampreeth1608/goldpetal/data | head'
 ```
 
-## Daily (one click)
+## Daily (one click — fast)
 
-**Finder:** double-click `goldpetal/scripts/open_desk_mac.command`  
-(first time only: `chmod +x scripts/open_desk_mac.command scripts/open_desk_mac.sh`)
+**Finder:** double-click `scripts/open_desk_mac.command`  
+→ light sync (no ticks.db) + Streamlit in a few seconds.
 
-**Terminal:**
+**Full ticks.db sync** (slow, only when you need fresh trade/tick history):
 
 ```bash
-cd ~/stockAutomation/goldpetal
-./scripts/open_desk_mac.sh
+./scripts/open_desk_mac.sh --full
 ```
 
-That pulls git, syncs the VM snapshot, and opens Streamlit at `http://localhost:8501`.
-
-Or use the in-app **Sync from VM** button after the desk is already open.
+Or with the desk already open: sidebar **Sync from VM** with **Light sync** checked (default daily). Uncheck light sync only when you need a new ticks.db.
 
 ### Fees on the desk
 Strategies can keep `IGNORE_FEES=true` (ride freely / no fee gates).  
