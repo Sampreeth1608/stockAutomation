@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import analytics.desk_auth as desk_auth
 from analytics.desk_auth import make_password_hash, verify_password
 from analytics.env_bridge import (
     apply_env_patch,
@@ -65,6 +66,35 @@ def test_password_hash_roundtrip() -> None:
     os.environ.pop("DESK_PASSWORD_HASH", None)
 
 
+def test_plain_password_from_env_path(tmp_path: Path, monkeypatch=None) -> None:
+    env = tmp_path / ".env"
+    env.write_text(
+        'DESK_PASSWORD="exact-from-file"\nDESK_AUTH=true\n',
+        encoding="utf-8",
+    )
+    desk_auth._RESOLVED_ENV_PATH = None
+    desk_auth._ENV_LOADED = False
+    os.environ["DESK_ENV_PATH"] = str(env)
+    os.environ.pop("DESK_PASSWORD", None)
+    os.environ.pop("DESK_PASSWORD_HASH", None)
+    assert verify_password("exact-from-file")
+    assert not verify_password("wrong")
+    assert not verify_password("")
+    os.environ.pop("DESK_ENV_PATH", None)
+    desk_auth._RESOLVED_ENV_PATH = None
+    desk_auth._ENV_LOADED = False
+
+
+def test_env_comment_and_last_wins(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text(
+        "DESK_PASSWORD=first\nDESK_PASSWORD=second # trailing note\n",
+        encoding="utf-8",
+    )
+    parsed = desk_auth._parse_env_file(env)
+    assert parsed["DESK_PASSWORD"] == "second"
+
+
 if __name__ == "__main__":
     from tempfile import TemporaryDirectory
 
@@ -78,6 +108,12 @@ if __name__ == "__main__":
         (root / "e3").mkdir()
         test_apply_s11_pack_path(root / "e3")
         print("ok s11")
+        (root / "e4").mkdir()
+        test_plain_password_from_env_path(root / "e4")
+        print("ok plain path")
+        (root / "e5").mkdir()
+        test_env_comment_and_last_wins(root / "e5")
+        print("ok parse")
     test_password_hash_roundtrip()
     print("ok password")
     print("ALL test_desk_ops OK")

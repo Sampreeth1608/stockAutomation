@@ -53,6 +53,7 @@ from analytics.desk_auth import (  # noqa: E402
     auth_required,
     dangerous_requires_totp,
     desk_password_configured,
+    desk_password_hint,
     desk_totp_configured,
     verify_password,
     verify_totp,
@@ -101,22 +102,48 @@ def require_desk_login() -> bool:
         return True
     st.title("Gold Petal desk — login")
     st.caption("SSH tunnel already limits network access. Password adds an operator gate.")
+    hint = desk_password_hint()
+    st.caption(
+        f"Secrets file: `{hint['env_path']}` · mode={hint['mode']} · "
+        f"password_len={hint['password_len']}"
+    )
     if not desk_password_configured():
         st.error(
             "DESK_AUTH is on but DESK_PASSWORD / DESK_PASSWORD_HASH is not set in .env. "
             "Set one, or DESK_AUTH=false for trusted localhost-only use."
         )
         return False
-    with st.form("desk_login_form"):
-        pw = st.text_input("Desk password", type="password")
-        submitted = st.form_submit_button("Unlock desk", type="primary")
-    if submitted:
-        if verify_password(pw or ""):
+    # Prefer non-form inputs: browser password managers often fill the visual
+    # field without updating Streamlit form state (submit then looks "wrong").
+    pw = st.text_input("Desk password", type="password", key="desk_login_pw")
+    if st.button("Unlock desk", type="primary", key="desk_login_btn"):
+        typed = (pw or "").strip()
+        if not typed:
+            st.error(
+                "Password field was empty. Type the password manually "
+                "(autofill often does not reach Streamlit)."
+            )
+            audit("desk_login", ok=False, detail={"reason": "empty"})
+            return False
+        if verify_password(typed):
             st.session_state["desk_authed"] = True
-            audit("desk_login", ok=True)
+            audit("desk_login", ok=True, detail={"env_path": hint["env_path"]})
             st.rerun()
-        audit("desk_login", ok=False)
-        st.error("Wrong password. Use the exact DESK_PASSWORD from ~/goldpetal/.env")
+        audit(
+            "desk_login",
+            ok=False,
+            detail={
+                "reason": "mismatch",
+                "typed_len": len(typed),
+                "expect_len": hint["password_len"],
+                "env_path": hint["env_path"],
+            },
+        )
+        st.error(
+            f"Wrong password (typed {len(typed)} chars, .env expects "
+            f"{hint['password_len']}). Value must match DESK_PASSWORD in "
+            f"`{hint['env_path']}` — type it; do not rely on autofill."
+        )
     return False
 
 

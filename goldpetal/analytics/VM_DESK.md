@@ -12,7 +12,7 @@ On the VM desk you can:
 - **Login** — set `DESK_PASSWORD` (and optional `DESK_TOTP_SECRET` for dangerous actions)
 
 ```bash
-# .env
+# .env  (must live where the desk reads it — usually ~/goldpetal/.env)
 DESK_AUTH=true
 DESK_PASSWORD=your-strong-password
 # optional OTP (python):
@@ -22,8 +22,15 @@ DESK_PASSWORD=your-strong-password
 # DESK_TOTP_SECRET=...
 ```
 
+If login fails: the login screen shows `Secrets file:` and `password_len`. Type the password
+manually (browser autofill often does not update Streamlit). Confirm you are editing the
+same path shown on screen (or set `GP_ENV_PATH=~/goldpetal/.env`). Instant unblock:
+`DESK_AUTH=false` then restart the desk.
+
 Restart desk after pulling:
 ```bash
+cd ~/goldpetal
+git pull
 tmux kill-session -t gp-desk 2>/dev/null || true
 ./scripts/run_desk_vm.sh
 ```
