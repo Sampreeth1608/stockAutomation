@@ -46,6 +46,7 @@ STRATEGIES = [
     "S9_STATE30",
     "S10_LEGACY30",
     "S11_DISCOVERED",
+    "S12_HHHL30",
 ]
 
 

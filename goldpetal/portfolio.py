@@ -22,11 +22,12 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S9_STATE30",
         "S10_LEGACY30",
         "S11_DISCOVERED",
+        "S12_HHHL30",
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
     # 100–200pt Gold drift is not blocked while the short-window regime says QUIET.
-    "CHOP": {"S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG", "S10_LEGACY30"},
+    "CHOP": {"S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG", "S10_LEGACY30", "S12_HHHL30"},
     "QUIET": {
         "S1_NETDELTA",
         "S2_BALANCE",
@@ -37,6 +38,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S9_STATE30",
         "S10_LEGACY30",
         "S11_DISCOVERED",
+        "S12_HHHL30",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -50,6 +52,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S9_STATE30",
         "S10_LEGACY30",
         "S11_DISCOVERED",
+        "S12_HHHL30",
     },
 }
 
@@ -116,6 +119,9 @@ def portfolio_from_env() -> PortfolioConfig:
     # S11 multi-model discovered pack — OFF until weekend proposal approved
     if os.getenv("ENABLE_S11", "false").strip().lower() in {"1", "true", "yes", "y"}:
         enabled.add("S11_DISCOVERED")
+    # S12 HH/LL candle breakout (30m default) — paper until proven
+    if os.getenv("ENABLE_S12", "false").strip().lower() in {"1", "true", "yes", "y"}:
+        enabled.add("S12_HHHL30")
 
     # If user set none of the vars oddly empty, fall back
     if not enabled:

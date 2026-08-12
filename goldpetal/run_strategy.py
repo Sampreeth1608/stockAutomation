@@ -34,6 +34,7 @@ from strategy_net_zigzag import (
     s10_legacy30_from_env,
 )
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
+from strategy_hhhl import HhhlCandleStrategy, hhhl_from_env
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
@@ -160,6 +161,7 @@ def run_once(
     s9_journal,
     strategy_s10: NetZigzagStrategy,
     strategy_s11: DiscoveredStrategy,
+    strategy_s12: HhhlCandleStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -314,6 +316,12 @@ def run_once(
         f"S11      : multi-model discover "
         f"[{'ON' if portfolio.is_enabled(strategy_s11.name) else 'OFF'}] "
         f"{strategy_s11.status_line}",
+        flush=True,
+    )
+    print(
+        f"S12      : HH/LL candle breakout "
+        f"[{'ON' if portfolio.is_enabled(strategy_s12.name) else 'OFF'}] "
+        f"{strategy_s12.status_line}",
         flush=True,
     )
     live_ok, live_why = is_live_mode_allowed()
@@ -1034,6 +1042,58 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s12_if_changed(now: datetime, message: dict) -> None:
+        """S12: HH/LL candle breakout on bar close."""
+        if not portfolio.is_enabled(strategy_s12.name):
+            return
+        if latest["cmp"] is None:
+            return
+        result = strategy_s12.on_tick(now, float(latest["cmp"]), message)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = _may_enter(strategy_s12.name, regime_det.last.regime)
+            if not ok_enter:
+                strategy_s12.position = "flat"
+                strategy_s12.entry_price = None
+                return
+        if (
+            strategy_s12.position != "flat"
+            and portfolio.should_flatten(strategy_s12.name, regime_det.last.regime)
+            and result.action != "CLOSE"
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy_s12.position = "flat"
+            strategy_s12.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
+            )
+        _record_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            strategy=strategy_s12.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s12.name} "
+            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+            f"=> {result.action} (pos={strategy_s12.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -1090,7 +1150,8 @@ def run_once(
                     f"s6={strategy_s6.position} s8={strategy_s8.position}"
                     f"/{strategy_s8.bias} s9={strategy_s9.position}"
                     f"/{strategy_s9.last_label} s10={strategy_s10.position}"
-                    f"/{strategy_s10.bias} s11={strategy_s11.position}{s3_extra}"
+                    f"/{strategy_s10.bias} s11={strategy_s11.position} "
+                    f"s12={strategy_s12.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -1113,6 +1174,8 @@ def run_once(
             emit_s9_if_changed(now, message)
             # S10: legacy 30m always zigzag (+₹42k MTF paper path)
             emit_s10_if_changed(now, message)
+            # S12: HH/LL candle breakout
+            emit_s12_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -1174,6 +1237,7 @@ def main() -> None:
     s9_journal = s9_journal_from_env()
     strategy_s10 = s10_legacy30_from_env()
     strategy_s11 = discovered_from_env()
+    strategy_s12 = hhhl_from_env()
     portfolio = portfolio_from_env()
     regime_det = RegimeDetector(window=60)
     init_db()
@@ -1188,9 +1252,10 @@ def main() -> None:
     print(f"S9 journal: {s9_journal.db_path} enabled={s9_journal.enabled}", flush=True)
     print(f"S10_LEGACY30: {strategy_s10.status_line}", flush=True)
     print(f"S11_DISCOVERED: {strategy_s11.status_line}", flush=True)
+    print(f"S12_HHHL30: {strategy_s12.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8/S9/S10/S11 in .env)",
+        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8/S9/S10/S11/S12 in .env)",
         flush=True,
     )
 
@@ -1217,6 +1282,7 @@ def main() -> None:
                 s9_journal,
                 strategy_s10,
                 strategy_s11,
+                strategy_s12,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -1239,6 +1305,7 @@ def main() -> None:
             f"s9={strategy_s9.position}/{strategy_s9.last_label} "
             f"s10={strategy_s10.position}/{strategy_s10.bias} "
             f"s11={strategy_s11.position} "
+            f"s12={strategy_s12.position} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )
