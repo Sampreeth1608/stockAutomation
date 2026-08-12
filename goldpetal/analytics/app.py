@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Gold Petal Mac desk — full control-panel replacement (runs on Mac only).
+"""Gold Petal research & control desk (Streamlit).
 
-Covers: PnL, trades, signals, ticks summary, capital, weekend proposals
-(approve/reject via VM), emergency/trading switches, ML/discovery, reasoning.
+Preferred: run ON the trading VM (local data/, no Mac sync):
+  ./scripts/run_desk_vm.sh
 
-  ./scripts/sync_analytics_mac.sh
-  streamlit run analytics/app.py
-
-Writes (approve / emergency) go to the GCP VM over gcloud ssh — the bot stays
-the source of truth; this app never needs to run on the trading VM.
+Legacy Mac snapshot mode still works with analytics_mac + gcloud sync.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from datetime import date
@@ -26,6 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from analytics.local_bridge import (  # noqa: E402
+    decide_proposal_local,
+    desk_data_dir,
+    save_capital_local,
+    set_control_local,
+)
 from analytics.vm_bridge import (  # noqa: E402
     VmConfig,
     decide_proposal_remote,
@@ -34,20 +37,46 @@ from analytics.vm_bridge import (  # noqa: E402
     sync_snapshot,
 )
 
-DEFAULT_DATA = ROOT / "data" / "analytics_mac"
+DEFAULT_DATA = desk_data_dir()
+LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "yes", "y"} or (
+    DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
+)
+
+# Slim paper set (S4/S5/S8/S11/S12)
 STRATEGIES = [
-    "S1_NETDELTA",
-    "S2_BALANCE",
-    "S3_ML",
     "S4_OVERNIGHT",
     "S5_MINEDGE",
-    "S6_MIN30",
     "S8_NET_ZIGZAG",
-    "S9_STATE30",
-    "S10_LEGACY30",
     "S11_DISCOVERED",
     "S12_HHHL30",
 ]
+
+
+def decide_proposal(pid: str, decision: str, note: str = "") -> dict:
+    if LOCAL_DESK:
+        try:
+            return decide_proposal_local(pid, decision, note=note)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return decide_proposal_remote(pid, decision, note=note)
+
+
+def set_control(**kwargs):  # type: ignore[no-untyped-def]
+    if LOCAL_DESK:
+        try:
+            return set_control_local(**kwargs)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return set_control_remote(**kwargs)
+
+
+def save_capital(payload: dict) -> dict:
+    if LOCAL_DESK:
+        try:
+            return save_capital_local(payload)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return save_capital_remote(payload)
 
 
 def data_dir() -> Path:
@@ -301,7 +330,7 @@ def tab_proposals(dd: Path) -> None:
             if b1.button("Approve → paper", key=f"ap_{p['id']}", type="primary"):
                 if p.get("safety_ok") is False:
                     st.warning("safety_ok=False — only approve if you accept the risk.")
-                res = decide_proposal_remote(p["id"], "approved_paper", note=note)
+                res = decide_proposal(p["id"], "approved_paper", note=note)
                 if res.get("ok"):
                     st.success(
                         f"Approved paper: {res.get('strategy')}. "
@@ -317,14 +346,14 @@ def tab_proposals(dd: Path) -> None:
                     st.session_state[f"live_confirm_{p['id']}"] = True
                     st.warning("Click again to confirm LIVE approve.")
                 else:
-                    res = decide_proposal_remote(p["id"], "approved_live", note=note)
+                    res = decide_proposal(p["id"], "approved_live", note=note)
                     st.session_state[f"live_confirm_{p['id']}"] = False
                     if res.get("ok"):
                         st.success("Marked live-approved (still locked until unlock + DRY_RUN=false).")
                     else:
                         st.error(res.get("error") or res)
             if b3.button("Reject", key=f"rj_{p['id']}"):
-                res = decide_proposal_remote(p["id"], "rejected", note=note)
+                res = decide_proposal(p["id"], "rejected", note=note)
                 if res.get("ok"):
                     st.success("Rejected on VM.")
                     st.cache_data.clear()
@@ -343,28 +372,28 @@ def tab_control(dd: Path) -> None:
 
     c1, c2, c3 = st.columns(3)
     if c1.button("EMERGENCY OFF", type="primary"):
-        res = set_control_remote(emergency_off=True)
+        res = set_control(emergency_off=True)
         st.write(res)
     if c2.button("Clear emergency"):
-        res = set_control_remote(emergency_off=False)
+        res = set_control(emergency_off=False)
         st.write(res)
     if c3.button("Pause trading"):
-        res = set_control_remote(trading_enabled=False)
+        res = set_control(trading_enabled=False)
         st.write(res)
 
     d1, d2, d3 = st.columns(3)
     if d1.button("Resume trading"):
-        res = set_control_remote(trading_enabled=True)
+        res = set_control(trading_enabled=True)
         st.write(res)
     if d2.button("Unlock live (dangerous)"):
         st.session_state["unlock_arm"] = True
         st.warning("Click Confirm unlock next.")
     if d3.button("Confirm unlock") and st.session_state.get("unlock_arm"):
-        res = set_control_remote(live_unlocked=True)
+        res = set_control(live_unlocked=True)
         st.session_state["unlock_arm"] = False
         st.write(res)
     if st.button("Lock live"):
-        res = set_control_remote(live_unlocked=False)
+        res = set_control(live_unlocked=False)
         st.write(res)
 
     st.caption("After control changes: Sync again to refresh the snapshot.")
@@ -407,7 +436,7 @@ def tab_capital(dd: Path) -> None:
             "max_lots_total": int(maxlots),
             "strategies": strategies,
         }
-        res = save_capital_remote(payload)
+        res = save_capital(payload)
         if res.get("ok"):
             st.success("Capital saved on VM.")
         else:
@@ -557,61 +586,64 @@ def main() -> None:
     inject_style()
 
     st.sidebar.title("Gold Petal desk")
-    st.sidebar.caption("Mac UI · VM is source of truth")
+    if LOCAL_DESK:
+        st.sidebar.caption("VM local · live data/ · no Mac sync")
+    else:
+        st.sidebar.caption("Mac snapshot · sync from VM")
     dd = Path(
         st.sidebar.text_input("Data folder", value=str(DEFAULT_DATA))
     ).expanduser()
     st.session_state["data_dir"] = str(dd)
     db = dd / "ticks.db"
 
-    cfg = VmConfig.from_env()
-    st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
-    st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
-    cfg = VmConfig(
-        vm=st.session_state.get("vm_name", cfg.vm),
-        zone=st.session_state.get("vm_zone", cfg.zone),
-        remote_dir=cfg.remote_dir,
-    )
-
-    skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=False)
     lot_size = float(
         st.sidebar.number_input(
             "Lots (fee display)",
             min_value=1.0,
-            value=1.0,
+            value=100.0 if LOCAL_DESK else 1.0,
             step=1.0,
-            help="Scales gross PnL and Angel turnover fees for the desk. "
-            "Does not change the VM bot.",
+            help="Scales gross PnL and Angel fees on the desk display.",
         )
     )
     st.sidebar.caption(
-        "IGNORE_FEES only affects live gates. Closed trades always show fees+tax here."
+        "IGNORE_FEES rides freely. Closed trades always show fees+tax here."
     )
-    if st.sidebar.button("Sync from VM", type="primary"):
-        with st.spinner("Syncing…"):
-            # temporarily set env for bridge
-            import os
 
-            os.environ["GP_VM"] = cfg.vm
-            os.environ["GP_ZONE"] = cfg.zone
-            code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
-        st.sidebar.code(out[-2000:] if out else f"exit {code}")
-        st.cache_data.clear()
-        if code == 0:
-            st.sidebar.success("Synced")
-        else:
-            st.sidebar.error(f"sync exit {code}")
+    if LOCAL_DESK:
+        if st.sidebar.button("Refresh", type="primary"):
+            st.cache_data.clear()
+            st.sidebar.success("Cache cleared")
+    else:
+        cfg = VmConfig.from_env()
+        st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
+        st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
+        cfg = VmConfig(
+            vm=st.session_state.get("vm_name", cfg.vm),
+            zone=st.session_state.get("vm_zone", cfg.zone),
+            remote_dir=cfg.remote_dir,
+        )
+        skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=True)
+        if st.sidebar.button("Sync from VM", type="primary"):
+            with st.spinner("Syncing…"):
+                os.environ["GP_VM"] = cfg.vm
+                os.environ["GP_ZONE"] = cfg.zone
+                code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
+            st.sidebar.code(out[-2000:] if out else f"exit {code}")
+            st.cache_data.clear()
+            if code == 0:
+                st.sidebar.success("Synced")
+            else:
+                st.sidebar.error(f"sync exit {code}")
 
     if st.sidebar.button("Clear cache"):
         st.cache_data.clear()
 
     st.title("Gold Petal research & control desk")
-    st.caption(
-        f"Local snapshot · approvals/emergency push to {cfg.vm} · {date.today().isoformat()}"
-    )
+    mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
+    st.caption(f"{mode} · strategies S4/S5/S8/S11/S12 · {date.today().isoformat()}")
 
     if not dd.exists():
-        st.warning("Run **Sync from VM** in the sidebar first.")
+        st.warning("Data folder missing.")
         return
 
     (

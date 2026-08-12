@@ -1223,25 +1223,34 @@ def run_once(
 
 def main() -> None:
     stop_flag = {"stop": False}
-    strategy_s1 = PressureStrategy()
-    strategy_s2 = balance_from_env()
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-    strategy_s3 = ml_strategy_from_env()
-    strategy_s4 = overnight_from_env()
-    strategy_s5 = minedge_from_env()
-    strategy_s6 = min30_from_env()
-    strategy_s8 = net_zigzag_from_env()
-    zigzag_rec = recorder_from_env()
-    zigzag_rec.record_params(strategy_s8.cfg)
-    strategy_s9 = state_s9_from_env()
-    s9_journal = s9_journal_from_env()
-    strategy_s10 = s10_legacy30_from_env()
-    strategy_s11 = discovered_from_env()
-    strategy_s12 = hhhl_from_env()
     portfolio = portfolio_from_env()
+    from strategy_disabled import DisabledStrategy
+
+    def _load(name: str, factory):
+        if portfolio.is_enabled(name):
+            return factory()
+        return DisabledStrategy(name)
+
+    strategy_s1 = _load("S1_NETDELTA", PressureStrategy)
+    strategy_s2 = _load("S2_BALANCE", balance_from_env)
+    strategy_s3 = _load("S3_ML", ml_strategy_from_env)
+    strategy_s4 = _load("S4_OVERNIGHT", overnight_from_env)
+    strategy_s5 = _load("S5_MINEDGE", minedge_from_env)
+    strategy_s6 = _load("S6_MIN30", min30_from_env)
+    strategy_s8 = _load("S8_NET_ZIGZAG", net_zigzag_from_env)
+    zigzag_rec = recorder_from_env()
+    if portfolio.is_enabled("S8_NET_ZIGZAG") and hasattr(strategy_s8, "cfg"):
+        zigzag_rec.record_params(strategy_s8.cfg)
+    strategy_s9 = _load("S9_STATE30", state_s9_from_env)
+    s9_journal = s9_journal_from_env()
+    strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
+    strategy_s11 = _load("S11_DISCOVERED", discovered_from_env)
+    strategy_s12 = _load("S12_HHHL30", hhhl_from_env)
     regime_det = RegimeDetector(window=60)
     init_db()
-    _seed_strategy_from_db(strategy_s1)
+    if portfolio.is_enabled("S1_NETDELTA"):
+        _seed_strategy_from_db(strategy_s1)
     print(f"S3_ML: {strategy_s3.status_line}", flush=True)
     print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(f"S5_MINEDGE: {strategy_s5.status_line}", flush=True)
@@ -1255,7 +1264,7 @@ def main() -> None:
     print(f"S12_HHHL30: {strategy_s12.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(set ENABLE_S1/S2/S3/S4/S5/S6/S8/S9/S10/S11/S12 in .env)",
+        f"(slim default S4/S5/S8/S11/S12 — set ENABLE_S* in .env)",
         flush=True,
     )
 

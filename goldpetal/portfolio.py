@@ -89,55 +89,43 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    ENABLE_S1=true/false, ENABLE_S2=..., ENABLE_S3=...
-    FLATTEN_ON_BAD_REGIME=true
+    Slim paper default: S4, S5, S8, S11, S12 only (saves RAM).
     """
+    def on(key: str, default: str) -> bool:
+        return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
+
     enabled: set[str] = set()
-    if os.getenv("ENABLE_S1", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S1", "false"):
         enabled.add("S1_NETDELTA")
-    if os.getenv("ENABLE_S2", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S2", "false"):
         enabled.add("S2_BALANCE")
-    else:
-        pass
-    if os.getenv("ENABLE_S3", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S3", "false"):
         enabled.add("S3_ML")
-    if os.getenv("ENABLE_S4", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S4", "true"):
         enabled.add("S4_OVERNIGHT")
-    if os.getenv("ENABLE_S5", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S5", "true"):
         enabled.add("S5_MINEDGE")
-    if os.getenv("ENABLE_S6", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S6", "false"):
         enabled.add("S6_MIN30")
-    # S8 NET zigzag — OFF until gated entry proves after-fee hist EV again
-    if os.getenv("ENABLE_S8", "false").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S8", "true"):
         enabled.add("S8_NET_ZIGZAG")
-    # S9 27-state TBQ/TSQ/Price machine (30m) — OFF by default; extend via env
-    if os.getenv("ENABLE_S9", "false").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S9", "false"):
         enabled.add("S9_STATE30")
-    # S10 legacy 30m always zigzag (MTF +₹42k paper row) — ON by default for paper
-    if os.getenv("ENABLE_S10", "true").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S10", "false"):
         enabled.add("S10_LEGACY30")
-    # S11 multi-model discovered pack — OFF until weekend proposal approved
-    if os.getenv("ENABLE_S11", "false").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S11", "true"):
         enabled.add("S11_DISCOVERED")
-    # S12 HH/LL candle breakout (30m default) — paper until proven
-    if os.getenv("ENABLE_S12", "false").strip().lower() in {"1", "true", "yes", "y"}:
+    if on("ENABLE_S12", "true"):
         enabled.add("S12_HHHL30")
 
-    # If user set none of the vars oddly empty, fall back
     if not enabled:
         enabled = {
-            "S1_NETDELTA",
-            "S3_ML",
             "S4_OVERNIGHT",
             "S5_MINEDGE",
-            "S6_MIN30",
-            "S10_LEGACY30",
+            "S8_NET_ZIGZAG",
+            "S11_DISCOVERED",
+            "S12_HHHL30",
         }
 
-    flatten = os.getenv("FLATTEN_ON_BAD_REGIME", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "y",
-    }
+    flatten = on("FLATTEN_ON_BAD_REGIME", "true")
     return PortfolioConfig(enabled=enabled, flatten_when_blocked=flatten)
