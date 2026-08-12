@@ -502,12 +502,14 @@ def write_outputs(results: list[TfResult], out_dir: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(
+        description="HH/LL candle breakout multi-TF backtest from ticks."
+    )
     ap.add_argument("--db", type=Path, default=Path("data/ticks.db"))
     ap.add_argument("--lots", type=float, default=1.0)
     ap.add_argument("--long-only", action="store_true")
     ap.add_argument("--short-only", action="store_true")
-    ap.add_argument("--fees", action="store_true", help="Angel fees + 30% tax")
+    ap.add_argument("--fees", action="store_true", help="Angel fees + 30 percent tax")
     ap.add_argument(
         "--session",
         action="store_true",
