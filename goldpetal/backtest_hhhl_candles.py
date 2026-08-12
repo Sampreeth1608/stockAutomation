@@ -12,7 +12,7 @@ Filters (recommended):
   --session     MCX hours Mon–Fri 09:00–23:30 IST (entries + force flat after)
   --min-range N require candle range (H−L) ≥ N pts to enter
   --no-flip     exit goes flat; no opposite entry on the same bar
-  --fees        Angel fee schedule + 30% tax (IGNORE_FEES off)
+  --fees        Angel fee schedule + 30 percent tax (IGNORE_FEES off)
 
   python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db \\
       --lots 1 --fees --session --min-range 5 --no-flip
