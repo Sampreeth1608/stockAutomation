@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """HH / LL candle breakout strategy — multi-TF backtest from tick OHLC.
 
-Rules (confirmed + symmetric completion for the cut-off downtrend line):
+Rules:
 
-  Uptrend (LONG)
-    Entry:  high > prev_high  AND  close > open
-    Exit:   high < prev_high  AND  close < open
+  LONG  entry: high > prev_high AND close > open
+        exit:  high < prev_high AND close < open
+  SHORT entry: low  < prev_low  AND close < open
+        exit:  low  > prev_low  AND close > open
 
-  Downtrend (SHORT)
-    Entry:  low  < prev_low   AND  close < open
-    Exit:   low  > prev_low   AND  close > open
+Filters (recommended):
+  --session     MCX hours Mon–Fri 09:00–23:30 IST (entries + force flat after)
+  --min-range N require candle range (H−L) ≥ N pts to enter
+  --no-flip     exit goes flat; no opposite entry on the same bar
+  --fees        Angel fee schedule + 30% tax (IGNORE_FEES off)
 
-Bars built from ticks: 1m 3m 5m 10m 15m 30m 45m 1h 2h 3h 1d
-Plus a day-by-day PnL breakdown per timeframe.
-
-  python3 backtest_hhhl_candles.py --db data/ticks.db
-  python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db --lots 1
+  python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db \\
+      --lots 1 --fees --session --min-range 5 --no-flip
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -30,12 +31,11 @@ from pathlib import Path
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
-from charges import apply_charges_and_tax, charges_from_env
+from charges import ChargeConfig, apply_charges_and_tax, zero_charge_config
 from mtf_bars import build_rich_bars, load_tick_rows, parse_ts
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# User-requested timeframes (+ daily for day-by-day candle mode)
 TIMEFRAMES: list[tuple[str, int]] = [
     ("1m", 1),
     ("3m", 3),
@@ -63,11 +63,15 @@ class Candle:
     def day(self) -> str:
         return self.time[:10]
 
+    @property
+    def range_pts(self) -> float:
+        return float(self.high - self.low)
+
 
 @dataclass
 class Trade:
     tf: str
-    side: str  # LONG | SHORT
+    side: str
     entry_time: str
     entry_px: float
     exit_time: str
@@ -131,6 +135,42 @@ def short_exit(cur: Candle, prev: Candle) -> bool:
     return cur.low > prev.low and cur.close > cur.open
 
 
+def in_session(
+    candle: Candle,
+    *,
+    open_hhmm: str = "09:00",
+    close_hhmm: str = "23:30",
+) -> bool:
+    """MCX Gold Petal default: Mon–Fri open_hhmm–close_hhmm IST."""
+    dt = parse_ts(candle.time)
+    if dt.weekday() >= 5:
+        return False
+    oh, om = (int(x) for x in open_hhmm.split(":"))
+    ch, cm = (int(x) for x in close_hhmm.split(":"))
+    start = dt.replace(hour=oh, minute=om, second=0, microsecond=0)
+    end = dt.replace(hour=ch, minute=cm, second=0, microsecond=0)
+    return start <= dt <= end
+
+
+def make_charge_cfg(*, fees: bool, lots: float) -> ChargeConfig:
+    """lot_size=lots so turnover (and ₹ PnL) scale with lot count."""
+    if not fees:
+        return zero_charge_config(lot_size=float(lots))
+    return ChargeConfig(
+        brokerage_per_order=20.0,
+        brokerage_promo=False,
+        mcx_txn_rate=0.0000210,
+        ctt_sell_rate=0.0001,
+        sebi_rate=0.000001,
+        stamp_buy_rate=0.00002,
+        gst_rate=0.18,
+        tax_rate=0.30,
+        lot_size=float(lots),
+        turnover_mult=1.0,
+        ignore_fees=False,
+    )
+
+
 def simulate(
     candles: list[Candle],
     *,
@@ -138,9 +178,20 @@ def simulate(
     lots: float = 1.0,
     allow_short: bool = True,
     allow_long: bool = True,
+    fees: bool = False,
+    session_filter: bool = False,
+    min_range: float = 0.0,
+    no_flip: bool = False,
+    market_open: str = "09:00",
+    market_close: str = "23:30",
+    charge_cfg: ChargeConfig | None = None,
 ) -> TfResult:
-    """Fill at signal-bar close. Flip when opposite entry (= exit of current)."""
-    cfg = charges_from_env()
+    """Fill at signal-bar close.
+
+    no_flip=False (legacy): opposite entry on exit bar flips.
+    no_flip=True: exit → flat only; opposite waits for a later bar.
+    """
+    cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
     trades: list[Trade] = []
     side: str | None = None
     entry_px = 0.0
@@ -150,10 +201,10 @@ def simulate(
         nonlocal side, entry_px, entry_time
         assert side is not None
         if side == "LONG":
-            pts = (exit_c.close - entry_px) * lots
+            pts = exit_c.close - entry_px
             order_side = "BUY"
         else:
-            pts = (entry_px - exit_c.close) * lots
+            pts = entry_px - exit_c.close
             order_side = "SELL"
         settled = apply_charges_and_tax(
             pts,
@@ -170,40 +221,60 @@ def simulate(
                 entry_px=entry_px,
                 exit_time=exit_c.time,
                 exit_px=exit_c.close,
-                gross_pts=float(pts),
+                gross_pts=float(pts) * float(cfg.lot_size),
                 gross_pnl_inr=float(settled["gross_pnl"]),
                 after_tax_pnl_inr=float(settled["pnl_after_tax"]),
                 fees_inr=float(settled["charges"]),
-                lots=lots,
+                lots=float(cfg.lot_size),
             )
         )
         side = None
 
+    def can_enter(cur: Candle) -> bool:
+        if min_range > 0 and cur.range_pts < min_range:
+            return False
+        if session_filter and not in_session(
+            cur, open_hhmm=market_open, close_hhmm=market_close
+        ):
+            return False
+        return True
+
     for i in range(1, len(candles)):
         prev, cur = candles[i - 1], candles[i]
+        sess_ok = (not session_filter) or in_session(
+            cur, open_hhmm=market_open, close_hhmm=market_close
+        )
+
+        # Force flat when session filter is on and bar is outside session.
+        if side is not None and session_filter and not sess_ok:
+            close_trade(cur)
+            continue
+
         want_long = allow_long and long_entry(cur, prev)
         want_short = allow_short and short_entry(cur, prev)
         exit_long = long_exit(cur, prev)
         exit_short = short_exit(cur, prev)
 
         if side == "LONG":
-            if exit_long or want_short:
+            if exit_long or (want_short and not no_flip):
                 close_trade(cur)
-                if want_short:
+                if want_short and not no_flip and can_enter(cur):
                     side = "SHORT"
                     entry_px = cur.close
                     entry_time = cur.time
             continue
         if side == "SHORT":
-            if exit_short or want_long:
+            if exit_short or (want_long and not no_flip):
                 close_trade(cur)
-                if want_long:
+                if want_long and not no_flip and can_enter(cur):
                     side = "LONG"
                     entry_px = cur.close
                     entry_time = cur.time
             continue
 
-        # flat
+        # flat — new entries only
+        if not can_enter(cur):
+            continue
         if want_long and not want_short:
             side = "LONG"
             entry_px = cur.close
@@ -213,7 +284,6 @@ def simulate(
             entry_px = cur.close
             entry_time = cur.time
 
-    # mark-to-market last bar if still open (optional flat force)
     if side is not None and candles:
         close_trade(candles[-1])
 
@@ -232,14 +302,16 @@ def simulate(
                 "gross_pts": 0.0,
                 "gross_pnl_inr": 0.0,
                 "after_tax_pnl_inr": 0.0,
+                "fees_inr": 0.0,
             },
         )
         d["n_trades"] += 1
         d["gross_pts"] += t.gross_pts
         d["gross_pnl_inr"] += t.gross_pnl_inr
         d["after_tax_pnl_inr"] += t.after_tax_pnl_inr
+        d["fees_inr"] += t.fees_inr
 
-    wins = sum(1 for t in trades if t.gross_pts > 0)
+    wins = sum(1 for t in trades if t.gross_pnl_inr > 0)
     n = len(trades)
     return TfResult(
         tf=tf,
@@ -259,7 +331,6 @@ def simulate(
 
 
 def db_diagnostics(db: Path) -> str:
-    """Human-readable why a ticks.db might look empty."""
     lines: list[str] = [f"path={db.resolve()}"]
     if not db.exists():
         lines.append("exists=False")
@@ -329,10 +400,17 @@ def run_all(
     tfs: list[tuple[str, int]] | None = None,
     allow_short: bool = True,
     allow_long: bool = True,
+    fees: bool = False,
+    session_filter: bool = False,
+    min_range: float = 0.0,
+    no_flip: bool = False,
+    market_open: str = "09:00",
+    market_close: str = "23:30",
 ) -> list[TfResult]:
     rows = load_tick_rows(db)
     if not rows:
         raise SystemExit(f"no ticks in {db}")
+    cfg = make_charge_cfg(fees=fees, lots=lots)
     results: list[TfResult] = []
     for name, minutes in tfs or TIMEFRAMES:
         bars = build_rich_bars(rows, name, minutes)
@@ -344,6 +422,13 @@ def run_all(
                 lots=lots,
                 allow_short=allow_short,
                 allow_long=allow_long,
+                fees=fees,
+                session_filter=session_filter,
+                min_range=min_range,
+                no_flip=no_flip,
+                market_open=market_open,
+                market_close=market_close,
+                charge_cfg=cfg,
             )
         )
     return results
@@ -353,14 +438,15 @@ def print_summary(results: list[TfResult]) -> None:
     print()
     print(
         f"{'TF':>4}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
-        f"{'win%':>6}  {'gross_pts':>10}  {'pnl_₹':>10}  {'maxDD_₹':>10}"
+        f"{'win%':>6}  {'gross_pts':>10}  {'fees_₹':>10}  {'pnl_₹':>10}  {'maxDD_₹':>10}"
     )
-    print("-" * 78)
+    print("-" * 92)
     for r in results:
         print(
             f"{r.tf:>4}  {r.n_bars:6d}  {r.n_trades:6d}  "
             f"{r.n_long:3d}/{r.n_short:<3d}  {100 * r.win_rate:5.1f}%  "
-            f"{r.gross_pts:10.1f}  {r.after_tax_pnl_inr:10.1f}  {r.max_dd_inr:10.1f}"
+            f"{r.gross_pts:10.1f}  {r.fees_inr:10.1f}  "
+            f"{r.after_tax_pnl_inr:10.1f}  {r.max_dd_inr:10.1f}"
         )
     print()
 
@@ -421,6 +507,25 @@ def main() -> None:
     ap.add_argument("--lots", type=float, default=1.0)
     ap.add_argument("--long-only", action="store_true")
     ap.add_argument("--short-only", action="store_true")
+    ap.add_argument("--fees", action="store_true", help="Angel fees + 30% tax")
+    ap.add_argument(
+        "--session",
+        action="store_true",
+        help="Only trade Mon–Fri 09:00–23:30 IST; flatten outside",
+    )
+    ap.add_argument(
+        "--min-range",
+        type=float,
+        default=0.0,
+        help="Min candle H−L (pts) required to enter",
+    )
+    ap.add_argument(
+        "--no-flip",
+        action="store_true",
+        help="Exit to flat only; no reverse entry on same bar",
+    )
+    ap.add_argument("--market-open", default="09:00")
+    ap.add_argument("--market-close", default="23:30")
     ap.add_argument(
         "--tfs",
         default="",
@@ -433,6 +538,10 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    # Ensure dotenv IGNORE_FEES=true does not override --fees
+    if args.fees:
+        os.environ["IGNORE_FEES"] = "false"
+
     if not args.db.exists():
         raise SystemExit(f"missing db: {args.db}")
     n = count_ticks(args.db)
@@ -441,11 +550,6 @@ def main() -> None:
             "0 ticks readable in db.\n"
             f"  {db_diagnostics(args.db)}\n\n"
             "Fix on Mac:\n"
-            "  ls -lah data/analytics_mac/ticks.db\n"
-            "  sqlite3 data/analytics_mac/ticks.db 'SELECT COUNT(*) FROM ticks;'\n"
-            "  # if count is 0 or path is a directory — re-sync:\n"
-            "  rm -rf data/analytics_mac/ticks.db data/analytics_mac/ticks.db-wal "
-            "data/analytics_mac/ticks.db-shm\n"
             "  ./scripts/sync_analytics_mac.sh\n"
             "  python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db --lots 1"
         )
@@ -453,7 +557,7 @@ def main() -> None:
     tfs = TIMEFRAMES
     if args.tfs.strip():
         want = {x.strip() for x in args.tfs.split(",") if x.strip()}
-        tfs = [(n, m) for n, m in TIMEFRAMES if n in want]
+        tfs = [(n_, m) for n_, m in TIMEFRAMES if n_ in want]
         if not tfs:
             raise SystemExit(f"no matching tfs in {want}")
 
@@ -469,6 +573,11 @@ def main() -> None:
         "Rules: LONG H>prevH & C>O / exit H<prevH & C<O | "
         "SHORT L<prevL & C<O / exit L>prevL & C>O"
     )
+    print(
+        f"Filters: fees={args.fees} session={args.session} "
+        f"({args.market_open}-{args.market_close}) "
+        f"min_range={args.min_range} no_flip={args.no_flip}"
+    )
 
     results = run_all(
         args.db,
@@ -476,6 +585,12 @@ def main() -> None:
         tfs=tfs,
         allow_long=not args.short_only,
         allow_short=not args.long_only,
+        fees=args.fees,
+        session_filter=args.session,
+        min_range=args.min_range,
+        no_flip=args.no_flip,
+        market_open=args.market_open,
+        market_close=args.market_close,
     )
     print_summary(results)
     print_by_day(results)
