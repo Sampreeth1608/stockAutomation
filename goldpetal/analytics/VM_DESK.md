@@ -2,6 +2,20 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
+## Day-by-day HH/LL on S4 horizon
+
+S12 rules on **daily** candles (prev high/low vs today), plus an S4-style overnight
+sim (enter day close → exit next open):
+
+```bash
+cd ~/goldpetal
+python3 backtest_s4_hhhl_daily.py --db data/ticks.db --lots 1 --fees --min-range 5
+python3 backtest_s4_hhhl_daily.py --db data/ticks.db --lots 100 --fees --min-range 5
+```
+
+Prints a day table (`prevH` / `prevL` / HH / LL / signal) and writes
+`data/backtests/s4_hhhl_daily/`.
+
 ## Paper allowlist (stop S9 etc.)
 
 Streamlit **Live Deploy → Paper allowlist**:
