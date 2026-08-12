@@ -1,0 +1,15 @@
+smartapi-python
+pyotp
+python-dotenv
+logzero
+websocket-client
+requests
+pandas
+numpy
+scikit-learn
+joblib
+# optional: S9 bar ML booster (train_s9_bar_ml.py --model lightgbm)
+# lightgbm
+# optional: upload manual pack CSVs to Google Sheets
+# gspread
+# google-auth
