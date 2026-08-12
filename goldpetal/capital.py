@@ -87,15 +87,18 @@ def default_plan() -> CapitalPlan:
     reserve = total * 0.20
     deployable = total - reserve
     each = round(deployable / len(DEFAULT_STRATEGIES), 2)
-    strats = {
-        name: StrategyBudget(strategy=name, budget_inr=each, max_lots=10)
-        for name in DEFAULT_STRATEGIES
-    }
+    strats = {}
+    for name in DEFAULT_STRATEGIES:
+        # S12 hist paper path sized at 100 lots; others stay conservative.
+        lots = 100 if name == "S12_HHHL30" else 10
+        strats[name] = StrategyBudget(
+            strategy=name, budget_inr=each, max_lots=lots
+        )
     return CapitalPlan(
         total_capital_inr=total,
         cash_reserve_pct=20.0,
         daily_loss_limit_inr=10_000.0,
-        max_lots_total=50,
+        max_lots_total=150,
         strategies=strats,
         updated_at_ist=_now_iso(),
     )
