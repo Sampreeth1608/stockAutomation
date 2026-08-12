@@ -23,6 +23,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Load .env before Streamlit auth / ops (ENABLE_*, DESK_PASSWORD, etc.)
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env", override=False)
+except Exception:
+    pass
+
 from analytics.local_bridge import (  # noqa: E402
     decide_proposal_local,
     desk_data_dir,
