@@ -54,6 +54,7 @@ STRATEGIES = (
     "S10_LEGACY30",
     "S11_DISCOVERED",
     "S12_HHHL30",
+    "S13_HHHL_DAY",
 )
 
 SCORE_FIELDS = [

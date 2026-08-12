@@ -12,6 +12,7 @@ SLIM_STRATEGIES = (
     "S8_NET_ZIGZAG",
     "S11_DISCOVERED",
     "S12_HHHL30",
+    "S13_HHHL_DAY",
 )
 
 

@@ -2,6 +2,20 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
+## S13 daily HH/LL overnight (paper)
+
+Separate from S4 ML. Enter near close on daily HH/LL vs previous day; exit next open.
+
+```bash
+# in .env
+ENABLE_S13=true
+S13_MIN_RANGE=5
+S13_ENTRY_MINUTES_BEFORE_CLOSE=15
+S13_EXIT_MINUTES_AFTER_OPEN=5
+```
+
+Restart supervise after pull. Look for `S13_HHHL_DAY` in `data/strategy_run.log`.
+
 ## Day-by-day HH/LL on S4 horizon
 
 S12 rules on **daily** candles (prev high/low vs today), plus an S4-style overnight

@@ -46,13 +46,14 @@ LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "ye
     DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
 )
 
-# Slim paper set (S4/S5/S8/S11/S12)
+# Slim paper set (S4/S5/S8/S11/S12/S13)
 STRATEGIES = [
     "S4_OVERNIGHT",
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
     "S11_DISCOVERED",
     "S12_HHHL30",
+    "S13_HHHL_DAY",
 ]
 
 
@@ -886,7 +887,7 @@ def main() -> None:
 
     st.title("Gold Petal research & control desk")
     mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
-    st.caption(f"{mode} · strategies S4/S5/S8/S11/S12 · {date.today().isoformat()}")
+    st.caption(f"{mode} · strategies S4/S5/S8/S11/S12/S13 · {date.today().isoformat()}")
 
     if not dd.exists():
         st.warning("Data folder missing.")

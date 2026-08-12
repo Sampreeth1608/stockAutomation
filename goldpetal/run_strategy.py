@@ -35,6 +35,7 @@ from strategy_net_zigzag import (
 )
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from strategy_hhhl import HhhlCandleStrategy, hhhl_from_env
+from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
@@ -162,6 +163,7 @@ def run_once(
     strategy_s10: NetZigzagStrategy,
     strategy_s11: DiscoveredStrategy,
     strategy_s12: HhhlCandleStrategy,
+    strategy_s13: HhhlDayOvernightStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -331,6 +333,12 @@ def run_once(
         f"S12      : HH/LL candle breakout "
         f"[{'ON' if portfolio.is_enabled(strategy_s12.name) else 'OFF'}] "
         f"{strategy_s12.status_line}",
+        flush=True,
+    )
+    print(
+        f"S13      : daily HH/LL overnight "
+        f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
+        f"{strategy_s13.status_line}",
         flush=True,
     )
     live_ok, live_why = is_live_mode_allowed()
@@ -1103,6 +1111,47 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def emit_s13_if_changed(now: datetime, message: dict) -> None:
+        """S13: daily HH/LL near close → hold overnight → exit next open."""
+        if not _strategy_active(strategy_s13.name):
+            return
+        if latest["cmp"] is None:
+            return
+        # Skip new overnight entries if book is abnormally wide at decision time
+        if (
+            regime_det.last.regime == "WIDE_SPREAD"
+            and strategy_s13.position == "flat"
+        ):
+            return
+        result = strategy_s13.on_tick(now, float(latest["cmp"]), message)
+        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+            return
+        if result.action in {"BUY", "SHORT"}:
+            ok_enter, _why = allow_new_entry(strategy_s13.name)
+            if not ok_enter:
+                strategy_s13.position = "flat"
+                strategy_s13.entry_price = None
+                strategy_s13.entry_date = None
+                return
+        _record_signal(
+            time_label=now.isoformat(timespec="seconds"),
+            action=result.action,
+            position_after=result.position_after,
+            reason=result.reason,
+            price_delta=result.price_delta,
+            net=result.net,
+            net_delta=result.net_delta,
+            strategy=strategy_s13.name,
+            cmp=float(latest["cmp"]),
+        )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_s13.name} "
+            f"CMP={latest['cmp']} => {result.action} "
+            f"(pos={strategy_s13.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -1185,6 +1234,8 @@ def run_once(
             emit_s10_if_changed(now, message)
             # S12: HH/LL candle breakout
             emit_s12_if_changed(now, message)
+            # S13: daily HH/LL overnight (S4-style windows)
+            emit_s13_if_changed(now, message)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -1256,6 +1307,7 @@ def main() -> None:
     strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
     strategy_s11 = _load("S11_DISCOVERED", discovered_from_env)
     strategy_s12 = _load("S12_HHHL30", hhhl_from_env)
+    strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
     regime_det = RegimeDetector(window=60)
     init_db()
     if portfolio.is_enabled("S1_NETDELTA"):
@@ -1271,9 +1323,10 @@ def main() -> None:
     print(f"S10_LEGACY30: {strategy_s10.status_line}", flush=True)
     print(f"S11_DISCOVERED: {strategy_s11.status_line}", flush=True)
     print(f"S12_HHHL30: {strategy_s12.status_line}", flush=True)
+    print(f"S13_HHHL_DAY: {strategy_s13.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S4/S5/S8/S11/S12 — set ENABLE_S* in .env)",
+        f"(slim default S4/S5/S8/S11/S12/S13 — set ENABLE_S* in .env)",
         flush=True,
     )
 
@@ -1301,6 +1354,7 @@ def main() -> None:
                 strategy_s10,
                 strategy_s11,
                 strategy_s12,
+                strategy_s13,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -1324,6 +1378,7 @@ def main() -> None:
             f"s10={strategy_s10.position}/{strategy_s10.bias} "
             f"s11={strategy_s11.position} "
             f"s12={strategy_s12.position} "
+            f"s13={strategy_s13.position} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )
