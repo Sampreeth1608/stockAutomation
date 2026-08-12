@@ -70,7 +70,22 @@ rm -f "$TMP_ENV"
 
 if [[ "$SKIP_DB" -eq 0 ]]; then
   echo "→ ticks.db (may take a minute)…"
+  # Avoid gcloud creating ticks.db/ as a directory from a prior bad sync.
+  rm -rf "$OUT/ticks.db" "$OUT/ticks.db-wal" "$OUT/ticks.db-shm"
   pull "data/ticks.db" "$OUT/ticks.db"
+  # WAL companions (needed if VM has uncheckpointed writes)
+  pull "data/ticks.db-wal" "$OUT/ticks.db-wal"
+  pull "data/ticks.db-shm" "$OUT/ticks.db-shm"
+  if [[ -f "$OUT/ticks.db" ]]; then
+    echo -n "  · local tick count: "
+    sqlite3 "$OUT/ticks.db" 'SELECT COUNT(*) FROM ticks;' 2>/dev/null \
+      || python3 -c "import sqlite3; c=sqlite3.connect('$OUT/ticks.db'); print(c.execute('select count(*) from ticks').fetchone()[0])" \
+      2>/dev/null || echo "(could not query — install sqlite3 or check file)"
+  elif [[ -d "$OUT/ticks.db" ]]; then
+    echo "  ✗ $OUT/ticks.db is a DIRECTORY — remove and re-run sync"
+  else
+    echo "  ✗ ticks.db missing after scp"
+  fi
 else
   echo "→ skipped ticks.db"
 fi

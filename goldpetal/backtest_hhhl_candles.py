@@ -258,15 +258,68 @@ def simulate(
     )
 
 
-def count_ticks(db: Path) -> int:
-    con = sqlite3.connect(db)
+def db_diagnostics(db: Path) -> str:
+    """Human-readable why a ticks.db might look empty."""
+    lines: list[str] = [f"path={db.resolve()}"]
+    if not db.exists():
+        lines.append("exists=False")
+        return "\n  ".join(lines)
+    lines.append(f"is_file={db.is_file()} is_dir={db.is_dir()}")
+    if db.is_dir():
+        lines.append("ERROR: path is a directory (gcloud scp nested?). Remove it and re-sync.")
+        try:
+            lines.append("contents=" + ", ".join(sorted(p.name for p in db.iterdir())[:20]))
+        except OSError as exc:
+            lines.append(f"listdir_error={exc}")
+        return "\n  ".join(lines)
+    lines.append(f"size_mb={db.stat().st_size / (1024 * 1024):.1f}")
+    for suffix in ("-wal", "-shm"):
+        side = Path(str(db) + suffix)
+        if side.exists():
+            lines.append(f"{suffix} size_mb={side.stat().st_size / (1024 * 1024):.1f}")
     try:
-        n = int(con.execute("SELECT COUNT(*) FROM ticks").fetchone()[0])
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            tables = [
+                r[0]
+                for r in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                )
+            ]
+            lines.append(f"tables={tables}")
+            if "ticks" in tables:
+                n = int(con.execute("SELECT COUNT(*) FROM ticks").fetchone()[0])
+                n_ltp = int(
+                    con.execute(
+                        "SELECT COUNT(*) FROM ticks WHERE ltp IS NOT NULL"
+                    ).fetchone()[0]
+                )
+                lines.append(f"ticks_rows={n} ticks_with_ltp={n_ltp}")
+                if n:
+                    lo, hi = con.execute(
+                        "SELECT MIN(received_at), MAX(received_at) FROM ticks"
+                    ).fetchone()
+                    lines.append(f"received_at_range={lo} → {hi}")
+            else:
+                lines.append("ERROR: no ticks table")
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        lines.append(f"sqlite_error={exc}")
+    return "\n  ".join(lines)
+
+
+def count_ticks(db: Path) -> int:
+    if not db.is_file():
+        return 0
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            return int(con.execute("SELECT COUNT(*) FROM ticks").fetchone()[0])
+        finally:
+            con.close()
     except sqlite3.Error:
-        n = 0
-    finally:
-        con.close()
-    return n
+        return 0
 
 
 def run_all(
@@ -385,9 +438,16 @@ def main() -> None:
     n = count_ticks(args.db)
     if n == 0:
         raise SystemExit(
-            f"0 ticks in {args.db}. Sync from VM first:\n"
-            f"  ./scripts/sync_analytics_mac.sh\n"
-            f"  python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db"
+            "0 ticks readable in db.\n"
+            f"  {db_diagnostics(args.db)}\n\n"
+            "Fix on Mac:\n"
+            "  ls -lah data/analytics_mac/ticks.db\n"
+            "  sqlite3 data/analytics_mac/ticks.db 'SELECT COUNT(*) FROM ticks;'\n"
+            "  # if count is 0 or path is a directory — re-sync:\n"
+            "  rm -rf data/analytics_mac/ticks.db data/analytics_mac/ticks.db-wal "
+            "data/analytics_mac/ticks.db-shm\n"
+            "  ./scripts/sync_analytics_mac.sh\n"
+            "  python3 backtest_hhhl_candles.py --db data/analytics_mac/ticks.db --lots 1"
         )
 
     tfs = TIMEFRAMES
