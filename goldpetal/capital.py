@@ -195,6 +195,57 @@ def update_strategy_budget(
     return save_capital(plan, path=path)
 
 
+def apply_live_capital_allocation(
+    allocations: list[dict[str, Any]],
+    *,
+    total_capital_inr: float | None = None,
+    cash_reserve_pct: float | None = None,
+    daily_loss_limit_inr: float | None = None,
+    max_lots_total: int | None = None,
+    disable_others: bool = False,
+    known_strategies: tuple[str, ...] | None = None,
+    path: Path | None = None,
+) -> CapitalPlan:
+    """Apply per-strategy ₹ budgets + lot caps for live deploy.
+
+    ``allocations`` rows: strategy, budget_inr, max_lots[, max_open_trades, enabled].
+    When disable_others=True, strategies not in the allocation list get enabled=False.
+    """
+    plan = load_capital(path)
+    if total_capital_inr is not None:
+        plan.total_capital_inr = float(total_capital_inr)
+    if cash_reserve_pct is not None:
+        plan.cash_reserve_pct = float(cash_reserve_pct)
+    if daily_loss_limit_inr is not None:
+        plan.daily_loss_limit_inr = float(daily_loss_limit_inr)
+    if max_lots_total is not None:
+        plan.max_lots_total = int(max_lots_total)
+    save_capital(plan, path=path)
+
+    selected: set[str] = set()
+    for row in allocations:
+        name = str(row.get("strategy") or "").strip()
+        if not name:
+            continue
+        selected.add(name)
+        update_strategy_budget(
+            name,
+            budget_inr=float(row.get("budget_inr", 0)),
+            max_lots=int(row.get("max_lots", 1)),
+            max_open_trades=int(row.get("max_open_trades", 1)),
+            enabled=bool(row.get("enabled", True)),
+            path=path,
+        )
+
+    if disable_others:
+        names = known_strategies or DEFAULT_STRATEGIES
+        for name in names:
+            if name not in selected:
+                update_strategy_budget(name, enabled=False, path=path)
+
+    return load_capital(path)
+
+
 def can_open_trade(
     strategy: str,
     lots: int = 1,

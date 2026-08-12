@@ -27,12 +27,14 @@ from analytics.local_bridge import (  # noqa: E402
     decide_proposal_local,
     desk_data_dir,
     save_capital_local,
+    save_live_allocation_local,
     set_control_local,
 )
 from analytics.vm_bridge import (  # noqa: E402
     VmConfig,
     decide_proposal_remote,
     save_capital_remote,
+    save_live_allocation_remote,
     set_control_remote,
     sync_snapshot,
 )
@@ -77,6 +79,31 @@ def save_capital(payload: dict) -> dict:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return save_capital_remote(payload)
+
+
+def save_live_allocation(payload: dict) -> dict:
+    if LOCAL_DESK:
+        try:
+            return save_live_allocation_local(payload)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return save_live_allocation_remote(payload)
+
+
+def _strategies_as_rows(raw) -> list[dict]:
+    if isinstance(raw, dict):
+        rows = []
+        for key, val in raw.items():
+            if isinstance(val, dict):
+                row = dict(val)
+                row.setdefault("strategy", key)
+                rows.append(row)
+            else:
+                rows.append({"strategy": str(key)})
+        return rows
+    if isinstance(raw, list):
+        return [dict(x) for x in raw if isinstance(x, dict) and x.get("strategy")]
+    return []
 
 
 def data_dir() -> Path:
@@ -403,8 +430,8 @@ def tab_capital(dd: Path) -> None:
     st.subheader("Capital")
     cap = load_json(dd / "control" / "capital.json")
     if not cap:
-        st.info("No capital.json synced.")
-        return
+        st.info("No capital.json yet — Live Deploy or Push will create it.")
+        cap = {}
     total = st.number_input(
         "Total capital ₹",
         value=float(cap.get("total_capital_inr") or 500000),
@@ -417,7 +444,7 @@ def tab_capital(dd: Path) -> None:
     )
     dayloss = st.number_input(
         "Day loss limit ₹",
-        value=float(cap.get("day_loss_limit_inr") or 5000),
+        value=float(cap.get("daily_loss_limit_inr") or cap.get("day_loss_limit_inr") or 5000),
         step=500.0,
     )
     maxlots = st.number_input(
@@ -425,22 +452,179 @@ def tab_capital(dd: Path) -> None:
         value=int(cap.get("max_lots_total") or 10),
         step=1,
     )
-    strategies = list(cap.get("strategies") or [])
+    strategies = _strategies_as_rows(cap.get("strategies"))
     if strategies:
         st.dataframe(pd.DataFrame(strategies), use_container_width=True, hide_index=True)
+        st.caption("Edit per-strategy ₹ / lots on the Live Deploy tab.")
     if st.button("Push capital to VM", type="primary"):
         payload = {
             "total_capital_inr": total,
             "cash_reserve_pct": reserve,
-            "day_loss_limit_inr": dayloss,
+            "daily_loss_limit_inr": dayloss,
             "max_lots_total": int(maxlots),
             "strategies": strategies,
         }
         res = save_capital(payload)
         if res.get("ok"):
-            st.success("Capital saved on VM.")
+            st.success("Capital saved.")
+            st.cache_data.clear()
         else:
             st.error(res.get("error") or res)
+
+
+def tab_live_deploy(dd: Path) -> None:
+    st.subheader("Live deploy — pick strategies + capital")
+    st.caption(
+        "This sets which strategies may place **real Angel orders**, and how much ₹ / lots "
+        "each may use. Paper (DRY_RUN) is separate. Still required after Save: "
+        "**Unlock live** (Control tab) + `DRY_RUN=false` on the VM `.env`, then restart supervise."
+    )
+    state = load_json(dd / "control" / "state.json") or {}
+    cap = load_json(dd / "control" / "capital.json") or {}
+    live_set = set(state.get("live_approved") or [])
+    strat_map = {
+        row["strategy"]: row for row in _strategies_as_rows(cap.get("strategies"))
+    }
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Live unlocked", "yes" if state.get("live_unlocked") else "locked")
+    c2.metric("Live approved", ", ".join(state.get("live_approved") or []) or "—")
+    c3.metric("Trading", "ON" if state.get("trading_enabled", True) else "paused")
+
+    total = st.number_input(
+        "Book capital ₹",
+        value=float(cap.get("total_capital_inr") or 500000),
+        step=1000.0,
+        key="live_total_cap",
+    )
+    reserve = st.number_input(
+        "Cash reserve %",
+        value=float(cap.get("cash_reserve_pct") or 20),
+        step=1.0,
+        key="live_reserve",
+    )
+    dayloss = st.number_input(
+        "Day loss limit ₹ (stops new entries)",
+        value=float(cap.get("daily_loss_limit_inr") or 5000),
+        step=500.0,
+        key="live_dayloss",
+    )
+    max_total = st.number_input(
+        "Max lots across all strategies",
+        value=int(cap.get("max_lots_total") or 10),
+        step=1,
+        key="live_max_total",
+    )
+
+    st.markdown("### Strategies for real trades")
+    st.caption(
+        "Check Live → that strategy is added to `live_approved`. "
+        "₹ budget gates entries; **max lots** is the live order size (hard-capped by "
+        "`LIVE_MAX_LOTS` in `.env`, default 1)."
+    )
+    allocations: list[dict] = []
+    live_names: list[str] = []
+    for name in STRATEGIES:
+        row = strat_map.get(name) or {}
+        with st.container(border=True):
+            left, mid, right = st.columns([1.4, 1.2, 1.2])
+            live_on = left.checkbox(
+                f"Live · {name}",
+                value=name in live_set,
+                key=f"live_on_{name}",
+            )
+            budget = mid.number_input(
+                "Capital ₹",
+                min_value=0.0,
+                value=float(row.get("budget_inr") or 50_000),
+                step=1000.0,
+                key=f"live_budget_{name}",
+            )
+            lots = right.number_input(
+                "Max lots",
+                min_value=1,
+                value=int(row.get("max_lots") or 1),
+                step=1,
+                key=f"live_lots_{name}",
+            )
+            if live_on:
+                live_names.append(name)
+                allocations.append(
+                    {
+                        "strategy": name,
+                        "budget_inr": float(budget),
+                        "max_lots": int(lots),
+                        "max_open_trades": int(row.get("max_open_trades") or 1),
+                        "enabled": True,
+                        "live": True,
+                    }
+                )
+
+    disable_others = st.checkbox(
+        "Disable capital for strategies not selected (blocks their new entries too)",
+        value=False,
+    )
+    confirm = st.checkbox(
+        "I understand this arms real-money strategies (still needs Unlock + DRY_RUN=false)",
+        value=False,
+    )
+
+    b1, b2 = st.columns(2)
+    if b1.button("Save live allocation", type="primary", disabled=not confirm):
+        if not live_names:
+            st.warning("No strategies checked — this clears live_approved.")
+        payload = {
+            "live_approved": live_names,
+            "allocations": allocations,
+            "total_capital_inr": float(total),
+            "cash_reserve_pct": float(reserve),
+            "daily_loss_limit_inr": float(dayloss),
+            "max_lots_total": int(max_total),
+            "disable_others": bool(disable_others),
+            "note": f"desk live: {', '.join(live_names) or 'none'}",
+        }
+        # Bridge writes live_approved + capital; disable_others turns off other slim budgets.
+        res = save_live_allocation(payload)
+        if res.get("ok"):
+            st.success(
+                f"Live approved: {', '.join(res.get('live_approved') or []) or 'none'}"
+            )
+            if not res.get("live_mode_ok"):
+                st.warning(
+                    f"Gates not ready for Angel orders yet: {res.get('live_mode_reason')}. "
+                    f"{res.get('reminder')}"
+                )
+            else:
+                st.info(res.get("reminder") or "Live mode OK.")
+            st.cache_data.clear()
+        else:
+            st.error(res.get("error") or res)
+
+    if b2.button("Clear all live approvals"):
+        res = save_live_allocation(
+            {
+                "live_approved": [],
+                "allocations": [],
+                "note": "desk cleared live_approved",
+            }
+        )
+        if res.get("ok"):
+            st.success("Cleared live_approved.")
+            st.cache_data.clear()
+        else:
+            st.error(res.get("error") or res)
+
+    with st.expander("How live sizing works", expanded=False):
+        st.markdown(
+            """
+1. Check **Live** on S4 / S5 / S12 (or others) and set each **Capital ₹** + **Max lots**.
+2. Click **Save live allocation**.
+3. On **Control**: Unlock live (two-step).
+4. On VM `.env`: `DRY_RUN=false` and set `LIVE_MAX_LOTS` to your hard ceiling (e.g. `5`).
+5. Restart `supervise.sh`. Only `live_approved` strategies place Angel orders;
+   size = min(strategy max_lots, LIVE_MAX_LOTS).
+"""
+        )
 
 
 def tab_ml(dd: Path) -> None:
@@ -650,6 +834,7 @@ def main() -> None:
         t0,
         t1,
         t2,
+        t_live,
         t3,
         t4,
         t5,
@@ -661,6 +846,7 @@ def main() -> None:
             "Overview",
             "Proposals / ML",
             "Control",
+            "Live Deploy",
             "Capital",
             "Models",
             "Reasoning",
@@ -675,6 +861,8 @@ def main() -> None:
         tab_proposals(dd)
     with t2:
         tab_control(dd)
+    with t_live:
+        tab_live_deploy(dd)
     with t3:
         tab_capital(dd)
     with t4:

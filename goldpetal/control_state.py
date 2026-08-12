@@ -167,6 +167,34 @@ def approve_strategy_live(strategy: str, path: Path | None = None) -> ControlSta
     return save_state(st, path=path)
 
 
+def set_live_approved(
+    strategies: list[str],
+    *,
+    path: Path | None = None,
+    note: str = "",
+) -> ControlState:
+    """Replace the live-approved list (exact set for real-money strategies).
+
+    Still requires live_unlocked + DRY_RUN=false before Angel orders fire.
+    """
+    st = load_state(path)
+    seen: list[str] = []
+    for raw in strategies:
+        name = str(raw or "").strip()
+        if name and name not in seen:
+            seen.append(name)
+    st.live_approved = seen
+    for name in seen:
+        if name not in st.paper_approved:
+            st.paper_approved.append(name)
+        if name in st.force_disabled:
+            st.force_disabled = [s for s in st.force_disabled if s != name]
+    st.note = note or (
+        f"live_approved set: {', '.join(seen)}" if seen else "live_approved cleared"
+    )
+    return save_state(st, path=path)
+
+
 def reject_strategy(strategy: str, path: Path | None = None) -> ControlState:
     st = load_state(path)
     st.paper_approved = [s for s in st.paper_approved if s != strategy]

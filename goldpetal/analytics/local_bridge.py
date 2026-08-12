@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+
+SLIM_STRATEGIES = (
+    "S4_OVERNIGHT",
+    "S5_MINEDGE",
+    "S8_NET_ZIGZAG",
+    "S11_DISCOVERED",
+    "S12_HHHL30",
+)
 
 
 def decide_proposal_local(proposal_id: str, decision: str, note: str = "") -> dict[str, Any]:
@@ -53,11 +61,13 @@ def save_capital_local(payload: dict[str, Any]) -> dict[str, Any]:
     if "cash_reserve_pct" in payload:
         plan.cash_reserve_pct = float(payload["cash_reserve_pct"])
     if "day_loss_limit_inr" in payload:
-        plan.day_loss_limit_inr = float(payload["day_loss_limit_inr"])
+        plan.daily_loss_limit_inr = float(payload["day_loss_limit_inr"])
+    if "daily_loss_limit_inr" in payload:
+        plan.daily_loss_limit_inr = float(payload["daily_loss_limit_inr"])
     if "max_lots_total" in payload:
         plan.max_lots_total = int(payload["max_lots_total"])
     save_capital(plan)
-    for row in payload.get("strategies") or []:
+    for row in _strategy_rows(payload.get("strategies")):
         update_strategy_budget(
             row["strategy"],
             budget_inr=float(row.get("budget_inr", 0)),
@@ -66,6 +76,83 @@ def save_capital_local(payload: dict[str, Any]) -> dict[str, Any]:
             enabled=bool(row.get("enabled", True)),
         )
     return {"ok": True, "capital": capital_snapshot()}
+
+
+def save_live_allocation_local(payload: dict[str, Any]) -> dict[str, Any]:
+    """Select live strategies + assign ₹ capital / lot caps for real trades."""
+    from capital import apply_live_capital_allocation, capital_snapshot
+    from control_state import is_live_mode_allowed, set_live_approved
+
+    allocations = _strategy_rows(payload.get("allocations") or payload.get("strategies"))
+    live_names = [
+        str(row["strategy"])
+        for row in allocations
+        if bool(row.get("live", row.get("enabled", True)))
+    ]
+    # If caller passed explicit live_approved list, prefer it.
+    if "live_approved" in payload:
+        live_names = [
+            str(s).strip() for s in (payload.get("live_approved") or []) if str(s).strip()
+        ]
+
+    st = set_live_approved(live_names, note=str(payload.get("note") or "desk live allocation"))
+    apply_live_capital_allocation(
+        allocations,
+        total_capital_inr=(
+            float(payload["total_capital_inr"]) if "total_capital_inr" in payload else None
+        ),
+        cash_reserve_pct=(
+            float(payload["cash_reserve_pct"]) if "cash_reserve_pct" in payload else None
+        ),
+        daily_loss_limit_inr=(
+            float(payload.get("daily_loss_limit_inr", payload.get("day_loss_limit_inr")))
+            if ("daily_loss_limit_inr" in payload or "day_loss_limit_inr" in payload)
+            else None
+        ),
+        max_lots_total=(
+            int(payload["max_lots_total"]) if "max_lots_total" in payload else None
+        ),
+        disable_others=bool(payload.get("disable_others", False)),
+        known_strategies=SLIM_STRATEGIES,
+    )
+    live_ok, live_why = is_live_mode_allowed()
+    return {
+        "ok": True,
+        "live_approved": list(st.live_approved),
+        "live_mode_ok": live_ok,
+        "live_mode_reason": live_why,
+        "capital": capital_snapshot(),
+        "note": st.note,
+        "reminder": (
+            "Live orders still need: Unlock live in Control + DRY_RUN=false on VM .env. "
+            "Order size = strategy max_lots capped by LIVE_MAX_LOTS."
+        ),
+    }
+
+
+def _strategy_rows(raw: Any) -> list[dict[str, Any]]:
+    """Normalize capital strategies dict|list into row dicts."""
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        rows: list[dict[str, Any]] = []
+        for key, val in raw.items():
+            if isinstance(val, dict):
+                row = dict(val)
+                row.setdefault("strategy", key)
+                rows.append(row)
+            else:
+                rows.append({"strategy": str(key)})
+        return rows
+    if isinstance(raw, list):
+        out: list[dict[str, Any]] = []
+        for item in raw:
+            if isinstance(item, dict) and item.get("strategy"):
+                out.append(dict(item))
+            elif isinstance(item, str) and item.strip():
+                out.append({"strategy": item.strip()})
+        return out
+    return []
 
 
 def desk_data_dir() -> Path:

@@ -2,6 +2,23 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
+## Live Deploy (real money)
+
+Streamlit tab **Live Deploy**:
+
+1. Check strategies (e.g. S4, S5, S12) and set each **Capital ₹** + **Max lots**.
+2. Confirm + **Save live allocation** → writes `live_approved` + `capital.json`.
+3. **Control** tab → Unlock live (two-step confirm).
+4. On VM `.env`:
+   ```bash
+   DRY_RUN=false
+   LIVE_MAX_LOTS=5   # hard ceiling; desk max_lots cannot exceed this
+   ```
+5. Restart supervise. Only approved strategies place Angel orders;
+   size = `min(strategy max_lots, LIVE_MAX_LOTS)`.
+
+Keep `DRY_RUN=true` until you are ready for real orders.
+
 ## One-time on VM
 
 ```bash

@@ -4,8 +4,8 @@ Safety stack (all required unless noted):
   1. DRY_RUN=false
   2. control panel live_unlocked=true
   3. trading_enabled and not emergency_off
-  4. strategy listed in live_approved (panel Approve → live)
-  5. LIVE_LOTS capped by LIVE_MAX_LOTS (default 1)
+  4. strategy listed in live_approved (desk Live Deploy / Approve → live)
+  5. quantity = strategy capital.max_lots capped by LIVE_MAX_LOTS
 
 Paper remains the default. This module places MARKET DAY CARRYFORWARD
 orders on MCX when gates pass.
@@ -65,6 +65,25 @@ def live_lots() -> int:
     lots = max(1, _env_int("LIVE_LOTS", 1))
     cap = max(1, _env_int("LIVE_MAX_LOTS", 1))
     return min(lots, cap)
+
+
+def live_lots_for(strategy: str) -> int:
+    """Per-strategy live size from capital.max_lots, hard-capped by LIVE_MAX_LOTS.
+
+    Desk Live Deploy sets max_lots per strategy. LIVE_MAX_LOTS in .env is the
+    operator hard ceiling (raise it only when you accept larger real size).
+    """
+    cap = max(1, _env_int("LIVE_MAX_LOTS", 1))
+    default = live_lots()
+    try:
+        from capital import load_capital
+
+        sb = load_capital().strategies.get(strategy)
+        if sb is not None and sb.enabled and int(sb.max_lots) > 0:
+            return min(cap, max(1, int(sb.max_lots)))
+    except Exception:
+        pass
+    return min(default, cap)
 
 
 def strategy_may_trade_live(strategy: str) -> tuple[bool, str]:
@@ -128,8 +147,10 @@ class LiveBroker:
             f"product={self.producttype} placed={self.placed_count} skipped={self.skip_count}"
         )
 
-    def _quantity(self) -> int:
+    def _quantity(self, strategy: str = "") -> int:
         # Angel MCX quantity is usually number of lots for these contracts.
+        if strategy:
+            return live_lots_for(strategy)
         return live_lots()
 
     def seed_positions(self, positions: dict[str, str]) -> None:
@@ -221,7 +242,7 @@ class LiveBroker:
             _append_order_log(res.to_dict())
             return res
 
-        qty = self._quantity() * max(1, int(mult))
+        qty = self._quantity(strategy) * max(1, int(mult))
         params = {
             "variety": self.variety,
             "tradingsymbol": self.symbol,

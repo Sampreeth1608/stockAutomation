@@ -149,11 +149,18 @@ if "total_capital_inr" in data:
 if "cash_reserve_pct" in data:
     plan.cash_reserve_pct = float(data["cash_reserve_pct"])
 if "day_loss_limit_inr" in data:
-    plan.day_loss_limit_inr = float(data["day_loss_limit_inr"])
+    plan.daily_loss_limit_inr = float(data["day_loss_limit_inr"])
+if "daily_loss_limit_inr" in data:
+    plan.daily_loss_limit_inr = float(data["daily_loss_limit_inr"])
 if "max_lots_total" in data:
     plan.max_lots_total = int(data["max_lots_total"])
 save_capital(plan)
-for row in data.get("strategies") or []:
+rows = data.get("strategies") or []
+if isinstance(rows, dict):
+    rows = [{{**v, "strategy": k}} if isinstance(v, dict) else {{"strategy": k}} for k, v in rows.items()]
+for row in rows:
+    if not isinstance(row, dict) or not row.get("strategy"):
+        continue
     update_strategy_budget(
         row["strategy"],
         budget_inr=float(row.get("budget_inr", 0)),
@@ -162,6 +169,25 @@ for row in data.get("strategies") or []:
         enabled=bool(row.get("enabled", True)),
     )
 print(json.dumps({{"ok": True, "capital": capital_snapshot()}}))
+"""
+    code, out, err = ssh_python(cfg, py, timeout=120)
+    if code != 0:
+        return {"ok": False, "error": err or out, "code": code}
+    try:
+        return json.loads(out.strip().splitlines()[-1])
+    except json.JSONDecodeError:
+        return {"ok": False, "error": out or err}
+
+
+def save_live_allocation_remote(
+    payload: dict[str, Any], cfg: VmConfig | None = None
+) -> dict[str, Any]:
+    cfg = cfg or VmConfig.from_env()
+    blob = json.dumps(payload)
+    py = f"""
+import json
+from analytics.local_bridge import save_live_allocation_local
+print(json.dumps(save_live_allocation_local(json.loads({blob!r}))))
 """
     code, out, err = ssh_python(cfg, py, timeout=120)
     if code != 0:
