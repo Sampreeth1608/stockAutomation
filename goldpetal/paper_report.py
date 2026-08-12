@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from charges import charges_from_env
+from charges import angel_charges_from_env
 from storage import build_trades, export_trades_csv
 
 
@@ -66,7 +66,7 @@ def main() -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    cfg = charges_from_env()
+    cfg = angel_charges_from_env()
     print("=== PAPER TRADE REPORT (Angel MCX fees + tax) ===")
     print(
         f"Brokerage ₹{cfg.brokerage_per_order}/order "
@@ -76,7 +76,10 @@ def main() -> None:
         f"SEBI {cfg.sebi_rate*100:.4f}% | TAX {cfg.tax_rate*100:.0f}% | "
         f"lot={cfg.lot_size} turnover_mult={cfg.turnover_mult}"
     )
-    print("Mode: paper until DRY_RUN=false + panel unlock + Approve → live")
+    print(
+        "Post-trade fees always shown. "
+        "IGNORE_FEES=true only skips fee gates while trading."
+    )
     print()
     print(
         f"{'strategy':12} {'n':>4} {'cl':>4} {'win%':>6} "

@@ -106,6 +106,44 @@ def test_ignore_fees_zeros_schedule() -> None:
     os.environ["IGNORE_FEES"] = "false"
 
 
+def test_build_trades_reports_fees_when_ignore_fees() -> None:
+    """IGNORE_FEES rides freely (net=gross) but post-trade columns still show Angel fees."""
+    os.environ["IGNORE_FEES"] = "true"
+    os.environ["BROKERAGE_PER_ORDER"] = "20"
+    os.environ["BROKERAGE_PROMO"] = "false"
+    os.environ["TAX_RATE"] = "0.30"
+    os.environ["TURNOVER_MULT"] = "1.0"
+    os.environ["LOT_SIZE"] = "1"
+
+    import tempfile
+    from pathlib import Path
+
+    from storage import build_trades, init_db, save_signal
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    db = Path(tmp.name)
+    tmp.close()
+    init_db(db)
+    save_signal(
+        "t1", "GOLDPETAL", "BUY", "long", "in",
+        None, 1, 1, True, strategy="S3_ML", cmp=14000.0, db_path=db,
+    )
+    save_signal(
+        "t2", "GOLDPETAL", "CLOSE", "flat", "out",
+        None, 1, 1, True, strategy="S3_ML", cmp=14100.0, db_path=db,
+    )
+    trades = build_trades(strategy="S3_ML", db_path=db)
+    assert len(trades) == 1
+    t = trades[0]
+    assert float(t["gross_pnl"]) == 100.0
+    assert float(t["charges"]) >= 40.0
+    assert float(t["tax"]) > 0.0
+    assert float(t["pnl_after_tax"]) < float(t["gross_pnl"])
+    # ride freely: net_pnl stays gross under IGNORE_FEES
+    assert float(t["net_pnl"]) == float(t["gross_pnl"])
+    os.environ["IGNORE_FEES"] = "false"
+
+
 if __name__ == "__main__":
     test_round_trip_has_brokerage_gst_ctt()
     test_promo_zero_brokerage()
@@ -113,4 +151,5 @@ if __name__ == "__main__":
     test_small_move_loses_to_fees()
     test_build_trades_angel_schedule()
     test_ignore_fees_zeros_schedule()
+    test_build_trades_reports_fees_when_ignore_fees()
     print("ok")

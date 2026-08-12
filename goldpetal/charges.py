@@ -90,6 +90,28 @@ def charges_from_env() -> ChargeConfig:
     if ignore_fees_enabled():
         return zero_charge_config(lot_size=lot_size, turnover_mult=turnover_mult)
 
+    return angel_charges_from_env(lot_size=lot_size, turnover_mult=turnover_mult)
+
+
+def angel_charges_from_env(
+    *,
+    lot_size: float | None = None,
+    turnover_mult: float | None = None,
+) -> ChargeConfig:
+    """Real Angel MCX fee + tax schedule for *post-trade* reporting.
+
+    Ignores IGNORE_FEES so journals/Streamlit still show charges after a trade
+    even when strategies ride fee-free (IGNORE_FEES=true).
+    """
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+
+    ls = float(os.getenv("LOT_SIZE", "1") if lot_size is None else lot_size)
+    tm = float(os.getenv("TURNOVER_MULT", "1.0") if turnover_mult is None else turnover_mult)
     promo = _env_flag("BROKERAGE_PROMO", False)
     brokerage = float(os.getenv("BROKERAGE_PER_ORDER", "20"))
     if promo:
@@ -104,8 +126,8 @@ def charges_from_env() -> ChargeConfig:
         stamp_buy_rate=float(os.getenv("STAMP_BUY_RATE", "0.00002")),
         gst_rate=float(os.getenv("GST_RATE", "0.18")),
         tax_rate=float(os.getenv("TAX_RATE", "0.30")),
-        lot_size=lot_size,
-        turnover_mult=turnover_mult,
+        lot_size=ls,
+        turnover_mult=tm,
         ignore_fees=False,
     )
 

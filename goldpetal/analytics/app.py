@@ -65,25 +65,25 @@ def load_json(path: Path) -> dict | list | None:
 
 
 @st.cache_data(ttl=20)
-def load_trades(db_path: str) -> pd.DataFrame:
+def load_trades(db_path: str, lot_size: float = 1.0) -> pd.DataFrame:
     from storage import build_trades
 
     path = Path(db_path)
     if not path.exists():
         return pd.DataFrame()
-    trades = build_trades(db_path=path)
+    trades = build_trades(db_path=path, lot_size=lot_size)
     return pd.DataFrame(trades) if trades else pd.DataFrame()
 
 
 @st.cache_data(ttl=20)
-def load_scoreboard(db_path: str) -> pd.DataFrame:
+def load_scoreboard(db_path: str, lot_size: float = 1.0) -> pd.DataFrame:
     from paper_report import summarize_trades
     from storage import build_trades
 
     path = Path(db_path)
     if not path.exists():
         return pd.DataFrame()
-    all_trades = build_trades(db_path=path)
+    all_trades = build_trades(db_path=path, lot_size=lot_size)
     return pd.DataFrame(
         [summarize_trades(all_trades, s) for s in STRATEGIES + [None]]
     )
@@ -176,7 +176,12 @@ def inject_style() -> None:
     )
 
 
-def tab_overview(dd: Path, db: Path) -> None:
+def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
+    st.subheader("Overview")
+    st.caption(
+        "Strategies ride fee-free while IGNORE_FEES=true. "
+        "Closed trades still show Angel charges + 30% tax below (post-trade)."
+    )
     stats = load_tick_stats(str(db)) if db.exists() else {}
     state = load_json(dd / "control" / "state.json") or {}
     flags = (dd / "env.flags").read_text(encoding="utf-8") if (dd / "env.flags").exists() else ""
@@ -200,8 +205,16 @@ def tab_overview(dd: Path, db: Path) -> None:
             st.code(flags, language="bash")
 
     if db.exists():
-        board = load_scoreboard(str(db))
+        board = load_scoreboard(str(db), lot_size=lot_size)
         if not board.empty:
+            all_row = board[board["strategy"] == "ALL"]
+            if not all_row.empty:
+                r = all_row.iloc[0]
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Gross PnL ₹", f"{float(r.get('gross_pnl') or 0):,.0f}")
+                m2.metric("Charges ₹", f"{float(r.get('charges') or 0):,.0f}")
+                m3.metric("Tax ₹", f"{float(r.get('tax') or 0):,.0f}")
+                m4.metric("After-tax ₹", f"{float(r.get('pnl_after_tax') or 0):,.0f}")
             cols = [
                 c
                 for c in (
@@ -212,11 +225,13 @@ def tab_overview(dd: Path, db: Path) -> None:
                     "win_rate",
                     "gross_pnl",
                     "charges",
+                    "pnl_after_charges",
+                    "tax",
                     "pnl_after_tax",
                 )
                 if c in board.columns
             ]
-            st.subheader("PnL board")
+            st.subheader(f"PnL board · {lot_size:g} lot(s)")
             st.dataframe(board[cols], use_container_width=True, hide_index=True)
             try:
                 import plotly.express as px
@@ -226,10 +241,9 @@ def tab_overview(dd: Path, db: Path) -> None:
                     fig = px.bar(
                         plot_df,
                         x="strategy",
-                        y="gross_pnl",
-                        title="Gross PnL by strategy",
-                        color="gross_pnl",
-                        color_continuous_scale=["#6b2d2d", "#c4c0b0", "#1f6b4a"],
+                        y=["gross_pnl", "pnl_after_tax"],
+                        barmode="group",
+                        title="Gross vs after-tax PnL by strategy",
                     )
                     fig.update_layout(
                         paper_bgcolor="rgba(0,0,0,0)",
@@ -436,14 +450,18 @@ def tab_reasoning(dd: Path) -> None:
     st.json(data)
 
 
-def tab_trades(db: Path) -> None:
+def tab_trades(db: Path, *, lot_size: float = 1.0) -> None:
     if not db.exists():
         st.info("Need ticks.db.")
         return
-    trades = load_trades(str(db))
+    trades = load_trades(str(db), lot_size=lot_size)
     if trades.empty:
         st.info("No trades.")
         return
+    st.caption(
+        f"Post-trade Angel fees + tax at {lot_size:g} lot(s). "
+        "Gross = points × lots; after-tax = gross − charges − tax."
+    )
     strat = st.multiselect(
         "Strategy",
         options=sorted(trades["strategy"].dropna().unique()),
@@ -455,6 +473,18 @@ def tab_trades(db: Path) -> None:
             view["entry_ts"].astype(str).str.startswith(tday)
             | view["exit_ts"].astype(str).str.startswith(tday)
         ]
+    closed = view[view["status"].astype(str).str.startswith("CLOSED")] if "status" in view.columns else view
+    if not closed.empty:
+        def _sum(col: str) -> float:
+            if col not in closed.columns:
+                return 0.0
+            return float(pd.to_numeric(closed[col], errors="coerce").fillna(0).sum())
+
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Gross ₹", f"{_sum('gross_pnl'):,.0f}")
+        s2.metric("Charges ₹", f"{_sum('charges'):,.0f}")
+        s3.metric("Tax ₹", f"{_sum('tax'):,.0f}")
+        s4.metric("After-tax ₹", f"{_sum('pnl_after_tax'):,.0f}")
     cols = [
         c
         for c in (
@@ -466,6 +496,9 @@ def tab_trades(db: Path) -> None:
             "exit_ts",
             "exit_price",
             "gross_pnl",
+            "charges",
+            "pnl_after_charges",
+            "tax",
             "pnl_after_tax",
             "entry_reason",
             "exit_reason",
@@ -540,6 +573,19 @@ def main() -> None:
     )
 
     skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=False)
+    lot_size = float(
+        st.sidebar.number_input(
+            "Lots (fee display)",
+            min_value=1.0,
+            value=1.0,
+            step=1.0,
+            help="Scales gross PnL and Angel turnover fees for the desk. "
+            "Does not change the VM bot.",
+        )
+    )
+    st.sidebar.caption(
+        "IGNORE_FEES only affects live gates. Closed trades always show fees+tax here."
+    )
     if st.sidebar.button("Sync from VM", type="primary"):
         with st.spinner("Syncing…"):
             # temporarily set env for bridge
@@ -591,7 +637,7 @@ def main() -> None:
         ]
     )
     with t0:
-        tab_overview(dd, db)
+        tab_overview(dd, db, lot_size=lot_size)
     with t1:
         tab_proposals(dd)
     with t2:
@@ -603,7 +649,7 @@ def main() -> None:
     with t5:
         tab_reasoning(dd)
     with t6:
-        tab_trades(db)
+        tab_trades(db, lot_size=lot_size)
     with t7:
         tab_signals_ticks(db)
     with t8:

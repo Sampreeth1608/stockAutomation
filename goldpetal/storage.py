@@ -379,11 +379,16 @@ def _price_from_signal(row: sqlite3.Row, db_path: Path = DB_PATH) -> float | Non
 def build_trades(
     strategy: str | None = None,
     db_path: Path = DB_PATH,
+    *,
+    lot_size: float | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) into round-trip trades + PnL.
 
     When strategy is None, builds each strategy separately then concatenates
     so S1 and S2 never cross-pair.
+
+    Post-trade Angel fees + tax are always computed for display (even when
+    IGNORE_FEES=true). lot_size overrides LOT_SIZE for fee/PnL scaling.
     """
     if strategy is None:
         with connect(db_path) as conn:
@@ -397,18 +402,20 @@ def build_trades(
         merged: list[dict[str, Any]] = []
         trade_no = 0
         for name in names:
-            for t in _build_trades_one(name, db_path=db_path):
+            for t in _build_trades_one(name, db_path=db_path, lot_size=lot_size):
                 trade_no += 1
                 t = dict(t)
                 t["trade_no"] = trade_no
                 merged.append(t)
         return merged
-    return _build_trades_one(strategy, db_path=db_path)
+    return _build_trades_one(strategy, db_path=db_path, lot_size=lot_size)
 
 
 def _build_trades_one(
     strategy: str,
     db_path: Path = DB_PATH,
+    *,
+    lot_size: float | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) for one strategy."""
     rows = list_signals(strategy=strategy, db_path=db_path)
@@ -419,7 +426,11 @@ def _build_trades_one(
     def _close(trade: dict[str, Any], *, exit_ts: str, exit_price: float | None,
                exit_reason: str, exit_net: Any, exit_net_delta: Any,
                status: str) -> dict[str, Any]:
-        from charges import apply_charges_and_tax, charges_from_env
+        from charges import (
+            angel_charges_from_env,
+            apply_charges_and_tax,
+            ignore_fees_enabled,
+        )
 
         entry = trade.get("entry_price")
         side = trade["side"]
@@ -439,15 +450,21 @@ def _build_trades_one(
             else:
                 pnl_pts = entry_f - exit_price
             pnl_pct = (pnl_pts / entry_f * 100.0) if entry_f else 0.0
+            # Always Angel schedule for post-trade reporting columns
+            report_cfg = angel_charges_from_env(lot_size=lot_size)
             charge_bits = apply_charges_and_tax(
                 pnl_pts,
-                charges_from_env(),
+                report_cfg,
                 side=side,
                 entry_price=entry_f,
                 exit_price=float(exit_price),
             )
-            # Keep net_pnl as after-tax so journals/reports default to real take-home
-            pnl = charge_bits["pnl_after_tax"]
+            # IGNORE_FEES: strategies "ride freely" — net_pnl stays gross.
+            # charges / tax / pnl_after_tax still filled for Streamlit/desk.
+            if ignore_fees_enabled():
+                pnl = float(charge_bits["gross_pnl"])
+            else:
+                pnl = float(charge_bits["pnl_after_tax"])
         trade.update(
             {
                 "exit_ts": exit_ts,
@@ -466,6 +483,7 @@ def _build_trades_one(
                 "pnl_after_charges": charge_bits["pnl_after_charges"],
                 "tax": charge_bits["tax"],
                 "pnl_after_tax": charge_bits["pnl_after_tax"],
+                "lots": float(lot_size) if lot_size is not None else "",
                 "net_pnl": round(pnl, 2) if pnl is not None else "",
                 "net_pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else "",
                 "status": status,
