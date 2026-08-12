@@ -42,21 +42,21 @@ gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c \
   --command 'ls -la /home/sampreeth1608/goldpetal/data | head'
 ```
 
-## Daily
+## Daily (one click)
+
+**Finder:** double-click `goldpetal/scripts/open_desk_mac.command`  
+(first time only: `chmod +x scripts/open_desk_mac.command scripts/open_desk_mac.sh`)
+
+**Terminal:**
 
 ```bash
 cd ~/stockAutomation/goldpetal
-source .venv-analytics/bin/activate
-git pull origin cursor/control-panel-capital-weekend-8bfa
-./scripts/sync_analytics_mac.sh
-streamlit run analytics/app.py
+./scripts/open_desk_mac.sh
 ```
 
-You should see `✓` lines (proposals, ticks.db, …), not `· missing …`.
+That pulls git, syncs the VM snapshot, and opens Streamlit at `http://localhost:8501`.
 
-Or use the in-app **Sync from VM** button.
-
-Opens `http://localhost:8501`.
+Or use the in-app **Sync from VM** button after the desk is already open.
 
 ### Fees on the desk
 Strategies can keep `IGNORE_FEES=true` (ride freely / no fee gates).  
