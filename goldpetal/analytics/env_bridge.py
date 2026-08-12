@@ -33,6 +33,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S12_NO_FLIP",
         "S12_ALLOW_LONG",
         "S12_ALLOW_SHORT",
+        "S12_CONFIRM_MINUTES",
         "S13_MIN_RANGE",
         "S13_ENTRY_MINUTES_BEFORE_CLOSE",
         "S13_EXIT_MINUTES_AFTER_OPEN",
@@ -101,7 +102,7 @@ def _validate_value(key: str, value: str) -> str:
         if low not in {"true", "false", "1", "0", "yes", "no", "y", "n"}:
             raise ValueError(f"{key} must be boolean-like, got {value!r}")
         return "true" if low in {"true", "1", "yes", "y"} else "false"
-    if key in {"LIVE_MAX_LOTS", "LIVE_LOTS", "S12_BAR_MINUTES", "S13_ENTRY_MINUTES_BEFORE_CLOSE", "S13_EXIT_MINUTES_AFTER_OPEN"}:
+    if key in {"LIVE_MAX_LOTS", "LIVE_LOTS", "S12_BAR_MINUTES", "S12_CONFIRM_MINUTES", "S13_ENTRY_MINUTES_BEFORE_CLOSE", "S13_EXIT_MINUTES_AFTER_OPEN"}:
         n = int(float(value))
         if n < 0 or n > 10_000:
             raise ValueError(f"{key} out of range")

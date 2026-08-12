@@ -37,17 +37,31 @@ tmux kill-session -t gp-desk 2>/dev/null || true
 
 ## S13 daily HH/LL overnight (paper)
 
-Separate from S4 ML. Enter near close on daily HH/LL vs previous day; exit next open.
+Same-day rule as S12: if today's high > yesterday's high, watch the day; in the
+**last minute before MARKET_CLOSE**, if close > open → long overnight (exit next open).
+Short is the mirror (LL + red close).
 
 ```bash
 # in .env
 ENABLE_S13=true
 S13_MIN_RANGE=5
-S13_ENTRY_MINUTES_BEFORE_CLOSE=15
+S13_ENTRY_MINUTES_BEFORE_CLOSE=1
 S13_EXIT_MINUTES_AFTER_OPEN=5
 ```
 
-Restart supervise after pull. Look for `S13_HHHL_DAY` in `data/strategy_run.log`.
+Restart supervise after pull. Look for `S13_HHHL_DAY` / `same-day` in `data/strategy_run.log`.
+
+## S12 same-candle 30m HH/LL
+
+During a 30m candle, if high > previous candle high, watch it; in that candle's
+**last minute**, if close > open → long (within that 30m, not +another 30m). Short mirror.
+
+```bash
+ENABLE_S12=true
+S12_BAR_MINUTES=30
+S12_MIN_RANGE=5
+S12_CONFIRM_MINUTES=1
+```
 
 ## Day-by-day HH/LL on S4 horizon
 

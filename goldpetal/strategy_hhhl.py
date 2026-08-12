@@ -1,13 +1,17 @@
-"""S12_HHHL30 — Higher-high / lower-low candle breakout (paper).
+"""S12_HHHL30 — Higher-high / lower-low on the *same* 30m candle (paper).
 
-Rules (same as backtest_hhhl_candles.py):
-  LONG  entry: high > prev_high AND close > open
-        exit:  high < prev_high AND close < open
-  SHORT entry: low  < prev_low  AND close < open
-        exit:  low  > prev_low  AND close > open
+Judgement (user rule):
+  During a 30m candle, if **current high > previous candle high**, watch it.
+  In that candle's **last minute**, if close > open → LONG.
+  Same for short: current low < prev low, last-minute close < open → SHORT.
+  Decision completes inside that 30m window (not after waiting another 30m).
 
-Defaults from hist paper sweep: 30m bars, min_range=5, no_flip=True.
-Session hours use global MARKET_OPEN/CLOSE in run_strategy.
+Exits (still on last-minute of a later candle):
+  LONG  exit: high < prev_high AND close < open
+  SHORT exit: low  > prev_low  AND close > open
+
+Defaults: 30m bars, min_range=5, no_flip=True.
+Previous candle is seeded from ticks.db so the first live bar can signal.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -30,6 +35,8 @@ class HhhlConfig:
     no_flip: bool = True
     allow_long: bool = True
     allow_short: bool = True
+    # Confirm in the final N minutes of the candle (default: last 1 minute).
+    confirm_minutes: int = 1
 
 
 class HhhlCandleStrategy:
@@ -44,14 +51,22 @@ class HhhlCandleStrategy:
         self._bar_key: datetime | None = None
         self._bar_o = self._bar_h = self._bar_l = self._bar_c = None
         self._bar_n = 0
+        self._decided_this_bar = False
+        self._watching: str | None = None  # "hh" | "ll" | None
+        self.seed_prev_from_ticks()
 
     @property
     def status_line(self) -> str:
         c = self.cfg
+        prev = (
+            f"prevH={self.prev_h:.0f} prevL={self.prev_l:.0f}"
+            if self.prev_h is not None and self.prev_l is not None
+            else "prev=none"
+        )
         return (
             f"TF={c.bar_minutes}m min_range={c.min_range:.0f} "
-            f"no_flip={c.no_flip} L={c.allow_long} S={c.allow_short} "
-            f"pos={self.position}"
+            f"confirm={c.confirm_minutes}m no_flip={c.no_flip} "
+            f"L={c.allow_long} S={c.allow_short} {prev} pos={self.position}"
         )
 
     def _floor_bar(self, ts: datetime) -> datetime:
@@ -61,40 +76,135 @@ class HhhlCandleStrategy:
         block = (mins // max(1, self.cfg.bar_minutes)) * max(1, self.cfg.bar_minutes)
         return midnight + timedelta(minutes=block)
 
+    def seed_prev_from_ticks(self, db_path: Path | None = None) -> None:
+        """Load last *completed* S12 bar so the current 30m candle can signal."""
+        if self.prev_h is not None:
+            return
+        try:
+            from mtf_bars import build_rich_bars, load_tick_rows
+
+            db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
+            if not db.exists():
+                return
+            rows = load_tick_rows(db)
+            minutes = max(1, int(self.cfg.bar_minutes))
+            bars = build_rich_bars(rows, f"{minutes}m", minutes)
+            if not bars:
+                return
+            now = datetime.now(IST)
+            cur_key = self._floor_bar(now)
+            completed = []
+            for b in bars:
+                try:
+                    bt = datetime.strptime(str(b.time)[:19], "%Y-%m-%d %H:%M:%S").replace(
+                        tzinfo=IST
+                    )
+                except ValueError:
+                    continue
+                if bt < cur_key:
+                    completed.append(b)
+            if not completed:
+                return
+            b = completed[-1]
+            self.prev_o = float(b.open)
+            self.prev_h = float(b.high)
+            self.prev_l = float(b.low)
+            self.prev_c = float(b.close)
+        except Exception:
+            return
+
+    def _in_confirm_window(self, now: datetime, bar_key: datetime) -> bool:
+        """True in the last `confirm_minutes` of this candle."""
+        bar_end = bar_key + timedelta(minutes=max(1, self.cfg.bar_minutes))
+        start = bar_end - timedelta(minutes=max(1, self.cfg.confirm_minutes))
+        return start <= now < bar_end
+
+    def _update_watching(self) -> None:
+        if self.prev_h is None or self.prev_l is None:
+            self._watching = None
+            return
+        if self._bar_h is None or self._bar_l is None:
+            return
+        saw_hh = float(self._bar_h) > float(self.prev_h)
+        saw_ll = float(self._bar_l) < float(self.prev_l)
+        if saw_hh and not saw_ll:
+            self._watching = "hh"
+        elif saw_ll and not saw_hh:
+            self._watching = "ll"
+        elif saw_hh and saw_ll:
+            self._watching = "both"
+        # keep prior watch flag if only one side appeared earlier in the bar
+
     def on_tick(
         self, now: datetime, ltp: float, message: dict[str, Any] | None = None
     ) -> SignalResult | None:
         del message  # OHLC from LTP only
+        now = now.astimezone(IST)
         key = self._floor_bar(now)
         px = float(ltp)
+
         if self._bar_key is None:
             self._bar_key = key
             self._bar_o = self._bar_h = self._bar_l = self._bar_c = px
             self._bar_n = 1
+            self._decided_this_bar = False
+            self._watching = None
             return None
 
-        if key == self._bar_key:
-            assert self._bar_h is not None and self._bar_l is not None
-            self._bar_h = max(self._bar_h, px)
-            self._bar_l = min(self._bar_l, px)
-            self._bar_c = px
-            self._bar_n += 1
+        if key != self._bar_key:
+            # Candle ended — seal as previous; fallback decide if last-min missed.
+            result: SignalResult | None = None
+            if (
+                not self._decided_this_bar
+                and self.prev_h is not None
+                and self._bar_o is not None
+            ):
+                result = self._decide(
+                    float(self._bar_o),
+                    float(self._bar_h or px),
+                    float(self._bar_l or px),
+                    float(self._bar_c or px),
+                )
+                self._decided_this_bar = True
+            self.prev_o = float(self._bar_o or px)
+            self.prev_h = float(self._bar_h or px)
+            self.prev_l = float(self._bar_l or px)
+            self.prev_c = float(self._bar_c or px)
+            self._bar_key = key
+            self._bar_o = self._bar_h = self._bar_l = self._bar_c = px
+            self._bar_n = 1
+            self._decided_this_bar = False
+            self._watching = None
+            return result
+
+        # Same candle — update OHLC and watch for HH/LL breaks
+        assert self._bar_h is not None and self._bar_l is not None
+        self._bar_h = max(self._bar_h, px)
+        self._bar_l = min(self._bar_l, px)
+        self._bar_c = px
+        self._bar_n += 1
+        self._update_watching()
+
+        if self._decided_this_bar:
+            return None
+        if self.prev_h is None or self.prev_l is None:
+            self.last_skip = "need_prev_bar"
+            return None
+        if not self._in_confirm_window(now, key):
+            self.last_skip = f"watching={self._watching or 'none'}"
             return None
 
-        # Bar closed → decide on completed candle, then start new bar
-        result = self._on_bar_close(
+        # Last minute(s) of *this* candle: confirm close vs open
+        self._decided_this_bar = True
+        return self._decide(
             float(self._bar_o or px),
-            float(self._bar_h or px),
-            float(self._bar_l or px),
+            float(self._bar_h),
+            float(self._bar_l),
             float(self._bar_c or px),
         )
-        self._bar_key = key
-        self._bar_o = self._bar_h = self._bar_l = self._bar_c = px
-        self._bar_n = 1
-        return result
 
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
-        """Offline / paper-sim path from OHLC row."""
+        """Offline / paper-sim path from a completed OHLC row."""
         return self._on_bar_close(
             float(row["open"]),
             float(row["high"]),
@@ -103,23 +213,26 @@ class HhhlCandleStrategy:
         )
 
     def _on_bar_close(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
-        prev = (self.prev_o, self.prev_h, self.prev_l, self.prev_c)
-        self.prev_o, self.prev_h, self.prev_l, self.prev_c = o, h, l, c
-        if any(x is None for x in prev):
+        """Bar-series API: each row is a finished candle vs previous finished candle."""
+        if self.prev_h is None or self.prev_l is None:
+            self.prev_o, self.prev_h, self.prev_l, self.prev_c = o, h, l, c
             return None
-        assert self.prev_h is not None  # for type checkers after assign
-        _po, ph, pl, _pc = prev
-        assert ph is not None and pl is not None
+        result = self._decide(o, h, l, c)
+        self.prev_o, self.prev_h, self.prev_l, self.prev_c = o, h, l, c
+        return result
+
+    def _decide(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
+        if self.prev_h is None or self.prev_l is None:
+            self.last_skip = "need_prev_bar"
+            return None
+        ph = float(self.prev_h)
+        pl = float(self.prev_l)
 
         range_pts = h - l
-        want_long = (
-            self.cfg.allow_long and h > float(ph) and c > o
-        )
-        want_short = (
-            self.cfg.allow_short and l < float(pl) and c < o
-        )
-        exit_long = h < float(ph) and c < o
-        exit_short = l > float(pl) and c > o
+        want_long = self.cfg.allow_long and h > ph and c > o
+        want_short = self.cfg.allow_short and l < pl and c < o
+        exit_long = h < ph and c < o
+        exit_short = l > pl and c > o
         can_enter = range_pts >= self.cfg.min_range
 
         if self.position == "long":
@@ -137,8 +250,8 @@ class HhhlCandleStrategy:
                         net_delta=None,
                         prev_net_delta=None,
                         reason=(
-                            f"s12 flip short LL+red range={range_pts:.1f} "
-                            f"H={h:.1f}<prevH={float(ph):.1f}"
+                            f"s12 flip short same-candle LL+red range={range_pts:.1f} "
+                            f"L={l:.1f}<prevL={pl:.1f}"
                         ),
                     )
                 return SignalResult(
@@ -148,7 +261,7 @@ class HhhlCandleStrategy:
                     net=None,
                     net_delta=None,
                     prev_net_delta=None,
-                    reason=f"s12 exit long LH+red range={range_pts:.1f}",
+                    reason=f"s12 exit long same-candle LH+red range={range_pts:.1f}",
                 )
             self.last_skip = "hold_long"
             return None
@@ -168,8 +281,8 @@ class HhhlCandleStrategy:
                         net_delta=None,
                         prev_net_delta=None,
                         reason=(
-                            f"s12 flip long HH+green range={range_pts:.1f} "
-                            f"L={l:.1f}>prevL={float(pl):.1f}"
+                            f"s12 flip long same-candle HH+green range={range_pts:.1f} "
+                            f"H={h:.1f}>prevH={ph:.1f}"
                         ),
                     )
                 return SignalResult(
@@ -179,12 +292,12 @@ class HhhlCandleStrategy:
                     net=None,
                     net_delta=None,
                     prev_net_delta=None,
-                    reason=f"s12 exit short HL+green range={range_pts:.1f}",
+                    reason=f"s12 exit short same-candle HL+green range={range_pts:.1f}",
                 )
             self.last_skip = "hold_short"
             return None
 
-        # flat
+        # flat — enter only if this candle broke HH/LL and closes in that direction
         if not can_enter:
             self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
             return None
@@ -198,7 +311,10 @@ class HhhlCandleStrategy:
                 net=None,
                 net_delta=None,
                 prev_net_delta=None,
-                reason=f"s12 long HH+green range={range_pts:.1f} H={h:.1f}>prevH={float(ph):.1f}",
+                reason=(
+                    f"s12 long same-candle HH+green range={range_pts:.1f} "
+                    f"H={h:.1f}>prevH={ph:.1f} C={c:.1f}>O={o:.1f}"
+                ),
             )
         if want_short and not want_long:
             self.position = "short"
@@ -210,7 +326,10 @@ class HhhlCandleStrategy:
                 net=None,
                 net_delta=None,
                 prev_net_delta=None,
-                reason=f"s12 short LL+red range={range_pts:.1f} L={l:.1f}<prevL={float(pl):.1f}",
+                reason=(
+                    f"s12 short same-candle LL+red range={range_pts:.1f} "
+                    f"L={l:.1f}<prevL={pl:.1f} C={c:.1f}<O={o:.1f}"
+                ),
             )
         self.last_skip = "no_signal"
         return None
@@ -224,19 +343,18 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def hhhl_from_env() -> HhhlCandleStrategy:
-    load = None
     try:
         from dotenv import load_dotenv
 
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
     except Exception:
         pass
-    del load
     cfg = HhhlConfig(
         bar_minutes=int(os.getenv("S12_BAR_MINUTES", "30")),
         min_range=float(os.getenv("S12_MIN_RANGE", "5")),
         no_flip=_env_flag("S12_NO_FLIP", True),
         allow_long=_env_flag("S12_ALLOW_LONG", True),
         allow_short=_env_flag("S12_ALLOW_SHORT", True),
+        confirm_minutes=int(os.getenv("S12_CONFIRM_MINUTES", "1")),
     )
     return HhhlCandleStrategy(cfg)

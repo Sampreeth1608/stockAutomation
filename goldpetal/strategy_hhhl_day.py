@@ -1,10 +1,11 @@
 """S13_HHHL_DAY — daily HH/LL signal, S4-style overnight hold (paper).
 
-Same candle rules as S12, but on the **completed trading day** vs **previous day**:
+Same *same-candle* rule as S12, on the **trading day** vs **previous day**:
 
-  LONG  entry near close: day.high > prev.high AND day.close > day.open
-  SHORT entry near close: day.low  < prev.low  AND day.close < day.open
-  EXIT  after next open (delivery-style), same windows as S4.
+  During the day, if **today's high > yesterday's high**, watch the day candle.
+  In the **last minute(s) before market close**, if close > open → LONG overnight.
+  Short: today's low < yesterday's low, last-minute close < open → SHORT overnight.
+  EXIT after next open (delivery-style).
 
 Does not replace S4 ML overnight — separate paper strategy.
 """
@@ -45,7 +46,8 @@ class DayOhlc:
 @dataclass
 class HhhlDayConfig:
     min_range: float = 5.0
-    entry_minutes_before_close: int = 15
+    # Confirm in the last N minutes of the day candle (default: last 1 minute).
+    entry_minutes_before_close: int = 1
     exit_minutes_after_open: int = 5
     market_open: str = "09:00"
     market_close: str = "23:30"
@@ -240,41 +242,40 @@ class HhhlDayOvernightStrategy:
         self._day.close = px
 
     def _signal_from_day(self) -> tuple[str | None, str]:
-        """Return ('long'|'short'|None, reason) using today vs prev_day."""
+        """Return ('long'|'short'|None, reason) — same-day HH/LL + last-min close."""
         day = self._day
         prev = self.prev_day
         if day is None or prev is None:
             return None, "need_prev_day"
         if day.range_pts < self.cfg.min_range:
             return None, f"min_range {day.range_pts:.1f}<{self.cfg.min_range}"
-        want_long = (
-            self.cfg.allow_long
-            and day.high > prev.high
-            and day.close > day.open
-        )
-        want_short = (
-            self.cfg.allow_short
-            and day.low < prev.low
-            and day.close < day.open
-        )
+        # Watch flags: HH/LL must have printed on *this* day candle.
+        saw_hh = day.high > prev.high
+        saw_ll = day.low < prev.low
+        want_long = self.cfg.allow_long and saw_hh and day.close > day.open
+        want_short = self.cfg.allow_short and saw_ll and day.close < day.open
         if want_long and want_short:
             return None, "conflict_hh_ll"
         if want_long:
             return (
                 "long",
                 (
-                    f"s13 LONG HH+green dayH={day.high:.1f}>prevH={prev.high:.1f} "
-                    f"range={day.range_pts:.1f}"
+                    f"s13 LONG same-day HH+green dayH={day.high:.1f}>prevH={prev.high:.1f} "
+                    f"C={day.close:.1f}>O={day.open:.1f} range={day.range_pts:.1f}"
                 ),
             )
         if want_short:
             return (
                 "short",
                 (
-                    f"s13 SHORT LL+red dayL={day.low:.1f}<prevL={prev.low:.1f} "
-                    f"range={day.range_pts:.1f}"
+                    f"s13 SHORT same-day LL+red dayL={day.low:.1f}<prevL={prev.low:.1f} "
+                    f"C={day.close:.1f}<O={day.open:.1f} range={day.range_pts:.1f}"
                 ),
             )
+        if saw_hh and not (day.close > day.open):
+            return None, "hh_but_not_green_at_close"
+        if saw_ll and not (day.close < day.open):
+            return None, "ll_but_not_red_at_close"
         return None, "no_hhll_signal"
 
     def on_tick(self, now: datetime, ltp: float, message: dict[str, Any] | None = None) -> SignalResult | None:
@@ -310,7 +311,7 @@ class HhhlDayOvernightStrategy:
                 reason=f"s13 delivery exit after open; was_{side} entry_date={entry_date}",
             )
 
-        # ENTRY near close
+        # ENTRY in last minute(s) of *this* day candle (same-day HH/LL confirm)
         if self.position != "flat":
             self.last_skip = "already_in"
             return None
@@ -318,7 +319,16 @@ class HhhlDayOvernightStrategy:
             self.last_skip = "entered_today"
             return None
         if not self._in_entry_window(now):
-            self.last_skip = "outside_entry_window"
+            # Still track watch state for status
+            if self._day and self.prev_day:
+                if self._day.high > self.prev_day.high:
+                    self.last_skip = "watching_hh"
+                elif self._day.low < self.prev_day.low:
+                    self.last_skip = "watching_ll"
+                else:
+                    self.last_skip = "outside_entry_window"
+            else:
+                self.last_skip = "outside_entry_window"
             return None
 
         side, reason = self._signal_from_day()
@@ -359,7 +369,7 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         pass
     cfg = HhhlDayConfig(
         min_range=float(os.getenv("S13_MIN_RANGE", "5")),
-        entry_minutes_before_close=int(os.getenv("S13_ENTRY_MINUTES_BEFORE_CLOSE", "15")),
+        entry_minutes_before_close=int(os.getenv("S13_ENTRY_MINUTES_BEFORE_CLOSE", "1")),
         exit_minutes_after_open=int(os.getenv("S13_EXIT_MINUTES_AFTER_OPEN", "5")),
         market_open=os.getenv("MARKET_OPEN", "09:00"),
         market_close=os.getenv("MARKET_CLOSE", "23:30"),
