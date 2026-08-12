@@ -195,6 +195,63 @@ def set_live_approved(
     return save_state(st, path=path)
 
 
+# Known strategy ids (paper + live). Used for allowlist lock.
+ALL_STRATEGY_NAMES: tuple[str, ...] = (
+    "S1_NETDELTA",
+    "S2_BALANCE",
+    "S3_ML",
+    "S4_OVERNIGHT",
+    "S5_MINEDGE",
+    "S6_MIN30",
+    "S8_NET_ZIGZAG",
+    "S9_STATE30",
+    "S10_LEGACY30",
+    "S11_DISCOVERED",
+    "S12_HHHL30",
+)
+
+SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
+    "S4_OVERNIGHT",
+    "S5_MINEDGE",
+    "S8_NET_ZIGZAG",
+    "S11_DISCOVERED",
+    "S12_HHHL30",
+)
+
+
+def set_paper_allowlist(
+    allowed: list[str],
+    *,
+    path: Path | None = None,
+    known: tuple[str, ...] | None = None,
+    note: str = "",
+) -> ControlState:
+    """Only ``allowed`` strategies may open new paper/live entries.
+
+    Everyone else is force-disabled (blocks BUY/SHORT even if ENABLE_S*=true).
+    Also keep ENABLE_S9=false etc. in .env and restart so disabled strategies
+    are not loaded / do not emit.
+    """
+    st = load_state(path)
+    allow: list[str] = []
+    for raw in allowed:
+        name = str(raw or "").strip()
+        if name and name not in allow:
+            allow.append(name)
+    universe = known or ALL_STRATEGY_NAMES
+    disabled = [name for name in universe if name not in set(allow)]
+    st.force_disabled = disabled
+    # Allowed strategies must not remain force-disabled.
+    for name in allow:
+        if name not in st.paper_approved:
+            st.paper_approved.append(name)
+    st.note = note or (
+        f"paper allowlist: {', '.join(allow) or '(none)'}; "
+        f"force_disabled: {', '.join(disabled) or '(none)'}"
+    )
+    return save_state(st, path=path)
+
+
 def reject_strategy(strategy: str, path: Path | None = None) -> ControlState:
     st = load_state(path)
     st.paper_approved = [s for s in st.paper_approved if s != strategy]

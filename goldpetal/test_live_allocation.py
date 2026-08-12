@@ -33,6 +33,28 @@ def test_set_live_approved_exact_set() -> None:
         td.cleanup()
 
 
+def test_paper_allowlist_force_disables_s9() -> None:
+    td, state, _, _ = _tmp()
+    try:
+        from control_state import set_paper_allowlist, strategy_entries_allowed
+
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_paper_allowlist(
+            ["S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG", "S11_DISCOVERED", "S12_HHHL30"],
+            path=state,
+        )
+        st = load_state(path=state)
+        assert "S9_STATE30" in st.force_disabled
+        assert "S1_NETDELTA" in st.force_disabled
+        ok, why = strategy_entries_allowed("S9_STATE30", path=state)
+        assert not ok and why == "force_disabled"
+        ok, why = strategy_entries_allowed("S4_OVERNIGHT", path=state)
+        assert ok, why
+    finally:
+        td.cleanup()
+
+
 def test_apply_live_capital_and_disable_others() -> None:
     td, _, capital_path, _ = _tmp()
     try:

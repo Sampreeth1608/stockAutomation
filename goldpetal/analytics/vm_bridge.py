@@ -198,6 +198,25 @@ print(json.dumps(save_live_allocation_local(json.loads({blob!r}))))
         return {"ok": False, "error": out or err}
 
 
+def save_paper_allowlist_remote(
+    payload: dict[str, Any], cfg: VmConfig | None = None
+) -> dict[str, Any]:
+    cfg = cfg or VmConfig.from_env()
+    blob = json.dumps(payload)
+    py = f"""
+import json
+from analytics.local_bridge import save_paper_allowlist_local
+print(json.dumps(save_paper_allowlist_local(json.loads({blob!r}))))
+"""
+    code, out, err = ssh_python(cfg, py, timeout=120)
+    if code != 0:
+        return {"ok": False, "error": err or out, "code": code}
+    try:
+        return json.loads(out.strip().splitlines()[-1])
+    except json.JSONDecodeError:
+        return {"ok": False, "error": out or err}
+
+
 def sync_snapshot(data_dir: Path, cfg: VmConfig | None = None, *, skip_db: bool = False) -> tuple[int, str]:
     """Call the shell sync script."""
     cfg = cfg or VmConfig.from_env()

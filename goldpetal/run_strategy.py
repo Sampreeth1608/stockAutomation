@@ -203,6 +203,15 @@ def run_once(
             return False, f"regime={regime}"
         return allow_new_entry(strategy_name)
 
+    def _strategy_active(strategy_name: str) -> bool:
+        """False when ENABLE_* is off or desk force-disabled (stops paper emits)."""
+        if not portfolio.is_enabled(strategy_name):
+            return False
+        st = load_state()
+        if strategy_name in st.force_disabled:
+            return False
+        return True
+
     def _record_signal(
         *,
         time_label: str,
@@ -461,7 +470,7 @@ def run_once(
 
     def emit_s2_if_changed(now: datetime, message: dict) -> None:
         """S2: accumulate buy1-5/sell1-5 for 1 minute, then trade on net sign."""
-        if not portfolio.is_enabled(strategy_s2.name):
+        if not _strategy_active(strategy_s2.name):
             return
         if latest["cmp"] is None:
             return
@@ -524,7 +533,7 @@ def run_once(
 
     def emit_s3_if_changed(now: datetime, message: dict) -> None:
         """S3 ML: score depth/LTP features; emit BUY/SHORT/CLOSE transitions."""
-        if not portfolio.is_enabled(strategy_s3.name):
+        if not _strategy_active(strategy_s3.name):
             return
         if not strategy_s3.enabled:
             return
@@ -587,7 +596,7 @@ def run_once(
 
     def emit_s11_if_changed(now: datetime, message: dict) -> None:
         """S11 discovered pack: multi-model ML entry templates from weekly discover."""
-        if not portfolio.is_enabled(strategy_s11.name):
+        if not _strategy_active(strategy_s11.name):
             return
         if not strategy_s11.enabled:
             return
@@ -649,7 +658,7 @@ def run_once(
 
     def emit_s4_if_changed(now: datetime, message: dict) -> None:
         """S4 overnight: enter near close, exit after next open. Ignores tick regime."""
-        if not portfolio.is_enabled(strategy_s4.name):
+        if not _strategy_active(strategy_s4.name):
             return
         if not strategy_s4.enabled:
             return
@@ -701,7 +710,7 @@ def run_once(
 
     def emit_s5_if_changed(now: datetime, message: dict) -> None:
         """S5: trade only when expected move covers fees / min edge points."""
-        if not portfolio.is_enabled(strategy_s5.name):
+        if not _strategy_active(strategy_s5.name):
             return
         if latest["cmp"] is None:
             return
@@ -739,7 +748,7 @@ def run_once(
 
     def emit_s6_if_changed(now: datetime, message: dict) -> None:
         """S6: trade when expected move >= 30 points (user floor, no fee gate)."""
-        if not portfolio.is_enabled(strategy_s6.name):
+        if not _strategy_active(strategy_s6.name):
             return
         if latest["cmp"] is None:
             return
@@ -775,7 +784,7 @@ def run_once(
 
     def emit_s8_if_changed(now: datetime, message: dict) -> None:
         """S8: fixed NET zigzag (best hist params) + retune recorder."""
-        if not portfolio.is_enabled(strategy_s8.name):
+        if not _strategy_active(strategy_s8.name):
             return
         if latest["cmp"] is None:
             return
@@ -883,7 +892,7 @@ def run_once(
 
     def emit_s9_if_changed(now: datetime, message: dict) -> None:
         """S9: 27-state TBQ/TSQ/Price machine on N-minute bar closes."""
-        if not portfolio.is_enabled(strategy_s9.name):
+        if not _strategy_active(strategy_s9.name):
             return
         if latest["cmp"] is None:
             return
@@ -989,7 +998,7 @@ def run_once(
 
     def emit_s10_if_changed(now: datetime, message: dict) -> None:
         """S10: legacy 30m always zigzag (MTF +₹42k paper path)."""
-        if not portfolio.is_enabled(strategy_s10.name):
+        if not _strategy_active(strategy_s10.name):
             return
         if latest["cmp"] is None:
             return
@@ -1044,7 +1053,7 @@ def run_once(
 
     def emit_s12_if_changed(now: datetime, message: dict) -> None:
         """S12: HH/LL candle breakout on bar close."""
-        if not portfolio.is_enabled(strategy_s12.name):
+        if not _strategy_active(strategy_s12.name):
             return
         if latest["cmp"] is None:
             return

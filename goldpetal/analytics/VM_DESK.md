@@ -2,6 +2,30 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
+## Paper allowlist (stop S9 etc.)
+
+Streamlit **Live Deploy → Paper allowlist**:
+
+1. Keep only S4 / S5 / S8 / S11 / S12 selected.
+2. Click **Lock paper to selected only** → force-disables S1/S2/S3/S6/S9/S10.
+3. On VM `.env` (required so they are not loaded at all):
+
+```bash
+ENABLE_S1=false
+ENABLE_S2=false
+ENABLE_S3=false
+ENABLE_S6=false
+ENABLE_S9=false
+ENABLE_S10=false
+ENABLE_S4=true
+ENABLE_S5=true
+ENABLE_S8=true
+ENABLE_S11=true
+ENABLE_S12=true
+```
+
+4. Restart supervise. Trades tab may still show **old** S9 history — filter to slim strategies.
+
 ## Live Deploy (real money)
 
 Streamlit tab **Live Deploy**:

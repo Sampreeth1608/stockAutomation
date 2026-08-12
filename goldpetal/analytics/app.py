@@ -28,6 +28,7 @@ from analytics.local_bridge import (  # noqa: E402
     desk_data_dir,
     save_capital_local,
     save_live_allocation_local,
+    save_paper_allowlist_local,
     set_control_local,
 )
 from analytics.vm_bridge import (  # noqa: E402
@@ -35,6 +36,7 @@ from analytics.vm_bridge import (  # noqa: E402
     decide_proposal_remote,
     save_capital_remote,
     save_live_allocation_remote,
+    save_paper_allowlist_remote,
     set_control_remote,
     sync_snapshot,
 )
@@ -88,6 +90,15 @@ def save_live_allocation(payload: dict) -> dict:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return save_live_allocation_remote(payload)
+
+
+def save_paper_allowlist(payload: dict) -> dict:
+    if LOCAL_DESK:
+        try:
+            return save_paper_allowlist_local(payload)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    return save_paper_allowlist_remote(payload)
 
 
 def _strategies_as_rows(raw) -> list[dict]:
@@ -482,9 +493,42 @@ def tab_live_deploy(dd: Path) -> None:
     state = load_json(dd / "control" / "state.json") or {}
     cap = load_json(dd / "control" / "capital.json") or {}
     live_set = set(state.get("live_approved") or [])
+    force_disabled = set(state.get("force_disabled") or [])
     strat_map = {
         row["strategy"]: row for row in _strategies_as_rows(cap.get("strategies"))
     }
+
+    st.markdown("### Paper allowlist (stop S9 / others)")
+    st.caption(
+        "Trades tab can still show **old** S9 rows from history. "
+        "This lock blocks **new** entries for everything not checked. "
+        "Also set `ENABLE_S9=false` (and S1/S2/S3/S6/S10) in `.env` + restart supervise."
+    )
+    paper_default = [s for s in STRATEGIES if s not in force_disabled] or list(STRATEGIES)
+    paper_pick = st.multiselect(
+        "Strategies allowed to paper-trade",
+        options=list(STRATEGIES),
+        default=paper_default,
+        key="paper_allow_pick",
+    )
+    if st.button("Lock paper to selected only", type="primary", key="paper_lock_btn"):
+        res = save_paper_allowlist(
+            {
+                "paper_allowlist": paper_pick,
+                "note": f"desk paper lock: {', '.join(paper_pick)}",
+            }
+        )
+        if res.get("ok"):
+            st.success(
+                f"Paper allowlist saved. Force-disabled: "
+                f"{', '.join(res.get('force_disabled') or []) or 'none'}"
+            )
+            st.warning(res.get("reminder") or "")
+            st.cache_data.clear()
+        else:
+            st.error(res.get("error") or res)
+    if force_disabled:
+        st.info(f"Currently force-disabled: {', '.join(sorted(force_disabled))}")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Live unlocked", "yes" if state.get("live_unlocked") else "locked")
@@ -560,6 +604,11 @@ def tab_live_deploy(dd: Path) -> None:
                     }
                 )
 
+    lock_paper_with_live = st.checkbox(
+        "Also lock paper to the Live-checked strategies only",
+        value=False,
+        key="lock_paper_with_live",
+    )
     disable_others = st.checkbox(
         "Disable capital for strategies not selected (blocks their new entries too)",
         value=False,
@@ -583,12 +632,17 @@ def tab_live_deploy(dd: Path) -> None:
             "disable_others": bool(disable_others),
             "note": f"desk live: {', '.join(live_names) or 'none'}",
         }
-        # Bridge writes live_approved + capital; disable_others turns off other slim budgets.
+        if lock_paper_with_live:
+            payload["paper_allowlist"] = list(live_names)
         res = save_live_allocation(payload)
         if res.get("ok"):
             st.success(
                 f"Live approved: {', '.join(res.get('live_approved') or []) or 'none'}"
             )
+            if res.get("force_disabled"):
+                st.info(
+                    f"Force-disabled for paper: {', '.join(res.get('force_disabled') or [])}"
+                )
             if not res.get("live_mode_ok"):
                 st.warning(
                     f"Gates not ready for Angel orders yet: {res.get('live_mode_reason')}. "
@@ -623,6 +677,9 @@ def tab_live_deploy(dd: Path) -> None:
 4. On VM `.env`: `DRY_RUN=false` and set `LIVE_MAX_LOTS` to your hard ceiling (e.g. `5`).
 5. Restart `supervise.sh`. Only `live_approved` strategies place Angel orders;
    size = min(strategy max_lots, LIVE_MAX_LOTS).
+
+To stop S9/S1/etc paper completely: use **Lock paper to selected only** above, then on VM:
+`ENABLE_S9=false` (and other non-slim) + restart supervise.
 """
         )
 
@@ -674,11 +731,16 @@ def tab_trades(db: Path, *, lot_size: float = 1.0) -> None:
         return
     st.caption(
         f"Post-trade Angel fees + tax at {lot_size:g} lot(s). "
-        "Gross = points × lots; after-tax = gross − charges − tax."
+        "Gross = points × lots; after-tax = gross − charges − tax. "
+        "Old S9/S1/… rows stay in history until you filter them out."
     )
+    all_strats = sorted(trades["strategy"].dropna().unique())
+    slim_present = [s for s in STRATEGIES if s in all_strats]
     strat = st.multiselect(
         "Strategy",
-        options=sorted(trades["strategy"].dropna().unique()),
+        options=all_strats,
+        default=slim_present or None,
+        key="trades_strat_filter",
     )
     view = trades if not strat else trades[trades["strategy"].isin(strat)]
     if st.checkbox("Today only"):

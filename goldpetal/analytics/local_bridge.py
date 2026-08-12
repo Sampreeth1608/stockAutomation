@@ -81,7 +81,12 @@ def save_capital_local(payload: dict[str, Any]) -> dict[str, Any]:
 def save_live_allocation_local(payload: dict[str, Any]) -> dict[str, Any]:
     """Select live strategies + assign ₹ capital / lot caps for real trades."""
     from capital import apply_live_capital_allocation, capital_snapshot
-    from control_state import is_live_mode_allowed, set_live_approved
+    from control_state import (
+        is_live_mode_allowed,
+        load_state,
+        set_live_approved,
+        set_paper_allowlist,
+    )
 
     allocations = _strategy_rows(payload.get("allocations") or payload.get("strategies"))
     live_names = [
@@ -96,6 +101,14 @@ def save_live_allocation_local(payload: dict[str, Any]) -> dict[str, Any]:
         ]
 
     st = set_live_approved(live_names, note=str(payload.get("note") or "desk live allocation"))
+    if payload.get("paper_allowlist") is not None:
+        paper_names = [
+            str(s).strip() for s in (payload.get("paper_allowlist") or []) if str(s).strip()
+        ]
+        st = set_paper_allowlist(
+            paper_names,
+            note=str(payload.get("paper_note") or "desk paper allowlist"),
+        )
     apply_live_capital_allocation(
         allocations,
         total_capital_inr=(
@@ -116,16 +129,43 @@ def save_live_allocation_local(payload: dict[str, Any]) -> dict[str, Any]:
         known_strategies=SLIM_STRATEGIES,
     )
     live_ok, live_why = is_live_mode_allowed()
+    st = load_state()
     return {
         "ok": True,
         "live_approved": list(st.live_approved),
+        "force_disabled": list(st.force_disabled),
+        "paper_approved": list(st.paper_approved),
         "live_mode_ok": live_ok,
         "live_mode_reason": live_why,
         "capital": capital_snapshot(),
         "note": st.note,
         "reminder": (
             "Live orders still need: Unlock live in Control + DRY_RUN=false on VM .env. "
-            "Order size = strategy max_lots capped by LIVE_MAX_LOTS."
+            "Order size = strategy max_lots capped by LIVE_MAX_LOTS. "
+            "For paper: set ENABLE_S9=false (etc.) in .env and restart supervise so "
+            "force-disabled strategies are not loaded."
+        ),
+    }
+
+
+def save_paper_allowlist_local(payload: dict[str, Any]) -> dict[str, Any]:
+    """Lock paper trading to an explicit strategy allowlist."""
+    from control_state import load_state, set_paper_allowlist
+
+    names = [str(s).strip() for s in (payload.get("paper_allowlist") or []) if str(s).strip()]
+    st = set_paper_allowlist(
+        names,
+        note=str(payload.get("note") or "desk paper allowlist"),
+    )
+    return {
+        "ok": True,
+        "paper_allowlist": names,
+        "force_disabled": list(st.force_disabled),
+        "paper_approved": list(st.paper_approved),
+        "note": st.note,
+        "reminder": (
+            "Also set ENABLE_S1/S2/S3/S6/S9/S10=false in .env and restart supervise "
+            "so those strategies stop emitting completely."
         ),
     }
 
