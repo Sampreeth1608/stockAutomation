@@ -30,14 +30,16 @@ DRY_RUN=true
 IGNORE_FEES=true
 ```
 
-Restart the bot, then start the desk in a **second** SSH session:
+Restart the bot, then start the desk in tmux:
 
 ```bash
 pkill -9 -f 'run_strategy|supervise' || true
 nohup ./supervise.sh >> data/supervise.log 2>&1 &
 
-# other terminal / screen / tmux:
+git pull origin cursor/vm-desk-slim-strategies-8bfa
 ./scripts/run_desk_vm.sh
+# detach without stopping: Ctrl+B then D
+# later: tmux attach -t gp-desk
 ```
 
 Open in browser: `http://VM_EXTERNAL_IP:8501`  

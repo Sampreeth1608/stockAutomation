@@ -21,7 +21,7 @@ fi
 
 CMD=(
   "$ST" run analytics/app.py
-  --server.address 0.0.0.0
+  --server.address 127.0.0.1
   --server.port 8501
   --server.headless true
 )
@@ -49,7 +49,9 @@ if tmux has-session -t "=$SESSION" 2>/dev/null; then
   exec tmux attach -t "$SESSION"
 fi
 
-echo "→ starting desk in tmux session '$SESSION' on :8501"
+echo "→ starting desk in tmux session '$SESSION' on 127.0.0.1:8501 (localhost only)"
+echo "   From Mac: gcloud compute ssh USER@VM --zone=ZONE -- -L 8501:localhost:8501"
+echo "   then open http://localhost:8501"
 echo "   detach: Ctrl+B then D    reattach: tmux attach -t $SESSION"
 tmux new-session -d -s "$SESSION" -c "$PWD" \
   "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
