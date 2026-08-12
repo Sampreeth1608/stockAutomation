@@ -69,22 +69,63 @@ fi
 rm -f "$TMP_ENV"
 
 if [[ "$SKIP_DB" -eq 0 ]]; then
-  echo "→ ticks.db (may take a minute)…"
-  # Avoid gcloud creating ticks.db/ as a directory from a prior bad sync.
-  rm -rf "$OUT/ticks.db" "$OUT/ticks.db-wal" "$OUT/ticks.db-shm"
-  pull "data/ticks.db" "$OUT/ticks.db"
-  # WAL companions (needed if VM has uncheckpointed writes)
-  pull "data/ticks.db-wal" "$OUT/ticks.db-wal"
-  pull "data/ticks.db-shm" "$OUT/ticks.db-shm"
-  if [[ -f "$OUT/ticks.db" ]]; then
-    echo -n "  · local tick count: "
-    sqlite3 "$OUT/ticks.db" 'SELECT COUNT(*) FROM ticks;' 2>/dev/null \
-      || python3 -c "import sqlite3; c=sqlite3.connect('$OUT/ticks.db'); print(c.execute('select count(*) from ticks').fetchone()[0])" \
-      2>/dev/null || echo "(could not query — install sqlite3 or check file)"
-  elif [[ -d "$OUT/ticks.db" ]]; then
-    echo "  ✗ $OUT/ticks.db is a DIRECTORY — remove and re-run sync"
+  echo "→ ticks.db consistent snapshot on VM (hot-copy safe)…"
+  # Live scp of ticks.db while the bot writes → "database disk image is malformed".
+  # sqlite3 .backup makes a consistent copy even with concurrent writers.
+  SNAP_REMOTE="data/ticks_snapshot.db"
+  SNAP_LOCAL="$OUT/ticks.db"
+  rm -rf "$SNAP_LOCAL" "$OUT/ticks.db-wal" "$OUT/ticks.db-shm"
+  BACKUP_CMD=$(cat <<'EOS'
+set -e
+cd /home/sampreeth1608/goldpetal
+rm -f data/ticks_snapshot.db
+if command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 data/ticks.db ".timeout 10000" ".backup data/ticks_snapshot.db"
+  sqlite3 data/ticks_snapshot.db 'PRAGMA integrity_check;' | head -1
+  sqlite3 data/ticks_snapshot.db 'SELECT COUNT(*) FROM ticks;'
+else
+  ./venv/bin/python - <<'PY'
+import sqlite3
+from pathlib import Path
+src = Path("data/ticks.db")
+dst = Path("data/ticks_snapshot.db")
+if dst.exists():
+    dst.unlink()
+con = sqlite3.connect(src)
+bck = sqlite3.connect(dst)
+with bck:
+    con.backup(bck)
+bck.close()
+con.close()
+chk = sqlite3.connect(dst)
+print(chk.execute("PRAGMA integrity_check").fetchone()[0])
+print(chk.execute("SELECT COUNT(*) FROM ticks").fetchone()[0])
+chk.close()
+PY
+fi
+EOS
+)
+  if gcloud compute ssh "$REMOTE" --zone="$ZONE" --command "$BACKUP_CMD" \
+      2>/tmp/gp_backup_err.txt | tee /tmp/gp_backup_out.txt; then
+    echo "  ✓ VM snapshot ready"
   else
-    echo "  ✗ ticks.db missing after scp"
+    echo "  ✗ VM snapshot failed:"
+    head -20 /tmp/gp_backup_err.txt | sed 's/^/    /'
+    echo "    On VM try: sqlite3 data/ticks.db 'PRAGMA integrity_check;'"
+    exit 1
+  fi
+  pull "$SNAP_REMOTE" "$SNAP_LOCAL"
+  if [[ -f "$SNAP_LOCAL" ]]; then
+    echo -n "  · local tick count: "
+    if command -v sqlite3 >/dev/null 2>&1; then
+      sqlite3 "$SNAP_LOCAL" 'SELECT COUNT(*) FROM ticks;' 2>/dev/null \
+        || echo "(malformed — see backtest diagnostics)"
+    else
+      python3 -c "import sqlite3; c=sqlite3.connect('$SNAP_LOCAL'); print(c.execute('select count(*) from ticks').fetchone()[0])" \
+        2>/dev/null || echo "(could not query)"
+    fi
+  else
+    echo "  ✗ ticks snapshot missing after scp"
   fi
 else
   echo "→ skipped ticks.db"
