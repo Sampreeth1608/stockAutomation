@@ -12,4 +12,5 @@ data/s4_state.json
 data/s8_presets/
 data/control/
 data/s8_nn/
-data/synth_hhhl.db
+data/backtests/
+data/discover/
