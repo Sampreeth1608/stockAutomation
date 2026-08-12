@@ -40,6 +40,23 @@ from analytics.vm_bridge import (  # noqa: E402
     set_control_remote,
     sync_snapshot,
 )
+from analytics.desk_auth import (  # noqa: E402
+    audit,
+    auth_required,
+    dangerous_requires_totp,
+    desk_password_configured,
+    desk_totp_configured,
+    verify_password,
+    verify_totp,
+)
+from analytics.env_bridge import (  # noqa: E402
+    apply_env_patch,
+    apply_strategy_enables,
+    read_env,
+    strategy_enable_snapshot,
+    write_env_updates,
+)
+from analytics.bot_ops import bot_status, restart_bot, stop_bot  # noqa: E402
 
 DEFAULT_DATA = desk_data_dir()
 LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "yes", "y"} or (
@@ -57,13 +74,54 @@ STRATEGIES = [
 ]
 
 
-def decide_proposal(pid: str, decision: str, note: str = "") -> dict:
+def decide_proposal(pid: str, decision: str, note: str = "", *, apply_env: bool = True) -> dict:
     if LOCAL_DESK:
         try:
-            return decide_proposal_local(pid, decision, note=note)
+            return decide_proposal_local(pid, decision, note=note, apply_env=apply_env)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return decide_proposal_remote(pid, decision, note=note)
+
+
+def require_desk_login() -> bool:
+    """Return True if the session may use the desk."""
+    if not LOCAL_DESK:
+        return True
+    if not auth_required():
+        return True
+    if st.session_state.get("desk_authed"):
+        return True
+    st.title("Gold Petal desk — login")
+    st.caption("SSH tunnel already limits network access. Password adds an operator gate.")
+    if not desk_password_configured():
+        st.error(
+            "DESK_AUTH is on but DESK_PASSWORD / DESK_PASSWORD_HASH is not set in .env. "
+            "Set one, or DESK_AUTH=false for trusted localhost-only use."
+        )
+        return False
+    pw = st.text_input("Desk password", type="password", key="desk_login_pw")
+    if st.button("Unlock desk", type="primary"):
+        if verify_password(pw):
+            st.session_state["desk_authed"] = True
+            audit("desk_login", ok=True)
+            st.rerun()
+        audit("desk_login", ok=False)
+        st.error("Wrong password.")
+    return False
+
+
+def totp_ok(label: str, key: str) -> bool:
+    """If TOTP is configured for dangerous ops, require a valid code in session form."""
+    if not dangerous_requires_totp():
+        return True
+    code = st.text_input(f"OTP — {label}", type="password", key=key)
+    if not code:
+        st.warning("Enter authenticator OTP to confirm this action.")
+        return False
+    if verify_totp(code):
+        return True
+    st.error("Invalid OTP.")
+    return False
 
 
 def set_control(**kwargs):  # type: ignore[no-untyped-def]
@@ -385,13 +443,13 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
 def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
-        "Approve → paper applies on the VM. Live approve only marks the list; "
-        "live trading still needs Unlock + DRY_RUN=false on the VM."
+        "Approve → paper **auto-writes** whitelist env keys (e.g. S11_PACK_PATH). "
+        "Then use **Deploy / Ops → Restart bot**. Live still needs Unlock + DRY_RUN=false."
     )
     raw = load_json(dd / "control" / "proposals.json")
     items = (raw or {}).get("proposals") if isinstance(raw, dict) else (raw or [])
     if not items:
-        st.warning("No proposals synced. Run weekly jobs on VM, then Sync.")
+        st.warning("No proposals yet. Run weekly jobs on VM.")
         return
 
     pending = [p for p in items if p.get("status") == "pending"]
@@ -422,36 +480,58 @@ def tab_proposals(dd: Path) -> None:
                 key=f"note_{p['id']}",
                 value="",
             )
+            auto_restart = st.checkbox(
+                "Restart bot after approve (loads new pack)",
+                value=False,
+                key=f"ar_{p['id']}",
+            )
             b1, b2, b3 = st.columns(3)
             if b1.button("Approve → paper", key=f"ap_{p['id']}", type="primary"):
                 if p.get("safety_ok") is False:
                     st.warning("safety_ok=False — only approve if you accept the risk.")
-                res = decide_proposal(p["id"], "approved_paper", note=note)
+                if auto_restart and not totp_ok("restart after approve", f"totp_ap_{p['id']}"):
+                    st.stop()
+                res = decide_proposal(p["id"], "approved_paper", note=note, apply_env=True)
                 if res.get("ok"):
+                    audit(
+                        "approve_paper",
+                        ok=True,
+                        detail={"id": p["id"], "env_applied": res.get("env_applied")},
+                    )
                     st.success(
                         f"Approved paper: {res.get('strategy')}. "
-                        f"Apply env_patch on VM .env then restart supervise."
+                        f"Env auto-applied: {res.get('env_applied')}"
                     )
-                    st.json(res.get("env_patch") or {})
+                    if auto_restart and LOCAL_DESK:
+                        rr = restart_bot()
+                        st.write(rr)
+                    elif res.get("restart_needed"):
+                        st.info("Open **Deploy / Ops** → Restart bot to load the new pack.")
                     st.cache_data.clear()
                 else:
                     st.error(res.get("error") or res)
             if b2.button("Approve → live", key=f"al_{p['id']}"):
+                if not totp_ok("live approve", f"totp_al_{p['id']}"):
+                    st.stop()
                 ok = st.session_state.get(f"live_confirm_{p['id']}", False)
                 if not ok:
                     st.session_state[f"live_confirm_{p['id']}"] = True
                     st.warning("Click again to confirm LIVE approve.")
                 else:
-                    res = decide_proposal(p["id"], "approved_live", note=note)
+                    res = decide_proposal(p["id"], "approved_live", note=note, apply_env=True)
                     st.session_state[f"live_confirm_{p['id']}"] = False
                     if res.get("ok"):
-                        st.success("Marked live-approved (still locked until unlock + DRY_RUN=false).")
+                        audit("approve_live", ok=True, detail={"id": p["id"]})
+                        st.success(
+                            "Live-approved + env applied. Still need Unlock live + DRY_RUN=false "
+                            "(Deploy / Ops), then Restart."
+                        )
                     else:
                         st.error(res.get("error") or res)
             if b3.button("Reject", key=f"rj_{p['id']}"):
-                res = decide_proposal(p["id"], "rejected", note=note)
+                res = decide_proposal(p["id"], "rejected", note=note, apply_env=False)
                 if res.get("ok"):
-                    st.success("Rejected on VM.")
+                    st.success("Rejected.")
                     st.cache_data.clear()
                 else:
                     st.error(res.get("error") or res)
@@ -462,17 +542,21 @@ def tab_proposals(dd: Path) -> None:
 
 
 def tab_control(dd: Path) -> None:
-    st.subheader("Bot control (writes to VM)")
+    st.subheader("Bot control")
     state = load_json(dd / "control" / "state.json") or {}
     st.json(state)
 
     c1, c2, c3 = st.columns(3)
     if c1.button("EMERGENCY OFF", type="primary"):
-        res = set_control(emergency_off=True)
-        st.write(res)
+        if totp_ok("emergency off", "totp_em_off"):
+            res = set_control(emergency_off=True)
+            audit("emergency_off", ok=bool(res.get("ok")), detail=res)
+            st.write(res)
     if c2.button("Clear emergency"):
-        res = set_control(emergency_off=False)
-        st.write(res)
+        if totp_ok("clear emergency", "totp_em_clear"):
+            res = set_control(emergency_off=False)
+            audit("emergency_clear", ok=bool(res.get("ok")), detail=res)
+            st.write(res)
     if c3.button("Pause trading"):
         res = set_control(trading_enabled=False)
         st.write(res)
@@ -485,14 +569,110 @@ def tab_control(dd: Path) -> None:
         st.session_state["unlock_arm"] = True
         st.warning("Click Confirm unlock next.")
     if d3.button("Confirm unlock") and st.session_state.get("unlock_arm"):
-        res = set_control(live_unlocked=True)
-        st.session_state["unlock_arm"] = False
-        st.write(res)
+        if totp_ok("unlock live", "totp_unlock"):
+            res = set_control(live_unlocked=True)
+            st.session_state["unlock_arm"] = False
+            audit("live_unlock", ok=bool(res.get("ok")), detail=res)
+            st.write(res)
     if st.button("Lock live"):
         res = set_control(live_unlocked=False)
+        audit("live_lock", ok=bool(res.get("ok")), detail=res)
         st.write(res)
 
-    st.caption("After control changes: Sync again to refresh the snapshot.")
+    st.caption("Prefer **Deploy / Ops** for DRY_RUN + restart after unlock.")
+
+
+def tab_deploy_ops(dd: Path) -> None:
+    st.subheader("Deploy / Ops — strategies, live arming, restart")
+    if not LOCAL_DESK:
+        st.warning("Full deploy/restart only works on the VM desk (GP_DESK_LOCAL=1).")
+        return
+
+    status = bot_status()
+    s1, s2, s3 = st.columns(3)
+    s1.metric("Bot running", "yes" if status.get("running") else "no")
+    s2.metric("supervise PIDs", len(status.get("supervise") or []))
+    s3.metric("run_strategy PIDs", len(status.get("run_strategy") or []))
+
+    env = read_env()
+    enables = strategy_enable_snapshot()
+    dry = env.get("DRY_RUN", "true").lower() in {"1", "true", "yes", "y"}
+    live_max = int(float(env.get("LIVE_MAX_LOTS", "1") or 1))
+    live_lots = int(float(env.get("LIVE_LOTS", "1") or 1))
+    s11_pack = env.get("S11_PACK_PATH", "")
+
+    st.markdown("### Paper / load strategies (ENABLE_*)")
+    st.caption("Checked = loaded into RAM after **Restart bot**. Unchecked strategies are not traded.")
+    picked: list[str] = []
+    cols = st.columns(3)
+    for i, name in enumerate(STRATEGIES):
+        on = cols[i % 3].checkbox(name, value=bool(enables.get(name)), key=f"en_{name}")
+        if on:
+            picked.append(name)
+
+    st.markdown("### Live arming")
+    dry_run = st.checkbox("DRY_RUN (paper only)", value=dry, key="ops_dry")
+    live_max_in = st.number_input("LIVE_MAX_LOTS (hard ceiling)", min_value=1, value=max(1, live_max), step=1)
+    live_lots_in = st.number_input("LIVE_LOTS (default size)", min_value=1, value=max(1, live_lots), step=1)
+    st.text_input("S11_PACK_PATH", value=s11_pack, key="ops_s11_pack")
+
+    restart_after = st.checkbox("Restart bot after save", value=True)
+    confirm = st.checkbox("I confirm writing .env from this desk", value=False)
+
+    b1, b2, b3, b4 = st.columns(4)
+    if b1.button("Save strategy enables", type="primary", disabled=not confirm):
+        if not totp_ok("save ENABLE_*", "totp_enables"):
+            st.stop()
+        res = apply_strategy_enables(picked, known=list(STRATEGIES))
+        # Also lock paper allowlist to the same set
+        save_paper_allowlist({"paper_allowlist": picked, "note": "desk deploy enables"})
+        audit("save_enables", ok=bool(res.get("ok")), detail=res)
+        st.write(res)
+        if restart_after and res.get("ok"):
+            if totp_ok("restart after enables", "totp_en_restart"):
+                st.write(restart_bot())
+        st.cache_data.clear()
+
+    if b2.button("Save live env (DRY_RUN / lots / S11)", disabled=not confirm):
+        if not totp_ok("save live env", "totp_live_env"):
+            st.stop()
+        patch = {
+            "DRY_RUN": "true" if dry_run else "false",
+            "LIVE_MAX_LOTS": int(live_max_in),
+            "LIVE_LOTS": int(live_lots_in),
+            "S11_PACK_PATH": st.session_state.get("ops_s11_pack", ""),
+        }
+        res = write_env_updates(patch)
+        audit("save_live_env", ok=bool(res.get("ok")), detail={"applied": res.get("applied")})
+        st.write(res)
+        if restart_after and res.get("ok"):
+            if totp_ok("restart after live env", "totp_live_restart"):
+                st.write(restart_bot())
+        st.cache_data.clear()
+
+    if b3.button("Restart bot now"):
+        if not totp_ok("restart bot", "totp_restart"):
+            st.stop()
+        res = restart_bot()
+        audit("restart_bot", ok=bool(res.get("ok")), detail={"killed": res.get("killed")})
+        st.write(res)
+        st.cache_data.clear()
+
+    if b4.button("Stop bot"):
+        if not totp_ok("stop bot", "totp_stop"):
+            st.stop()
+        res = stop_bot()
+        audit("stop_bot", ok=True, detail=res)
+        st.write(res)
+
+    with st.expander("strategy_run.log (tail)", expanded=False):
+        st.code(status.get("log_tail") or "(empty)", language="text")
+
+    st.markdown("### One-shot: paper set → capital → live list")
+    st.caption(
+        "Writes ENABLE_* + paper allowlist + live_approved + capital budgets, "
+        "optionally arms DRY_RUN=false. Always confirm + OTP."
+    )
 
 
 def tab_capital(dd: Path) -> None:
@@ -667,6 +847,16 @@ def tab_live_deploy(dd: Path) -> None:
         value=False,
         key="lock_paper_with_live",
     )
+    also_enable = st.checkbox(
+        "Also write ENABLE_* for Live-checked strategies (needs Restart)",
+        value=True,
+        key="live_also_enable",
+    )
+    restart_after_live = st.checkbox(
+        "Restart bot after save",
+        value=False,
+        key="live_restart_after",
+    )
     disable_others = st.checkbox(
         "Disable capital for strategies not selected (blocks their new entries too)",
         value=False,
@@ -678,6 +868,8 @@ def tab_live_deploy(dd: Path) -> None:
 
     b1, b2 = st.columns(2)
     if b1.button("Save live allocation", type="primary", disabled=not confirm):
+        if not totp_ok("save live allocation", "totp_live_alloc"):
+            st.stop()
         if not live_names:
             st.warning("No strategies checked — this clears live_approved.")
         payload = {
@@ -694,9 +886,16 @@ def tab_live_deploy(dd: Path) -> None:
             payload["paper_allowlist"] = list(live_names)
         res = save_live_allocation(payload)
         if res.get("ok"):
+            audit("live_allocation", ok=True, detail={"live_approved": live_names})
             st.success(
                 f"Live approved: {', '.join(res.get('live_approved') or []) or 'none'}"
             )
+            if also_enable and LOCAL_DESK and live_names:
+                en = apply_strategy_enables(live_names, known=list(STRATEGIES))
+                st.write({"ENABLE_applied": en})
+            if restart_after_live and LOCAL_DESK:
+                if totp_ok("restart after live save", "totp_live_save_restart"):
+                    st.write(restart_bot())
             if res.get("force_disabled"):
                 st.info(
                     f"Force-disabled for paper: {', '.join(res.get('force_disabled') or [])}"
@@ -888,10 +1087,20 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     inject_style()
+    if not require_desk_login():
+        return
 
     st.sidebar.title("Gold Petal desk")
     if LOCAL_DESK:
         st.sidebar.caption("VM local · live data/ · no Mac sync")
+        if st.session_state.get("desk_authed"):
+            if st.sidebar.button("Lock desk"):
+                st.session_state["desk_authed"] = False
+                st.rerun()
+            st.sidebar.caption(
+                "Auth: password"
+                + (" + OTP for dangerous ops" if desk_totp_configured() else "")
+            )
     else:
         st.sidebar.caption("Mac snapshot · sync from VM")
     dd = Path(
@@ -917,6 +1126,8 @@ def main() -> None:
         if st.sidebar.button("Refresh", type="primary"):
             st.cache_data.clear()
             st.sidebar.success("Cache cleared")
+        st_status = bot_status()
+        st.sidebar.metric("Bot", "RUN" if st_status.get("running") else "STOP")
     else:
         cfg = VmConfig.from_env()
         st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
@@ -953,6 +1164,7 @@ def main() -> None:
     (
         t0,
         t1,
+        t_ops,
         t2,
         t_live,
         t3,
@@ -965,6 +1177,7 @@ def main() -> None:
         [
             "Overview",
             "Proposals / ML",
+            "Deploy / Ops",
             "Control",
             "Live Deploy",
             "Capital",
@@ -979,6 +1192,8 @@ def main() -> None:
         tab_overview(dd, db, lot_size=lot_size)
     with t1:
         tab_proposals(dd)
+    with t_ops:
+        tab_deploy_ops(dd)
     with t2:
         tab_control(dd)
     with t_live:
@@ -1001,6 +1216,7 @@ def main() -> None:
         with st.expander("strategy_run.log (tail)", expanded=False):
             text = log_path.read_text(encoding="utf-8", errors="replace")
             st.code("\n".join(text.splitlines()[-100:]), language="text")
+
 
 
 if __name__ == "__main__":

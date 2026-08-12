@@ -2,6 +2,32 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
+## Streamlit full desk (no manual .env copy/paste)
+
+On the VM desk you can:
+
+- **Deploy / Ops** — toggle ENABLE_* strategies, set DRY_RUN / LIVE_MAX_LOTS / S11_PACK_PATH, Restart/Stop bot
+- **Live Deploy** — live_approved + capital/lots (+ optional ENABLE write)
+- **Proposals** — Approve auto-applies whitelist env_patch (restart to load)
+- **Login** — set `DESK_PASSWORD` (and optional `DESK_TOTP_SECRET` for dangerous actions)
+
+```bash
+# .env
+DESK_AUTH=true
+DESK_PASSWORD=your-strong-password
+# optional OTP (python):
+# python3 - <<'PY'
+# import pyotp; s=pyotp.random_base32(); print(s); print(pyotp.totp.TOTP(s).provisioning_uri(name='goldpetal-desk', issuer_name='GoldPetal'))
+# PY
+# DESK_TOTP_SECRET=...
+```
+
+Restart desk after pulling:
+```bash
+tmux kill-session -t gp-desk 2>/dev/null || true
+./scripts/run_desk_vm.sh
+```
+
 ## S13 daily HH/LL overnight (paper)
 
 Separate from S4 ML. Enter near close on daily HH/LL vs previous day; exit next open.

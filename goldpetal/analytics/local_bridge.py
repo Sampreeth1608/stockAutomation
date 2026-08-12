@@ -16,10 +16,21 @@ SLIM_STRATEGIES = (
 )
 
 
-def decide_proposal_local(proposal_id: str, decision: str, note: str = "") -> dict[str, Any]:
+def decide_proposal_local(
+    proposal_id: str,
+    decision: str,
+    note: str = "",
+    *,
+    apply_env: bool = True,
+) -> dict[str, Any]:
     from proposals import decide_proposal
 
     p = decide_proposal(proposal_id, decision, note=note)
+    env_result = None
+    if apply_env and decision in {"approved_paper", "approved_live"} and p.env_patch:
+        from analytics.env_bridge import apply_env_patch
+
+        env_result = apply_env_patch(p.env_patch)
     return {
         "ok": True,
         "id": p.id,
@@ -27,7 +38,9 @@ def decide_proposal_local(proposal_id: str, decision: str, note: str = "") -> di
         "status": p.status,
         "safety_ok": p.safety_ok,
         "env_patch": p.env_patch,
+        "env_applied": env_result,
         "title": p.title,
+        "restart_needed": bool(env_result and env_result.get("ok")),
     }
 
 
