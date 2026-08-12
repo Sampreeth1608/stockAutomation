@@ -153,9 +153,42 @@ def load_scoreboard(db_path: str, lot_size: float = 1.0) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     all_trades = build_trades(db_path=path, lot_size=lot_size)
-    return pd.DataFrame(
-        [summarize_trades(all_trades, s) for s in STRATEGIES + [None]]
+    # Desk board is slim-only — ignore OPEN leftovers from S9/S10/etc.
+    slim = set(STRATEGIES)
+    slim_trades = [t for t in all_trades if t.get("strategy") in slim]
+    orphan_open = sum(
+        1
+        for t in all_trades
+        if t.get("status") == "OPEN" and t.get("strategy") not in slim
     )
+    rows = [summarize_trades(slim_trades, s) for s in STRATEGIES]
+    all_row = summarize_trades(slim_trades, None)
+    all_row["orphan_open"] = orphan_open
+    rows.append(all_row)
+    return pd.DataFrame(rows)
+
+
+def load_orphan_opens(db_path: str) -> pd.DataFrame:
+    """OPEN trades from strategies not in the slim desk list."""
+    from storage import build_trades
+
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame()
+    slim = set(STRATEGIES)
+    opens = [
+        t
+        for t in build_trades(db_path=path)
+        if t.get("status") == "OPEN" and t.get("strategy") not in slim
+    ]
+    if not opens:
+        return pd.DataFrame()
+    cols = [
+        c
+        for c in ("strategy", "side", "entry_ts", "entry_price", "entry_reason", "status")
+        if opens and c in opens[0]
+    ]
+    return pd.DataFrame(opens)[cols] if cols else pd.DataFrame(opens)
 
 
 @st.cache_data(ttl=20)
@@ -284,6 +317,18 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
                 m2.metric("Charges ₹", f"{float(r.get('charges') or 0):,.0f}")
                 m3.metric("Tax ₹", f"{float(r.get('tax') or 0):,.0f}")
                 m4.metric("After-tax ₹", f"{float(r.get('pnl_after_tax') or 0):,.0f}")
+                open_n = int(r.get("open") or 0)
+                orphan = int(r.get("orphan_open") or 0)
+                st.caption(
+                    f"Slim open positions: **{open_n}** "
+                    f"(S4/S5/S8/S11/S12/S13 only)."
+                    + (
+                        f" Also {orphan} leftover OPEN from disabled strategies "
+                        f"(S9/S10/…) — not active now; see expander below."
+                        if orphan
+                        else ""
+                    )
+                )
             cols = [
                 c
                 for c in (
@@ -302,6 +347,18 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
             ]
             st.subheader(f"PnL board · {lot_size:g} lot(s)")
             st.dataframe(board[cols], use_container_width=True, hide_index=True)
+            orphans = load_orphan_opens(str(db))
+            if not orphans.empty:
+                with st.expander(
+                    f"Leftover OPEN from disabled strategies ({len(orphans)})",
+                    expanded=False,
+                ):
+                    st.caption(
+                        "These are historical signal pairs that never got CLOSE after "
+                        "the strategy was turned off. They are not live paper positions "
+                        "in the slim runner."
+                    )
+                    st.dataframe(orphans, use_container_width=True, hide_index=True)
             try:
                 import plotly.express as px
 
