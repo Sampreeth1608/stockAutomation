@@ -42,8 +42,14 @@ git pull origin cursor/vm-desk-slim-strategies-8bfa
 # later: tmux attach -t gp-desk
 ```
 
-Open in browser: `http://VM_EXTERNAL_IP:8501`  
-(GCP firewall: allow tcp:8501 to your IP, or use an SSH tunnel.)
+Open desk from your Mac (localhost only on VM — tunnel required):
+
+```bash
+# Mac Terminal — leave this open:
+gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -L 8501:localhost:8501
+```
+
+Then browse **http://localhost:8501** (not the external IP).
 
 ## Cancel Mac desk
 
