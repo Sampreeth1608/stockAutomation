@@ -1,0 +1,16 @@
+.env
+venv/
+__pycache__/
+*.pyc
+logs/
+data/*.db
+data/scrip_master.json
+data/*.csv
+data/models/
+data/archive/
+data/s4_state.json
+data/s8_presets/
+data/control/
+data/s8_nn/
+data/backtests/
+data/discover/
