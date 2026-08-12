@@ -66,7 +66,7 @@ def test_password_hash_roundtrip() -> None:
     os.environ.pop("DESK_PASSWORD_HASH", None)
 
 
-def test_plain_password_from_env_path(tmp_path: Path, monkeypatch=None) -> None:
+def test_plain_password_from_env_path(tmp_path: Path) -> None:
     env = tmp_path / ".env"
     env.write_text(
         'DESK_PASSWORD="exact-from-file"\nDESK_AUTH=true\n',
