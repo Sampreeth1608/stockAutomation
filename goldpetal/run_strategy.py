@@ -22,6 +22,13 @@ from portfolio import portfolio_from_env
 from regime import RegimeDetector
 from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
 from control_state import entries_blocked, is_live_mode_allowed, load_state
+from position_safety import (
+    emit_startup_closes,
+    in_eod_flatten_window,
+    intraday_open_for_flatten,
+    startup_reconcile,
+    write_bot_health,
+)
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
@@ -228,12 +235,14 @@ def run_once(
     ) -> None:
         db_save_signal(
             time_label=time_label,
+            symbol=symbol,
             action=action,
             position_after=position_after,
             reason=reason,
             price_delta=price_delta,
-            net=net,
+            net=0.0 if net is None else float(net),
             net_delta=net_delta,
+            dry_run=dry_run,
             strategy=strategy,
             cmp=cmp,
         )
@@ -361,8 +370,46 @@ def run_once(
     open_s, close_s = _market_window()
     print(f"Hours    : {open_s}-{close_s} IST, Mon-Fri only", flush=True)
     print(f"Next bar : {state['next_bar_at'].isoformat(timespec='seconds')}", flush=True)
+
+    # --- Restart safety: restore RAM from DB or auto-CLOSE orphans ---
+    strat_map = {
+        strategy_s5.name: strategy_s5,
+        strategy_s8.name: strategy_s8,
+        strategy_s12.name: strategy_s12,
+        strategy_s2.name: strategy_s2,
+        strategy_s3.name: strategy_s3,
+        strategy_s6.name: strategy_s6,
+        strategy_s9.name: strategy_s9,
+        strategy_s10.name: strategy_s10,
+        strategy_s11.name: strategy_s11,
+    }
+    reconcile = startup_reconcile(strat_map)
+    for msg in reconcile.get("messages") or []:
+        print(f"[SAFETY] {msg}", flush=True)
+        logger.info("[SAFETY] %s", msg)
+    if reconcile.get("closes"):
+        emit_startup_closes(reconcile["closes"], record=_record_signal, symbol=symbol)
+        print(
+            f"[SAFETY] wrote {len(reconcile['closes'])} startup CLOSE signal(s)",
+            flush=True,
+        )
+    write_bot_health(
+        {
+            "event": "startup",
+            "restart_mode": reconcile.get("mode"),
+            "restored": reconcile.get("restored"),
+            "orphan_closes": reconcile.get("closes"),
+            "positions": {
+                n: getattr(o, "position", "flat") for n, o in strat_map.items()
+            },
+            "runner": "run_strategy",
+        }
+    )
+
     print("Press Ctrl+C to stop", flush=True)
     print("=================================", flush=True)
+
+    eod_closed: set[tuple[str, str]] = set()
 
     correlation_id = f"goldpetal_strategy_{int(time.time())}"
     token_list = [{"exchangeType": exchange_type, "tokens": [token]}]
@@ -1213,6 +1260,22 @@ def run_once(
                 )
                 print(line, flush=True)
                 logger.info(line)
+                write_bot_health(
+                    {
+                        "event": "heartbeat",
+                        "ticks": tick_count,
+                        "ltp": latest.get("cmp"),
+                        "regime": rs.regime,
+                        "positions": {
+                            "S4": strategy_s4.position,
+                            "S5": strategy_s5.position,
+                            "S8": strategy_s8.position,
+                            "S12": strategy_s12.position,
+                            "S13": strategy_s13.position,
+                        },
+                        "runner": "run_strategy",
+                    }
+                )
 
             # S2: 1-min sum of buy1-5 vs sell1-5
             emit_s2_if_changed(now, message)
@@ -1236,6 +1299,57 @@ def run_once(
             emit_s12_if_changed(now, message)
             # S13: daily HH/LL overnight (S4-style windows)
             emit_s13_if_changed(now, message)
+
+            # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
+            day_key = now.astimezone(IST).strftime("%Y-%m-%d")
+            if in_eod_flatten_window(now, market_close=close_s):
+                opens = intraday_open_for_flatten(strat_map)
+                flattened_now: list[dict] = []
+                for row in opens:
+                    name = row["strategy"]
+                    key = (day_key, name)
+                    if key in eod_closed:
+                        continue
+                    obj = strat_map.get(name)
+                    if obj is None:
+                        continue
+                    side = row["side"]
+                    obj.position = "flat"
+                    if hasattr(obj, "entry_price"):
+                        obj.entry_price = None
+                    ts = now.isoformat(timespec="seconds")
+                    _record_signal(
+                        time_label=ts,
+                        action="CLOSE",
+                        position_after="flat",
+                        reason=(
+                            f"EOD flatten intraday was_{side} "
+                            f"(last {os.getenv('EOD_FLATTEN_MINUTES', '5')}m "
+                            f"before {close_s})"
+                        ),
+                        price_delta=None,
+                        net=0.0,
+                        net_delta=None,
+                        strategy=name,
+                        cmp=latest.get("cmp"),
+                    )
+                    eod_closed.add(key)
+                    flattened_now.append(row)
+                    line = f"[{ts}] [SAFETY] EOD CLOSE {name} was_{side}"
+                    print(line, flush=True)
+                    logger.info(line)
+                if flattened_now:
+                    write_bot_health(
+                        {
+                            "event": "eod_flatten",
+                            "flattened": flattened_now,
+                            "positions": {
+                                n: getattr(o, "position", "flat")
+                                for n, o in strat_map.items()
+                            },
+                            "runner": "run_strategy",
+                        }
+                    )
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:

@@ -51,6 +51,22 @@ S13_EXIT_MINUTES_AFTER_OPEN=5
 
 Restart supervise after pull. Look for `S13_HHHL_DAY` / `same-day` in `data/strategy_run.log`.
 
+## Restart / orphan / EOD safety (intraday)
+
+After a bot restart, S5/S8/S12 used to forget RAM state while SQLite still showed OPEN.
+
+Defaults now:
+- `POSITION_ON_RESTART=restore` — reload open trades into RAM so exits can fire
+- set `POSITION_ON_RESTART=close` to paper-CLOSE orphans on startup instead
+- `EOD_FLATTEN_INTRADAY=true` — force-CLOSE intraday books in the last 5m before `MARKET_CLOSE`
+- Desk **Deploy / Ops** shows DB vs RAM mismatches from `data/control/bot_health.json`
+
+```bash
+POSITION_ON_RESTART=restore
+EOD_FLATTEN_INTRADAY=true
+EOD_FLATTEN_MINUTES=5
+```
+
 ## S12 same-candle 30m HH/LL
 
 During a 30m candle, if high > previous candle high, watch it; in that candle's
@@ -62,6 +78,7 @@ S12_BAR_MINUTES=30
 S12_MIN_RANGE=5
 S12_CONFIRM_MINUTES=1
 ```
+
 
 ## Day-by-day HH/LL on S4 horizon
 

@@ -54,14 +54,50 @@ def bot_status() -> dict[str, Any]:
             tail = "\n".join(lines[-30:])
         except OSError:
             tail = ""
+    health: dict[str, Any] = {}
+    health_path = ROOT / "data" / "control" / "bot_health.json"
+    if health_path.exists():
+        try:
+            import json
+
+            health = json.loads(health_path.read_text(encoding="utf-8"))
+        except Exception:
+            health = {}
+    # DB open vs RAM mismatch hint
+    mismatches: list[str] = []
+    try:
+        from position_safety import INTRADAY_RESTORE, last_open_position
+
+        ram = (health.get("positions") or {}) if isinstance(health, dict) else {}
+        # health may use short keys S5 or full names
+        for name in INTRADAY_RESTORE:
+            open_pos = last_open_position(name)
+            short = name.split("_")[0]  # S5, S8, S12…
+            ram_pos = ram.get(name) or ram.get(short) or "flat"
+            if open_pos is None:
+                db_pos = "flat"
+            else:
+                db_pos = open_pos.side
+            if str(ram_pos) != str(db_pos) and not (
+                str(ram_pos) == "flat" and db_pos == "flat"
+            ):
+                # Only flag when DB open but RAM flat (classic orphan) or opposite
+                if db_pos != "flat" and str(ram_pos) == "flat":
+                    mismatches.append(f"{name}: DB={db_pos} RAM=flat (orphan)")
+                elif db_pos == "flat" and str(ram_pos) != "flat":
+                    mismatches.append(f"{name}: DB=flat RAM={ram_pos}")
+    except Exception as exc:
+        mismatches.append(f"mismatch_check_error:{exc}")
     return {
         "ok": True,
         "supervise": supervise,
         "run_strategy": runner,
         "desk": desk,
-        "running": bool(supervise or runner),
+        "running": bool(supervise and runner),
         "log_tail": tail,
         "cwd": str(ROOT),
+        "health": health,
+        "mismatches": mismatches,
     }
 
 

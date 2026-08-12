@@ -626,10 +626,25 @@ def tab_deploy_ops(dd: Path) -> None:
         return
 
     status = bot_status()
-    s1, s2, s3 = st.columns(3)
+    s1, s2, s3, s4 = st.columns(4)
     s1.metric("Bot running", "yes" if status.get("running") else "no")
     s2.metric("supervise PIDs", len(status.get("supervise") or []))
     s3.metric("run_strategy PIDs", len(status.get("run_strategy") or []))
+    health = status.get("health") or {}
+    s4.metric("Last health", str(health.get("ts_ist") or "—")[-8:] if health else "—")
+    mismatches = status.get("mismatches") or []
+    if mismatches:
+        st.error("Position mismatch (DB vs RAM): " + "; ".join(mismatches))
+    elif status.get("running"):
+        st.caption(
+            f"RAM positions: {health.get('positions') or '—'} · "
+            "restart restore + EOD flatten enabled in runner"
+        )
+    if not status.get("run_strategy"):
+        st.warning(
+            "supervise may be up but run_strategy is missing — "
+            "activate venv or pull supervise.sh fix, then Restart bot."
+        )
 
     env = read_env()
     enables = strategy_enable_snapshot()
