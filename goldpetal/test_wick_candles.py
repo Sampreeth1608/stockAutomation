@@ -70,6 +70,46 @@ def test_equal_wick_holds() -> None:
     assert r.trades[0].exit_time == candles[-1].time
 
 
+def test_no_wick_either_side_uses_body() -> None:
+    # Green marubozu: H=C, L=O
+    assert wick_side(100.0, 110.0, 100.0, 110.0) == "long"
+    # Red marubozu
+    assert wick_side(110.0, 110.0, 100.0, 100.0) == "short"
+    # Bald doji
+    assert wick_side(100.0, 100.0, 100.0, 100.0, min_range=0) is None
+    assert wick_side(100.0, 110.0, 100.0, 110.0, nowick_body=False) is None
+
+
+def test_nowick_only_ignores_hammer() -> None:
+    assert wick_side(100.0, 102.0, 90.0, 101.0, nowick_only=True) is None
+    assert wick_side(100.0, 110.0, 100.0, 110.0, nowick_only=True) == "long"
+
+
+def test_pin2_still_takes_bald_body() -> None:
+    # pin2 would reject a marubozu (no wick), but nowick_body is along with it
+    assert wick_side(100.0, 110.0, 100.0, 110.0, min_body_ratio=2.0) == "long"
+
+
+def test_all_presets_run_on_toy_tape() -> None:
+    from backtest_wick_candles import PRESETS
+
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # hammer long
+        Candle("2026-08-17 10:30:00", 101.0, 120.0, 100.0, 102.0),  # star short
+        Candle("2026-08-17 11:00:00", 102.0, 115.0, 102.0, 115.0),  # green bald
+        Candle("2026-08-17 11:30:00", 115.0, 115.0, 100.0, 100.0),  # red bald
+    ]
+    names = [n for n, _ in PRESETS]
+    assert names == ["raw", "diff5", "diff10", "frac50", "pin2", "nowick"]
+    for name, filt in PRESETS:
+        r = simulate_wick(candles, tf=f"toy:{name}", min_range=5, **filt)
+        assert r.n_bars == 4
+        assert r.n_trades >= 1, name
+        if name == "nowick":
+            assert r.trades[0].side == "LONG"
+            assert r.trades[0].entry_px == 115.0
+
+
 if __name__ == "__main__":
     test_wick_measure_hammer()
     print("ok hammer")
@@ -85,4 +125,12 @@ if __name__ == "__main__":
     print("ok flip")
     test_equal_wick_holds()
     print("ok hold")
+    test_no_wick_either_side_uses_body()
+    print("ok nowick body")
+    test_nowick_only_ignores_hammer()
+    print("ok nowick only")
+    test_pin2_still_takes_bald_body()
+    print("ok pin+nowick")
+    test_all_presets_run_on_toy_tape()
+    print("ok preset grid")
     print("ALL test_wick_candles OK")

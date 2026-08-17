@@ -5,9 +5,10 @@
   SHORT when upper wick > lower wick
   Exit when the opposite wick wins; re-enter on that same candle if it qualifies.
 
-Fill at signal-bar close. Run on the VM:
+Fill at signal-bar close. Bald candles (no wick on either side) use the body:
+green → long, red → short. That rule is included in every wick preset.
 
-  python3 backtest_wick_candles.py --db data/ticks.db --lots 1 --session --no-flip --fees
+  python3 backtest_wick_candles.py --db data/ticks.db --lots 1 --session --fees
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from dataclasses import asdict
+from typing import Any
 from pathlib import Path
 
 from backtest_hhhl_candles import (
@@ -35,12 +36,13 @@ from charges import ChargeConfig, apply_charges_and_tax
 from mtf_bars import build_rich_bars, load_tick_rows, parse_ts
 from wick_candles import wick_side
 
-PRESETS: list[tuple[str, dict[str, float]]] = [
-    ("raw", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
-    ("diff5", {"min_diff": 5.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
-    ("diff10", {"min_diff": 10.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
-    ("frac50", {"min_diff": 0.0, "min_frac": 0.5, "min_body_ratio": 0.0}),
-    ("pin2", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 2.0}),
+PRESETS: list[tuple[str, dict[str, Any]]] = [
+    ("raw", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
+    ("diff5", {"min_diff": 5.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
+    ("diff10", {"min_diff": 10.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
+    ("frac50", {"min_diff": 0.0, "min_frac": 0.5, "min_body_ratio": 0.0, "nowick_body": True}),
+    ("pin2", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 2.0, "nowick_body": True}),
+    ("nowick", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_only": True, "nowick_body": True}),
 ]
 
 
@@ -58,6 +60,9 @@ def simulate_wick(
     min_diff: float = 0.0,
     min_frac: float = 0.0,
     min_body_ratio: float = 0.0,
+    nowick_eps: float = 1.0,
+    nowick_body: bool = True,
+    nowick_only: bool = False,
     market_open: str = "09:00",
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
@@ -111,6 +116,9 @@ def simulate_wick(
             min_frac=min_frac,
             min_body_ratio=min_body_ratio,
             min_range=min_range,
+            nowick_eps=nowick_eps,
+            nowick_body=nowick_body,
+            nowick_only=nowick_only,
         )
         if want == "long" and not allow_long:
             return None
@@ -233,13 +241,14 @@ def run_all(
     *,
     lots: float = 1.0,
     tfs: list[tuple[str, int]] | None = None,
-    presets: list[tuple[str, dict[str, float]]] | None = None,
+    presets: list[tuple[str, dict[str, Any]]] | None = None,
     allow_short: bool = True,
     allow_long: bool = True,
     fees: bool = False,
     session_filter: bool = False,
     min_range: float = 5.0,
     no_flip: bool = True,
+    nowick_eps: float = 1.0,
     market_open: str = "09:00",
     market_close: str = "23:30",
 ) -> list[TfResult]:
@@ -265,6 +274,7 @@ def run_all(
                     session_filter=session_filter,
                     min_range=min_range,
                     no_flip=no_flip,
+                    nowick_eps=nowick_eps,
                     market_open=market_open,
                     market_close=market_close,
                     charge_cfg=cfg,
@@ -285,6 +295,7 @@ def main() -> None:
     ap.add_argument("--fees", action="store_true")
     ap.add_argument("--session", action="store_true")
     ap.add_argument("--min-range", type=float, default=5.0)
+    ap.add_argument("--nowick-eps", type=float, default=1.0, help="pts: wick ≤ this counts as no wick")
     ap.add_argument("--no-flip", action="store_true", default=True)
     ap.add_argument("--allow-flip", action="store_true")
     ap.add_argument("--market-open", default="09:00")
@@ -293,7 +304,7 @@ def main() -> None:
     ap.add_argument(
         "--presets",
         default="",
-        help="comma list: raw,diff5,diff10,frac50,pin2 (default: all)",
+        help="comma list: raw,diff5,diff10,frac50,pin2,nowick (default: all)",
     )
     ap.add_argument(
         "--out-dir",
@@ -337,12 +348,13 @@ def main() -> None:
     )
     print(
         "Rules: LONG lower_wick>upper_wick | SHORT upper_wick>lower_wick | "
-        "exit on opposite wick; re-enter same candle"
+        "no wick either side → body C>O long / C<O short | "
+        "exit on opposite signal; re-enter same candle"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "
         f"({args.market_open}-{args.market_close}) "
-        f"min_range={args.min_range} no_flip={no_flip}"
+        f"min_range={args.min_range} nowick_eps={args.nowick_eps} no_flip={no_flip}"
     )
 
     results = run_all(
@@ -356,6 +368,7 @@ def main() -> None:
         session_filter=args.session,
         min_range=args.min_range,
         no_flip=no_flip,
+        nowick_eps=args.nowick_eps,
         market_open=args.market_open,
         market_close=args.market_close,
     )
