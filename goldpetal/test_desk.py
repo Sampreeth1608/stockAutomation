@@ -36,6 +36,9 @@ def test_control_panel_serves_desk_file() -> None:
     assert "/api/feed/start" in text
     assert "/api/history" in text
     assert "history_payload" in text
+    sh = (ROOT / "scripts" / "run_control_panel.sh").read_text(encoding="utf-8")
+    assert "desk folder" in sh
+    assert "Save strategies" in sh
     assert "HTML_PAGE = r" not in text
 
 

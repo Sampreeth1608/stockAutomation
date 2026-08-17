@@ -683,7 +683,7 @@ def main() -> None:
     load_state()
     load_capital()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
-    print(f"Gold Petal operator desk → http://{args.host}:{args.port}/  (only writer)", flush=True)
+    print(f"cwd {ROOT}  Gold Petal operator desk → http://{args.host}:{args.port}/  (only writer)", flush=True)
     print("Research chart stays on Streamlit 8501. This desk: start/stop, feed, live picks, money.", flush=True)
     try:
         httpd.serve_forever()
