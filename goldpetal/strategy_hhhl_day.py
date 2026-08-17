@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -104,11 +105,17 @@ class HhhlDayOvernightStrategy:
             if self.prev_day
             else "prev=none"
         )
+        today = (
+            f"todayH={self._day.high:.0f} todayL={self._day.low:.0f} "
+            f"todayO={self._day.open:.0f} todayC={self._day.close:.0f}"
+            if self._day
+            else "today=none"
+        )
         return (
             f"daily HH/LL same-candle min_range={c.min_range:.0f} "
             f"confirm={c.entry_minutes_before_close}m_before_close "
             f"no_flip={c.no_flip} L={c.allow_long} S={c.allow_short} "
-            f"{prev} pos={self.position}"
+            f"{prev} {today} pos={self.position}"
         )
 
     def _load_state(self) -> None:
@@ -164,52 +171,80 @@ class HhhlDayOvernightStrategy:
         self._day.low = min(self._day.low, bar.low)
         self._day.close = bar.close
 
-    def _seed_from_ticks(self, db_path: Path | None = None) -> None:
+    @staticmethod
+    def _ohlc_from_sql(db: Path, day: str) -> DayOhlc | None:
+        """Open/high/low/close for one calendar day from ticks.db (fast, indexed)."""
+        prefix = f"{day}%"
+        con = sqlite3.connect(str(db))
+        try:
+            first = con.execute(
+                "SELECT ltp FROM ticks WHERE ltp IS NOT NULL AND received_at LIKE ? "
+                "ORDER BY received_at ASC, id ASC LIMIT 1",
+                (prefix,),
+            ).fetchone()
+            if first is None or first[0] is None:
+                return None
+            last = con.execute(
+                "SELECT ltp FROM ticks WHERE ltp IS NOT NULL AND received_at LIKE ? "
+                "ORDER BY received_at DESC, id DESC LIMIT 1",
+                (prefix,),
+            ).fetchone()
+            agg = con.execute(
+                "SELECT MIN(ltp), MAX(ltp) FROM ticks "
+                "WHERE ltp IS NOT NULL AND received_at LIKE ?",
+                (prefix,),
+            ).fetchone()
+            if last is None or agg is None or agg[0] is None or agg[1] is None:
+                return None
+            return DayOhlc(
+                date=day,
+                open=float(first[0]),
+                high=float(agg[1]),
+                low=float(agg[0]),
+                close=float(last[0]),
+            )
+        finally:
+            con.close()
+
+    @staticmethod
+    def _prev_trading_day(db: Path, today: str) -> str | None:
+        con = sqlite3.connect(str(db))
+        try:
+            row = con.execute(
+                "SELECT received_at FROM ticks "
+                "WHERE ltp IS NOT NULL AND received_at < ? "
+                "ORDER BY received_at DESC, id DESC LIMIT 1",
+                (today,),
+            ).fetchone()
+            if row is None or not row[0]:
+                return None
+            return str(row[0])[:10]
+        finally:
+            con.close()
+
+    def _seed_from_ticks(
+        self, db_path: Path | None = None, *, today: str | None = None
+    ) -> None:
         """Load previous completed day + hydrate today's forming day from ticks.db."""
         try:
-            from mtf_bars import build_rich_bars, load_tick_rows
-
             db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
             if not db.exists():
                 return
-            rows = load_tick_rows(db)
-            bars = build_rich_bars(rows, "1d", 1440)
-            if not bars:
-                return
-            today = datetime.now(IST).strftime("%Y-%m-%d")
-            completed: list[Any] = []
-            current = None
-            for b in bars:
-                d = str(b.time)[:10]
-                if d < today:
-                    completed.append(b)
-                elif d == today:
-                    current = b
-            if completed:
-                b = completed[-1]
-                b_date = str(b.time)[:10]
-                if self.prev_day is None or self.prev_day.date < b_date:
-                    self.prev_day = DayOhlc(
-                        date=b_date,
-                        open=float(b.open),
-                        high=float(b.high),
-                        low=float(b.low),
-                        close=float(b.close),
-                    )
-                elif self.prev_day.date == b_date:
-                    self.prev_day.high = max(self.prev_day.high, float(b.high))
-                    self.prev_day.low = min(self.prev_day.low, float(b.low))
+            today = today or datetime.now(IST).strftime("%Y-%m-%d")
+            prev_date = self._prev_trading_day(db, today)
+            if prev_date:
+                prev_bar = self._ohlc_from_sql(db, prev_date)
+                if prev_bar is not None:
+                    if self.prev_day is None or self.prev_day.date < prev_date:
+                        self.prev_day = prev_bar
+                    elif self.prev_day.date == prev_date:
+                        self.prev_day.high = max(self.prev_day.high, prev_bar.high)
+                        self.prev_day.low = min(self.prev_day.low, prev_bar.low)
+            current = self._ohlc_from_sql(db, today)
             if current is not None:
-                self._merge_forming_day(
-                    DayOhlc(
-                        date=str(current.time)[:10],
-                        open=float(current.open),
-                        high=float(current.high),
-                        low=float(current.low),
-                        close=float(current.close),
-                    )
-                )
-        except Exception:
+                self._merge_forming_day(current)
+        except Exception as exc:
+            self.last_skip = f"seed_err:{type(exc).__name__}"
             return
 
     def _save_state(self) -> None:

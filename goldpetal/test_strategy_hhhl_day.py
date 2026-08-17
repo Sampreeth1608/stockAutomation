@@ -161,6 +161,48 @@ def test_hl_extend_persists_today_bar() -> None:
         state.unlink()
 
 
+def test_sql_seed_hydrates_today_from_ticks_db() -> None:
+    import sqlite3
+
+    state = Path("/tmp/s13_test_sql_seed.json")
+    db = Path("/tmp/s13_test_ticks.db")
+    if db.exists():
+        db.unlink()
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE ticks (id INTEGER PRIMARY KEY, received_at TEXT, ltp REAL)"
+    )
+    rows = [
+        ("2026-08-14T09:00:00+05:30", 15269.0),
+        ("2026-08-14T12:00:00+05:30", 15424.0),
+        ("2026-08-14T15:00:00+05:30", 15157.0),
+        ("2026-08-14T23:20:00+05:30", 15395.0),
+        ("2026-08-17T09:00:00+05:30", 15424.0),
+        ("2026-08-17T09:30:00+05:30", 15480.0),
+        ("2026-08-17T10:10:00+05:30", 15410.0),
+        ("2026-08-17T10:45:00+05:30", 15456.0),
+    ]
+    con.executemany("INSERT INTO ticks (received_at, ltp) VALUES (?, ?)", rows)
+    con.commit()
+    con.close()
+
+    s = _fresh(str(state))
+    s._day = DayOhlc("2026-08-17", 15424.0, 15424.0, 15424.0, 15424.0)
+    s._seed_from_ticks(db, today="2026-08-17")
+    assert s.prev_day is not None
+    assert s.prev_day.date == "2026-08-14"
+    assert s.prev_day.high == 15424.0
+    assert s.prev_day.low == 15157.0
+    assert s._day.open == 15424.0
+    assert s._day.high == 15480.0
+    assert s._day.low == 15410.0
+    assert s._day.close == 15456.0
+    if state.exists():
+        state.unlink()
+    if db.exists():
+        db.unlink()
+
+
 if __name__ == "__main__":
     test_long_near_close_holds_next_open_exits_same_candle()
     print("ok long_same_candle_exit")
@@ -176,4 +218,6 @@ if __name__ == "__main__":
     print("ok merge")
     test_hl_extend_persists_today_bar()
     print("ok persist")
+    test_sql_seed_hydrates_today_from_ticks_db()
+    print("ok sql seed")
     print("ALL test_strategy_hhhl_day OK")
