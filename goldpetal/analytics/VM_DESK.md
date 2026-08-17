@@ -129,6 +129,15 @@ Next candle (in a trade or flat): wait 2 minutes from that open.
 No range skip, no bald body, no frac50/pin2. **S15** is still last-minute bald HOLD.
 Keep `DRY_RUN=true`. Restart supervise after pull.
 
+Tick backtest (needs the VM `ticks.db`):
+
+```bash
+cd ~/goldpetal
+python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
+```
+
+Writes `data/backtests/s14_tick/`. Second row is wick-only (no 2-minute open-hold).
+
 ```bash
 ENABLE_S14=true
 S14_BAR_MINUTES=30
