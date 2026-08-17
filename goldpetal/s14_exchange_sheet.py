@@ -106,6 +106,124 @@ def display_bar_row(walk: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _flag_yes(value: Any) -> bool:
+    return value in {True, "Y", "y", "YES", "yes", 1, "1"}
+
+
+def candle_onbar_lines(row: dict[str, Any]) -> list[str]:
+    """O/H/L/C + side printed on the candle itself (not a side table)."""
+    side = str(row.get("side") or "skip").strip() or "skip"
+    if side.lower() != "skip":
+        side = side.upper()
+    flags: list[str] = []
+    if _flag_yes(row.get("O=H", row.get("open_eq_high"))):
+        flags.append("O=H")
+    if _flag_yes(row.get("O=L", row.get("open_eq_low"))):
+        flags.append("O=L")
+    tail = f"{side} {' '.join(flags)}".strip()
+    return [
+        f"O {_num(row['open'])}",
+        f"H {_num(row['high'])}",
+        f"L {_num(row['low'])}",
+        f"C {_num(row['close'])}",
+        tail,
+    ]
+
+
+def candle_hover_text(row: dict[str, Any]) -> str:
+    lines = candle_onbar_lines(row)
+    extra = [
+        str(row.get("time") or ""),
+        *lines,
+        str(row.get("rule") or ""),
+        f"U {_num(row.get('upper') or 0)}  Lw {_num(row.get('lower') or 0)}",
+        f"{row.get('action') or ''}  {row.get('pos_from') or row.get('pos_before') or ''}→{row.get('pos_to') or row.get('pos_after') or ''}",
+    ]
+    return "\n".join(x for x in extra if str(x).strip())
+
+
+PLOTLY_ZOOM_CONFIG = {
+    "scrollZoom": True,
+    "displaylogo": False,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+}
+
+
+def labeled_candlestick_figure(
+    rows: list[dict[str, Any]],
+    *,
+    title: str = "Gold Petal",
+) -> Any:
+    """Candlestick with O/H/L/C on each bar. Scroll-zoom, drag-pan, rangeslider."""
+    import plotly.graph_objects as go
+
+    times = [str(r.get("time") or "") for r in rows]
+    opens = [r["open"] for r in rows]
+    highs = [r["high"] for r in rows]
+    lows = [r["low"] for r in rows]
+    closes = [r["close"] for r in rows]
+    texts = ["<br>".join(candle_onbar_lines(r)) for r in rows]
+    hovers = [candle_hover_text(r).replace("\n", "<br>") for r in rows]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Candlestick(
+            x=times,
+            open=opens,
+            high=highs,
+            low=lows,
+            close=closes,
+            name="GOLDPETAL",
+            increasing_line_color="#1f9d55",
+            decreasing_line_color="#d64545",
+            increasing_fillcolor="#1f9d55",
+            decreasing_fillcolor="#d64545",
+            hovertext=hovers,
+            hoverinfo="text",
+        )
+    )
+    yaxis_layout: dict[str, Any] = dict(title="₹ / g", fixedrange=False)
+    if rows:
+        fig.add_trace(
+            go.Scatter(
+                x=times,
+                y=highs,
+                mode="text",
+                text=texts,
+                textposition="top center",
+                textfont=dict(
+                    size=9,
+                    family="IBM Plex Mono, ui-monospace, monospace",
+                    color="#111111",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+                cliponaxis=False,
+            )
+        )
+        lo = min(lows)
+        hi = max(highs)
+        span = (hi - lo) or 1.0
+        yaxis_layout["range"] = [lo - 0.06 * span, hi + 0.34 * span]
+    fig.update_layout(
+        title=title,
+        dragmode="pan",
+        hovermode="closest",
+        height=780,
+        margin=dict(l=50, r=24, t=52, b=40),
+        xaxis=dict(
+            rangeslider=dict(visible=True, thickness=0.08),
+            type="category",
+            showspikes=True,
+            title="time IST · scroll zoom · drag pan · double-click reset",
+        ),
+        yaxis=yaxis_layout,
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        uirevision=title,
+    )
+    return fig
+
+
 def display_pnl_row(r: TfResult) -> dict[str, Any]:
     return {
         "tf": r.tf,
@@ -227,6 +345,10 @@ def _ohlc_json(rows: list[dict[str, Any]]) -> str:
             "h": r["high"],
             "l": r["low"],
             "c": r["close"],
+            "s": r.get("side") or "",
+            "oh": r.get("O=H") or "N",
+            "ol": r.get("O=L") or "N",
+            "rule": r.get("rule") or "",
         }
         for r in rows
     ]
@@ -236,30 +358,161 @@ def _ohlc_json(rows: list[dict[str, Any]]) -> str:
 def _bar_pane(tf: str, rows: list[dict[str, Any]]) -> str:
     safe = html.escape(tf)
     return (
+        '<p class="sub">O/H/L/C is printed on each candle. '
+        "Scroll to zoom, drag to pan, double-click to reset. "
+        "On 30m/1h zoom in until the numbers sit on the bar.</p>"
         f'<canvas class="ohlc" id="chart-{safe}"></canvas>'
         f'<script type="application/json" id="ohlc-{safe}">{_ohlc_json(rows)}</script>'
-        f"{_bar_table(rows)}"
+        f"<details><summary>Row list (copy)</summary>{_bar_table(rows)}</details>"
     )
 
 
 CANDLE_JS = r"""
-function drawOhlc(canvas, bars, dark) {
-  if (!canvas || !bars || !bars.length) return;
+const OHLC_STATE = new WeakMap();
+function ohlcTipEl() {
+  let el = document.getElementById("ohlc-tip");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ohlc-tip";
+    el.style.cssText = "position:fixed;display:none;z-index:40;background:#111;color:#fff;font:12px ui-monospace,monospace;padding:6px 8px;border-radius:4px;pointer-events:none;white-space:pre;box-shadow:0 4px 16px rgba(0,0,0,.35)";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function barLabelLines(b) {
+  const lines = ["O " + b.o, "H " + b.h, "L " + b.l, "C " + b.c];
+  let side = String(b.s || "");
+  if (b.oh === "Y") side += " O=H";
+  if (b.ol === "Y") side += " O=L";
+  if (side) lines.push(side.trim());
+  return lines;
+}
+function bindOhlcChart(canvas, bars, dark) {
+  if (!canvas) return;
+  let st = OHLC_STATE.get(canvas);
+  if (!st) {
+    st = { bars: [], i0: 0, i1: 0, drag: false, lastX: 0, dark: !!dark, padL: 56, slot: 8 };
+    OHLC_STATE.set(canvas, st);
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomOhlc(canvas, e); }, { passive: false });
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      st.drag = true;
+      st.lastX = e.clientX;
+      canvas.style.cursor = "grabbing";
+    });
+    window.addEventListener("mousemove", (e) => {
+      const cur = OHLC_STATE.get(canvas);
+      if (!cur) return;
+      if (cur.drag) panOhlc(canvas, e);
+      else if (e.target === canvas) hoverOhlc(canvas, e);
+    });
+    window.addEventListener("mouseup", () => {
+      const cur = OHLC_STATE.get(canvas);
+      if (!cur) return;
+      cur.drag = false;
+      canvas.style.cursor = "crosshair";
+    });
+    canvas.addEventListener("dblclick", () => resetOhlc(canvas));
+    canvas.addEventListener("mouseleave", () => { ohlcTipEl().style.display = "none"; });
+    canvas.style.cursor = "crosshair";
+    canvas.title = "Scroll zoom · drag pan · double-click reset";
+  }
+  const sameLen = st.bars.length === (bars || []).length;
+  st.bars = bars || [];
+  st.dark = !!dark;
+  if (!sameLen || st.i1 > st.bars.length || st.i1 <= st.i0) {
+    st.i0 = 0;
+    st.i1 = st.bars.length;
+  }
+  drawOhlcFromState(canvas);
+}
+function clampView(st) {
+  const n = st.bars.length;
+  if (!n) { st.i0 = 0; st.i1 = 0; return; }
+  let vis = Math.max(2, st.i1 - st.i0);
+  vis = Math.min(n, vis);
+  if (st.i0 < 0) st.i0 = 0;
+  if (st.i0 + vis > n) st.i0 = Math.max(0, n - vis);
+  st.i1 = st.i0 + vis;
+}
+function resetOhlc(canvas) {
+  const st = OHLC_STATE.get(canvas);
+  if (!st) return;
+  st.i0 = 0;
+  st.i1 = st.bars.length;
+  drawOhlcFromState(canvas);
+}
+function zoomOhlc(canvas, e) {
+  const st = OHLC_STATE.get(canvas);
+  if (!st || !st.bars.length) return;
+  const n = st.bars.length;
+  const vis = Math.max(2, st.i1 - st.i0);
+  const rect = canvas.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - st.padL) / Math.max(1, rect.width - st.padL - 10)));
+  const factor = e.deltaY < 0 ? 0.72 : 1.38;
+  let newN = Math.round(vis * factor);
+  newN = Math.max(2, Math.min(n, newN));
+  const center = st.i0 + frac * vis;
+  st.i0 = Math.round(center - frac * newN);
+  st.i1 = st.i0 + newN;
+  clampView(st);
+  drawOhlcFromState(canvas);
+}
+function panOhlc(canvas, e) {
+  const st = OHLC_STATE.get(canvas);
+  if (!st || !st.drag || !st.bars.length) return;
+  const vis = Math.max(2, st.i1 - st.i0);
+  const dx = e.clientX - st.lastX;
+  st.lastX = e.clientX;
+  const shift = Math.round(-dx / Math.max(4, st.slot));
+  if (!shift) return;
+  st.i0 += shift;
+  st.i1 = st.i0 + vis;
+  clampView(st);
+  drawOhlcFromState(canvas);
+}
+function hoverOhlc(canvas, e) {
+  const st = OHLC_STATE.get(canvas);
+  if (!st || !st.bars.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const vis = st.bars.slice(st.i0, st.i1);
+  const idx = Math.floor((x - st.padL) / st.slot);
+  const tip = ohlcTipEl();
+  if (idx < 0 || idx >= vis.length) { tip.style.display = "none"; return; }
+  const b = vis[idx];
+  tip.textContent = [b.t].concat(barLabelLines(b)).concat([b.rule || ""]).filter(Boolean).join("\n");
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 180) + "px";
+  tip.style.top = Math.max(8, e.clientY - 24) + "px";
+}
+function drawOhlcFromState(canvas) {
+  const st = OHLC_STATE.get(canvas);
+  if (!st) return;
+  const bars = st.bars.slice(st.i0, st.i1);
+  const dark = st.dark;
   const cssW = Math.max(canvas.clientWidth || 900, 320);
-  const cssH = Math.max(canvas.clientHeight || 320, 220);
+  const cssH = Math.max(canvas.clientHeight || 520, 280);
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(cssW * dpr);
   canvas.height = Math.floor(cssH * dpr);
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const padL = 56, padR = 10, padT = 12, padB = 28;
+  ctx.fillStyle = dark ? "#0c1410" : "#ffffff";
+  ctx.fillRect(0, 0, cssW, cssH);
+  if (!bars.length) {
+    ctx.fillStyle = dark ? "#8aa394" : "#555";
+    ctx.font = "13px ui-monospace, monospace";
+    ctx.fillText("No OHLC", 16, 40);
+    return;
+  }
+  const padL = 56, padR = 12, padT = 78, padB = 28;
+  st.padL = padL;
   const w = cssW - padL - padR, h = cssH - padT - padB;
   const lo = Math.min.apply(null, bars.map((b) => +b.l));
   const hi = Math.max.apply(null, bars.map((b) => +b.h));
   const span = (hi - lo) || 1;
   const y = (px) => padT + (hi - px) / span * h;
-  ctx.fillStyle = dark ? "#0c1410" : "#ffffff";
-  ctx.fillRect(0, 0, cssW, cssH);
   ctx.font = "11px ui-monospace, monospace";
   ctx.fillStyle = dark ? "#8aa394" : "#555";
   ctx.strokeStyle = dark ? "#2a4034" : "#d0d7ca";
@@ -270,18 +523,38 @@ function drawOhlc(canvas, bars, dark) {
     ctx.fillText(String(Math.round(px)), 4, yy + 4);
   }
   const slot = w / bars.length;
+  st.slot = slot;
+  const showFull = slot >= 46;
+  const showShort = slot >= 22;
   bars.forEach((b, i) => {
     const o = +b.o, hh = +b.h, l = +b.l, c = +b.c;
     const x = padL + (i + 0.5) * slot;
     const up = c >= o;
     ctx.strokeStyle = up ? "#1f9d55" : "#d64545";
     ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, y(hh)); ctx.lineTo(x, y(l)); ctx.stroke();
     const top = y(Math.max(o, c)), bot = y(Math.min(o, c));
-    const bw = Math.max(2, Math.min(14, slot * 0.62));
+    const bw = Math.max(2, Math.min(22, slot * 0.62));
     ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
+    if (!showShort) return;
+    const lines = showFull ? barLabelLines(b) : ["C " + b.c, String(b.s || "")];
+    ctx.textAlign = "center";
+    ctx.font = (showFull ? "10px" : "9px") + " ui-monospace, monospace";
+    const lineH = showFull ? 11 : 10;
+    let yy = y(hh) - 6 - (lines.length - 1) * lineH;
+    lines.forEach((line, k) => {
+      const last = k === lines.length - 1;
+      if (last && /LONG/.test(line)) ctx.fillStyle = "#0b7a3b";
+      else if (last && /SHORT/.test(line)) ctx.fillStyle = "#b42318";
+      else ctx.fillStyle = dark ? "#e8eee8" : "#111";
+      ctx.fillText(line, x, yy);
+      yy += lineH;
+    });
+    ctx.textAlign = "start";
   });
   ctx.fillStyle = dark ? "#8aa394" : "#555";
+  ctx.font = "11px ui-monospace, monospace";
   const labels = [0, Math.floor(bars.length / 2), bars.length - 1];
   labels.forEach((i) => {
     const t = String(bars[i].t || "").slice(0, 16);
@@ -289,12 +562,15 @@ function drawOhlc(canvas, bars, dark) {
     ctx.fillText(t, Math.max(padL, x - 40), cssH - 8);
   });
 }
+function drawOhlc(canvas, bars, dark) {
+  bindOhlcChart(canvas, bars, dark);
+}
 function drawSheetCharts() {
   document.querySelectorAll("canvas.ohlc").forEach((c) => {
     const tf = c.id.replace(/^chart-/, "");
     const el = document.getElementById("ohlc-" + tf);
     if (!el) return;
-    try { drawOhlc(c, JSON.parse(el.textContent), false); } catch (e) {}
+    try { bindOhlcChart(c, JSON.parse(el.textContent), false); } catch (e) {}
   });
 }
 """
@@ -343,8 +619,10 @@ def render_html(
   .pane {{ padding: .6rem 1rem 2rem; overflow: auto; max-height: calc(100vh - 9rem);
            background: #fff; }}
   .pane.hidden {{ display: none; }}
-  canvas.ohlc {{ display: block; width: 100%; height: 320px; background: #fff;
-                 border: 1px solid #d0d7ca; margin: 0 0 .8rem; }}
+  canvas.ohlc {{ display: block; width: 100%; height: 560px; background: #fff;
+                 border: 1px solid #d0d7ca; margin: 0 0 .8rem; cursor: crosshair; }}
+  details {{ margin: .4rem 0 1rem; }}
+  summary {{ cursor: pointer; color: #444; }}
   table {{ border-collapse: collapse; font-size: 12px; font-family: "IBM Plex Mono", ui-monospace, monospace; }}
   th, td {{ border: 1px solid #d0d7ca; padding: 3px 7px; white-space: nowrap; }}
   th {{ position: sticky; top: 0; background: #1f6b3a; color: #fff; z-index: 1; }}

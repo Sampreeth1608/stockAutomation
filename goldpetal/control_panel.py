@@ -52,6 +52,7 @@ from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 from s14_exchange_sheet import (
+    CANDLE_JS,
     HTML_NAME,
     load_sheet_csv,
     load_sheet_meta,
@@ -248,7 +249,7 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 .check.warn { color: var(--warn); }
 #live-desk-banner.armed { color: var(--bad); font-weight: 700; }
 #live-desk-banner.paper { color: var(--ok); }
-#s14-chart { width: 100%; height: 320px; background: #0c1410; border: 1px solid var(--line); border-radius: 3px; }
+#s14-chart { width: 100%; height: 560px; background: #0c1410; border: 1px solid var(--line); border-radius: 3px; cursor: crosshair; }
 </style>
 </head>
 <body>
@@ -276,8 +277,8 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 
     <section class="panel">
       <h2>Gold Petal exchange candles</h2>
-      <p class="muted">Angel/MCX Gold Petal chart. Open this panel through the SSH tunnel, then Pull live candles (or wait for the weekday job). Green/red sticks = close vs open. Table is O/H/L/C + wick + S14 side.</p>
-      <canvas id="s14-chart" width="1100" height="320"></canvas>
+      <p class="muted">O/H/L/C is printed on each candle. Scroll to zoom, drag to pan, double-click to reset. On 30m/1h zoom in until the numbers sit on the bar. Prefer Streamlit 8501 for this chart.</p>
+      <canvas id="s14-chart" width="1100" height="560"></canvas>
       <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
         <button class="btn ok" type="button" id="btn-s14-pull">Pull live candles</button>
         <a class="btn" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
@@ -295,7 +296,10 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
       </div>
       <p class="mono" id="s14-meta">No sheet yet — restart this panel after git pull</p>
       <p class="flash" id="s14-flash"></p>
-      <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
+      <details>
+        <summary class="muted">Row list (copy)</summary>
+        <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
+      </details>
     </section>
 
     <section class="panel">
@@ -1040,54 +1044,13 @@ function drawS14Chart(rows) {
   if (!canvas) return;
   const bars = (rows || []).map((r) => ({
     t: String(r.time || ""),
-    o: +r.open, h: +r.high, l: +r.low, c: +r.close
+    o: +r.open, h: +r.high, l: +r.low, c: +r.close,
+    s: String(r.side || ""),
+    oh: String(r["O=H"] || "N"),
+    ol: String(r["O=L"] || "N"),
+    rule: String(r.rule || "")
   })).filter((b) => Number.isFinite(b.o) && Number.isFinite(b.h) && Number.isFinite(b.l) && Number.isFinite(b.c));
-  const cssW = Math.max(canvas.clientWidth || 900, 320);
-  const cssH = 320;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(cssW * dpr);
-  canvas.height = Math.floor(cssH * dpr);
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#0c1410";
-  ctx.fillRect(0, 0, cssW, cssH);
-  if (!bars.length) {
-    ctx.fillStyle = "#8aa394";
-    ctx.font = "13px IBM Plex Mono, monospace";
-    ctx.fillText("No OHLC in this tab — pick 1d / 1h / 30m", 16, 40);
-    return;
-  }
-  const padL = 56, padR = 10, padT = 12, padB = 28;
-  const w = cssW - padL - padR, h = cssH - padT - padB;
-  const lo = Math.min.apply(null, bars.map((b) => b.l));
-  const hi = Math.max.apply(null, bars.map((b) => b.h));
-  const span = (hi - lo) || 1;
-  const y = (px) => padT + (hi - px) / span * h;
-  ctx.font = "11px IBM Plex Mono, monospace";
-  ctx.fillStyle = "#8aa394";
-  ctx.strokeStyle = "#2a4034";
-  for (let i = 0; i <= 4; i++) {
-    const px = hi - span * i / 4;
-    const yy = y(px);
-    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(cssW - padR, yy); ctx.stroke();
-    ctx.fillText(String(Math.round(px)), 4, yy + 4);
-  }
-  const slot = w / bars.length;
-  bars.forEach((b, i) => {
-    const x = padL + (i + 0.5) * slot;
-    const up = b.c >= b.o;
-    ctx.strokeStyle = up ? "#3dba7a" : "#e05a4c";
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.beginPath(); ctx.moveTo(x, y(b.h)); ctx.lineTo(x, y(b.l)); ctx.stroke();
-    const top = y(Math.max(b.o, b.c)), bot = y(Math.min(b.o, b.c));
-    const bw = Math.max(2, Math.min(16, slot * 0.62));
-    ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
-  });
-  const labels = [0, Math.floor(bars.length / 2), bars.length - 1];
-  ctx.fillStyle = "#8aa394";
-  labels.forEach((i) => {
-    ctx.fillText(String(bars[i].t || "").slice(0, 16), Math.max(padL, padL + (i + 0.5) * slot - 40), cssH - 8);
-  });
+  bindOhlcChart(canvas, bars, true);
 }
 async function loadS14Preview() {
   const tf = $("s14-tf").value || "1d";
@@ -1165,6 +1128,12 @@ setInterval(() => refresh().catch(() => {}), 30000);
 </body>
 </html>
 """
+
+HTML_PAGE = HTML_PAGE.replace(
+    "<script>\nconst $ = (id) => document.getElementById(id);",
+    "<script>\n" + CANDLE_JS + "\nconst $ = (id) => document.getElementById(id);",
+    1,
+)
 
 
 def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:

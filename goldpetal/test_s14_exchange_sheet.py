@@ -48,6 +48,10 @@ def test_workbook_html_and_csv() -> None:
         assert "Gold Petal exchange candles" in html
         assert 'canvas class="ohlc"' in html
         assert "drawOhlc" in html
+        assert "bindOhlcChart" in html
+        assert "Scroll to zoom" in html
+        assert "O/H/L/C is printed on each candle" in html
+        assert "<details>" in html
         csv_text = (out / "1d.csv").read_text(encoding="utf-8")
         assert csv_text.splitlines()[0].startswith("time,open,high,low,close")
         assert "14324" in csv_text
@@ -100,6 +104,50 @@ def test_panel_mentions_s14_sheet() -> None:
     )
     assert "S14 chart" in desk
     assert "def tab_s14_chart" in desk
+    assert "labeled_candlestick_figure" in desk
+    assert "PLOTLY_ZOOM_CONFIG" in desk
+    sheet_py = Path(__file__).resolve().parent.joinpath("s14_exchange_sheet.py").read_text(
+        encoding="utf-8"
+    )
+    assert "scrollZoom" in sheet_py
+    assert "bindOhlcChart" in text
+    assert "O/H/L/C is printed on each candle" in text
+
+
+def test_candle_print_lives_on_bar() -> None:
+    from s14_exchange_sheet import candle_hover_text, candle_onbar_lines
+
+    rows = walk_candles(EXCHANGE_1D_AUG)
+    d = display_bar_row(rows[0])
+    lines = candle_onbar_lines(d)
+    assert lines[0] == "O 14379"
+    assert lines[1] == "H 14418"
+    assert lines[2] == "L 14300"
+    assert lines[3] == "C 14324"
+    assert "SHORT" in lines[4]
+    hover = candle_hover_text(d)
+    assert "O 14379" in hover
+    assert "C 14324" in hover
+
+
+def test_labeled_figure_prints_and_zooms() -> None:
+    try:
+        import plotly.graph_objects as go  # noqa: F401
+    except ImportError:
+        return
+    from s14_exchange_sheet import labeled_candlestick_figure
+
+    rows = [display_bar_row(r) for r in walk_candles(EXCHANGE_1D_AUG)]
+    fig = labeled_candlestick_figure(rows, title="Gold Petal 1d")
+    types = [t.type for t in fig.data]
+    assert "candlestick" in types
+    assert any(getattr(t, "mode", None) == "text" for t in fig.data)
+    text_trace = next(t for t in fig.data if getattr(t, "mode", None) == "text")
+    joined = " ".join(str(x) for x in text_trace.text)
+    assert "O 14379" in joined
+    assert "C 14324" in joined
+    assert fig.layout.dragmode == "pan"
+    assert fig.layout.xaxis.rangeslider.visible is True
 
 
 if __name__ == "__main__":
@@ -108,4 +156,6 @@ if __name__ == "__main__":
     test_format_table_no_column_binary()
     test_refresh_status_idle()
     test_panel_mentions_s14_sheet()
+    test_candle_print_lives_on_bar()
+    test_labeled_figure_prints_and_zooms()
     print("ALL test_s14_exchange_sheet OK")

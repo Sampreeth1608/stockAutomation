@@ -466,15 +466,21 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
 
 def tab_s14_chart(dd: Path) -> None:
     """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
-    from s14_exchange_sheet import refresh_status, start_angel_refresh
+    from s14_exchange_sheet import (
+        PLOTLY_ZOOM_CONFIG,
+        labeled_candlestick_figure,
+        refresh_status,
+        start_angel_refresh,
+    )
 
     sheet = dd / "s14_sheet"
     st.subheader("Gold Petal exchange candles")
     st.caption(
-        "This is the Angel/MCX chart (O/H/L/C). Open the desk with "
-        "`gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
-        "http://127.0.0.1:8501/ → tab **S14 chart**. "
-        "Do not use 8787 for this."
+        "O/H/L/C is printed on each candle (not a table). "
+        "Scroll to zoom, drag to pan, use the rangeslider, double-click to reset. "
+        "On 30m/1h zoom in until the numbers sit on the bar. "
+        "Open with `gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
+        "http://127.0.0.1:8501/ → tab **S14 chart**."
     )
     st_status = refresh_status(sheet)
     if st_status.get("running"):
@@ -509,33 +515,18 @@ def tab_s14_chart(dd: Path) -> None:
     for col in ("open", "high", "low", "close", "upper", "lower"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+    rows = df.where(pd.notnull(df), None).to_dict("records")
     try:
-        import plotly.graph_objects as go
-
-        fig = go.Figure(
-            data=[
-                go.Candlestick(
-                    x=df["time"] if "time" in df.columns else df.index,
-                    open=df["open"],
-                    high=df["high"],
-                    low=df["low"],
-                    close=df["close"],
-                    name="GOLDPETAL",
-                )
-            ]
+        fig = labeled_candlestick_figure(rows, title=f"Gold Petal {tf} · O/H/L/C on candle")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config=PLOTLY_ZOOM_CONFIG,
+            key=f"s14-chart-{tf}",
         )
-        fig.update_layout(
-            title=f"Gold Petal {tf} · exchange OHLC",
-            xaxis_title="time IST",
-            yaxis_title="₹ / g",
-            xaxis_rangeslider_visible=False,
-            height=460,
-            margin=dict(l=40, r=20, t=40, b=40),
-        )
-        st.plotly_chart(fig, use_container_width=True)
     except Exception as exc:
-        st.warning(f"Candlestick needs plotly ({exc}). Table still below.")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+        st.error(f"Candlestick needs plotly ({exc}).")
+        return
 
 
 def tab_proposals(dd: Path) -> None:
