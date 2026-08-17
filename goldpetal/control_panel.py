@@ -39,7 +39,7 @@ from control_state import (
     set_trading_enabled,
 )
 from live_orders import live_lots, recent_orders
-from live_readiness import live_readiness
+from live_readiness import apply_panel_live_env, live_readiness, panel_restart_allowed, read_live_env
 from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
@@ -204,11 +204,12 @@ input[type="number"] {
   color: var(--text); padding: .35rem .45rem; border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
 }
-input[type="date"] {
+input[type="date"], input[type="text"] {
   background: var(--bg0); border: 1px solid var(--line);
   color: var(--text); padding: .35rem .45rem; border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
 }
+input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 .flash { margin: .5rem 0 0; color: var(--gold2); font-size: .85rem; min-height: 1.2em; }
 .toast {
   position: fixed; top: 1rem; right: 1rem; z-index: 1000;
@@ -255,7 +256,7 @@ input[type="date"] {
 
     <section class="panel">
       <h2>Live money — readiness (does not arm itself)</h2>
-      <p class="muted">Real orders need <strong>every</strong> gate below. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). Keep <span class="mono">DRY_RUN=true</span> until you intend Angel fills. This panel never writes DRY_RUN.</p>
+      <p class="muted">Real orders need <strong>every</strong> gate below. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). <strong>Save .env</strong> writes the file only. <strong>Restart supervise</strong> loads it into the bot. Type <span class="mono">LIVE</span> to set <span class="mono">DRY_RUN=false</span>. Panel cap is 10 lots.</p>
       <p class="mono" id="live-desk-banner">Loading…</p>
       <div class="row" id="live-desk-steps" style="margin:.6rem 0"></div>
       <p class="muted" id="live-desk-bot"></p>
@@ -265,10 +266,19 @@ input[type="date"] {
           <tbody id="live-desk-books"></tbody>
         </table>
       </div>
-      <div class="row" style="margin-top:.75rem">
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin-top:.75rem">
+        <label class="muted" style="display:flex;align-items:center;gap:.4rem"><input type="checkbox" id="live-dry-run" checked/> Paper only (<span class="mono">DRY_RUN</span>)</label>
+        <label class="muted">LIVE_MAX_LOTS (1–10)<br/><input type="number" id="live-max-lots" min="1" max="10" step="1" value="1"/></label>
+        <label class="muted">Type LIVE to allow DRY_RUN=false<br/><input type="text" id="live-env-confirm" placeholder="LIVE" autocomplete="off" style="width:8rem"/></label>
+        <button class="btn warn" type="button" id="btn-save-live-env">Save .env</button>
+      </div>
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin-top:.5rem">
+        <label class="muted">Type RESTART to restart the bot<br/><input type="text" id="live-restart-confirm" placeholder="RESTART" autocomplete="off" style="width:8rem"/></label>
+        <button class="btn danger" type="button" id="btn-restart-supervise">Restart supervise</button>
         <button class="btn warn" type="button" id="btn-save-live-approved">Save live-approved list</button>
         <button class="btn" type="button" id="btn-clear-live-approved">Clear live-approved</button>
       </div>
+      <p class="muted" id="live-env-hint"></p>
       <p class="flash" id="live-desk-flash"></p>
     </section>
 
@@ -594,6 +604,16 @@ function renderLiveDesk(data) {
       <td><input type="checkbox" data-live-strat="${b.strategy}" ${b.live_approved ? "checked" : ""}/></td>
       <td>${b.live_approved ? b.live_qty : "—"}</td>
     </tr>`).join("");
+  const dryEl = $("live-dry-run");
+  if (dryEl) dryEl.checked = d.dry_run !== false;
+  const lotsEl = $("live-max-lots");
+  if (lotsEl && document.activeElement !== lotsEl) lotsEl.value = d.live_max_lots || 1;
+  const hint = $("live-env-hint");
+  if (hint) {
+    hint.textContent = d.dry_run !== false
+      ? "Paper. Save writes .env; Restart supervise loads it into the bot."
+      : "DRY_RUN is false in .env. Restart supervise if you just changed it. Lock live or check Paper only if that is wrong.";
+  }
 }
 
 function selectedLiveApproved() {
@@ -795,6 +815,54 @@ $("btn-clear-live-approved").onclick = async () => {
     await refresh();
   } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
 };
+$("btn-save-live-env").onclick = async () => {
+  try {
+    const dry = $("live-dry-run").checked;
+    const lots = Number($("live-max-lots").value || 1);
+    const confirmWord = ($("live-env-confirm").value || "").trim();
+    if (!dry) {
+      if (confirmWord !== "LIVE") {
+        liveDeskFlash("Type LIVE to set DRY_RUN=false");
+        return;
+      }
+      const ok = confirm("Write DRY_RUN=false to .env? Real Angel fills still need Unlock live + live_approved + Restart supervise. LIVE_MAX_LOTS is the hard ceiling, not paper 100. Continue?");
+      if (!ok) { liveDeskFlash("cancelled"); return; }
+    }
+    const res = await api("/api/live/env", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: dry, live_max_lots: lots, confirm: confirmWord })
+    });
+    const applied = res.applied || {};
+    liveDeskFlash("Saved .env: DRY_RUN=" + (applied.DRY_RUN || "?") + " LIVE_MAX_LOTS=" + (applied.LIVE_MAX_LOTS || "?") + " — Restart supervise to load into the bot.");
+    $("live-env-confirm").value = "";
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-restart-supervise").onclick = async () => {
+  try {
+    const word = ($("live-restart-confirm").value || "").trim();
+    if (word !== "RESTART") {
+      liveDeskFlash("Type RESTART to restart supervise");
+      return;
+    }
+    const dry = $("live-dry-run").checked;
+    const msg = dry
+      ? "Restart supervise? This kills run_strategy and starts it again. The control panel stays up."
+      : "DRY_RUN is unchecked. Restart will load whatever is in .env (including DRY_RUN=false) into the bot. Continue?";
+    const ok = confirm(msg);
+    if (!ok) { liveDeskFlash("cancelled"); return; }
+    liveDeskFlash("Restarting supervise…");
+    const res = await api("/api/bot/restart", {
+      method: "POST",
+      body: JSON.stringify({ confirm: word })
+    });
+    $("live-restart-confirm").value = "";
+    liveDeskFlash(res.ok
+      ? "Supervise restarted. Check heartbeat below."
+      : ("Restart reported a problem: " + (res.error || "bot not running yet")));
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
 $("btn-reason").onclick = async () => {
   try {
     const r = await api("/api/reasoning/refresh", { method: "POST", body: "{}" });
@@ -944,16 +1012,16 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     blocked = entries_blocked()
     # Cached only — do not re-run reasoner on every poll (slow).
     reasoning = load_reasoning()
-    dry = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
+    live_file = read_live_env()
     return {
         "state": state.to_dict(),
         "entries_blocked": list(blocked),
         "live_allowed": [live_ok, live_reason],
         "live_orders": recent_orders(limit=40),
         "live_env": {
-            "dry_run": dry,
+            "dry_run": live_file["dry_run"],
             "lots": live_lots(),
-            "max_lots": int(os.getenv("LIVE_MAX_LOTS", "1") or "1"),
+            "max_lots": live_file["live_max_lots"],
             "producttype": (os.getenv("LIVE_PRODUCTTYPE", "CARRYFORWARD") or "CARRYFORWARD"),
         },
         "ltp": latest_ltp(),
@@ -1190,6 +1258,37 @@ class ControlHandler(BaseHTTPRequestHandler):
                     )
                 )
                 return
+            if path == "/api/live/env":
+                dry_raw = data.get("dry_run")
+                dry_run = True if dry_raw is None else bool(dry_raw)
+                try:
+                    lots = int(data.get("live_max_lots") or 1)
+                except (TypeError, ValueError):
+                    self._send(*_json_bytes({"ok": False, "error": "LIVE_MAX_LOTS must be an integer"}, 400))
+                    return
+                res = apply_panel_live_env(
+                    dry_run=dry_run,
+                    live_max_lots=lots,
+                    confirm=str(data.get("confirm") or ""),
+                )
+                status = 200 if res.get("ok") else 400
+                res = {**res, "live_desk": live_readiness()}
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/bot/restart":
+                ok, why = panel_restart_allowed(str(data.get("confirm") or ""))
+                if not ok:
+                    self._send(*_json_bytes({"ok": False, "error": why}, 400))
+                    return
+                from analytics.bot_ops import restart_bot
+
+                res = restart_bot()
+                status_info = dict(res.get("status") or {})
+                status_info.pop("log_tail", None)
+                res["status"] = status_info
+                res["live_desk"] = live_readiness()
+                self._send(*_json_bytes(res))
+                return
             if path == "/api/reasoning/refresh":
                 payload = refresh_and_save(
                     in_position=bool(data.get("in_position", False)),
@@ -1252,7 +1351,7 @@ def main() -> None:
     print(f"Gold Petal control panel → http://{args.host}:{args.port}/", flush=True)
     print(
         "Endpoints: /api/dashboard /api/ticks /api/bars /api/reasoning "
-        "/api/trades /api/proposals /api/capital",
+        "/api/trades /api/proposals /api/capital /api/live/env /api/bot/restart",
         flush=True,
     )
     try:

@@ -1,13 +1,15 @@
-"""Live-money readiness for the control panel (read-only gates + size).
+"""Live-money readiness for the control panel (gates, size, .env writes).
 
-Does not arm DRY_RUN=false. Paper 100 lots is not live size:
-live qty = min(capital.max_lots, LIVE_MAX_LOTS).
+Paper 100 lots is not live size: live qty = min(capital.max_lots, LIVE_MAX_LOTS).
+DRY_RUN=false from this panel requires typing LIVE. LIVE_MAX_LOTS is capped at 10.
+Save writes .env only; Restart supervise loads it into the bot.
 """
 
 from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -16,17 +18,90 @@ from live_orders import live_lots, live_lots_for
 from position_safety import read_bot_health
 
 IST = ZoneInfo("Asia/Kolkata")
+PANEL_LIVE_MAX_LOTS = 10
+LIVE_CONFIRM_WORD = "LIVE"
+RESTART_CONFIRM_WORD = "RESTART"
+
+
+def _truthy(raw: str | None, default: str = "true") -> bool:
+    v = (raw if raw is not None else default).strip().lower()
+    return v in {"1", "true", "yes", "y"}
+
+
+def read_live_env(*, path: Path | None = None) -> dict[str, Any]:
+    """DRY_RUN / LIVE_MAX_LOTS from .env, falling back to process env."""
+    from analytics.env_bridge import read_env
+
+    e = read_env(path)
+    dry_raw = e.get("DRY_RUN")
+    if dry_raw is None:
+        dry_raw = os.getenv("DRY_RUN", "true")
+    lots_raw = e.get("LIVE_MAX_LOTS")
+    if lots_raw is None:
+        lots_raw = os.getenv("LIVE_MAX_LOTS", "1")
+    try:
+        lots = max(1, int(float(lots_raw or "1")))
+    except ValueError:
+        lots = 1
+    return {"dry_run": _truthy(str(dry_raw)), "live_max_lots": lots}
 
 
 def _dry_run() -> bool:
-    return os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
+    return bool(read_live_env()["dry_run"])
 
 
 def _live_max() -> int:
+    return int(read_live_env()["live_max_lots"])
+
+
+def apply_panel_live_env(
+    *,
+    dry_run: bool,
+    live_max_lots: int,
+    confirm: str = "",
+    path: Path | None = None,
+    sync_environ: bool = True,
+) -> dict[str, Any]:
+    """Write DRY_RUN + LIVE_MAX_LOTS. DRY_RUN=false requires confirm==LIVE. Lots 1–10."""
     try:
-        return max(1, int(os.getenv("LIVE_MAX_LOTS", "1") or "1"))
-    except ValueError:
-        return 1
+        lots = int(live_max_lots)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "LIVE_MAX_LOTS must be an integer"}
+    if lots < 1 or lots > PANEL_LIVE_MAX_LOTS:
+        return {
+            "ok": False,
+            "error": (
+                f"LIVE_MAX_LOTS from this panel must be 1–{PANEL_LIVE_MAX_LOTS} "
+                f"(got {lots}). Paper 100 is not live size."
+            ),
+        }
+    if not dry_run and str(confirm).strip() != LIVE_CONFIRM_WORD:
+        return {
+            "ok": False,
+            "error": "Type LIVE to set DRY_RUN=false. Leave Paper only checked for paper.",
+        }
+    from analytics.env_bridge import write_env_updates
+
+    applied_dry = "true" if dry_run else "false"
+    res = write_env_updates(
+        {"DRY_RUN": applied_dry, "LIVE_MAX_LOTS": lots},
+        path=path,
+    )
+    if res.get("ok") and sync_environ:
+        os.environ["DRY_RUN"] = applied_dry
+        os.environ["LIVE_MAX_LOTS"] = str(lots)
+    res["restart_needed"] = True
+    res["note"] = (
+        "Saved .env. Restart supervise to load into the bot. "
+        "This save does not place Angel orders."
+    )
+    return res
+
+
+def panel_restart_allowed(confirm: str) -> tuple[bool, str]:
+    if str(confirm).strip() != RESTART_CONFIRM_WORD:
+        return False, "Type RESTART to restart supervise"
+    return True, "ok"
 
 
 def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> float | None:
@@ -72,10 +147,9 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "ok": not dry,
             "label": "DRY_RUN=false in .env",
             "detail": (
-                "still true — paper only. Edit .env then restart supervise. "
-                "Do not flip this until you mean real money."
+                "still true — paper only. Uncheck Paper only, type LIVE, Save, then Restart."
                 if dry
-                else "false — Angel orders can fire when other gates pass"
+                else "false — Angel orders can fire when other gates pass + after Restart"
             ),
         },
         {
@@ -156,6 +230,6 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         },
         "note": (
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
-            "DRY_RUN=false, restart supervise. Size is LIVE_MAX_LOTS, not paper 100."
+            "DRY_RUN=false, Restart supervise. Size is LIVE_MAX_LOTS (panel cap 10), not paper 100."
         ),
     }
