@@ -1,4 +1,4 @@
-"""Tests for S14 30m:raw_strict and S15 30m:nowick live strategies."""
+"""Tests for S14 30m:strict and S15 30m:nowick live strategies."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ def _strict(seed: bool = False) -> WickCandleStrategy:
             nowick_eps=1.0,
             nowick_body=True,
             nowick_only=False,
+            entry_strict=True,
             exit_strict=True,
         ),
         seed=seed,
@@ -52,6 +53,7 @@ def _flip() -> WickCandleStrategy:
             nowick_eps=1.0,
             nowick_body=True,
             nowick_only=False,
+            entry_strict=True,
             exit_strict=True,
             reenter=True,
         ),
@@ -149,7 +151,7 @@ def test_later_bar_can_enter_after_flat() -> None:
 
 
 def test_strict_ignores_weak_opposite() -> None:
-    """Raw would call short; strict needs frac50/pin2/bald — stay long."""
+    """Weak opposite (not bald/frac50/pin2) — stay long."""
     s = _strict()
     # Enter on hammer
     assert s.on_bar_row({"open": 100, "high": 102, "low": 90, "close": 101}).action == "BUY"
@@ -157,7 +159,7 @@ def test_strict_ignores_weak_opposite() -> None:
     hold = s.on_bar_row({"open": 101, "high": 108, "low": 100, "close": 105})
     assert hold is None
     assert s.position == "long"
-    assert s.last_skip == "weak_opposite"
+    assert s.last_skip == "hold_long"
 
 
 def test_strict_exits_on_decisive_opposite() -> None:
@@ -200,22 +202,34 @@ def test_nowick_hammer_does_not_exit() -> None:
     assert s.position == "flat"
 
 
-def test_min_range_blocks() -> None:
+def test_min_range_is_ignored() -> None:
+    """No high−low skip: a 12-pt bar still trades even if min_range is set."""
     s = WickCandleStrategy(
         "S14_WICK30_STRICT",
-        WickConfig(min_range=20, exit_strict=True),
+        WickConfig(min_range=20, entry_strict=True, exit_strict=True),
         seed=False,
     )
-    assert s.on_bar_row({"open": 100, "high": 102, "low": 90, "close": 101}) is None
-    assert s.position == "flat"
+    sig = s.on_bar_row({"open": 100, "high": 102, "low": 90, "close": 101})
+    assert sig is not None and sig.action == "BUY"
+    assert s.position == "long"
 
 
 def test_small_range_candle_is_taken() -> None:
-    """Default has no H−L gate: range 3 still shorts (upper 2.5 > lower 0)."""
+    """Range 3, upper 2.5 ≥ 0.5×range → SHORT. No H−L skip."""
     s = _strict()
     sig = s.on_bar_row({"open": 100, "high": 103, "low": 100, "close": 100.5})
     assert sig is not None and sig.action == "SHORT"
     assert s.position == "short"
+
+
+def test_weak_wick_does_not_enter() -> None:
+    """upper>lower but not bald/frac50/pin2 → no trade."""
+    s = _strict()
+    # U=2 L=1 range=6 body=3 → frac 0.33, pin 2<6
+    sig = s.on_bar_row({"open": 100, "high": 105, "low": 99, "close": 103})
+    assert sig is None
+    assert s.position == "flat"
+    assert s.last_skip == "no_signal"
 
 
 def test_seed_current_bar_from_sql() -> None:
@@ -272,8 +286,9 @@ if __name__ == "__main__":
     test_nowick_ignores_hammer()
     test_nowick_bald_green_buys()
     test_nowick_hammer_does_not_exit()
-    test_min_range_blocks()
+    test_min_range_is_ignored()
     test_small_range_candle_is_taken()
+    test_weak_wick_does_not_enter()
     test_seed_current_bar_from_sql()
     test_gate_reject_can_retry()
     print("ALL test_strategy_wick OK")

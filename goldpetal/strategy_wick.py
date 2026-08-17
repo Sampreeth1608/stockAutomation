@@ -1,27 +1,22 @@
-"""S14 / S15 — 30m wick-length HOLD (paper).
+"""S14 / S15 — 30m wick HOLD (paper).
 
-Judgement (user pick from 100-lot HOLD + fees tape):
+S14 uses one rule on every candle (entry and exit). No high−low skip.
 
-  S14_WICK30_STRICT  = 30m:raw_strict  (only real candidate: 43 trades, +₹29,640)
-  S15_WICK30_NOWICK  = 30m:nowick      (luck on 1–5 trades elsewhere; enable 30m only)
+  if upper ≤ 1 and lower ≤ 1:          # bald
+      close > open → LONG
+      close < open → SHORT
+      close = open → skip
+  else:
+      winning wick ≥ 0.5 × range → that side
+      or winning wick ≥ 2 × body → that side
+      else skip
 
-Every action is taken on the 30m candle that printed the signal, in that
-candle's last minute — never on the next bar's first tick.
+Action is in that 30m candle's last minute — never the next bar's first tick.
 
-  LONG  entry: lower wick > upper wick (raw), or bald green body.
-  SHORT entry: upper wick > lower wick (raw), or bald red body.
-  S14 exit:    only a *decisive* opposite (frac50 or pin2 or bald body).
-  S15 entry/exit: bald candles only (hammers / shooting stars ignored).
+HOLD: opposite → CLOSE. Do not reverse on that same candle.
+S15 is bald-only (nowick). FLIP is not papered.
 
-HOLD: opposite → CLOSE to flat. Do **not** reverse on that same candle.
-A later bar may enter the other side. CLOSE locks the confirm window so a
-later last-minute tick cannot flip. Equal non-zero wicks → hold.
-
-FLIP (backtest / future S16): same last-minute rules, but a decisive opposite
-closes the open side and takes the new signal on that candle. Not papered
-until a `30m:raw_strict_flip` row is picked.
-
-Defaults: 30m bars, min_range=0 (no H−L skip), confirm=1 minute, nowick_eps=1 pt.
+Defaults: 30m bars, confirm=1 minute, nowick_eps=1 pt.
 Current in-progress 30m OHLC is seeded from ticks.db (fast SQL, not raw_json).
 """
 
@@ -52,6 +47,7 @@ class WickConfig:
     min_diff: float = 0.0
     min_frac: float = 0.0
     min_body_ratio: float = 0.0
+    entry_strict: bool = False
     exit_strict: bool = False
     reenter: bool = False
     allow_long: bool = True
@@ -85,6 +81,8 @@ class WickCandleStrategy:
     def preset_label(self) -> str:
         if self.cfg.nowick_only:
             base = "nowick"
+        elif self.cfg.entry_strict and self.cfg.exit_strict:
+            base = "strict"
         elif self.cfg.exit_strict:
             base = "raw_strict"
         else:
@@ -113,7 +111,8 @@ class WickCandleStrategy:
         return (
             f"TF={c.bar_minutes}m {self.preset_label} min_range={c.min_range:.0f} "
             f"confirm={c.confirm_minutes}m nowick_eps={c.nowick_eps:.0f} "
-            f"exit_strict={c.exit_strict} reenter={c.reenter} nowick_only={c.nowick_only} "
+            f"entry_strict={c.entry_strict} exit_strict={c.exit_strict} "
+            f"reenter={c.reenter} nowick_only={c.nowick_only} "
             f"{'FLIP same-candle reverse' if c.reenter else 'HOLD no-reverse'} {self.bar_debug} "
             f"skip={self.last_skip or '-'} pos={self.position}"
         )
@@ -252,11 +251,19 @@ class WickCandleStrategy:
 
     def _decide(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
         range_pts = h - l
-        if range_pts < self.cfg.min_range:
-            self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
-            return None
 
-        side = wick_side(o, h, l, c, **self._wick_kwargs())
+        if self.cfg.entry_strict:
+            side = wick_exit_strict(
+                o,
+                h,
+                l,
+                c,
+                min_range=0.0,
+                nowick_eps=self.cfg.nowick_eps,
+                nowick_body=self.cfg.nowick_body,
+            )
+        else:
+            side = wick_side(o, h, l, c, **self._wick_kwargs())
         if self.cfg.exit_strict:
             xside = wick_exit_strict(
                 o,
@@ -419,11 +426,11 @@ def _load_dotenv() -> None:
 
 
 def wick_strict_from_env() -> WickCandleStrategy:
-    """S14 — 30m:raw_strict HOLD (entry raw wick / bald body, strict exit)."""
+    """S14 — 30m:strict HOLD (bald / frac50 / pin2 on every candle)."""
     _load_dotenv()
     cfg = WickConfig(
         bar_minutes=int(os.getenv("S14_BAR_MINUTES", "30")),
-        min_range=0.0,  # no H−L skip; not in the wick formula
+        min_range=0.0,
         confirm_minutes=int(os.getenv("S14_CONFIRM_MINUTES", "1")),
         nowick_eps=float(os.getenv("S14_NOWICK_EPS", "1")),
         nowick_body=True,
@@ -431,6 +438,7 @@ def wick_strict_from_env() -> WickCandleStrategy:
         min_diff=0.0,
         min_frac=0.0,
         min_body_ratio=0.0,
+        entry_strict=True,
         exit_strict=True,
         allow_long=_env_flag("S14_ALLOW_LONG", True),
         allow_short=_env_flag("S14_ALLOW_SHORT", True),

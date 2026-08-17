@@ -1,23 +1,22 @@
-"""Candle wick lengths → long / short (S14 candidate).
+"""Candle wick lengths → long / short (S14).
 
-  upper wick = high − max(open, close)
-  lower wick = min(open, close) − low
+  upper = high − max(open, close)
+  lower = min(open, close) − low
+  body  = |close − open|
+  range = high − low
 
-  LONG  when lower wick is longer than upper wick (demand defended the low)
-  SHORT when upper wick is longer than lower wick (supply defended the high)
+S14 uses this on every candle (entry and exit). No high−low skip.
 
-No wick on either side (upper and lower both ≤ nowick_eps, default 1 pt):
-  green body (C > O) → LONG
-  red body   (C < O) → SHORT
-  doji       (C = O) → no trade
-This body rule is applied together with raw / diff5 / diff10 / frac50 / pin2.
+  if upper ≤ 1 and lower ≤ 1:          # bald
+      close > open → LONG
+      close < open → SHORT
+      close = open → skip
+  else:
+      winning wick ≥ 0.5 × range → that side
+      or winning wick ≥ 2 × body → that side
+      else skip
 
-Equal *non-zero* wicks → no new signal (hold if already in a trade).
-One bald side is already covered: no upper wick + lower wick → LONG, and mirror.
-
-Exit is the opposite signal on a **later** candle. Default is hold:
-flatten on that exit candle, do **not** reverse into the other side
-until a later bar prints a fresh signal.
+HOLD: opposite → CLOSE on a later candle; no reverse on that same bar.
 """
 
 from __future__ import annotations
@@ -122,9 +121,9 @@ def wick_exit_strict(
     nowick_eps: float = 1.0,
     nowick_body: bool = True,
 ) -> str | None:
-    """Opposite-side exit only when the reversal is decisive.
+    """S14 rule on one candle: bald body, or winning wick ≥ 0.5×range, or ≥ 2×body.
 
-    Bald body, or winning wick ≥ 50% of range, or winning wick ≥ 2× body.
+    Used for both entry and exit. min_range is unused when 0 (S14 default).
     """
     m = wick_measure(open_, high, low, close)
     if min_range > 0 and m.range_pts < min_range:

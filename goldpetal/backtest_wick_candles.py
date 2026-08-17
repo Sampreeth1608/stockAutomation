@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """Wick-length long/short — multi-TF backtest from tick OHLC (S14 candidate).
 
-  LONG  when lower wick > upper wick
-  SHORT when upper wick > lower wick
-  HOLD: exit to flat on opposite signal; do not reverse on that same candle.
-  STRICT exit: only flatten on a decisive opposite (frac50 or pin2 or bald body).
+S14 `strict` on every candle (no high−low skip):
+  bald (both wicks ≤ 1) → body C>O long / C<O short / doji skip
+  or winning wick ≥ 0.5 × range
+  or winning wick ≥ 2 × body
+HOLD: exit to flat on opposite; do not reverse on that same candle.
 
-Fill at signal-bar close. Bald candles (no wick on either side) use the body:
-green → long, red → short. That rule is included in every wick preset.
-
-Same command also prints the old FLIP book (reverse on every opposite wick)
-so HOLD vs FLIP is visible on one tape.
+Other presets (raw / raw_strict / nowick / …) stay on the tape for comparison.
 
   python3 backtest_wick_candles.py --db data/ticks.db --lots 1 --session --fees
   python3 backtest_wick_candles.py --resettle-from data/backtests/wick_candles --lots 100
@@ -61,9 +58,10 @@ PRESETS: list[tuple[str, dict[str, Any]]] = [
     ("pin2", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0}),
     ("nowick", {**_HOLD, "nowick_only": True, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
     ("raw_strict", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "exit_strict": True}),
+    ("strict", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "entry_strict": True, "exit_strict": True}),
     ("pin2_strict", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0, "exit_strict": True}),
 ]
-# Same-candle reverse (FLIP). Keep exit_strict on *_strict rows — that is S14's exit.
+# Same-candle reverse (FLIP). `strict` is S14 (same rule entry and exit).
 _FLIP_BASES = {
     "raw",
     "diff5",
@@ -72,6 +70,7 @@ _FLIP_BASES = {
     "pin2",
     "nowick",
     "raw_strict",
+    "strict",
     "pin2_strict",
 }
 FLIP_PRESETS: list[tuple[str, dict[str, Any]]] = [
@@ -99,6 +98,7 @@ def simulate_wick(
     nowick_body: bool = True,
     nowick_only: bool = False,
     reenter: bool = False,
+    entry_strict: bool = False,
     exit_strict: bool = False,
     market_open: str = "09:00",
     market_close: str = "23:30",
@@ -144,19 +144,30 @@ def simulate_wick(
         side = None
 
     def signal(cur: Candle) -> str | None:
-        want = wick_side(
-            cur.open,
-            cur.high,
-            cur.low,
-            cur.close,
-            min_diff=min_diff,
-            min_frac=min_frac,
-            min_body_ratio=min_body_ratio,
-            min_range=min_range,
-            nowick_eps=nowick_eps,
-            nowick_body=nowick_body,
-            nowick_only=nowick_only,
-        )
+        if entry_strict:
+            want = wick_exit_strict(
+                cur.open,
+                cur.high,
+                cur.low,
+                cur.close,
+                min_range=min_range,
+                nowick_eps=nowick_eps,
+                nowick_body=nowick_body,
+            )
+        else:
+            want = wick_side(
+                cur.open,
+                cur.high,
+                cur.low,
+                cur.close,
+                min_diff=min_diff,
+                min_frac=min_frac,
+                min_body_ratio=min_body_ratio,
+                min_range=min_range,
+                nowick_eps=nowick_eps,
+                nowick_body=nowick_body,
+                nowick_only=nowick_only,
+            )
         if want == "long" and not allow_long:
             return None
         if want == "short" and not allow_short:
@@ -578,8 +589,8 @@ def main() -> None:
     ap.add_argument(
         "--presets",
         default="",
-        help="comma list: raw,diff5,diff10,frac50,pin2,nowick,raw_strict,pin2_strict "
-        "(default: all hold). FLIP twins including raw_strict_flip are added unless --no-compare",
+        help="comma list: raw,diff5,diff10,frac50,pin2,nowick,raw_strict,strict,pin2_strict "
+        "(default: all hold). FLIP twins including strict_flip are added unless --no-compare",
     )
     ap.add_argument(
         "--out-dir",
@@ -650,11 +661,10 @@ def main() -> None:
         f"lots={args.lots}"
     )
     print(
-        "Rules: LONG lower>upper wick | SHORT upper>lower wick | "
-        "bald → body C>O long / C<O short | "
+        "Rules: S14 strict = bald body or winning wick ≥0.5×range or ≥2×body | "
         "HOLD: exit to flat, no reverse on that candle | "
         "FLIP: close and take the opposite on that same candle | "
-        "strict: exit/reverse only frac50/pin2/bald"
+        "no high−low skip"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "

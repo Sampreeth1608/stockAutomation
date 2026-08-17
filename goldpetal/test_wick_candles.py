@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from backtest_hhhl_candles import Candle
 from backtest_wick_candles import simulate_wick
-from wick_candles import wick_measure, wick_side
+from wick_candles import wick_exit_strict, wick_measure, wick_side
 
 
 def test_wick_measure_hammer() -> None:
@@ -168,6 +168,7 @@ def test_all_presets_run_on_toy_tape() -> None:
         "pin2",
         "nowick",
         "raw_strict",
+        "strict",
         "pin2_strict",
     ]
     for name, filt in PRESETS:
@@ -219,6 +220,37 @@ def test_small_range_not_gated() -> None:
     assert wick_side(100.0, 103.0, 100.0, 100.5, min_range=5) is None
 
 
+def test_s14_rule_bald_frac_pin() -> None:
+    # bald green
+    assert wick_exit_strict(100.0, 110.0, 100.0, 110.0) == "long"
+    # bald red
+    assert wick_exit_strict(110.0, 110.0, 100.0, 100.0) == "short"
+    # bald doji
+    assert wick_exit_strict(100.0, 100.0, 100.0, 100.0) is None
+    # winning wick ≥ 0.5 range (lower 10, range 12)
+    assert wick_exit_strict(100.0, 102.0, 90.0, 101.0) == "long"
+    # winning wick ≥ 2× body
+    assert wick_exit_strict(100.0, 102.0, 90.0, 101.0) == "long"
+    # weak wick: U=2 L=1 range=6 body=3 → skip
+    assert wick_exit_strict(100.0, 105.0, 99.0, 103.0) is None
+
+
+def test_strict_preset_skips_weak_entry() -> None:
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 105.0, 99.0, 103.0),  # weak short, skip
+        Candle("2026-08-17 10:30:00", 100.0, 102.0, 90.0, 101.0),  # frac/pin long
+    ]
+    raw = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
+    strict = simulate_wick(
+        candles, tf="30m:strict", min_range=0, reenter=False, entry_strict=True, exit_strict=True
+    )
+    assert raw.n_trades >= 1
+    assert raw.trades[0].side == "SHORT"
+    assert strict.n_trades == 1
+    assert strict.trades[0].side == "LONG"
+    assert strict.trades[0].entry_px == 101.0
+
+
 if __name__ == "__main__":
     test_wick_measure_hammer()
     print("ok hammer")
@@ -250,6 +282,10 @@ if __name__ == "__main__":
     print("ok pin+nowick")
     test_small_range_not_gated()
     print("ok small range")
+    test_s14_rule_bald_frac_pin()
+    print("ok s14 rule")
+    test_strict_preset_skips_weak_entry()
+    print("ok strict skip weak")
     test_resettle_100_lots_scales_gross_not_brokerage()
     print("ok resettle 100 lots")
     test_all_presets_run_on_toy_tape()

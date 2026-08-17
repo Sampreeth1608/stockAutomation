@@ -110,16 +110,21 @@ S12_CONFIRM_MINUTES=1
 
 ## S14 / S15 30m wick HOLD (paper)
 
-100-lot HOLD + fees tape (not 1-lot). **S14** is `30m:raw_strict` (43 trades,
-+₹29,640) — the only real candidate. **S15** is `30m:nowick` only (other
-nowick TFs were luck). Do **not** paper `3h:frac50` (6 trades, DD > pnl).
+**S14** uses this on every 30m candle (last minute). No high−low skip.
 
-Same last-minute confirm as S12. HOLD: opposite → CLOSE, no reverse on that
-candle. S14 exits only on a decisive opposite (frac50 / pin2 / bald body).
-S15 ignores hammers; bald green/red only. Both skip EOD flatten (`:29`).
-No high−low size gate. Live S14/S15 hardcode `min_range=0` (a leftover
-`S14_MIN_RANGE=5` in `.env` is ignored). Restart supervise after pull.
-Keep `DRY_RUN=true`.
+```
+if upper ≤ 1 and lower ≤ 1:          # bald
+    close > open → LONG
+    close < open → SHORT
+    close = open → skip
+else:
+    winning wick ≥ 0.5 × range → that side
+    or winning wick ≥ 2 × body → that side
+    else skip
+```
+
+HOLD: opposite → CLOSE, no reverse on that candle. Skip EOD flatten (`:29`).
+**S15** is bald-only. Keep `DRY_RUN=true`. Restart supervise after pull.
 
 ```bash
 ENABLE_S14=true
