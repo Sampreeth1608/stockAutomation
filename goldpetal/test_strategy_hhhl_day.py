@@ -129,6 +129,38 @@ def test_short_same_day_last_15m() -> None:
         state.unlink()
 
 
+def test_merge_forming_day_keeps_open_widens_range() -> None:
+    state = Path("/tmp/s13_test_merge.json")
+    s = _fresh(str(state))
+    s._day = DayOhlc("2026-08-17", 15424.0, 15424.0, 15424.0, 15424.0)
+    s._merge_forming_day(DayOhlc("2026-08-17", 15430.0, 15480.0, 15410.0, 15456.0))
+    assert s._day.open == 15424.0
+    assert s._day.high == 15480.0
+    assert s._day.low == 15410.0
+    assert s._day.close == 15456.0
+    if state.exists():
+        state.unlink()
+
+
+def test_hl_extend_persists_today_bar() -> None:
+    import json
+
+    state = Path("/tmp/s13_test_persist.json")
+    s = _fresh(str(state))
+    s.prev_day = DayOhlc("2026-08-14", 15269.0, 15424.0, 15157.0, 15395.0)
+    s.on_tick(_ts("2026-08-17", "09:00"), 15424.0)
+    s.on_tick(_ts("2026-08-17", "09:30"), 15480.0)
+    s.on_tick(_ts("2026-08-17", "10:10"), 15410.0)
+    raw = json.loads(state.read_text(encoding="utf-8"))
+    today = raw["today"]
+    assert today["open"] == 15424.0
+    assert today["high"] == 15480.0
+    assert today["low"] == 15410.0
+    assert today["close"] == 15410.0
+    if state.exists():
+        state.unlink()
+
+
 if __name__ == "__main__":
     test_long_near_close_holds_next_open_exits_same_candle()
     print("ok long_same_candle_exit")
@@ -140,4 +172,8 @@ if __name__ == "__main__":
     print("ok outside_window")
     test_short_same_day_last_15m()
     print("ok short")
+    test_merge_forming_day_keeps_open_widens_range()
+    print("ok merge")
+    test_hl_extend_persists_today_bar()
+    print("ok persist")
     print("ALL test_strategy_hhhl_day OK")

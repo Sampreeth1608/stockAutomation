@@ -85,6 +85,11 @@ class HhhlDayOvernightStrategy:
         self.market_open = self._parse_hhmm(self.cfg.market_open)
         self.market_close = self._parse_hhmm(self.cfg.market_close)
         self._load_state()
+        # Always re-read ticks so a restart does not freeze today's H/L
+        # at the first print of the day (s13_state.json is only a snapshot).
+        self._seed_from_ticks()
+        if self.prev_day is not None or self._day is not None:
+            self._save_state()
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:
@@ -108,12 +113,10 @@ class HhhlDayOvernightStrategy:
 
     def _load_state(self) -> None:
         if not self.state_path.exists():
-            self._seed_prev_from_ticks()
             return
         try:
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            self._seed_prev_from_ticks()
             return
         self.position = raw.get("side", "flat")  # type: ignore[assignment]
         self.entry_price = raw.get("entry_price")
@@ -141,47 +144,71 @@ class HhhlDayOvernightStrategy:
                 low=float(td["low"]),
                 close=float(td["close"]),
             )
-        if self.prev_day is None:
-            self._seed_prev_from_ticks()
 
     def _seed_prev_from_ticks(self) -> None:
-        """Best-effort: load last completed calendar day OHLC from ticks.db."""
+        """Back-compat alias."""
+        self._seed_from_ticks()
+
+    def _merge_forming_day(self, bar: DayOhlc) -> None:
+        """Widen today's range from ticks; keep the session open already recorded."""
+        if self._day is None or self._day.date != bar.date:
+            self._day = DayOhlc(
+                date=bar.date,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+            )
+            return
+        self._day.high = max(self._day.high, bar.high)
+        self._day.low = min(self._day.low, bar.low)
+        self._day.close = bar.close
+
+    def _seed_from_ticks(self, db_path: Path | None = None) -> None:
+        """Load previous completed day + hydrate today's forming day from ticks.db."""
         try:
             from mtf_bars import build_rich_bars, load_tick_rows
 
-            db = Path(__file__).resolve().parent / "data" / "ticks.db"
+            db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
             if not db.exists():
                 return
             rows = load_tick_rows(db)
             bars = build_rich_bars(rows, "1d", 1440)
-            if len(bars) < 2:
-                if bars:
-                    b = bars[-1]
-                    today = datetime.now(IST).strftime("%Y-%m-%d")
-                    if str(b.time)[:10] < today:
-                        self.prev_day = DayOhlc(
-                            date=str(b.time)[:10],
-                            open=float(b.open),
-                            high=float(b.high),
-                            low=float(b.low),
-                            close=float(b.close),
-                        )
+            if not bars:
                 return
-            # Prefer second-to-last if last bar is "today" (still forming)
             today = datetime.now(IST).strftime("%Y-%m-%d")
-            last = bars[-1]
-            prev = bars[-2]
-            if str(last.time)[:10] == today:
-                b = prev
-            else:
-                b = last
-            self.prev_day = DayOhlc(
-                date=str(b.time)[:10],
-                open=float(b.open),
-                high=float(b.high),
-                low=float(b.low),
-                close=float(b.close),
-            )
+            completed: list[Any] = []
+            current = None
+            for b in bars:
+                d = str(b.time)[:10]
+                if d < today:
+                    completed.append(b)
+                elif d == today:
+                    current = b
+            if completed:
+                b = completed[-1]
+                b_date = str(b.time)[:10]
+                if self.prev_day is None or self.prev_day.date < b_date:
+                    self.prev_day = DayOhlc(
+                        date=b_date,
+                        open=float(b.open),
+                        high=float(b.high),
+                        low=float(b.low),
+                        close=float(b.close),
+                    )
+                elif self.prev_day.date == b_date:
+                    self.prev_day.high = max(self.prev_day.high, float(b.high))
+                    self.prev_day.low = min(self.prev_day.low, float(b.low))
+            if current is not None:
+                self._merge_forming_day(
+                    DayOhlc(
+                        date=str(current.time)[:10],
+                        open=float(current.open),
+                        high=float(current.high),
+                        low=float(current.low),
+                        close=float(current.close),
+                    )
+                )
         except Exception:
             return
 
@@ -245,9 +272,12 @@ class HhhlDayOvernightStrategy:
         assert self._day is not None
         if self._day.date != today:
             self._roll_day(today, px)
+        old_h, old_l = self._day.high, self._day.low
         self._day.high = max(self._day.high, px)
         self._day.low = min(self._day.low, px)
         self._day.close = px
+        if self._day.high != old_h or self._day.low != old_l:
+            self._save_state()
 
     def release_action_lock(self) -> None:
         """Allow another confirm-window attempt (e.g. after entry gate reject)."""
