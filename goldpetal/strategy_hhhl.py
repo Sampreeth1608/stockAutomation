@@ -9,6 +9,10 @@ signal, in that candle's last minute — never on the next bar.
   SHORT entry: same candle last-minute close < open after LL.
   SHORT exit:  a later candle with low > prev_low AND last-minute close > open.
 
+If the *exit* candle also qualifies as a new long or short, re-enter on that
+same candle (close the old trade, open the new side). A CLOSE-only does not
+lock the confirm window, so a later last-minute tick can still enter.
+
 No fallback on the first tick of the next bar (that was the 60-minute delay).
 Defaults: 30m bars, min_range=5, no_flip=True.
 Previous + in-progress candle OHLC seeded from ticks.db.
@@ -210,7 +214,8 @@ class HhhlCandleStrategy:
             float(self._bar_l),
             float(self._bar_c or px),
         )
-        if result is not None:
+        # Lock only after a new position. CLOSE must not block same-candle re-entry.
+        if result is not None and result.action in {"BUY", "SHORT"}:
             self._decided_this_bar = True
         return result
 
@@ -232,6 +237,62 @@ class HhhlCandleStrategy:
         self.prev_o, self.prev_h, self.prev_l, self.prev_c = o, h, l, c
         return result
 
+    def _open_if_flat(
+        self,
+        o: float,
+        h: float,
+        l: float,
+        c: float,
+        ph: float,
+        pl: float,
+        range_pts: float,
+        *,
+        reason_prefix: str = "",
+    ) -> SignalResult | None:
+        """Enter long/short from flat when this candle has HH+green or LL+red."""
+        want_long = self.cfg.allow_long and h > ph and c > o
+        want_short = self.cfg.allow_short and l < pl and c < o
+        if range_pts < self.cfg.min_range:
+            self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
+            return None
+        if want_long and not want_short:
+            self.position = "long"
+            self.entry_price = c
+            return SignalResult(
+                action="BUY",
+                position_after="long",
+                price_delta=None,
+                net=None,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=(
+                    f"{reason_prefix}s12 long same-candle HH+green range={range_pts:.1f} "
+                    f"H={h:.1f}>prevH={ph:.1f} C={c:.1f}>O={o:.1f}"
+                ),
+            )
+        if want_short and not want_long:
+            self.position = "short"
+            self.entry_price = c
+            return SignalResult(
+                action="SHORT",
+                position_after="short",
+                price_delta=None,
+                net=None,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=(
+                    f"{reason_prefix}s12 short same-candle LL+red range={range_pts:.1f} "
+                    f"L={l:.1f}<prevL={pl:.1f} C={c:.1f}<O={o:.1f}"
+                ),
+            )
+        if self._watching == "hh" and not (c > o):
+            self.last_skip = "hh_but_not_green_yet"
+        elif self._watching == "ll" and not (c < o):
+            self.last_skip = "ll_but_not_red_yet"
+        else:
+            self.last_skip = "no_signal"
+        return None
+
     def _decide(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
         if self.prev_h is None or self.prev_l is None:
             self.last_skip = "need_prev_bar"
@@ -244,27 +305,17 @@ class HhhlCandleStrategy:
         want_short = self.cfg.allow_short and l < pl and c < o
         exit_long = h < ph and c < o
         exit_short = l > pl and c > o
-        can_enter = range_pts >= self.cfg.min_range
 
         if self.position == "long":
             if exit_long or (want_short and not self.cfg.no_flip):
                 self.position = "flat"
                 self.entry_price = None
-                if want_short and not self.cfg.no_flip and can_enter:
-                    self.position = "short"
-                    self.entry_price = c
-                    return SignalResult(
-                        action="SHORT",
-                        position_after="short",
-                        price_delta=None,
-                        net=None,
-                        net_delta=None,
-                        prev_net_delta=None,
-                        reason=(
-                            f"s12 flip short same-candle LL+red range={range_pts:.1f} "
-                            f"L={l:.1f}<prevL={pl:.1f}"
-                        ),
-                    )
+                reenter = self._open_if_flat(
+                    o, h, l, c, ph, pl, range_pts,
+                    reason_prefix="s12 re-enter after close ",
+                )
+                if reenter is not None:
+                    return reenter
                 return SignalResult(
                     action="CLOSE",
                     position_after="flat",
@@ -281,21 +332,12 @@ class HhhlCandleStrategy:
             if exit_short or (want_long and not self.cfg.no_flip):
                 self.position = "flat"
                 self.entry_price = None
-                if want_long and not self.cfg.no_flip and can_enter:
-                    self.position = "long"
-                    self.entry_price = c
-                    return SignalResult(
-                        action="BUY",
-                        position_after="long",
-                        price_delta=None,
-                        net=None,
-                        net_delta=None,
-                        prev_net_delta=None,
-                        reason=(
-                            f"s12 flip long same-candle HH+green range={range_pts:.1f} "
-                            f"H={h:.1f}>prevH={ph:.1f}"
-                        ),
-                    )
+                reenter = self._open_if_flat(
+                    o, h, l, c, ph, pl, range_pts,
+                    reason_prefix="s12 re-enter after close ",
+                )
+                if reenter is not None:
+                    return reenter
                 return SignalResult(
                     action="CLOSE",
                     position_after="flat",
@@ -308,48 +350,7 @@ class HhhlCandleStrategy:
             self.last_skip = "hold_short"
             return None
 
-        # flat — enter only if this candle broke HH/LL and closes in that direction
-        if not can_enter:
-            self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
-            return None
-        if want_long and not want_short:
-            self.position = "long"
-            self.entry_price = c
-            return SignalResult(
-                action="BUY",
-                position_after="long",
-                price_delta=None,
-                net=None,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"s12 long same-candle HH+green range={range_pts:.1f} "
-                    f"H={h:.1f}>prevH={ph:.1f} C={c:.1f}>O={o:.1f}"
-                ),
-            )
-        if want_short and not want_long:
-            self.position = "short"
-            self.entry_price = c
-            return SignalResult(
-                action="SHORT",
-                position_after="short",
-                price_delta=None,
-                net=None,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"s12 short same-candle LL+red range={range_pts:.1f} "
-                    f"L={l:.1f}<prevL={pl:.1f} C={c:.1f}<O={o:.1f}"
-                ),
-            )
-        # Helpful skip while confirming
-        if self._watching == "hh" and not (c > o):
-            self.last_skip = "hh_but_not_green_yet"
-        elif self._watching == "ll" and not (c < o):
-            self.last_skip = "ll_but_not_red_yet"
-        else:
-            self.last_skip = "no_signal"
-        return None
+        return self._open_if_flat(o, h, l, c, ph, pl, range_pts)
 
 
 def _env_flag(name: str, default: bool) -> bool:

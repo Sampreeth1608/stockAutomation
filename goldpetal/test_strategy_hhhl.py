@@ -10,15 +10,29 @@ from strategy_hhhl import HhhlCandleStrategy, HhhlConfig
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def test_long_entry_exit_no_flip() -> None:
+def test_long_entry_exit_no_reentry() -> None:
+    """LH+red without LL → CLOSE only (stay flat)."""
+    s = HhhlCandleStrategy(HhhlConfig(min_range=5, no_flip=True), seed=False)
+    assert s.on_bar_row({"open": 100, "high": 105, "low": 90, "close": 104}) is None
+    r = s.on_bar_row({"open": 104, "high": 112, "low": 91, "close": 110})
+    assert r is not None and r.action == "BUY"
+    assert s.position == "long"
+    # H < prevH 112, L > prevL 91, red → exit long, no short re-entry
+    r2 = s.on_bar_row({"open": 110, "high": 109, "low": 100, "close": 101})
+    assert r2 is not None and r2.action == "CLOSE"
+    assert s.position == "flat"
+
+
+def test_long_exit_same_candle_reenter_short() -> None:
+    """Exit-long candle that is also LL+red → close long and open short."""
     s = HhhlCandleStrategy(HhhlConfig(min_range=5, no_flip=True), seed=False)
     assert s.on_bar_row({"open": 100, "high": 105, "low": 99, "close": 104}) is None
     r = s.on_bar_row({"open": 104, "high": 112, "low": 103, "close": 110})
     assert r is not None and r.action == "BUY"
-    assert s.position == "long"
     r2 = s.on_bar_row({"open": 110, "high": 109, "low": 95, "close": 96})
-    assert r2 is not None and r2.action == "CLOSE"
-    assert s.position == "flat"
+    assert r2 is not None and r2.action == "SHORT"
+    assert s.position == "short"
+    assert "re-enter" in (r2.reason or "")
 
 
 def test_short_entry() -> None:
@@ -114,10 +128,34 @@ def test_same_candle_last_minute_exit_after_entry() -> None:
     assert s.on_tick(ts("10:30"), 110.0) is None
     assert s.position == "long"
     s.on_tick(ts("10:40"), 96.0)
-    close = s.on_tick(ts("10:59"), 96.0)
+    short = s.on_tick(ts("10:59"), 96.0)
+    assert short is not None and short.action == "SHORT"
+    assert s.position == "short"
+    assert "re-enter" in (short.reason or "")
+
+
+def test_close_then_later_tick_reenter() -> None:
+    """CLOSE on first last-minute tick; later tick on same candle prints LL → SHORT."""
+    s = HhhlCandleStrategy(
+        HhhlConfig(min_range=5, no_flip=True, confirm_minutes=1), seed=False
+    )
+    s.prev_o, s.prev_h, s.prev_l, s.prev_c = 100.0, 112.0, 104.0, 110.0
+    s.position = "long"
+    s.entry_price = 110.0
+
+    def ts(hhmmss: str) -> datetime:
+        return datetime.fromisoformat(f"2026-08-12T{hhmmss}+05:30").astimezone(IST)
+
+    s.on_tick(ts("10:30:00"), 110.0)
+    # LH+red but low still above prevL 104 → CLOSE only
+    close = s.on_tick(ts("10:59:00"), 105.0)
     assert close is not None and close.action == "CLOSE"
     assert s.position == "flat"
-    assert "same-candle" in (close.reason or "")
+    assert s._decided_this_bar is False
+    # Same candle, later tick breaks prev low → re-enter short
+    short = s.on_tick(ts("10:59:20"), 96.0)
+    assert short is not None and short.action == "SHORT"
+    assert s.position == "short"
 
 
 def test_gate_reject_can_retry() -> None:
@@ -141,12 +179,14 @@ def test_gate_reject_can_retry() -> None:
 
 
 if __name__ == "__main__":
-    test_long_entry_exit_no_flip()
+    test_long_entry_exit_no_reentry()
+    test_long_exit_same_candle_reenter_short()
     test_short_entry()
     test_min_range_blocks()
     test_same_candle_last_minute_long()
     test_same_candle_last_minute_short()
     test_no_next_bar_fallback_entry()
     test_same_candle_last_minute_exit_after_entry()
+    test_close_then_later_tick_reenter()
     test_gate_reject_can_retry()
     print("ALL test_strategy_hhhl OK")

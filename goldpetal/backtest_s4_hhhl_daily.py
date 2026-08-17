@@ -218,14 +218,18 @@ def simulate_swing(
         if side == "long":
             if exit_long or (want_short and not no_flip):
                 close_trade(c, "exit_long" if exit_long else "flip")
-                if want_short and not no_flip:
+                if want_short and not want_long:
                     side, entry_px, entry_t = "short", c, cur["time"]
+                elif want_long and not want_short:
+                    side, entry_px, entry_t = "long", c, cur["time"]
             continue
         if side == "short":
             if exit_short or (want_long and not no_flip):
                 close_trade(c, "exit_short" if exit_short else "flip")
-                if want_long and not no_flip:
+                if want_long and not want_short:
                     side, entry_px, entry_t = "long", c, cur["time"]
+                elif want_short and not want_long:
+                    side, entry_px, entry_t = "short", c, cur["time"]
             continue
         if want_long and not want_short:
             side, entry_px, entry_t = "long", c, cur["time"]

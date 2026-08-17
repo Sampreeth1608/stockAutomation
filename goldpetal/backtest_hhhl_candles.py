@@ -258,18 +258,29 @@ def simulate(
         if side == "LONG":
             if exit_long or (want_short and not no_flip):
                 close_trade(cur)
-                if want_short and not no_flip and can_enter(cur):
-                    side = "SHORT"
-                    entry_px = cur.close
-                    entry_time = cur.time
+                # Same-candle re-entry: the exit bar may itself be a new short/long.
+                if can_enter(cur):
+                    if want_short and not want_long:
+                        side = "SHORT"
+                        entry_px = cur.close
+                        entry_time = cur.time
+                    elif want_long and not want_short:
+                        side = "LONG"
+                        entry_px = cur.close
+                        entry_time = cur.time
             continue
         if side == "SHORT":
             if exit_short or (want_long and not no_flip):
                 close_trade(cur)
-                if want_long and not no_flip and can_enter(cur):
-                    side = "LONG"
-                    entry_px = cur.close
-                    entry_time = cur.time
+                if can_enter(cur):
+                    if want_long and not want_short:
+                        side = "LONG"
+                        entry_px = cur.close
+                        entry_time = cur.time
+                    elif want_short and not want_long:
+                        side = "SHORT"
+                        entry_px = cur.close
+                        entry_time = cur.time
             continue
 
         # flat — new entries only
