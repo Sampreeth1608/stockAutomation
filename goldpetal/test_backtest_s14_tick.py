@@ -73,9 +73,29 @@ def test_equal_open_high_low_does_not_force() -> None:
     assert r.n_trades == 0
 
 
+def test_multi_tf_runs() -> None:
+    from backtest_s14_tick import _parse_tfs
+
+    tfs = _parse_tfs("5m,15m,30,1d")
+    assert tfs == [("5m", 5), ("15m", 15), ("30m", 30), ("1d", 1440)]
+    rows = [
+        ("2026-08-17T10:00:00+05:30", 100.0),
+        ("2026-08-17T10:10:00+05:30", 90.0),
+        ("2026-08-17T10:11:00+05:30", 95.0),
+        ("2026-08-17T10:21:00+05:30", 100.0),
+        ("2026-08-17T11:00:00+05:30", 99.0),
+    ]
+    for name, minutes in tfs:
+        r = simulate_s14_ticks(
+            rows, tf=f"toy:{name}", lots=1, fees=False, open_hold_minutes=0, bar_minutes=minutes
+        )
+        assert r.n_bars >= 1
+
+
 if __name__ == "__main__":
     test_s14_cfg_is_flip_and_open_hold()
     test_replay_matches_live_wick_flip()
     test_replay_open_high_shorts()
     test_equal_open_high_low_does_not_force()
+    test_multi_tf_runs()
     print("ALL test_backtest_s14_tick OK")

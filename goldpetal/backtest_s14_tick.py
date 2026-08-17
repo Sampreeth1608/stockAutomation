@@ -25,7 +25,6 @@ from backtest_hhhl_candles import (
     Trade,
     TfResult,
     make_charge_cfg,
-    print_by_day,
     write_outputs,
 )
 from backtest_wick_candles import _tf_result_from_trades, load_ltp_rows
@@ -34,6 +33,22 @@ from mtf_bars import parse_ts
 from strategy_wick import WickCandleStrategy, WickConfig
 
 IST = ZoneInfo("Asia/Kolkata")
+
+TIMEFRAMES: list[tuple[str, int]] = [
+    ("1m", 1),
+    ("3m", 3),
+    ("5m", 5),
+    ("10m", 10),
+    ("15m", 15),
+    ("30m", 30),
+    ("45m", 45),
+    ("1h", 60),
+    ("2h", 120),
+    ("3h", 180),
+    ("1d", 1440),
+]
+DEFAULT_TFS = ",".join(n for n, _ in TIMEFRAMES)
+_TF_BY_NAME = {n: m for n, m in TIMEFRAMES}
 
 
 def s14_cfg(*, open_hold_minutes: float = 2.0, bar_minutes: int = 30) -> WickConfig:
@@ -194,12 +209,29 @@ def simulate_s14_ticks(
 
 def _print_row(r: TfResult) -> None:
     print(
-        f"{r.tf:>22}  bars={r.n_bars:5d}  trades={r.n_trades:4d}  "
+        f"{r.tf:>22}  bars={r.n_bars:5d}  trades={r.n_trades:6d}  "
         f"{r.n_long}/{r.n_short}  win={100 * r.win_rate:5.1f}%  "
-        f"pts={r.gross_pts:8.1f}  pnl={r.after_tax_pnl_inr:10.1f}  "
-        f"fees={r.fees_inr:8.1f}  dd={r.max_dd_inr:8.1f}",
+        f"pts={r.gross_pts:10.1f}  pnl={r.after_tax_pnl_inr:12.1f}  "
+        f"fees={r.fees_inr:10.1f}  dd={r.max_dd_inr:12.1f}",
         flush=True,
     )
+
+
+def _parse_tfs(raw: str) -> list[tuple[str, int]]:
+    want = [x.strip() for x in raw.split(",") if x.strip()]
+    out: list[tuple[str, int]] = []
+    for name in want:
+        key = name.lower().replace(" ", "")
+        if key in {"d", "day", "1d", "daily"}:
+            key = "1d"
+        if key == "30":
+            key = "30m"
+        if key not in _TF_BY_NAME:
+            raise SystemExit(f"unknown tf {name!r}; use {DEFAULT_TFS}")
+        out.append((key, _TF_BY_NAME[key]))
+    if not out:
+        raise SystemExit("no timeframes")
+    return out
 
 
 def main() -> None:
@@ -209,7 +241,11 @@ def main() -> None:
     ap.add_argument("--fees", action="store_true")
     ap.add_argument("--session", action="store_true")
     ap.add_argument("--open-hold", type=float, default=2.0)
-    ap.add_argument("--bar-minutes", type=int, default=30)
+    ap.add_argument(
+        "--tfs",
+        default=DEFAULT_TFS,
+        help=f"comma list (default: {DEFAULT_TFS})",
+    )
     ap.add_argument("--market-open", default="09:00")
     ap.add_argument("--market-close", default="23:30")
     ap.add_argument(
@@ -218,9 +254,9 @@ def main() -> None:
         default=Path("data/backtests/s14_tick"),
     )
     ap.add_argument(
-        "--no-compare",
+        "--compare",
         action="store_true",
-        help="skip the wick-only (open-hold=0) comparison row",
+        help="also print wick-only (open-hold=0) for each TF",
     )
     args = ap.parse_args()
 
@@ -238,9 +274,11 @@ def main() -> None:
             f"  python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees"
         )
 
+    tfs = _parse_tfs(args.tfs)
     rows = load_ltp_rows(args.db)
     t0 = parse_ts(rows[0][0])
     t1 = parse_ts(rows[-1][0])
+    charge_cfg = make_charge_cfg(fees=args.fees, lots=args.lots)
     print(
         f"S14 tick replay  db={args.db}  ticks={n}  "
         f"{t0.isoformat(timespec='seconds')} → {t1.isoformat(timespec='seconds')}  "
@@ -254,40 +292,62 @@ def main() -> None:
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "
-        f"({args.market_open}-{args.market_close})"
+        f"({args.market_open}-{args.market_close})  tfs={','.join(n for n, _ in tfs)}"
+    )
+    print(
+        "Note: 2-minute open-hold only fires if the candle is still open at +2m "
+        "(so 1m bars are wick-FLIP only).",
+        flush=True,
     )
 
     results: list[TfResult] = []
-    full = simulate_s14_ticks(
-        rows,
-        tf=f"{args.bar_minutes}m:s14",
-        lots=args.lots,
-        fees=args.fees,
-        session_filter=args.session,
-        open_hold_minutes=args.open_hold,
-        bar_minutes=args.bar_minutes,
-        market_open=args.market_open,
-        market_close=args.market_close,
-    )
-    results.append(full)
-    _print_row(full)
-
-    if not args.no_compare:
-        wick_only = simulate_s14_ticks(
+    for name, minutes in tfs:
+        full = simulate_s14_ticks(
             rows,
-            tf=f"{args.bar_minutes}m:s14_wickonly",
+            tf=f"{name}:s14",
             lots=args.lots,
             fees=args.fees,
             session_filter=args.session,
-            open_hold_minutes=0.0,
-            bar_minutes=args.bar_minutes,
+            open_hold_minutes=args.open_hold,
+            bar_minutes=minutes,
             market_open=args.market_open,
             market_close=args.market_close,
+            charge_cfg=charge_cfg,
         )
-        results.append(wick_only)
-        _print_row(wick_only)
+        results.append(full)
+        _print_row(full)
+        if args.compare:
+            wick_only = simulate_s14_ticks(
+                rows,
+                tf=f"{name}:s14_wickonly",
+                lots=args.lots,
+                fees=args.fees,
+                session_filter=args.session,
+                open_hold_minutes=0.0,
+                bar_minutes=minutes,
+                market_open=args.market_open,
+                market_close=args.market_close,
+                charge_cfg=charge_cfg,
+            )
+            results.append(wick_only)
+            _print_row(wick_only)
 
-    print_by_day(results)
+    print()
+    print("=== Day-by-day (after-tax ₹) ===")
+    days: set[str] = set()
+    for r in results:
+        days.update(r.by_day)
+    for day in sorted(days):
+        print(f"  {day}")
+        for r in results:
+            d = r.by_day.get(day)
+            if not d:
+                continue
+            print(
+                f"    {r.tf:>16}  trades={int(d['n_trades']):5d}  "
+                f"pnl={d['after_tax_pnl_inr']:+12.0f}  fees={d['fees_inr']:10.0f}"
+            )
+        print()
     write_outputs(results, args.out_dir)
 
 

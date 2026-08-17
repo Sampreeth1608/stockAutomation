@@ -136,7 +136,8 @@ cd ~/goldpetal
 python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
 ```
 
-Writes `data/backtests/s14_tick/`. Second row is wick-only (no 2-minute open-hold).
+Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
+1m candles end before +2m, so 1m is wick-FLIP only. Writes `data/backtests/s14_tick/`.
 
 ```bash
 ENABLE_S14=true
