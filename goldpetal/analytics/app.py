@@ -37,6 +37,7 @@ from operator_desk import (  # noqa: E402
     streamlit_control_allowed,
     streamlit_write_blocked,
 )
+from analytics.operator_tab import render_operator_desk  # noqa: E402
 from analytics.local_bridge import (  # noqa: E402
     decide_proposal_local,
     desk_data_dir,
@@ -465,7 +466,7 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
 
 
 def tab_s14_chart(dd: Path) -> None:
-    """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
+    """Angel/MCX Gold Petal candles — research tab (Desk tab is the writer)."""
     from analytics.s14_chart import PLOTLY_ZOOM_CONFIG, labeled_candlestick_figure
     from s14_exchange_sheet import refresh_status, start_angel_refresh
 
@@ -475,8 +476,9 @@ def tab_s14_chart(dd: Path) -> None:
         "O/H/L/C is printed on each candle (not a table). "
         "Scroll to zoom, drag to pan, use the rangeslider, double-click to reset. "
         "On 30m/1h zoom in until the numbers sit on the bar. "
+        "Start/stop and live picks are on tab **Desk**. "
         "Open with `gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
-        "http://127.0.0.1:8501/ → tab **S14 chart**."
+        "http://127.0.0.1:8501/ → **Desk** (this chart is the next tab)."
     )
     st.caption(f"Desk code: `{ROOT}`")
     st_status = refresh_status(sheet)
@@ -530,8 +532,8 @@ def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
         "Approve → paper **auto-writes** whitelist env keys (e.g. S11_PACK_PATH). "
-        f"Then Restart supervise on the 8787 panel ({OPERATOR_URL}). "
-        "Live still needs Unlock live + DRY_RUN=false on 8787."
+        f"Then Restart the bot on the Desk tab ({OPERATOR_URL}). "
+        "Live still needs Unlock live + DRY_RUN=false on Desk."
     )
     raw = load_json(dd / "control" / "proposals.json")
     items = (raw or {}).get("proposals") if isinstance(raw, dict) else (raw or [])
@@ -583,14 +585,14 @@ def tab_proposals(dd: Path) -> None:
                         f"Env auto-applied: {res.get('env_applied')}"
                     )
                     if res.get("restart_needed"):
-                        st.info(f"Restart supervise on 8787 ({OPERATOR_URL}) to load the pack.")
+                        st.info(f"Restart the bot on the Desk tab ({OPERATOR_URL}) to load the pack.")
                     st.cache_data.clear()
                 else:
                     st.error(res.get("error") or res)
             if b2.button("Approve → live", key=f"al_{p['id']}"):
                 st.warning(
-                    f"Do not approve live here. After paper looks good, check Live? "
-                    f"on the 8787 panel ({OPERATOR_URL})."
+                    f"Do not approve live here. After paper looks good, check Live "
+                    f"on the Desk tab ({OPERATOR_URL})."
                 )
             if b3.button("Reject", key=f"rj_{p['id']}"):
                 res = decide_proposal(p["id"], "rejected", note=note, apply_env=False)
@@ -610,7 +612,7 @@ def tab_control(dd: Path) -> None:
     st.info(
         operator_readonly_markdown()
         + " Streamlit may **stop** (emergency / pause / lock live). "
-        "Clear emergency, resume, and unlock live only on 8787."
+        "Clear emergency, resume, and unlock live only on the Desk tab."
     )
     state = load_json(dd / "control" / "state.json") or {}
     st.json(state)
@@ -633,7 +635,7 @@ def tab_control(dd: Path) -> None:
 def tab_deploy_ops(dd: Path) -> None:
     st.subheader("Deploy / Ops — read-only")
     st.info(operator_readonly_markdown())
-    st.caption(f"Change ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, and Restart on {OPERATOR_URL}")
+    st.caption(f"Change ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, and Restart on the Desk tab ({OPERATOR_URL})")
 
     if LOCAL_DESK:
         status = bot_status()
@@ -659,13 +661,13 @@ def tab_deploy_ops(dd: Path) -> None:
         with st.expander("strategy_run.log (tail)", expanded=False):
             st.code(status.get("log_tail") or "(empty)", language="text")
     else:
-        st.warning("Bot/.env snapshot is on the VM. Open 8787 there.")
+        st.warning("Bot/.env snapshot is on the VM. Open the Desk tab on 8501 there.")
 
 
 def tab_capital(dd: Path) -> None:
     st.subheader("Capital — read-only")
     st.info(operator_readonly_markdown())
-    st.caption(f"Edit book ₹ / lots on {OPERATOR_URL} Capital management.")
+    st.caption(f"Edit book ₹ / lots on the Desk tab ({OPERATOR_URL}).")
     cap = load_json(dd / "control" / "capital.json")
     if not cap:
         st.info("No capital.json yet.")
@@ -684,7 +686,7 @@ def tab_live_deploy(dd: Path) -> None:
     st.subheader("Live deploy — read-only")
     st.info(operator_readonly_markdown())
     st.caption(
-        f"live_approved, ENABLE_*, DRY_RUN, and Restart are on {OPERATOR_URL} Live money."
+        f"live_approved, ENABLE_*, DRY_RUN, and Restart are on the Desk tab ({OPERATOR_URL})."
     )
     state = load_json(dd / "control" / "state.json") or {}
     cap = load_json(dd / "control" / "capital.json") or {}
@@ -712,12 +714,12 @@ def tab_live_deploy(dd: Path) -> None:
     with st.expander("How live sizing works", expanded=False):
         st.markdown(
             f"""
-1. On **8787 Strategies**: In bot + Live pick, Save strategies.
-2. On **8787 Live money**: set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
+1. On **Desk → Strategies**: In bot + Live pick, Save strategies.
+2. On **Desk → Live money**: set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
 3. Unlock live. Type LIVE only if you intend `DRY_RUN=false`.
-4. Type RESTART on 8787 Engine. Size = min(strategy max_lots, LIVE_MAX_LOTS).
+4. Type RESTART on Desk → Engine. Size = min(strategy max_lots, LIVE_MAX_LOTS).
 
-Do not also save these on Streamlit.
+Do not also save these on the other Streamlit tabs.
 """
         )
 
@@ -938,7 +940,7 @@ def main() -> None:
     st.title("Gold Petal research desk")
     mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
     st.caption(
-        f"{mode} · operator writes on 8787 only · "
+        f"{mode} · operator writes on tab Desk · "
         f"S4/S5/S8/S11/S12/S13/S14/S15 · {date.today().isoformat()}"
     )
 
@@ -947,6 +949,7 @@ def main() -> None:
         return
 
     (
+        t_desk,
         t_s14,
         t0,
         t1,
@@ -961,6 +964,7 @@ def main() -> None:
         t8,
     ) = st.tabs(
         [
+            "Desk",
             "S14 chart",
             "Overview",
             "Proposals / ML",
@@ -975,6 +979,8 @@ def main() -> None:
             "Live orders",
         ]
     )
+    with t_desk:
+        render_operator_desk(local=LOCAL_DESK)
     with t_s14:
         tab_s14_chart(dd)
     with t0:

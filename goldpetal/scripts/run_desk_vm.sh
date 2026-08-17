@@ -32,7 +32,8 @@ mkdir -p data/control
 if [[ "${1:-}" == "--fg" ]]; then
   echo "→ desk foreground :8501  data=$GP_DATA_DIR"
   echo "   Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
-  echo "   then http://127.0.0.1:8501/  → tab S14 chart"
+  echo "   then Chrome: http://127.0.0.1:8501/  → first tab Desk"
+  echo "   Do not type that URL in this SSH session."
   exec "${CMD[@]}"
 fi
 
@@ -44,8 +45,10 @@ start_detached() {
   tmux new-session -d -s "$session" -c "$PWD" \
     "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
   echo "started tmux $session from $PWD"
-  echo "Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
-  echo "then http://127.0.0.1:8501/  → first tab S14 chart"
+  echo "Mac tunnel (leave running):"
+  echo "  gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "Then Chrome: http://127.0.0.1:8501/  → first tab Desk (start/stop). S14 chart is next."
+  echo "Do not type that URL in this SSH session."
 }
 
 if [[ "${1:-}" == "--detach" || "${1:-}" == "--restart" ]]; then
@@ -70,8 +73,8 @@ if tmux has-session -t "=$SESSION" 2>/dev/null; then
 fi
 
 echo "→ starting desk in tmux session '$SESSION' on 127.0.0.1:8501 (localhost only)"
-echo "   From Mac: gcloud compute ssh USER@VM --zone=ZONE -- -L 8501:localhost:8501"
-echo "   then open http://localhost:8501"
+echo "   From Mac: gcloud compute ssh USER@VM --zone=ZONE -- -N -L 8501:127.0.0.1:8501"
+echo "   then Chrome: http://127.0.0.1:8501/  → first tab Desk"
 echo "   detach: Ctrl+B then D    reattach: tmux attach -t $SESSION"
 tmux new-session -d -s "$SESSION" -c "$PWD" \
   "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"

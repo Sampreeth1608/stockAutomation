@@ -108,6 +108,9 @@ def test_panel_mentions_s14_sheet() -> None:
     desk = Path(__file__).resolve().parent.joinpath("analytics/app.py").read_text(
         encoding="utf-8"
     )
+    assert '"Desk"' in desk
+    assert "render_operator_desk" in desk
+    assert desk.find('"Desk"') < desk.find('"S14 chart"')
     assert "S14 chart" in desk
     assert "def tab_s14_chart" in desk
     assert "labeled_candlestick_figure" in desk

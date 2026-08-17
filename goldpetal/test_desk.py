@@ -42,18 +42,35 @@ def test_control_panel_serves_desk_file() -> None:
     assert "HTML_PAGE = r" not in text
 
 
-def test_streamlit_still_cannot_write() -> None:
+def test_streamlit_other_tabs_cannot_write() -> None:
     from operator_desk import streamlit_control_allowed, streamlit_write_blocked
 
     res = streamlit_write_blocked("Live deploy")
     assert res["ok"] is False
-    assert "8787" in res["error"]
+    assert "Desk" in res["error"]
+    assert "8501" in res["error"]
     ok, _ = streamlit_control_allowed({"live_unlocked": True})
     assert ok is False
+
+
+def test_streamlit_desk_tab_is_the_writer() -> None:
+    app = (ROOT / "analytics" / "app.py").read_text(encoding="utf-8")
+    assert "render_operator_desk" in app
+    assert '"Desk"' in app
+    assert app.find('"Desk"') < app.find('"S14 chart"')
+    tab = (ROOT / "analytics" / "operator_tab.py").read_text(encoding="utf-8")
+    assert "Save strategies" in tab
+    assert "Start bot" in tab
+    assert "Start feed only" in tab
+    assert "Download all (ZIP)" in tab
+    assert "Copy trades → Sheets" in tab
+    sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
+    assert "first tab Desk" in sh
 
 
 if __name__ == "__main__":
     test_desk_html_is_the_operator_page()
     test_control_panel_serves_desk_file()
-    test_streamlit_still_cannot_write()
+    test_streamlit_other_tabs_cannot_write()
+    test_streamlit_desk_tab_is_the_writer()
     print("ALL test_desk OK")

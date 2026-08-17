@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Gold Petal operator desk — the only writer for live switches.
+"""Gold Petal operator desk (HTML on 8787).
 
-Streamlit 8501 is research and cannot overwrite this panel.
+Same writer as Streamlit 8501 tab Desk. Use 8501 if 8787 does not open.
 
   ./scripts/run_control_panel.sh
   python3 control_panel.py --host 0.0.0.0 --port 8787
@@ -683,8 +683,8 @@ def main() -> None:
     load_state()
     load_capital()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
-    print(f"cwd {ROOT}  Gold Petal operator desk → http://{args.host}:{args.port}/  (only writer)", flush=True)
-    print("Research chart stays on Streamlit 8501. This desk: start/stop, feed, live picks, money.", flush=True)
+    print(f"cwd {ROOT}  Gold Petal operator desk → http://{args.host}:{args.port}/", flush=True)
+    print("Same desk is on Streamlit 8501 tab Desk (use that if this URL does not open).", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

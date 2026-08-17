@@ -1,4 +1,4 @@
-"""Tests: Streamlit must not overwrite 8787 operator writes."""
+"""Tests: other Streamlit tabs must not overwrite the Desk tab."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from operator_desk import streamlit_control_allowed, streamlit_write_blocked
 def test_streamlit_write_blocked() -> None:
     res = streamlit_write_blocked("Capital")
     assert res["ok"] is False
+    assert "Desk" in res["error"]
+    assert "8501" in res["error"]
     assert "8787" in res["error"]
-    assert res["use"].endswith(":8787/")
+    assert res["use"].endswith(":8501/")
 
 
 def test_streamlit_may_only_stop() -> None:
