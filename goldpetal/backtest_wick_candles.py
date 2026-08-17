@@ -9,6 +9,9 @@
 Fill at signal-bar close. Bald candles (no wick on either side) use the body:
 green → long, red → short. That rule is included in every wick preset.
 
+Same command also prints the old FLIP book (reverse on every opposite wick)
+so HOLD vs FLIP is visible on one tape.
+
   python3 backtest_wick_candles.py --db data/ticks.db --lots 1 --session --fees
 """
 
@@ -57,6 +60,15 @@ PRESETS: list[tuple[str, dict[str, Any]]] = [
     ("nowick", {**_HOLD, "nowick_only": True, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
     ("raw_strict", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "exit_strict": True}),
     ("pin2_strict", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0, "exit_strict": True}),
+]
+_FLIP_BASES = {"raw", "diff5", "diff10", "frac50", "pin2", "nowick"}
+FLIP_PRESETS: list[tuple[str, dict[str, Any]]] = [
+    (
+        f"{name}_flip",
+        {k: v for k, v in {**filt, "reenter": True}.items() if k != "exit_strict"},
+    )
+    for name, filt in PRESETS
+    if name in _FLIP_BASES
 ]
 
 
@@ -181,10 +193,14 @@ def simulate_wick(
         want_long = want == "long"
         want_short = want == "short"
 
+        # reenter=False (HOLD): flatten on opposite, wait for a later bar.
+        # reenter=True (FLIP): reverse into the opposite side on that same candle.
+        # no_flip=True forces HOLD even if reenter was requested.
+        do_reenter = bool(reenter) and not bool(no_flip)
         if side == "LONG":
             if xwant == "short":
                 close_trade(cur)
-                if reenter and can_enter(cur) and want_short:
+                if do_reenter and can_enter(cur) and want_short:
                     side = "SHORT"
                     entry_px = cur.close
                     entry_time = cur.time
@@ -192,7 +208,7 @@ def simulate_wick(
         if side == "SHORT":
             if xwant == "long":
                 close_trade(cur)
-                if reenter and can_enter(cur) and want_long:
+                if do_reenter and can_enter(cur) and want_long:
                     side = "LONG"
                     entry_px = cur.close
                     entry_time = cur.time
@@ -304,8 +320,10 @@ def build_ohlc_candles(rows: list[tuple[str, float]], minutes: int) -> list[Cand
     return candles
 
 
-def print_wick_summary(results: list[TfResult]) -> None:
+def print_wick_summary(results: list[TfResult], title: str = "") -> None:
     print()
+    if title:
+        print(f"=== {title} ===")
     print(
         f"{'row':>18}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
         f"{'win%':>6}  {'gross_pts':>10}  {'fees_₹':>10}  {'pnl_₹':>10}  {'maxDD_₹':>10}"
@@ -321,6 +339,42 @@ def print_wick_summary(results: list[TfResult]) -> None:
     print()
 
 
+def _row_parts(name: str) -> tuple[str, str]:
+    tf, _, preset = name.partition(":")
+    return tf, preset
+
+
+def print_hold_vs_flip(results: list[TfResult]) -> None:
+    by = {r.tf: r for r in results}
+    rows: list[tuple[TfResult, TfResult]] = []
+    for hold in results:
+        tf, preset = _row_parts(hold.tf)
+        if preset.endswith("_flip") or preset.endswith("_strict"):
+            continue
+        flip = by.get(f"{tf}:{preset}_flip")
+        if flip is None:
+            continue
+        rows.append((hold, flip))
+    if not rows:
+        return
+    print("=== HOLD vs FLIP (d = hold − flip) ===")
+    print(
+        f"{'row':>12}  {'hold_tr':>7}  {'flip_tr':>7}  {'d_tr':>6}  "
+        f"{'hold_pts':>9}  {'flip_pts':>9}  {'hold_pnl':>10}  {'flip_pnl':>10}  {'d_pnl':>10}"
+    )
+    print("-" * 108)
+    for hold, flip in rows:
+        tf, preset = _row_parts(hold.tf)
+        print(
+            f"{f'{tf}:{preset}':>12}  {hold.n_trades:7d}  {flip.n_trades:7d}  "
+            f"{hold.n_trades - flip.n_trades:6d}  "
+            f"{hold.gross_pts:9.1f}  {flip.gross_pts:9.1f}  "
+            f"{hold.after_tax_pnl_inr:10.1f}  {flip.after_tax_pnl_inr:10.1f}  "
+            f"{hold.after_tax_pnl_inr - flip.after_tax_pnl_inr:10.1f}"
+        )
+    print()
+
+
 def run_all(
     db: Path,
     *,
@@ -332,18 +386,24 @@ def run_all(
     fees: bool = False,
     session_filter: bool = False,
     min_range: float = 5.0,
-    no_flip: bool = True,
+    no_flip: bool = False,
     nowick_eps: float = 1.0,
     market_open: str = "09:00",
     market_close: str = "23:30",
+    compare_flip: bool = True,
 ) -> list[TfResult]:
     rows = load_ltp_rows(db)
     if not rows:
         raise SystemExit(f"no ticks in {db}")
     cfg = make_charge_cfg(fees=fees, lots=lots)
     results: list[TfResult] = []
-    chosen_tfs = tfs or HOLD_TIMEFRAMES
-    chosen_presets = presets or PRESETS
+    chosen_tfs = tfs or TIMEFRAMES
+    chosen_presets = list(presets or PRESETS)
+    if compare_flip:
+        hold_names = {n for n, _ in chosen_presets}
+        chosen_presets.extend(
+            (n, f) for n, f in FLIP_PRESETS if n[: -len("_flip")] in hold_names
+        )
     for name, minutes in chosen_tfs:
         candles = build_ohlc_candles(rows, minutes)
         use_session = session_filter and name != "1d"
@@ -386,11 +446,18 @@ def main() -> None:
     ap.add_argument("--session", action="store_true")
     ap.add_argument("--min-range", type=float, default=5.0)
     ap.add_argument("--nowick-eps", type=float, default=1.0, help="pts: wick ≤ this counts as no wick")
-    ap.add_argument("--no-flip", action="store_true", default=True)
-    ap.add_argument("--allow-flip", action="store_true")
+    ap.add_argument(
+        "--no-compare",
+        action="store_true",
+        help="HOLD rows only; skip the old reverse-every-opposite (flip) comparison",
+    )
     ap.add_argument("--market-open", default="09:00")
     ap.add_argument("--market-close", default="23:30")
-    ap.add_argument("--tfs", default="")
+    ap.add_argument(
+        "--tfs",
+        default="",
+        help="comma list, 'all' (default), or 'hold' for 15m–1d only",
+    )
     ap.add_argument(
         "--presets",
         default="",
@@ -404,7 +471,6 @@ def main() -> None:
     args = ap.parse_args()
     if args.fees:
         os.environ["IGNORE_FEES"] = "false"
-    no_flip = not args.allow_flip
 
     if not args.db.exists():
         raise SystemExit(f"missing db: {args.db}")
@@ -415,10 +481,13 @@ def main() -> None:
             f"  {db_diagnostics(args.db)}\n"
         )
 
-    tfs = HOLD_TIMEFRAMES
+    tfs = TIMEFRAMES
     if args.tfs.strip():
-        if args.tfs.strip().lower() == "all":
+        key = args.tfs.strip().lower()
+        if key == "all":
             tfs = TIMEFRAMES
+        elif key == "hold":
+            tfs = HOLD_TIMEFRAMES
         else:
             want = {x.strip() for x in args.tfs.split(",") if x.strip()}
             tfs = [(n_, m) for n_, m in TIMEFRAMES if n_ in want]
@@ -434,6 +503,7 @@ def main() -> None:
     ltp_rows = load_ltp_rows(args.db)
     t0 = parse_ts(ltp_rows[0][0])
     t1 = parse_ts(ltp_rows[-1][0])
+    compare_flip = not args.no_compare
     print(
         f"Wick-length HOLD backtest  db={args.db}  ticks={n}  "
         f"range={t0.isoformat(timespec='seconds')} → {t1.isoformat(timespec='seconds')}  "
@@ -443,12 +513,14 @@ def main() -> None:
         "Rules: LONG lower>upper wick | SHORT upper>lower wick | "
         "bald → body C>O long / C<O short | "
         "HOLD: exit to flat, no reverse on that candle | "
+        "FLIP (comparison): reverse on the opposite wick | "
         "strict: exit only frac50/pin2/bald"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "
         f"({args.market_open}-{args.market_close}) "
-        f"min_range={args.min_range} nowick_eps={args.nowick_eps} no_flip={no_flip}"
+        f"min_range={args.min_range} nowick_eps={args.nowick_eps} "
+        f"compare_flip={compare_flip}"
     )
 
     results = run_all(
@@ -461,13 +533,18 @@ def main() -> None:
         fees=args.fees,
         session_filter=args.session,
         min_range=args.min_range,
-        no_flip=no_flip,
         nowick_eps=args.nowick_eps,
         market_open=args.market_open,
         market_close=args.market_close,
+        compare_flip=compare_flip,
     )
-    print_wick_summary(results)
-    print_by_day(results)
+    hold_rows = [r for r in results if not r.tf.endswith("_flip")]
+    flip_rows = [r for r in results if r.tf.endswith("_flip")]
+    print_wick_summary(hold_rows, "HOLD — exit to flat, no reverse on that candle")
+    if flip_rows:
+        print_wick_summary(flip_rows, "FLIP — old reverse-on-every-opposite (for comparison)")
+        print_hold_vs_flip(results)
+    print_by_day(hold_rows)
     write_outputs(results, args.out_dir)
     (args.out_dir / "scoreboard.json").write_text(
         json.dumps(

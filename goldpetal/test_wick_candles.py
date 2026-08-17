@@ -56,6 +56,22 @@ def test_simulate_long_exits_flat_no_reverse() -> None:
     assert r.trades[0].exit_px == 103.0
 
 
+def test_flip_reverses_on_exit_candle() -> None:
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # lower wick → long
+        Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → reverse short
+    ]
+    hold = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
+    flip = simulate_wick(candles, tf="30m:raw_flip", min_range=5, reenter=True)
+    assert hold.n_trades == 1
+    assert hold.trades[0].side == "LONG"
+    assert hold.trades[0].exit_px == 103.0
+    assert flip.n_trades == 2
+    assert flip.trades[0].side == "LONG"
+    assert flip.trades[1].side == "SHORT"
+    assert flip.trades[1].entry_px == 103.0
+
+
 def test_later_bar_can_enter_after_flat() -> None:
     candles = [
         Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # long
@@ -158,6 +174,8 @@ if __name__ == "__main__":
     print("ok pin")
     test_simulate_long_exits_flat_no_reverse()
     print("ok hold exit")
+    test_flip_reverses_on_exit_candle()
+    print("ok flip reverse")
     test_later_bar_can_enter_after_flat()
     print("ok later entry")
     test_strict_exit_ignores_weak_opposite()
