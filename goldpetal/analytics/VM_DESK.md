@@ -20,15 +20,19 @@ Keep `DRY_RUN=true` until you intend Angel fills. Panel LIVE_MAX_LOTS cap is 10.
 Paper 100 lots on S12/S14/S15 is not live size.
 
 Restart **only** `control_panel.py` after this pull (not supervise), unless you
-meant to load a new `.env`.
+meant to load a new `.env`. Bind **0.0.0.0** if you open `http://<vm-ip>:8787/`
+in the browser. `127.0.0.1` only works through the SSH tunnel.
 
 ```bash
 cd ~/goldpetal
-pkill -f 'python.*control_panel.py' || true
-nohup ./venv/bin/python control_panel.py --host 127.0.0.1 --port 8787 >> data/control_panel.log 2>&1 &
+./scripts/run_control_panel.sh
+# or:
+pkill -f control_panel.py || true
+nohup ./venv/bin/python control_panel.py --host 0.0.0.0 --port 8787 >> data/control_panel.log 2>&1 &
+tail data/control_panel.log
 ```
 
-Then hard-refresh http://127.0.0.1:8787/ (Ctrl+Shift+R). The Gold Petal candlestick
+Then hard-refresh the VM IP on port 8787 (Ctrl+Shift+R). The Gold Petal candlestick
 is the second panel. Do **not** restart supervise.
 
 ## Streamlit research desk
