@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run Streamlit desk ON the trading VM inside tmux (survives SSH disconnect).
 #
-#   ./scripts/run_desk_vm.sh           # start/attach tmux session "gp-desk"
-#   ./scripts/run_desk_vm.sh --fg      # foreground (no tmux)
+#   ./scripts/run_desk_vm.sh --detach   # kill old 8501 and start in tmux
+#   ./scripts/run_desk_vm.sh --restart  # same as --detach
+#   ./scripts/run_desk_vm.sh --fg       # foreground (no tmux)
 #   tmux attach -t gp-desk             # reattach later
 #   tmux kill-session -t gp-desk       # stop desk
 set -euo pipefail
@@ -30,7 +31,26 @@ mkdir -p data/control
 
 if [[ "${1:-}" == "--fg" ]]; then
   echo "→ desk foreground :8501  data=$GP_DATA_DIR"
+  echo "   Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "   then http://127.0.0.1:8501/  → tab S14 chart"
   exec "${CMD[@]}"
+fi
+
+start_detached() {
+  local session="${TMUX_DESK_SESSION:-gp-desk}"
+  tmux kill-session -t "=$session" 2>/dev/null || true
+  pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
+  sleep 1
+  tmux new-session -d -s "$session" -c "$PWD" \
+    "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
+  echo "started tmux $session from $PWD"
+  echo "Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "then http://127.0.0.1:8501/  → first tab S14 chart"
+}
+
+if [[ "${1:-}" == "--detach" || "${1:-}" == "--restart" ]]; then
+  start_detached
+  exit 0
 fi
 
 SESSION="${TMUX_DESK_SESSION:-gp-desk}"

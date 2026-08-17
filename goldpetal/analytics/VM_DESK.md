@@ -2,13 +2,56 @@
 
 No Mac sync. Streamlit reads `data/` on the trading VM.
 
-## Streamlit full desk (no manual .env copy/paste)
+## One operator desk: 8787
+
+**All operator writes go on the 8787 control panel.** Streamlit (8501) is research
+(trades, ticks, proposals view). Its Deploy / Ops, Live Deploy, and Capital tabs
+are **read-only** so they cannot overwrite 8787.
+
+| Job | Where |
+|---|---|
+| Emergency / trading / unlock live | **8787** Emergency & trading |
+| ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, Restart | **8787** Live money |
+| live_approved | **8787** Live money checkboxes |
+| Book ₹ / day-loss / per-strategy lots | **8787** Capital management |
+| Streamlit | View only. May **stop** (emergency / pause / lock live), not start or unlock |
+
+Keep `DRY_RUN=true` until you intend Angel fills. Panel LIVE_MAX_LOTS cap is 10.
+Paper 100 lots on S12/S14/S15 is not live size.
+
+## Gold Petal chart (Streamlit 8501 — this is the one that opens)
+
+Do **not** use 8787 for the candle chart. Use the desk you already tunnel:
+
+On the **VM**:
+
+The desk that is actually open is the folder Streamlit prints as **Desk code** on the S14 chart tab (often `~/goldpetal-repo/goldpetal`, not `~/goldpetal`). Pull and restart **that** folder:
+
+```bash
+cd ~/goldpetal-repo/goldpetal   # or ~/goldpetal — match the path on the S14 tab
+git pull origin cursor/s14-wick-length-a4b2
+./scripts/run_desk_vm.sh --restart
+./daily_s14_sheet.sh
+```
+
+On your **Mac** (leave running):
+
+```bash
+gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501
+```
+
+Then Chrome: **http://127.0.0.1:8501/** — first tab **S14 chart**. Pull live candles there.
+8787 is emergency / live / capital only — not this chart. Do **not** restart supervise.
+
+## Streamlit research desk
 
 On the VM desk you can:
 
-- **Deploy / Ops** — toggle ENABLE_* strategies, set DRY_RUN / LIVE_MAX_LOTS / S11_PACK_PATH, Restart/Stop bot
-- **Live Deploy** — live_approved + capital/lots (+ optional ENABLE write)
-- **Proposals** — Approve auto-applies whitelist env_patch (restart to load)
+- **S14 chart** — Angel/MCX Gold Petal candlesticks (this is the exchange chart)
+- **Overview / Trades / Ticks** — research
+- **Proposals** — Approve → paper (whitelist env). Restart on **8787**. Approve → live is on 8787.
+- **Deploy / Ops, Live Deploy, Capital** — read-only snapshots
+- **Control** — stop only (emergency / pause / lock live)
 - **Login** — set `DESK_PASSWORD` (and optional `DESK_TOTP_SECRET` for dangerous actions)
 
 ```bash
@@ -27,12 +70,11 @@ manually (browser autofill often does not update Streamlit). Confirm you are edi
 same path shown on screen (or set `GP_ENV_PATH=~/goldpetal/.env`). Instant unblock:
 `DESK_AUTH=false` then restart the desk.
 
-Restart desk after pulling:
+Restart desk after pulling (use the folder shown as **Desk code** on the S14 tab):
 ```bash
-cd ~/goldpetal
-git pull
-tmux kill-session -t gp-desk 2>/dev/null || true
-./scripts/run_desk_vm.sh
+cd ~/goldpetal-repo/goldpetal   # or ~/goldpetal
+git pull origin cursor/s14-wick-length-a4b2
+./scripts/run_desk_vm.sh --restart
 ```
 
 ## S13 daily HH/LL same-candle (paper)
@@ -62,7 +104,7 @@ Defaults now:
 - `POSITION_ON_RESTART=restore` — reload open trades into RAM so exits can fire
 - set `POSITION_ON_RESTART=close` to paper-CLOSE orphans on startup instead
 - `EOD_FLATTEN_INTRADAY=true` — force-CLOSE intraday books in the last 5m before `MARKET_CLOSE`
-- Desk **Deploy / Ops** shows DB vs RAM mismatches from `data/control/bot_health.json`
+- 8787 **Live money** shows DB vs RAM mismatches from `data/control/bot_health.json`. Streamlit Deploy / Ops is a read-only copy.
 
 ```bash
 POSITION_ON_RESTART=restore
@@ -87,6 +129,70 @@ S12_MIN_RANGE=5
 S12_CONFIRM_MINUTES=1
 ```
 
+## S14 / S15 30m wick (paper)
+
+**S14** (nothing else):
+
+```
+upper = high − max(open, close)
+lower = min(open, close) − low
+lower > upper → LONG
+upper > lower → SHORT
+upper = lower → skip
+```
+
+Wait for the candle to **finish**, then on that **same** candle:
+  open = high (high never left open) → SHORT
+  open = low  (low never left open)  → LONG
+  both (flat tape) → skip this check, use the wick
+  else wick: lower > upper LONG, upper > lower SHORT (FLIP if already the other side)
+
+No range skip, no bald body, no frac50/pin2. **S15** is still last-minute bald HOLD.
+Keep `DRY_RUN=true`. Restart supervise after pull.
+
+Tick backtest (needs the VM `ticks.db`):
+
+```bash
+cd ~/goldpetal
+python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
+```
+
+Exchange candles (Angel MCX chart, formula + decision + close-fill PnL):
+
+```bash
+cd ~/goldpetal
+./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+# already dumped:
+./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d
+# if venv is .venv:
+./.venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+```
+
+Prints O/H/L/C, upper, lower, O=H, O=L, rule, LONG/SHORT/skip, then the same
+100-lot Angel-fee after-tax row as the tick tape. Fill is the **signal bar
+close** (not the next open). Leftover flattened at the last **finished** close.
+Writes CSV under `data/backtests/s14_candles/` **and** a reopenable sheet at
+`data/s14_sheet/GoldPetal_S14.html` (also on 8787 → **Open full sheet** /
+http://127.0.0.1:8787/s14-sheet). Copy a tab into Google Sheets from the panel.
+Angel has 1m 3m 5m 10m 15m 30m 1h 1d (not 45m/2h/3h). `--from-ticks` uses
+`ticks.db` instead of the exchange. `--no-fees` is gross only.
+
+Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
+Writes `data/backtests/s14_tick/`. `S14_OPEN_HOLD_MINUTES=0` turns off open=high/low (wick only).
+
+```bash
+ENABLE_S14=true
+S14_BAR_MINUTES=30
+S14_MIN_RANGE=0
+S14_OPEN_HOLD_MINUTES=2
+ENABLE_S15=true
+S15_BAR_MINUTES=30
+S15_MIN_RANGE=0
+```
+
+Restart supervise after pull. Look for `S14_WICK30_STRICT` / `S15_WICK30_NOWICK`
+and heartbeat `s14=` / `s15=` in `data/strategy_run.log`.
+
 
 ## Day-by-day HH/LL on S4 horizon
 
@@ -104,44 +210,19 @@ Prints a day table (`prevH` / `prevL` / HH / LL / signal) and writes
 
 ## Paper allowlist (stop S9 etc.)
 
-Streamlit **Live Deploy → Paper allowlist**:
+On **8787 Live money**, Save ENABLE_* with only the slim books checked (S4/S5/S8/S11/S12/S13/S14/S15). That writes `ENABLE_S9=false` (and S1/S2/S3/S6/S10) then Restart supervise on 8787.
 
-1. Keep only S4 / S5 / S8 / S11 / S12 selected.
-2. Click **Lock paper to selected only** → force-disables S1/S2/S3/S6/S9/S10.
-3. On VM `.env` (required so they are not loaded at all):
+Trades tab may still show **old** S9 history — filter to slim strategies.
 
-```bash
-ENABLE_S1=false
-ENABLE_S2=false
-ENABLE_S3=false
-ENABLE_S6=false
-ENABLE_S9=false
-ENABLE_S10=false
-ENABLE_S4=true
-ENABLE_S5=true
-ENABLE_S8=true
-ENABLE_S11=true
-ENABLE_S12=true
-```
+## Live money (real orders) — 8787 only
 
-4. Restart supervise. Trades tab may still show **old** S9 history — filter to slim strategies.
+1. 8787 **Live money**: check Live? on the strategy. Paper 100 lots is not live size.
+2. 8787 **Capital**: set ₹ / max lots.
+3. Unlock live on 8787.
+4. Uncheck Paper only, type `LIVE`, Save .env (`DRY_RUN=false`, `LIVE_MAX_LOTS` 1–10).
+5. Type `RESTART` on 8787. Size = `min(strategy max_lots, LIVE_MAX_LOTS)`.
 
-## Live Deploy (real money)
-
-Streamlit tab **Live Deploy**:
-
-1. Check strategies (e.g. S4, S5, S12) and set each **Capital ₹** + **Max lots**.
-2. Confirm + **Save live allocation** → writes `live_approved` + `capital.json`.
-3. **Control** tab → Unlock live (two-step confirm).
-4. On VM `.env`:
-   ```bash
-   DRY_RUN=false
-   LIVE_MAX_LOTS=5   # hard ceiling; desk max_lots cannot exceed this
-   ```
-5. Restart supervise. Only approved strategies place Angel orders;
-   size = `min(strategy max_lots, LIVE_MAX_LOTS)`.
-
-Keep `DRY_RUN=true` until you are ready for real orders.
+Keep `DRY_RUN=true` until you are ready for real orders. Do not also save these on Streamlit.
 
 ## One-time on VM
 

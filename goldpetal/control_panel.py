@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,19 +28,40 @@ from capital import (
     save_capital,
     update_strategy_budget,
 )
+from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
 from control_state import (
     entries_blocked,
     is_live_mode_allowed,
     load_state,
     save_state,
     set_emergency,
+    set_live_approved,
     set_live_unlocked,
     set_trading_enabled,
 )
 from live_orders import live_lots, recent_orders
+from live_readiness import (
+    apply_panel_enables,
+    apply_panel_live_env,
+    live_readiness,
+    panel_restart_allowed,
+    read_live_env,
+)
+from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
+from s14_exchange_sheet import (
+    CANDLE_JS,
+    HTML_NAME,
+    load_sheet_csv,
+    load_sheet_meta,
+    missing_sheet_html,
+    refresh_status,
+    rows_to_tsv as s14_rows_to_tsv,
+    sheet_zip_bytes,
+    start_angel_refresh,
+)
 from panel_export import (
     TRADE_CSV_FIELDS,
     TICK_CSV_FIELDS,
@@ -58,9 +80,10 @@ from reasoning_cockpit import (
     panel_timeframes,
     refresh_and_save,
 )
-from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
+from position_safety import read_bot_health
 
 ROOT = Path(__file__).resolve().parent
+S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 
 
 HTML_PAGE = r"""<!DOCTYPE html>
@@ -174,6 +197,7 @@ h2 {
 .btn.danger.on { background: var(--bad); color: #1a0504; border-color: var(--bad); }
 .btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
 .btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
+a.btn { text-decoration: none; display: inline-block; }
 .pill {
   display: inline-block; padding: .15rem .45rem; border-radius: 2px;
   font-family: "IBM Plex Mono", monospace; font-size: .75rem;
@@ -200,11 +224,12 @@ input[type="number"] {
   color: var(--text); padding: .35rem .45rem; border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
 }
-input[type="date"] {
+input[type="date"], input[type="text"] {
   background: var(--bg0); border: 1px solid var(--line);
   color: var(--text); padding: .35rem .45rem; border-radius: 3px;
   font-family: "IBM Plex Mono", monospace;
 }
+input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 .flash { margin: .5rem 0 0; color: var(--gold2); font-size: .85rem; min-height: 1.2em; }
 .toast {
   position: fixed; top: 1rem; right: 1rem; z-index: 1000;
@@ -218,14 +243,20 @@ input[type="date"] {
 .toast.show { display: block; }
 .toast.bad { border-color: var(--bad); color: #ffb4ab; background: #2a1412; }
 .toast.ok { border-color: #2f6a4a; color: #a8efc6; background: #143224; }
-.btn:disabled { opacity: .55; cursor: wait; }
+.check { font-family: "IBM Plex Mono", monospace; font-size: .78rem; padding: .35rem .55rem; border: 1px solid var(--line); border-radius: 3px; }
+.check.ok { color: var(--ok); }
+.check.bad { color: var(--bad); }
+.check.warn { color: var(--warn); }
+#live-desk-banner.armed { color: var(--bad); font-weight: 700; }
+#live-desk-banner.paper { color: var(--ok); }
+#s14-chart { width: 100%; height: 560px; background: #0c1410; border: 1px solid var(--line); border-radius: 3px; cursor: crosshair; }
 </style>
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <header class="brand">
     <h1>Gold Petal</h1>
-    <p class="tag">Control + reasoning cockpit on your trading VM. See ticks, 1m→day bars, entry/hold/exit plans, capital, and weekend approvals. Nothing goes live without you.</p>
+    <p class="tag">Operator desk on the trading VM. Streamlit (8501) is research-only and cannot overwrite these switches. Ticks, bars, capital, live gates, weekend approvals. Nothing goes live without you.</p>
     <div class="where">Runs on VM · :8787</div>
   </header>
 
@@ -241,11 +272,72 @@ input[type="date"] {
         <button class="btn" id="btn-reason" type="button">Re-run reasoner</button>
       </div>
       <p class="flash" id="flash"></p>
-      <p class="muted" style="margin-top:.75rem">Safer access: SSH tunnel (no public firewall). On your laptop run <span class="mono">ssh -N -L 8787:127.0.0.1:8787 USER@VM_IP</span> then open <span class="mono">http://127.0.0.1:8787/</span>. Bind panel with <span class="mono">--host 127.0.0.1</span>. Public <span class="mono">0.0.0.0/0</span> firewall is optional and less safe.</p>
+      <p class="muted" style="margin-top:.75rem">Open this desk through an SSH tunnel (no public 8787). On your Mac: <span class="mono">gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8787:127.0.0.1:8787</span> then <span class="mono">http://127.0.0.1:8787/</span>. Bind the panel with <span class="mono">--host 127.0.0.1</span>.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Gold Petal exchange candles</h2>
+      <p class="muted">O/H/L/C is printed on each candle. Scroll to zoom, drag to pan, double-click to reset. On 30m/1h zoom in until the numbers sit on the bar. Prefer Streamlit 8501 for this chart.</p>
+      <canvas id="s14-chart" width="1100" height="560"></canvas>
+      <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
+        <button class="btn ok" type="button" id="btn-s14-pull">Pull live candles</button>
+        <a class="btn" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
+        <button class="btn" type="button" id="btn-s14-zip">Download sheet ZIP</button>
+        <label class="muted">Tab
+          <select id="s14-tf" style="margin-left:.35rem">
+            <option value="1d">1d</option>
+            <option value="1h">1h</option>
+            <option value="30m">30m</option>
+            <option value="pnl">pnl</option>
+            <option value="trades">trades</option>
+          </select>
+        </label>
+        <button class="btn warn" type="button" id="btn-s14-copy">Copy tab → Google Sheets</button>
+      </div>
+      <p class="mono" id="s14-meta">No sheet yet — restart this panel after git pull</p>
+      <p class="flash" id="s14-flash"></p>
+      <details>
+        <summary class="muted">Row list (copy)</summary>
+        <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Live money — operator desk (only writer)</h2>
+      <p class="muted">This panel is the <strong>only</strong> place that writes DRY_RUN, LIVE_MAX_LOTS, ENABLE_*, live_approved, and Restart. Streamlit Deploy/Ops, Live Deploy, and Capital are read-only. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). <strong>Save .env</strong> writes the file only. <strong>Restart supervise</strong> loads it into the bot. Type <span class="mono">LIVE</span> to set <span class="mono">DRY_RUN=false</span>. Panel cap is 10 lots.</p>
+      <p class="mono" id="live-desk-banner">Loading…</p>
+      <div class="row" id="live-desk-steps" style="margin:.6rem 0"></div>
+      <p class="muted" id="live-desk-bot"></p>
+      <div class="scroll" style="margin-top:.5rem">
+        <table>
+          <thead><tr><th>Strategy</th><th>RAM</th><th>Paper lots</th><th>Live?</th><th>Live qty</th></tr></thead>
+          <tbody id="live-desk-books"></tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:.7rem">Loaded after Restart (<span class="mono">ENABLE_*</span>) — this is not live-approved. Unchecked books are not in RAM.</p>
+      <div class="row" id="live-desk-enables" style="margin:.35rem 0 .5rem"></div>
+      <div class="row">
+        <button class="btn" type="button" id="btn-save-enables">Save ENABLE_*</button>
+      </div>
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin-top:.75rem">
+        <label class="muted" style="display:flex;align-items:center;gap:.4rem"><input type="checkbox" id="live-dry-run" checked/> Paper only (<span class="mono">DRY_RUN</span>)</label>
+        <label class="muted">LIVE_MAX_LOTS (1–10)<br/><input type="number" id="live-max-lots" min="1" max="10" step="1" value="1"/></label>
+        <label class="muted">Type LIVE to allow DRY_RUN=false<br/><input type="text" id="live-env-confirm" placeholder="LIVE" autocomplete="off" style="width:8rem"/></label>
+        <button class="btn warn" type="button" id="btn-save-live-env">Save .env</button>
+      </div>
+      <div class="row" style="gap:.8rem;align-items:flex-end;margin-top:.5rem">
+        <label class="muted">Type RESTART to restart the bot<br/><input type="text" id="live-restart-confirm" placeholder="RESTART" autocomplete="off" style="width:8rem"/></label>
+        <button class="btn danger" type="button" id="btn-restart-supervise">Restart supervise</button>
+        <button class="btn warn" type="button" id="btn-save-live-approved">Save live-approved list</button>
+        <button class="btn" type="button" id="btn-clear-live-approved">Clear live-approved</button>
+      </div>
+      <p class="muted" id="live-env-hint"></p>
+      <p class="flash" id="live-desk-flash"></p>
     </section>
 
     <section class="panel span-7">
       <h2>Capital management</h2>
+      <p class="muted">Book ₹, day-loss, and per-strategy lots. Same <span class="mono">capital.json</span> the bot uses. Do not also Push capital from Streamlit.</p>
       <div class="row" id="capital-stats"></div>
       <div class="row" style="gap:.8rem;align-items:flex-end;margin:.75rem 0">
         <label class="muted">Total capital ₹<br/><input type="number" id="cap-total" step="1000" style="margin-top:.25rem;width:9rem"/></label>
@@ -295,6 +387,13 @@ input[type="date"] {
     <section class="panel span-6">
       <h2>Finished trades</h2>
       <p class="muted" id="trades-meta"></p>
+      <div class="row" style="margin:.35rem 0 .55rem">
+        <label class="muted">Filter
+          <select id="trade-filter" style="margin-left:.4rem">
+            <option value="">all slim + others</option>
+          </select>
+        </label>
+      </div>
       <div class="scroll">
         <table>
           <thead><tr><th>Strat</th><th>Side</th><th>Entry</th><th>Exit</th><th>After tax</th><th>Status</th></tr></thead>
@@ -512,8 +611,18 @@ function renderReasoning(r) {
 }
 
 function renderTrades(trades, meta) {
-  $("trades-meta").textContent = meta;
-  $("trades-body").innerHTML = (trades || []).map(t => `
+  window._allTrades = trades || [];
+  const sel = $("trade-filter");
+  if (sel && !sel.dataset.wired) {
+    const names = [...new Set((trades || []).map(t => t.strategy).filter(Boolean))].sort();
+    sel.innerHTML = `<option value="">all</option>` + names.map(n => `<option value="${n}">${n}</option>`).join("");
+    sel.dataset.wired = "1";
+    sel.addEventListener("change", () => renderTrades(window._allTrades, $("trades-meta").textContent));
+  }
+  const want = sel ? sel.value : "";
+  const rows = (trades || []).filter(t => !want || t.strategy === want);
+  $("trades-meta").textContent = meta + (want ? ` · filter ${want}` : "");
+  $("trades-body").innerHTML = rows.map(t => `
     <tr>
       <td>${t.strategy || ""}</td>
       <td>${t.side || ""}</td>
@@ -522,6 +631,56 @@ function renderTrades(trades, meta) {
       <td>${t.pnl_after_tax !== "" && t.pnl_after_tax != null ? money(t.pnl_after_tax) : (t.net_pnl ?? "")}</td>
       <td>${t.status || ""}</td>
     </tr>`).join("") || `<tr><td colspan="6">No finished trades</td></tr>`;
+}
+
+function renderLiveDesk(data) {
+  const d = data.live_desk || {};
+  const banner = $("live-desk-banner");
+  if (!banner) return;
+  if (d.would_place_real_orders) {
+    banner.className = "mono armed";
+    banner.textContent = "ARMED — next BUY/SHORT on an approved strategy will hit Angel. Lock live or set DRY_RUN=true if that is wrong.";
+  } else {
+    banner.className = "mono paper";
+    banner.textContent = `PAPER · ${d.steps_ok || 0}/${d.steps_n || 0} gates green · DRY_RUN=${d.dry_run} · LIVE_MAX_LOTS=${d.live_max_lots} · ${d.note || ""}`;
+  }
+  $("live-desk-steps").innerHTML = (d.steps || []).map(s =>
+    `<div class="check ${s.ok ? "ok" : (s.id === "dry_run" || s.id === "unlocked" ? "warn" : "bad")}">${s.ok ? "OK" : "NO"} · ${s.label} — ${s.detail}</div>`
+  ).join("");
+  const bot = d.bot_health || {};
+  $("live-desk-bot").textContent =
+    `Heartbeat: ${bot.alive ? "alive" : "stale/missing"} · ${bot.ts_ist || "—"} · LTP=${bot.ltp ?? "—"} · regime=${bot.regime || "—"} · RAM ${JSON.stringify(bot.positions || {})}`;
+  $("live-desk-books").innerHTML = (d.books || []).map(b => `
+    <tr>
+      <td>${b.strategy}${b.warn_100 ? " · paper 100 lots" : ""}</td>
+      <td>${b.ram}</td>
+      <td>${b.paper_max_lots}</td>
+      <td><input type="checkbox" data-live-strat="${b.strategy}" ${b.live_approved ? "checked" : ""}/></td>
+      <td>${b.live_approved ? b.live_qty : "—"}</td>
+    </tr>`).join("");
+  const dryEl = $("live-dry-run");
+  if (dryEl) dryEl.checked = d.dry_run !== false;
+  const lotsEl = $("live-max-lots");
+  if (lotsEl && document.activeElement !== lotsEl) lotsEl.value = d.live_max_lots || 1;
+  const hint = $("live-env-hint");
+  if (hint) {
+    hint.textContent = d.dry_run !== false
+      ? "Paper. Save writes .env; Restart supervise loads it into the bot."
+      : "DRY_RUN is false in .env. Restart supervise if you just changed it. Lock live or check Paper only if that is wrong.";
+  }
+  const enBox = $("live-desk-enables");
+  if (enBox) {
+    const enables = d.enables || {};
+    enBox.innerHTML = Object.keys(enables).map(name => {
+      const on = enables[name];
+      const short = name.split("_")[0];
+      return `<label class="muted" style="display:flex;align-items:center;gap:.35rem"><input type="checkbox" data-enable-strat="${name}" ${on ? "checked" : ""}/> ${short}</label>`;
+    }).join("");
+  }
+}
+
+function selectedLiveApproved() {
+  return [...document.querySelectorAll("input[data-live-strat]:checked")].map(el => el.dataset.liveStrat);
 }
 
 function renderLiveOrders(data) {
@@ -636,6 +795,7 @@ async function refresh() {
   renderTicks(data.ticks, `${data.tick_count} ticks stored · showing latest ${data.ticks.length}`);
   renderTrades(data.trades, `Closed/open from signals · showing latest ${data.trades.length}`);
   renderLiveOrders(data);
+  renderLiveDesk(data);
   renderProposals(data.proposals);
   renderScore(data.scoreboard);
   renderReasoning(data.reasoning);
@@ -647,6 +807,7 @@ async function refreshLight() {
   // Fast path: status + ticks only (no full trade rebuild / bars).
   const s = await api("/api/status");
   renderStatus(s);
+  renderLiveDesk(s);
   const t = await api("/api/ticks?limit=40");
   renderTicks(t.ticks, `${t.count} ticks stored · showing latest ${(t.ticks||[]).length}`);
 }
@@ -687,6 +848,96 @@ $("btn-refresh").onclick = async () => {
     await refresh();
     flash("✓ Refreshed");
   } catch (e) { flash("Failed: " + (e.message || e)); }
+};
+const liveDeskFlash = (msg) => {
+  const el = $("live-desk-flash");
+  if (el) el.textContent = msg || "";
+  if (msg) toast(msg, msg.toLowerCase().includes("fail") ? "bad" : "ok");
+};
+$("btn-save-live-approved").onclick = async () => {
+  try {
+    const names = selectedLiveApproved();
+    if (names.some(n => n === "S14_WICK30_STRICT" || n === "S15_WICK30_NOWICK" || n === "S12_HHHL30" || n === "S13_HHHL_DAY")) {
+      const ok = confirm("These books paper at 100 lots. Live qty will be min(100, LIVE_MAX_LOTS), currently often 1.\n\nThis only adds them to live_approved. DRY_RUN stays whatever is in .env. Continue?");
+      if (!ok) { liveDeskFlash("cancelled"); return; }
+    } else if (!names.length) {
+      const ok = confirm("Clear live_approved? No strategy will place Angel orders.");
+      if (!ok) return;
+    }
+    const res = await api("/api/live/approved", { method: "POST", body: JSON.stringify({ strategies: names }) });
+    liveDeskFlash("Saved live_approved: " + ((res.live_approved || []).join(", ") || "(none)"));
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-clear-live-approved").onclick = async () => {
+  try {
+    const ok = confirm("Clear live_approved for every strategy?");
+    if (!ok) return;
+    await api("/api/live/approved", { method: "POST", body: JSON.stringify({ strategies: [] }) });
+    liveDeskFlash("Cleared live_approved");
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-save-enables").onclick = async () => {
+  try {
+    const names = [...document.querySelectorAll("input[data-enable-strat]:checked")].map(el => el.dataset.enableStrat);
+    const ok = confirm("Write ENABLE_* to .env? Unchecked slim books (and S1/S2/S3/S6/S9/S10) become false. Restart supervise after this. This does not approve live.");
+    if (!ok) { liveDeskFlash("cancelled"); return; }
+    const res = await api("/api/live/enables", {
+      method: "POST",
+      body: JSON.stringify({ strategies: names })
+    });
+    liveDeskFlash("Saved ENABLE_*: " + ((res.enabled || []).join(", ") || "(none)") + " — Restart supervise to load into RAM.");
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-save-live-env").onclick = async () => {
+  try {
+    const dry = $("live-dry-run").checked;
+    const lots = Number($("live-max-lots").value || 1);
+    const confirmWord = ($("live-env-confirm").value || "").trim();
+    if (!dry) {
+      if (confirmWord !== "LIVE") {
+        liveDeskFlash("Type LIVE to set DRY_RUN=false");
+        return;
+      }
+      const ok = confirm("Write DRY_RUN=false to .env? Real Angel fills still need Unlock live + live_approved + Restart supervise. LIVE_MAX_LOTS is the hard ceiling, not paper 100. Continue?");
+      if (!ok) { liveDeskFlash("cancelled"); return; }
+    }
+    const res = await api("/api/live/env", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: dry, live_max_lots: lots, confirm: confirmWord })
+    });
+    const applied = res.applied || {};
+    liveDeskFlash("Saved .env: DRY_RUN=" + (applied.DRY_RUN || "?") + " LIVE_MAX_LOTS=" + (applied.LIVE_MAX_LOTS || "?") + " — Restart supervise to load into the bot.");
+    $("live-env-confirm").value = "";
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-restart-supervise").onclick = async () => {
+  try {
+    const word = ($("live-restart-confirm").value || "").trim();
+    if (word !== "RESTART") {
+      liveDeskFlash("Type RESTART to restart supervise");
+      return;
+    }
+    const dry = $("live-dry-run").checked;
+    const msg = dry
+      ? "Restart supervise? This kills run_strategy and starts it again. The control panel stays up."
+      : "DRY_RUN is unchecked. Restart will load whatever is in .env (including DRY_RUN=false) into the bot. Continue?";
+    const ok = confirm(msg);
+    if (!ok) { liveDeskFlash("cancelled"); return; }
+    liveDeskFlash("Restarting supervise…");
+    const res = await api("/api/bot/restart", {
+      method: "POST",
+      body: JSON.stringify({ confirm: word })
+    });
+    $("live-restart-confirm").value = "";
+    liveDeskFlash(res.ok
+      ? "Supervise restarted. Check heartbeat below."
+      : ("Restart reported a problem: " + (res.error || "bot not running yet")));
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
 };
 $("btn-reason").onclick = async () => {
   try {
@@ -775,6 +1026,91 @@ $("btn-copy-score").onclick = async () => {
   } catch (e) { sheetsFlash(String(e.message || e)); }
 };
 
+const s14Flash = (msg) => { $("s14-flash").textContent = msg || ""; };
+function paintS14Table(fields, rows) {
+  $("s14-head").innerHTML = "<tr>" + fields.map((c) => `<th>${c}</th>`).join("") + "</tr>";
+  const body = rows.slice(0, 80).map((r) => {
+    const side = String(r.side || "");
+    const cls = side === "LONG" ? "ok" : side === "SHORT" ? "bad" : "";
+    return "<tr>" + fields.map((c) => {
+      const v = r[c] == null ? "" : String(r[c]);
+      return `<td class="${c==="side"?cls:""}">${v}</td>`;
+    }).join("") + "</tr>";
+  }).join("");
+  $("s14-body").innerHTML = body || `<tr><td>No rows. Run the dump command above.</td></tr>`;
+}
+function drawS14Chart(rows) {
+  const canvas = $("s14-chart");
+  if (!canvas) return;
+  const bars = (rows || []).map((r) => ({
+    t: String(r.time || ""),
+    o: +r.open, h: +r.high, l: +r.low, c: +r.close,
+    s: String(r.side || ""),
+    oh: String(r["O=H"] || "N"),
+    ol: String(r["O=L"] || "N"),
+    rule: String(r.rule || "")
+  })).filter((b) => Number.isFinite(b.o) && Number.isFinite(b.h) && Number.isFinite(b.l) && Number.isFinite(b.c));
+  bindOhlcChart(canvas, bars, true);
+}
+async function loadS14Preview() {
+  const tf = $("s14-tf").value || "1d";
+  try {
+    const meta = await api("/api/s14/meta");
+    if (!meta.ok) {
+      $("s14-meta").textContent = meta.hint || "Sheet not built yet";
+      $("s14-head").innerHTML = "";
+      $("s14-body").innerHTML = "";
+      drawS14Chart([]);
+      return;
+    }
+    $("s14-meta").textContent =
+      `${meta.generated_at || ""} · ${meta.symbol || ""} · source=${meta.source || ""} · tabs=${(meta.tfs||[]).join(",")}`;
+    const data = await api(`/api/s14/sheet?tf=${encodeURIComponent(tf)}`);
+    paintS14Table(data.fields || [], data.rows || []);
+    drawS14Chart(data.rows || []);
+    if ((data.rows || []).length > 80) {
+      s14Flash(`Showing first 80 of ${data.rows.length} rows — Open full sheet for all`);
+    } else {
+      s14Flash("");
+    }
+  } catch (e) {
+    $("s14-meta").textContent = String(e.message || e);
+    drawS14Chart([]);
+  }
+}
+$("btn-s14-zip").onclick = () => {
+  downloadUrl("/api/s14/sheet.zip");
+  s14Flash("Downloading GoldPetal_S14 sheet ZIP (HTML + CSVs)");
+};
+$("btn-s14-copy").onclick = async () => {
+  try {
+    const tf = $("s14-tf").value || "1d";
+    const data = await api(`/api/s14/sheet?tf=${encodeURIComponent(tf)}`);
+    await navigator.clipboard.writeText(data.tsv || "");
+    s14Flash(`Copied ${data.rows.length} ${tf} rows — paste into Google Sheets`);
+  } catch (e) { s14Flash(String(e.message || e)); }
+};
+$("btn-s14-pull").onclick = async () => {
+  try {
+    s14Flash("Pulling Angel/MCX Gold Petal candles… keep this tab open");
+    await api("/api/s14/refresh", { method: "POST", body: "{}" });
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const st = await api("/api/s14/refresh");
+      if (!st.running) {
+        await loadS14Preview();
+        s14Flash(st.generated_at ? `Chart updated ${st.generated_at}` : "Pull finished");
+        return;
+      }
+      s14Flash(`Still pulling from exchange… ${i * 2}s`);
+    }
+    s14Flash("Still running — wait and hard-refresh");
+  } catch (e) { s14Flash(String(e.message || e)); }
+};
+$("s14-tf").onchange = () => loadS14Preview();
+window.addEventListener("resize", () => loadS14Preview());
+setInterval(() => loadS14Preview().catch(() => {}), 60000);
+
 async function initExportDates() {
   const d = await api("/api/export/defaults");
   $("exp-from").value = d.date_from;
@@ -784,6 +1120,7 @@ async function initExportDates() {
 
 refresh().then(() => loadBars(currentTf).catch(() => {})).catch(e => flash("Failed: " + e));
 initExportDates().catch(e => expFlash(String(e.message || e)));
+loadS14Preview().catch(() => {});
 // Light poll often; full dashboard less often (tunnel-friendly).
 setInterval(() => refreshLight().catch(() => {}), 5000);
 setInterval(() => refresh().catch(() => {}), 30000);
@@ -791,6 +1128,12 @@ setInterval(() => refresh().catch(() => {}), 30000);
 </body>
 </html>
 """
+
+HTML_PAGE = HTML_PAGE.replace(
+    "<script>\nconst $ = (id) => document.getElementById(id);",
+    "<script>\n" + CANDLE_JS + "\nconst $ = (id) => document.getElementById(id);",
+    1,
+)
 
 
 def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
@@ -827,6 +1170,8 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "S11_DISCOVERED",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     )
     scoreboard = [summarize_trades(all_trades, s) for s in strat_names]
     scoreboard.append(summarize_trades(all_trades, None))
@@ -835,16 +1180,16 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     blocked = entries_blocked()
     # Cached only — do not re-run reasoner on every poll (slow).
     reasoning = load_reasoning()
-    dry = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
+    live_file = read_live_env()
     return {
         "state": state.to_dict(),
         "entries_blocked": list(blocked),
         "live_allowed": [live_ok, live_reason],
         "live_orders": recent_orders(limit=40),
         "live_env": {
-            "dry_run": dry,
+            "dry_run": live_file["dry_run"],
             "lots": live_lots(),
-            "max_lots": int(os.getenv("LIVE_MAX_LOTS", "1") or "1"),
+            "max_lots": live_file["live_max_lots"],
             "producttype": (os.getenv("LIVE_PRODUCTTYPE", "CARRYFORWARD") or "CARRYFORWARD"),
         },
         "ltp": latest_ltp(),
@@ -857,6 +1202,8 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "scoreboard": scoreboard,
         "reasoning": reasoning,
         "timeframes": panel_timeframes(),
+        "live_desk": live_readiness(),
+        "open_positions": [t for t in all_trades if t.get("status") == "OPEN"][:20],
         "where": {
             "host": "Same trading VM as run_strategy.py / supervise.sh",
             "url": "SSH tunnel → http://127.0.0.1:8788/",
@@ -903,6 +1250,57 @@ class ControlHandler(BaseHTTPRequestHandler):
                 body = HTML_PAGE.encode("utf-8")
                 self._send(200, body, "text/html; charset=utf-8")
                 return
+            if path in {"/s14-sheet", "/s14-sheet.html"}:
+                html_path = S14_SHEET_DIR / HTML_NAME
+                if html_path.is_file():
+                    self._send(200, html_path.read_bytes(), "text/html; charset=utf-8")
+                else:
+                    self._send(
+                        200,
+                        missing_sheet_html().encode("utf-8"),
+                        "text/html; charset=utf-8",
+                    )
+                return
+            if path == "/api/s14/meta":
+                status, body, ctype = _json_bytes(load_sheet_meta(S14_SHEET_DIR))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/refresh":
+                status, body, ctype = _json_bytes(refresh_status(S14_SHEET_DIR))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/sheet":
+                tf = ((qs.get("tf") or ["1d"])[0] or "1d").strip().lower()
+                fields, rows = load_sheet_csv(f"{tf}.csv", S14_SHEET_DIR)
+                tsv = s14_rows_to_tsv(rows, fields) if fields else ""
+                status, body, ctype = _json_bytes(
+                    {
+                        "tf": tf,
+                        "fields": fields,
+                        "rows": rows,
+                        "tsv": tsv,
+                    }
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/sheet.zip":
+                if not (S14_SHEET_DIR / HTML_NAME).is_file() and not any(
+                    S14_SHEET_DIR.glob("*.csv")
+                ):
+                    status, body, ctype = _json_bytes(
+                        load_sheet_meta(S14_SHEET_DIR), 404
+                    )
+                    self._send(status, body, ctype)
+                    return
+                blob = sheet_zip_bytes(S14_SHEET_DIR)
+                name = "GoldPetal_S14_sheet.zip"
+                self._send(
+                    200,
+                    blob,
+                    "application/zip",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
             if path == "/api/dashboard":
                 status, body, ctype = _json_bytes(dashboard_payload())
                 self._send(status, body, ctype)
@@ -913,6 +1311,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "state": load_state().to_dict(),
                         "entries_blocked": list(entries_blocked()),
                         "live_allowed": list(is_live_mode_allowed()),
+                        "live_desk": live_readiness(),
                         "ltp": latest_ltp(),
                         "tick_count": count_ticks(),
                     }
@@ -1048,6 +1447,14 @@ class ControlHandler(BaseHTTPRequestHandler):
             path = parsed.path
             data = self._read_json()
 
+            if path == "/api/s14/refresh":
+                res = start_angel_refresh(
+                    root=ROOT,
+                    python=sys.executable,
+                    sheet_dir=S14_SHEET_DIR,
+                )
+                self._send(*_json_bytes(res))
+                return
             if path == "/api/emergency":
                 st = set_emergency(bool(data.get("off")))
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
@@ -1059,6 +1466,66 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/live":
                 st = set_live_unlocked(bool(data.get("unlocked")))
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/live/approved":
+                names = [
+                    str(s).strip()
+                    for s in (data.get("strategies") or [])
+                    if str(s).strip()
+                ]
+                st = set_live_approved(names, note="control panel live_approved")
+                self._send(
+                    *_json_bytes(
+                        {
+                            "ok": True,
+                            "live_approved": list(st.live_approved),
+                            "state": st.to_dict(),
+                            "live_desk": live_readiness(),
+                        }
+                    )
+                )
+                return
+            if path == "/api/live/enables":
+                names = [
+                    str(s).strip()
+                    for s in (data.get("strategies") or [])
+                    if str(s).strip()
+                ]
+                res = apply_panel_enables(names)
+                status = 200 if res.get("ok") else 400
+                res = {**res, "live_desk": live_readiness()}
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/live/env":
+                dry_raw = data.get("dry_run")
+                dry_run = True if dry_raw is None else bool(dry_raw)
+                try:
+                    lots = int(data.get("live_max_lots") or 1)
+                except (TypeError, ValueError):
+                    self._send(*_json_bytes({"ok": False, "error": "LIVE_MAX_LOTS must be an integer"}, 400))
+                    return
+                res = apply_panel_live_env(
+                    dry_run=dry_run,
+                    live_max_lots=lots,
+                    confirm=str(data.get("confirm") or ""),
+                )
+                status = 200 if res.get("ok") else 400
+                res = {**res, "live_desk": live_readiness()}
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/bot/restart":
+                ok, why = panel_restart_allowed(str(data.get("confirm") or ""))
+                if not ok:
+                    self._send(*_json_bytes({"ok": False, "error": why}, 400))
+                    return
+                from analytics.bot_ops import restart_bot
+
+                res = restart_bot()
+                status_info = dict(res.get("status") or {})
+                status_info.pop("log_tail", None)
+                res["status"] = status_info
+                res["live_desk"] = live_readiness()
+                self._send(*_json_bytes(res))
                 return
             if path == "/api/reasoning/refresh":
                 payload = refresh_and_save(
@@ -1122,7 +1589,7 @@ def main() -> None:
     print(f"Gold Petal control panel → http://{args.host}:{args.port}/", flush=True)
     print(
         "Endpoints: /api/dashboard /api/ticks /api/bars /api/reasoning "
-        "/api/trades /api/proposals /api/capital",
+        "/api/trades /api/proposals /api/capital /api/live/env /api/live/enables /api/bot/restart",
         flush=True,
     )
     try:

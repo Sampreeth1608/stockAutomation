@@ -215,6 +215,9 @@ def test_control_panel_dashboard_payload() -> None:
     assert "capital" in payload
     assert "proposals" in payload
     assert "scoreboard" in payload
+    assert "live_desk" in payload
+    assert "dry_run" in payload["live_desk"]
+    assert "enables" in payload["live_desk"]
     assert isinstance(payload["tick_count"], int)
 
 

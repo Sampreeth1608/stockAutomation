@@ -4,7 +4,7 @@ Safety stack (all required unless noted):
   1. DRY_RUN=false
   2. control panel live_unlocked=true
   3. trading_enabled and not emergency_off
-  4. strategy listed in live_approved (desk Live Deploy / Approve → live)
+  4. strategy listed in live_approved (8787 Live money checkboxes)
   5. quantity = strategy capital.max_lots capped by LIVE_MAX_LOTS
 
 Paper remains the default. This module places MARKET DAY CARRYFORWARD
@@ -70,7 +70,7 @@ def live_lots() -> int:
 def live_lots_for(strategy: str) -> int:
     """Per-strategy live size from capital.max_lots, hard-capped by LIVE_MAX_LOTS.
 
-    Desk Live Deploy sets max_lots per strategy. LIVE_MAX_LOTS in .env is the
+    8787 Capital sets max_lots per strategy. LIVE_MAX_LOTS in .env is the
     operator hard ceiling (raise it only when you accept larger real size).
     """
     cap = max(1, _env_int("LIVE_MAX_LOTS", 1))

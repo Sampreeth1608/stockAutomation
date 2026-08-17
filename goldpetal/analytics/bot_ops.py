@@ -109,8 +109,10 @@ def _kill_patterns(patterns: list[str]) -> list[int]:
             cmd = row.get("cmd", "")
             if "pgrep" in cmd:
                 continue
-            # Never kill the Streamlit desk itself from restart.
+            # Never kill the Streamlit desk or the 8787 control panel.
             if "streamlit" in cmd.lower() or "analytics.app" in cmd:
+                continue
+            if "control_panel.py" in cmd:
                 continue
             try:
                 os.kill(pid, signal.SIGKILL)

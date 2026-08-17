@@ -33,7 +33,16 @@ DEFAULT_STRATEGIES = (
     "S11_DISCOVERED",
     "S12_HHHL30",
     "S13_HHHL_DAY",
+    "S14_WICK30_STRICT",
+    "S15_WICK30_NOWICK",
 )
+
+_HUNDRED_LOT = {
+    "S12_HHHL30",
+    "S13_HHHL_DAY",
+    "S14_WICK30_STRICT",
+    "S15_WICK30_NOWICK",
+}
 
 
 @dataclass
@@ -91,7 +100,7 @@ def default_plan() -> CapitalPlan:
     strats = {}
     for name in DEFAULT_STRATEGIES:
         # S12 hist paper path sized at 100 lots; S13 daily same-candle HH/LL similar; others stay conservative.
-        lots = 100 if name in {"S12_HHHL30", "S13_HHHL_DAY"} else 10
+        lots = 100 if name in _HUNDRED_LOT else 10
         strats[name] = StrategyBudget(
             strategy=name, budget_inr=each, max_lots=lots
         )
@@ -126,7 +135,7 @@ def load_capital(path: Path | None = None) -> CapitalPlan:
     # Ensure defaults exist for any new strategy names.
     for name in DEFAULT_STRATEGIES:
         if name not in strategies:
-            lots = 100 if name in {"S12_HHHL30", "S13_HHHL_DAY"} else 10
+            lots = 100 if name in _HUNDRED_LOT else 10
             strategies[name] = StrategyBudget(strategy=name, max_lots=lots)
     return CapitalPlan(
         total_capital_inr=float(raw.get("total_capital_inr", 500_000)),

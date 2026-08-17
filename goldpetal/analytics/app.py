@@ -31,20 +31,20 @@ try:
 except Exception:
     pass
 
+from operator_desk import (  # noqa: E402
+    OPERATOR_URL,
+    operator_readonly_markdown,
+    streamlit_control_allowed,
+    streamlit_write_blocked,
+)
 from analytics.local_bridge import (  # noqa: E402
     decide_proposal_local,
     desk_data_dir,
-    save_capital_local,
-    save_live_allocation_local,
-    save_paper_allowlist_local,
     set_control_local,
 )
 from analytics.vm_bridge import (  # noqa: E402
     VmConfig,
     decide_proposal_remote,
-    save_capital_remote,
-    save_live_allocation_remote,
-    save_paper_allowlist_remote,
     set_control_remote,
     sync_snapshot,
 )
@@ -59,20 +59,17 @@ from analytics.desk_auth import (  # noqa: E402
     verify_totp,
 )
 from analytics.env_bridge import (  # noqa: E402
-    apply_env_patch,
-    apply_strategy_enables,
     read_env,
     strategy_enable_snapshot,
-    write_env_updates,
 )
-from analytics.bot_ops import bot_status, restart_bot, stop_bot  # noqa: E402
+from analytics.bot_ops import bot_status  # noqa: E402
 
 DEFAULT_DATA = desk_data_dir()
 LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "yes", "y"} or (
     DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
 )
 
-# Slim paper set (S4/S5/S8/S11/S12/S13)
+# Slim paper set (S4/S5/S8/S11/S12/S13/S14/S15)
 STRATEGIES = [
     "S4_OVERNIGHT",
     "S5_MINEDGE",
@@ -80,6 +77,8 @@ STRATEGIES = [
     "S11_DISCOVERED",
     "S12_HHHL30",
     "S13_HHHL_DAY",
+    "S14_WICK30_STRICT",
+    "S15_WICK30_NOWICK",
 ]
 
 
@@ -162,6 +161,9 @@ def totp_ok(label: str, key: str) -> bool:
 
 
 def set_control(**kwargs):  # type: ignore[no-untyped-def]
+    allowed, why = streamlit_control_allowed(kwargs)
+    if not allowed:
+        return streamlit_write_blocked(why)
     if LOCAL_DESK:
         try:
             return set_control_local(**kwargs)
@@ -171,30 +173,15 @@ def set_control(**kwargs):  # type: ignore[no-untyped-def]
 
 
 def save_capital(payload: dict) -> dict:
-    if LOCAL_DESK:
-        try:
-            return save_capital_local(payload)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-    return save_capital_remote(payload)
+    return streamlit_write_blocked("Capital")
 
 
 def save_live_allocation(payload: dict) -> dict:
-    if LOCAL_DESK:
-        try:
-            return save_live_allocation_local(payload)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-    return save_live_allocation_remote(payload)
+    return streamlit_write_blocked("Live deploy")
 
 
 def save_paper_allowlist(payload: dict) -> dict:
-    if LOCAL_DESK:
-        try:
-            return save_paper_allowlist_local(payload)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-    return save_paper_allowlist_remote(payload)
+    return streamlit_write_blocked("Paper allowlist")
 
 
 def _strategies_as_rows(raw) -> list[dict]:
@@ -477,11 +464,74 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
         st.info("Sync ticks.db to see PnL (uncheck skip-db).")
 
 
+def tab_s14_chart(dd: Path) -> None:
+    """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
+    from analytics.s14_chart import PLOTLY_ZOOM_CONFIG, labeled_candlestick_figure
+    from s14_exchange_sheet import refresh_status, start_angel_refresh
+
+    sheet = dd / "s14_sheet"
+    st.subheader("Gold Petal exchange candles")
+    st.caption(
+        "O/H/L/C is printed on each candle (not a table). "
+        "Scroll to zoom, drag to pan, use the rangeslider, double-click to reset. "
+        "On 30m/1h zoom in until the numbers sit on the bar. "
+        "Open with `gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
+        "http://127.0.0.1:8501/ → tab **S14 chart**."
+    )
+    st.caption(f"Desk code: `{ROOT}`")
+    st_status = refresh_status(sheet)
+    if st_status.get("running"):
+        st.warning("Angel pull running — wait ~30s and hit Rerun (top right).")
+    elif st_status.get("generated_at"):
+        st.caption(f"Last pull: {st_status['generated_at']}  {st_status.get('source') or ''}")
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        tf = st.selectbox("Timeframe", ["1d", "1h", "30m"], index=0)
+    with cols[1]:
+        pull = st.button("Pull live candles", type="primary")
+    if pull:
+        py = ROOT / "venv" / "bin" / "python"
+        if not py.is_file():
+            py = Path(sys.executable)
+        res = start_angel_refresh(root=ROOT, python=str(py), sheet_dir=sheet)
+        if res.get("started_new"):
+            st.info("Pulling Angel/MCX now. Wait 30–60s, then Rerun.")
+        elif res.get("running"):
+            st.info("A pull is already running.")
+        else:
+            st.error(str(res))
+    path = sheet / f"{tf}.csv"
+    if not path.is_file():
+        st.error(
+            "No sheet yet. On the VM run:\n\n"
+            "`cd ~/goldpetal && ./venv/bin/python explain_s14_candles.py "
+            "--tf 30m,1h,1d --from 2026-08-02 --no-print-bars`"
+        )
+        return
+    df = pd.read_csv(path)
+    for col in ("open", "high", "low", "close", "upper", "lower"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    rows = df.where(pd.notnull(df), None).to_dict("records")
+    try:
+        fig = labeled_candlestick_figure(rows, title=f"Gold Petal {tf} · O/H/L/C on candle")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config=PLOTLY_ZOOM_CONFIG,
+            key=f"s14-chart-{tf}",
+        )
+    except Exception as exc:
+        st.error(f"Candlestick needs plotly ({exc}).")
+        return
+
+
 def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
         "Approve → paper **auto-writes** whitelist env keys (e.g. S11_PACK_PATH). "
-        "Then use **Deploy / Ops → Restart bot**. Live still needs Unlock + DRY_RUN=false."
+        f"Then Restart supervise on the 8787 panel ({OPERATOR_URL}). "
+        "Live still needs Unlock live + DRY_RUN=false on 8787."
     )
     raw = load_json(dd / "control" / "proposals.json")
     items = (raw or {}).get("proposals") if isinstance(raw, dict) else (raw or [])
@@ -517,17 +567,10 @@ def tab_proposals(dd: Path) -> None:
                 key=f"note_{p['id']}",
                 value="",
             )
-            auto_restart = st.checkbox(
-                "Restart bot after approve (loads new pack)",
-                value=False,
-                key=f"ar_{p['id']}",
-            )
             b1, b2, b3 = st.columns(3)
             if b1.button("Approve → paper", key=f"ap_{p['id']}", type="primary"):
                 if p.get("safety_ok") is False:
                     st.warning("safety_ok=False — only approve if you accept the risk.")
-                if auto_restart and not totp_ok("restart after approve", f"totp_ap_{p['id']}"):
-                    st.stop()
                 res = decide_proposal(p["id"], "approved_paper", note=note, apply_env=True)
                 if res.get("ok"):
                     audit(
@@ -539,32 +582,16 @@ def tab_proposals(dd: Path) -> None:
                         f"Approved paper: {res.get('strategy')}. "
                         f"Env auto-applied: {res.get('env_applied')}"
                     )
-                    if auto_restart and LOCAL_DESK:
-                        rr = restart_bot()
-                        st.write(rr)
-                    elif res.get("restart_needed"):
-                        st.info("Open **Deploy / Ops** → Restart bot to load the new pack.")
+                    if res.get("restart_needed"):
+                        st.info(f"Restart supervise on 8787 ({OPERATOR_URL}) to load the pack.")
                     st.cache_data.clear()
                 else:
                     st.error(res.get("error") or res)
             if b2.button("Approve → live", key=f"al_{p['id']}"):
-                if not totp_ok("live approve", f"totp_al_{p['id']}"):
-                    st.stop()
-                ok = st.session_state.get(f"live_confirm_{p['id']}", False)
-                if not ok:
-                    st.session_state[f"live_confirm_{p['id']}"] = True
-                    st.warning("Click again to confirm LIVE approve.")
-                else:
-                    res = decide_proposal(p["id"], "approved_live", note=note, apply_env=True)
-                    st.session_state[f"live_confirm_{p['id']}"] = False
-                    if res.get("ok"):
-                        audit("approve_live", ok=True, detail={"id": p["id"]})
-                        st.success(
-                            "Live-approved + env applied. Still need Unlock live + DRY_RUN=false "
-                            "(Deploy / Ops), then Restart."
-                        )
-                    else:
-                        st.error(res.get("error") or res)
+                st.warning(
+                    f"Do not approve live here. After paper looks good, check Live? "
+                    f"on the 8787 panel ({OPERATOR_URL})."
+                )
             if b3.button("Reject", key=f"rj_{p['id']}"):
                 res = decide_proposal(p["id"], "rejected", note=note, apply_env=False)
                 if res.get("ok"):
@@ -579,7 +606,12 @@ def tab_proposals(dd: Path) -> None:
 
 
 def tab_control(dd: Path) -> None:
-    st.subheader("Bot control")
+    st.subheader("Bot control — stop only")
+    st.info(
+        operator_readonly_markdown()
+        + " Streamlit may **stop** (emergency / pause / lock live). "
+        "Clear emergency, resume, and unlock live only on 8787."
+    )
     state = load_json(dd / "control" / "state.json") or {}
     st.json(state)
 
@@ -589,408 +621,106 @@ def tab_control(dd: Path) -> None:
             res = set_control(emergency_off=True)
             audit("emergency_off", ok=bool(res.get("ok")), detail=res)
             st.write(res)
-    if c2.button("Clear emergency"):
-        if totp_ok("clear emergency", "totp_em_clear"):
-            res = set_control(emergency_off=False)
-            audit("emergency_clear", ok=bool(res.get("ok")), detail=res)
-            st.write(res)
-    if c3.button("Pause trading"):
+    if c2.button("Pause trading"):
         res = set_control(trading_enabled=False)
         st.write(res)
-
-    d1, d2, d3 = st.columns(3)
-    if d1.button("Resume trading"):
-        res = set_control(trading_enabled=True)
-        st.write(res)
-    if d2.button("Unlock live (dangerous)"):
-        st.session_state["unlock_arm"] = True
-        st.warning("Click Confirm unlock next.")
-    if d3.button("Confirm unlock") and st.session_state.get("unlock_arm"):
-        if totp_ok("unlock live", "totp_unlock"):
-            res = set_control(live_unlocked=True)
-            st.session_state["unlock_arm"] = False
-            audit("live_unlock", ok=bool(res.get("ok")), detail=res)
-            st.write(res)
-    if st.button("Lock live"):
+    if c3.button("Lock live"):
         res = set_control(live_unlocked=False)
         audit("live_lock", ok=bool(res.get("ok")), detail=res)
         st.write(res)
 
-    st.caption("Prefer **Deploy / Ops** for DRY_RUN + restart after unlock.")
-
 
 def tab_deploy_ops(dd: Path) -> None:
-    st.subheader("Deploy / Ops — strategies, live arming, restart")
-    if not LOCAL_DESK:
-        st.warning("Full deploy/restart only works on the VM desk (GP_DESK_LOCAL=1).")
-        return
+    st.subheader("Deploy / Ops — read-only")
+    st.info(operator_readonly_markdown())
+    st.caption(f"Change ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, and Restart on {OPERATOR_URL}")
 
-    status = bot_status()
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Bot running", "yes" if status.get("running") else "no")
-    s2.metric("supervise PIDs", len(status.get("supervise") or []))
-    s3.metric("run_strategy PIDs", len(status.get("run_strategy") or []))
-    health = status.get("health") or {}
-    s4.metric("Last health", str(health.get("ts_ist") or "—")[-8:] if health else "—")
-    mismatches = status.get("mismatches") or []
-    if mismatches:
-        st.error("Position mismatch (DB vs RAM): " + "; ".join(mismatches))
-    elif status.get("running"):
-        st.caption(
-            f"RAM positions: {health.get('positions') or '—'} · "
-            "restart restore + EOD flatten enabled in runner"
-        )
-    if not status.get("run_strategy"):
-        st.warning(
-            "supervise may be up but run_strategy is missing — "
-            "activate venv or pull supervise.sh fix, then Restart bot."
-        )
-
-    env = read_env()
-    enables = strategy_enable_snapshot()
-    dry = env.get("DRY_RUN", "true").lower() in {"1", "true", "yes", "y"}
-    live_max = int(float(env.get("LIVE_MAX_LOTS", "1") or 1))
-    live_lots = int(float(env.get("LIVE_LOTS", "1") or 1))
-    s11_pack = env.get("S11_PACK_PATH", "")
-
-    st.markdown("### Paper / load strategies (ENABLE_*)")
-    st.caption("Checked = loaded into RAM after **Restart bot**. Unchecked strategies are not traded.")
-    picked: list[str] = []
-    cols = st.columns(3)
-    for i, name in enumerate(STRATEGIES):
-        on = cols[i % 3].checkbox(name, value=bool(enables.get(name)), key=f"en_{name}")
-        if on:
-            picked.append(name)
-
-    st.markdown("### Live arming")
-    dry_run = st.checkbox("DRY_RUN (paper only)", value=dry, key="ops_dry")
-    live_max_in = st.number_input("LIVE_MAX_LOTS (hard ceiling)", min_value=1, value=max(1, live_max), step=1)
-    live_lots_in = st.number_input("LIVE_LOTS (default size)", min_value=1, value=max(1, live_lots), step=1)
-    st.text_input("S11_PACK_PATH", value=s11_pack, key="ops_s11_pack")
-
-    restart_after = st.checkbox("Restart bot after save", value=True)
-    confirm = st.checkbox("I confirm writing .env from this desk", value=False)
-
-    b1, b2, b3, b4 = st.columns(4)
-    if b1.button("Save strategy enables", type="primary", disabled=not confirm):
-        if not totp_ok("save ENABLE_*", "totp_enables"):
-            st.stop()
-        res = apply_strategy_enables(picked, known=list(STRATEGIES))
-        # Also lock paper allowlist to the same set
-        save_paper_allowlist({"paper_allowlist": picked, "note": "desk deploy enables"})
-        audit("save_enables", ok=bool(res.get("ok")), detail=res)
-        st.write(res)
-        if restart_after and res.get("ok"):
-            if totp_ok("restart after enables", "totp_en_restart"):
-                st.write(restart_bot())
-        st.cache_data.clear()
-
-    if b2.button("Save live env (DRY_RUN / lots / S11)", disabled=not confirm):
-        if not totp_ok("save live env", "totp_live_env"):
-            st.stop()
-        patch = {
-            "DRY_RUN": "true" if dry_run else "false",
-            "LIVE_MAX_LOTS": int(live_max_in),
-            "LIVE_LOTS": int(live_lots_in),
-            "S11_PACK_PATH": st.session_state.get("ops_s11_pack", ""),
-        }
-        res = write_env_updates(patch)
-        audit("save_live_env", ok=bool(res.get("ok")), detail={"applied": res.get("applied")})
-        st.write(res)
-        if restart_after and res.get("ok"):
-            if totp_ok("restart after live env", "totp_live_restart"):
-                st.write(restart_bot())
-        st.cache_data.clear()
-
-    if b3.button("Restart bot now"):
-        if not totp_ok("restart bot", "totp_restart"):
-            st.stop()
-        res = restart_bot()
-        audit("restart_bot", ok=bool(res.get("ok")), detail={"killed": res.get("killed")})
-        st.write(res)
-        st.cache_data.clear()
-
-    if b4.button("Stop bot"):
-        if not totp_ok("stop bot", "totp_stop"):
-            st.stop()
-        res = stop_bot()
-        audit("stop_bot", ok=True, detail=res)
-        st.write(res)
-
-    with st.expander("strategy_run.log (tail)", expanded=False):
-        st.code(status.get("log_tail") or "(empty)", language="text")
-
-    st.markdown("### One-shot: paper set → capital → live list")
-    st.caption(
-        "Writes ENABLE_* + paper allowlist + live_approved + capital budgets, "
-        "optionally arms DRY_RUN=false. Always confirm + OTP."
-    )
+    if LOCAL_DESK:
+        status = bot_status()
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Bot running", "yes" if status.get("running") else "no")
+        s2.metric("supervise PIDs", len(status.get("supervise") or []))
+        s3.metric("run_strategy PIDs", len(status.get("run_strategy") or []))
+        health = status.get("health") or {}
+        s4.metric("Last health", str(health.get("ts_ist") or "—")[-8:] if health else "—")
+        mismatches = status.get("mismatches") or []
+        if mismatches:
+            st.error("Position mismatch (DB vs RAM): " + "; ".join(mismatches))
+        elif status.get("running"):
+            st.caption(f"RAM positions: {health.get('positions') or '—'}")
+        env = read_env()
+        enables = strategy_enable_snapshot()
+        e1, e2, e3 = st.columns(3)
+        e1.metric("DRY_RUN", env.get("DRY_RUN", "true"))
+        e2.metric("LIVE_MAX_LOTS", env.get("LIVE_MAX_LOTS", "1"))
+        e3.metric("S11_PACK_PATH", env.get("S11_PACK_PATH", "") or "—")
+        rows = [{"strategy": k, "ENABLE": "true" if v else "false"} for k, v in enables.items()]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        with st.expander("strategy_run.log (tail)", expanded=False):
+            st.code(status.get("log_tail") or "(empty)", language="text")
+    else:
+        st.warning("Bot/.env snapshot is on the VM. Open 8787 there.")
 
 
 def tab_capital(dd: Path) -> None:
-    st.subheader("Capital")
+    st.subheader("Capital — read-only")
+    st.info(operator_readonly_markdown())
+    st.caption(f"Edit book ₹ / lots on {OPERATOR_URL} Capital management.")
     cap = load_json(dd / "control" / "capital.json")
     if not cap:
-        st.info("No capital.json yet — Live Deploy or Push will create it.")
-        cap = {}
-    total = st.number_input(
-        "Total capital ₹",
-        value=float(cap.get("total_capital_inr") or 500000),
-        step=1000.0,
-    )
-    reserve = st.number_input(
-        "Cash reserve %",
-        value=float(cap.get("cash_reserve_pct") or 10),
-        step=1.0,
-    )
-    dayloss = st.number_input(
-        "Day loss limit ₹",
-        value=float(cap.get("daily_loss_limit_inr") or cap.get("day_loss_limit_inr") or 5000),
-        step=500.0,
-    )
-    maxlots = st.number_input(
-        "Max lots total",
-        value=int(cap.get("max_lots_total") or 10),
-        step=1,
-    )
+        st.info("No capital.json yet.")
+        return
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total ₹", f"{float(cap.get('total_capital_inr') or 0):,.0f}")
+    c2.metric("Reserve %", cap.get("cash_reserve_pct") or 0)
+    c3.metric("Day loss ₹", f"{float(cap.get('daily_loss_limit_inr') or cap.get('day_loss_limit_inr') or 0):,.0f}")
+    c4.metric("Max lots total", cap.get("max_lots_total") or 0)
     strategies = _strategies_as_rows(cap.get("strategies"))
     if strategies:
         st.dataframe(pd.DataFrame(strategies), use_container_width=True, hide_index=True)
-        st.caption("Edit per-strategy ₹ / lots on the Live Deploy tab.")
-    if st.button("Push capital to VM", type="primary"):
-        payload = {
-            "total_capital_inr": total,
-            "cash_reserve_pct": reserve,
-            "daily_loss_limit_inr": dayloss,
-            "max_lots_total": int(maxlots),
-            "strategies": strategies,
-        }
-        res = save_capital(payload)
-        if res.get("ok"):
-            st.success("Capital saved.")
-            st.cache_data.clear()
-        else:
-            st.error(res.get("error") or res)
 
 
 def tab_live_deploy(dd: Path) -> None:
-    st.subheader("Live deploy — pick strategies + capital")
+    st.subheader("Live deploy — read-only")
+    st.info(operator_readonly_markdown())
     st.caption(
-        "This sets which strategies may place **real Angel orders**, and how much ₹ / lots "
-        "each may use. Paper (DRY_RUN) is separate. Still required after Save: "
-        "**Unlock live** (Control tab) + `DRY_RUN=false` on the VM `.env`, then restart supervise."
+        f"live_approved, ENABLE_*, DRY_RUN, and Restart are on {OPERATOR_URL} Live money."
     )
     state = load_json(dd / "control" / "state.json") or {}
     cap = load_json(dd / "control" / "capital.json") or {}
-    live_set = set(state.get("live_approved") or [])
     force_disabled = set(state.get("force_disabled") or [])
-    strat_map = {
-        row["strategy"]: row for row in _strategies_as_rows(cap.get("strategies"))
-    }
-
-    st.markdown("### Paper allowlist (stop S9 / others)")
-    st.caption(
-        "Trades tab can still show **old** S9 rows from history. "
-        "This lock blocks **new** entries for everything not checked. "
-        "Also set `ENABLE_S9=false` (and S1/S2/S3/S6/S10) in `.env` + restart supervise."
-    )
-    paper_default = [s for s in STRATEGIES if s not in force_disabled] or list(STRATEGIES)
-    paper_pick = st.multiselect(
-        "Strategies allowed to paper-trade",
-        options=list(STRATEGIES),
-        default=paper_default,
-        key="paper_allow_pick",
-    )
-    if st.button("Lock paper to selected only", type="primary", key="paper_lock_btn"):
-        res = save_paper_allowlist(
-            {
-                "paper_allowlist": paper_pick,
-                "note": f"desk paper lock: {', '.join(paper_pick)}",
-            }
-        )
-        if res.get("ok"):
-            st.success(
-                f"Paper allowlist saved. Force-disabled: "
-                f"{', '.join(res.get('force_disabled') or []) or 'none'}"
-            )
-            st.warning(res.get("reminder") or "")
-            st.cache_data.clear()
-        else:
-            st.error(res.get("error") or res)
-    if force_disabled:
-        st.info(f"Currently force-disabled: {', '.join(sorted(force_disabled))}")
-
     c1, c2, c3 = st.columns(3)
     c1.metric("Live unlocked", "yes" if state.get("live_unlocked") else "locked")
     c2.metric("Live approved", ", ".join(state.get("live_approved") or []) or "—")
     c3.metric("Trading", "ON" if state.get("trading_enabled", True) else "paused")
-
-    total = st.number_input(
-        "Book capital ₹",
-        value=float(cap.get("total_capital_inr") or 500000),
-        step=1000.0,
-        key="live_total_cap",
-    )
-    reserve = st.number_input(
-        "Cash reserve %",
-        value=float(cap.get("cash_reserve_pct") or 20),
-        step=1.0,
-        key="live_reserve",
-    )
-    dayloss = st.number_input(
-        "Day loss limit ₹ (stops new entries)",
-        value=float(cap.get("daily_loss_limit_inr") or 5000),
-        step=500.0,
-        key="live_dayloss",
-    )
-    max_total = st.number_input(
-        "Max lots across all strategies",
-        value=int(cap.get("max_lots_total") or 10),
-        step=1,
-        key="live_max_total",
-    )
-
-    st.markdown("### Strategies for real trades")
-    st.caption(
-        "Check Live → that strategy is added to `live_approved`. "
-        "₹ budget gates entries; **max lots** is the live order size (hard-capped by "
-        "`LIVE_MAX_LOTS` in `.env`, default 1)."
-    )
-    allocations: list[dict] = []
-    live_names: list[str] = []
-    for name in STRATEGIES:
-        row = strat_map.get(name) or {}
-        with st.container(border=True):
-            left, mid, right = st.columns([1.4, 1.2, 1.2])
-            live_on = left.checkbox(
-                f"Live · {name}",
-                value=name in live_set,
-                key=f"live_on_{name}",
-            )
-            budget = mid.number_input(
-                "Capital ₹",
-                min_value=0.0,
-                value=float(row.get("budget_inr") or 50_000),
-                step=1000.0,
-                key=f"live_budget_{name}",
-            )
-            lots = right.number_input(
-                "Max lots",
-                min_value=1,
-                value=int(row.get("max_lots") or 1),
-                step=1,
-                key=f"live_lots_{name}",
-            )
-            if live_on:
-                live_names.append(name)
-                allocations.append(
-                    {
-                        "strategy": name,
-                        "budget_inr": float(budget),
-                        "max_lots": int(lots),
-                        "max_open_trades": int(row.get("max_open_trades") or 1),
-                        "enabled": True,
-                        "live": True,
-                    }
-                )
-
-    lock_paper_with_live = st.checkbox(
-        "Also lock paper to the Live-checked strategies only",
-        value=False,
-        key="lock_paper_with_live",
-    )
-    also_enable = st.checkbox(
-        "Also write ENABLE_* for Live-checked strategies (needs Restart)",
-        value=True,
-        key="live_also_enable",
-    )
-    restart_after_live = st.checkbox(
-        "Restart bot after save",
-        value=False,
-        key="live_restart_after",
-    )
-    disable_others = st.checkbox(
-        "Disable capital for strategies not selected (blocks their new entries too)",
-        value=False,
-    )
-    confirm = st.checkbox(
-        "I understand this arms real-money strategies (still needs Unlock + DRY_RUN=false)",
-        value=False,
-    )
-
-    b1, b2 = st.columns(2)
-    if b1.button("Save live allocation", type="primary", disabled=not confirm):
-        if not totp_ok("save live allocation", "totp_live_alloc"):
-            st.stop()
-        if not live_names:
-            st.warning("No strategies checked — this clears live_approved.")
-        payload = {
-            "live_approved": live_names,
-            "allocations": allocations,
-            "total_capital_inr": float(total),
-            "cash_reserve_pct": float(reserve),
-            "daily_loss_limit_inr": float(dayloss),
-            "max_lots_total": int(max_total),
-            "disable_others": bool(disable_others),
-            "note": f"desk live: {', '.join(live_names) or 'none'}",
-        }
-        if lock_paper_with_live:
-            payload["paper_allowlist"] = list(live_names)
-        res = save_live_allocation(payload)
-        if res.get("ok"):
-            audit("live_allocation", ok=True, detail={"live_approved": live_names})
-            st.success(
-                f"Live approved: {', '.join(res.get('live_approved') or []) or 'none'}"
-            )
-            if also_enable and LOCAL_DESK and live_names:
-                en = apply_strategy_enables(live_names, known=list(STRATEGIES))
-                st.write({"ENABLE_applied": en})
-            if restart_after_live and LOCAL_DESK:
-                if totp_ok("restart after live save", "totp_live_save_restart"):
-                    st.write(restart_bot())
-            if res.get("force_disabled"):
-                st.info(
-                    f"Force-disabled for paper: {', '.join(res.get('force_disabled') or [])}"
-                )
-            if not res.get("live_mode_ok"):
-                st.warning(
-                    f"Gates not ready for Angel orders yet: {res.get('live_mode_reason')}. "
-                    f"{res.get('reminder')}"
-                )
-            else:
-                st.info(res.get("reminder") or "Live mode OK.")
-            st.cache_data.clear()
-        else:
-            st.error(res.get("error") or res)
-
-    if b2.button("Clear all live approvals"):
-        res = save_live_allocation(
+    if force_disabled:
+        st.info("Force-disabled: " + ", ".join(sorted(force_disabled)))
+    rows = []
+    live_set = set(state.get("live_approved") or [])
+    for row in _strategies_as_rows(cap.get("strategies")):
+        name = row.get("strategy") or ""
+        rows.append(
             {
-                "live_approved": [],
-                "allocations": [],
-                "note": "desk cleared live_approved",
+                "strategy": name,
+                "live_approved": name in live_set,
+                "budget_inr": row.get("budget_inr"),
+                "max_lots": row.get("max_lots"),
             }
         )
-        if res.get("ok"):
-            st.success("Cleared live_approved.")
-            st.cache_data.clear()
-        else:
-            st.error(res.get("error") or res)
-
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     with st.expander("How live sizing works", expanded=False):
         st.markdown(
-            """
-1. Check **Live** on S4 / S5 / S12 (or others) and set each **Capital ₹** + **Max lots**.
-2. Click **Save live allocation**.
-3. On **Control**: Unlock live (two-step).
-4. On VM `.env`: `DRY_RUN=false` and set `LIVE_MAX_LOTS` to your hard ceiling (e.g. `5`).
-5. Restart `supervise.sh`. Only `live_approved` strategies place Angel orders;
-   size = min(strategy max_lots, LIVE_MAX_LOTS).
+            f"""
+1. On **8787 Live money**: check Live? for the strategy, set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
+2. On **8787 Capital**: set ₹ / max lots.
+3. Unlock live on 8787. Type LIVE only if you intend `DRY_RUN=false`.
+4. Type RESTART on 8787. Size = min(strategy max_lots, LIVE_MAX_LOTS).
 
-To stop S9/S1/etc paper completely: use **Lock paper to selected only** above, then on VM:
-`ENABLE_S9=false` (and other non-slim) + restart supervise.
+Do not also save these on Streamlit.
 """
         )
+
 
 
 def tab_ml(dd: Path) -> None:
@@ -1205,15 +935,19 @@ def main() -> None:
     if st.sidebar.button("Clear cache"):
         st.cache_data.clear()
 
-    st.title("Gold Petal research & control desk")
+    st.title("Gold Petal research desk")
     mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
-    st.caption(f"{mode} · strategies S4/S5/S8/S11/S12/S13 · {date.today().isoformat()}")
+    st.caption(
+        f"{mode} · operator writes on 8787 only · "
+        f"S4/S5/S8/S11/S12/S13/S14/S15 · {date.today().isoformat()}"
+    )
 
     if not dd.exists():
         st.warning("Data folder missing.")
         return
 
     (
+        t_s14,
         t0,
         t1,
         t_ops,
@@ -1227,12 +961,13 @@ def main() -> None:
         t8,
     ) = st.tabs(
         [
+            "S14 chart",
             "Overview",
             "Proposals / ML",
-            "Deploy / Ops",
-            "Control",
-            "Live Deploy",
-            "Capital",
+            "Deploy / Ops (view)",
+            "Control (stop)",
+            "Live Deploy (view)",
+            "Capital (view)",
             "Models",
             "Reasoning",
             "Trades",
@@ -1240,6 +975,8 @@ def main() -> None:
             "Live orders",
         ]
     )
+    with t_s14:
+        tab_s14_chart(dd)
     with t0:
         tab_overview(dd, db, lot_size=lot_size)
     with t1:

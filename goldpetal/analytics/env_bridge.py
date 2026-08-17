@@ -24,6 +24,8 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "ENABLE_S11",
         "ENABLE_S12",
         "ENABLE_S13",
+        "ENABLE_S14",
+        "ENABLE_S15",
         "DRY_RUN",
         "LIVE_MAX_LOTS",
         "LIVE_LOTS",
@@ -40,6 +42,19 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S13_ALLOW_LONG",
         "S13_ALLOW_SHORT",
         "S13_NO_FLIP",
+        "S14_BAR_MINUTES",
+        "S14_MIN_RANGE",
+        "S14_CONFIRM_MINUTES",
+        "S14_NOWICK_EPS",
+        "S14_OPEN_HOLD_MINUTES",
+        "S14_ALLOW_LONG",
+        "S14_ALLOW_SHORT",
+        "S15_BAR_MINUTES",
+        "S15_MIN_RANGE",
+        "S15_CONFIRM_MINUTES",
+        "S15_NOWICK_EPS",
+        "S15_ALLOW_LONG",
+        "S15_ALLOW_SHORT",
         "IGNORE_FEES",
         "FLATTEN_ON_BAD_REGIME",
     }
@@ -58,6 +73,8 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S11_DISCOVERED": "ENABLE_S11",
     "S12_HHHL30": "ENABLE_S12",
     "S13_HHHL_DAY": "ENABLE_S13",
+    "S14_WICK30_STRICT": "ENABLE_S14",
+    "S15_WICK30_NOWICK": "ENABLE_S15",
 }
 
 SLIM_ENABLE_DEFAULTS: dict[str, str] = {
@@ -73,6 +90,8 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S11": "true",
     "ENABLE_S12": "true",
     "ENABLE_S13": "true",
+    "ENABLE_S14": "true",
+    "ENABLE_S15": "true",
 }
 
 
@@ -98,17 +117,42 @@ def read_env(path: Path | None = None) -> dict[str, str]:
 
 def _validate_value(key: str, value: str) -> str:
     value = str(value).strip()
-    if key.startswith("ENABLE_") or key in {"DRY_RUN", "IGNORE_FEES", "FLATTEN_ON_BAD_REGIME", "S12_NO_FLIP", "S12_ALLOW_LONG", "S12_ALLOW_SHORT", "S13_ALLOW_LONG", "S13_ALLOW_SHORT", "S13_NO_FLIP"}:
+    if key.startswith("ENABLE_") or key in {
+        "DRY_RUN",
+        "IGNORE_FEES",
+        "FLATTEN_ON_BAD_REGIME",
+        "S12_NO_FLIP",
+        "S12_ALLOW_LONG",
+        "S12_ALLOW_SHORT",
+        "S13_ALLOW_LONG",
+        "S13_ALLOW_SHORT",
+        "S13_NO_FLIP",
+        "S14_ALLOW_LONG",
+        "S14_ALLOW_SHORT",
+        "S15_ALLOW_LONG",
+        "S15_ALLOW_SHORT",
+    }:
         low = value.lower()
         if low not in {"true", "false", "1", "0", "yes", "no", "y", "n"}:
             raise ValueError(f"{key} must be boolean-like, got {value!r}")
         return "true" if low in {"true", "1", "yes", "y"} else "false"
-    if key in {"LIVE_MAX_LOTS", "LIVE_LOTS", "S12_BAR_MINUTES", "S12_CONFIRM_MINUTES", "S13_ENTRY_MINUTES_BEFORE_CLOSE", "S13_EXIT_MINUTES_AFTER_OPEN"}:
+    if key in {
+        "LIVE_MAX_LOTS",
+        "LIVE_LOTS",
+        "S12_BAR_MINUTES",
+        "S12_CONFIRM_MINUTES",
+        "S13_ENTRY_MINUTES_BEFORE_CLOSE",
+        "S13_EXIT_MINUTES_AFTER_OPEN",
+        "S14_BAR_MINUTES",
+        "S14_CONFIRM_MINUTES",
+        "S15_BAR_MINUTES",
+        "S15_CONFIRM_MINUTES",
+    }:
         n = int(float(value))
         if n < 0 or n > 10_000:
             raise ValueError(f"{key} out of range")
         return str(n)
-    if key in {"S12_MIN_RANGE", "S13_MIN_RANGE"}:
+    if key in {"S12_MIN_RANGE", "S13_MIN_RANGE", "S14_MIN_RANGE", "S14_NOWICK_EPS", "S14_OPEN_HOLD_MINUTES", "S15_MIN_RANGE", "S15_NOWICK_EPS"}:
         f = float(value)
         if f < 0 or f > 1_000_000:
             raise ValueError(f"{key} out of range")
