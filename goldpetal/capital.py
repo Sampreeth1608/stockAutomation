@@ -90,7 +90,7 @@ def default_plan() -> CapitalPlan:
     each = round(deployable / len(DEFAULT_STRATEGIES), 2)
     strats = {}
     for name in DEFAULT_STRATEGIES:
-        # S12 hist paper path sized at 100 lots; S13 overnight HH/LL similar; others stay conservative.
+        # S12 hist paper path sized at 100 lots; S13 daily same-candle HH/LL similar; others stay conservative.
         lots = 100 if name in {"S12_HHHL30", "S13_HHHL_DAY"} else 10
         strats[name] = StrategyBudget(
             strategy=name, budget_inr=each, max_lots=lots

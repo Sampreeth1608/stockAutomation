@@ -35,18 +35,19 @@ tmux kill-session -t gp-desk 2>/dev/null || true
 ./scripts/run_desk_vm.sh
 ```
 
-## S13 daily HH/LL overnight (paper)
+## S13 daily HH/LL same-candle (paper)
 
-Same-day rule as S12: if today's high > yesterday's high, watch the day; in the
-**last 15 minutes before MARKET_CLOSE**, if close > open → long overnight (exit next open).
-Short is the mirror (LL + red close).
+Same rule as S12 on the **day** candle: if today's high > yesterday's high, watch
+the day; in the **last 15 minutes before MARKET_CLOSE**, if close > open → long.
+Exit only on a later day that prints LH + red in **that day's last 15 minutes**
+(not at the next open). Short is the mirror (LL + red close / HL + green close).
 
 ```bash
 # in .env
 ENABLE_S13=true
 S13_MIN_RANGE=5
 S13_ENTRY_MINUTES_BEFORE_CLOSE=15
-S13_EXIT_MINUTES_AFTER_OPEN=5
+S13_NO_FLIP=true
 ```
 
 Restart supervise after pull. Look for `S13_HHHL_DAY` / `same-day` in `data/strategy_run.log`.
@@ -70,7 +71,10 @@ EOD_FLATTEN_MINUTES=5
 ## S12 same-candle 30m HH/LL
 
 During a 30m candle, if high > previous candle high, watch it; in that candle's
-**last minute**, if close > open → long (within that 30m, not +another 30m). Short mirror.
+**last minute**, if close > open → long (within that 30m, not +another 30m).
+Exit on a later 30m candle's last minute when high < prev high and close < open.
+Never fill on the first tick of the next bar. Short mirror. S12 is **not**
+EOD-flattened in the last 5m (that window overlaps `:29`).
 
 ```bash
 ENABLE_S12=true

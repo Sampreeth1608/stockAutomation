@@ -79,6 +79,47 @@ def test_same_candle_last_minute_short() -> None:
     assert s.position == "short"
 
 
+def test_no_next_bar_fallback_entry() -> None:
+    """HH+green on 10:00 bar must NOT buy on the first tick of 10:30."""
+    s = HhhlCandleStrategy(
+        HhhlConfig(min_range=5, no_flip=True, confirm_minutes=1), seed=False
+    )
+    s.prev_o, s.prev_h, s.prev_l, s.prev_c = 100.0, 105.0, 99.0, 104.0
+
+    def ts(hhmm: str) -> datetime:
+        return datetime.fromisoformat(f"2026-08-12T{hhmm}:00+05:30").astimezone(IST)
+
+    assert s.on_tick(ts("10:00"), 104.0) is None
+    assert s.on_tick(ts("10:10"), 112.0) is None
+    rolled = s.on_tick(ts("10:30"), 110.0)
+    assert rolled is None
+    assert s.position == "flat"
+
+
+def test_same_candle_last_minute_exit_after_entry() -> None:
+    """Enter last minute of HH+green bar; exit last minute of later LH+red bar."""
+    s = HhhlCandleStrategy(
+        HhhlConfig(min_range=5, no_flip=True, confirm_minutes=1), seed=False
+    )
+    s.prev_o, s.prev_h, s.prev_l, s.prev_c = 100.0, 105.0, 99.0, 104.0
+
+    def ts(hhmm: str) -> datetime:
+        return datetime.fromisoformat(f"2026-08-12T{hhmm}:00+05:30").astimezone(IST)
+
+    s.on_tick(ts("10:00"), 104.0)
+    s.on_tick(ts("10:10"), 112.0)
+    buy = s.on_tick(ts("10:29"), 110.0)
+    assert buy is not None and buy.action == "BUY"
+    # First tick of next candle must not exit/enter
+    assert s.on_tick(ts("10:30"), 110.0) is None
+    assert s.position == "long"
+    s.on_tick(ts("10:40"), 96.0)
+    close = s.on_tick(ts("10:59"), 96.0)
+    assert close is not None and close.action == "CLOSE"
+    assert s.position == "flat"
+    assert "same-candle" in (close.reason or "")
+
+
 def test_gate_reject_can_retry() -> None:
     s = HhhlCandleStrategy(
         HhhlConfig(min_range=5, no_flip=True, confirm_minutes=1), seed=False
@@ -105,5 +146,7 @@ if __name__ == "__main__":
     test_min_range_blocks()
     test_same_candle_last_minute_long()
     test_same_candle_last_minute_short()
+    test_no_next_bar_fallback_entry()
+    test_same_candle_last_minute_exit_after_entry()
     test_gate_reject_can_retry()
     print("ALL test_strategy_hhhl OK")

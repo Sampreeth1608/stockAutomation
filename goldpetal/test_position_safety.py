@@ -10,6 +10,7 @@ from position_safety import (
     OpenPosition,
     apply_position_to_strategy,
     in_eod_flatten_window,
+    intraday_open_for_flatten,
     startup_reconcile,
 )
 
@@ -60,6 +61,23 @@ def test_disabled_not_restorable() -> None:
         OpenPosition("S5_MINEDGE", "long", 1.0, "t", "BUY", 1.0),
     )
     assert not ok
+
+
+def test_s12_not_eod_flattened() -> None:
+    class _S12:
+        name = "S12_HHHL30"
+        position = "long"
+        entry_price = 15000.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    rows = intraday_open_for_flatten({"S12_HHHL30": _S12(), "S5_MINEDGE": _S5()})
+    names = {r["strategy"] for r in rows}
+    assert "S5_MINEDGE" in names
+    assert "S12_HHHL30" not in names
 
 
 def test_eod_window() -> None:
@@ -115,6 +133,8 @@ if __name__ == "__main__":
     print("ok disabled")
     test_eod_window()
     print("ok eod")
+    test_s12_not_eod_flattened()
+    print("ok s12 skip flatten")
     test_startup_reconcile_restore()
     print("ok reconcile")
     print("ALL test_position_safety OK")

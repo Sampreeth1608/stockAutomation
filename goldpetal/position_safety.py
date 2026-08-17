@@ -1,9 +1,10 @@
-"""Restart / orphan / EOD safety for intraday strategies (S5/S8/S12).
+"""Restart / orphan / EOD safety for intraday strategies (S5/S8/…).
 
 Institutional minimum:
   - Restore RAM position from last DB signal after restart (so exits can fire)
   - Or auto-CLOSE orphans when restore is impossible / mode=close
   - Flatten intraday books in the last N minutes before MARKET_CLOSE
+    (S12/S13 skipped — they only exit on same-candle HH/LL confirm)
   - Write data/control/bot_health.json for the desk
 """
 
@@ -21,7 +22,7 @@ IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
 HEALTH_PATH = ROOT / "data" / "control" / "bot_health.json"
 
-# Intraday strategies that lose RAM state on restart and should EOD-flatten.
+# Intraday strategies that lose RAM state on restart.
 INTRADAY_RESTORE = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
@@ -33,6 +34,10 @@ INTRADAY_RESTORE = (
     "S10_LEGACY30",
     "S11_DISCOVERED",
 )
+
+# S12 must only flatten on same-candle last-minute HH/LL (confirm window
+# overlaps the last 5m before MARKET_CLOSE). S13 is a multi-day hold.
+EOD_FLATTEN_SKIP = frozenset({"S12_HHHL30", "S13_HHHL_DAY"})
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -245,6 +250,8 @@ def intraday_open_for_flatten(strategies: dict[str, Any]) -> list[dict[str, Any]
     out: list[dict[str, Any]] = []
     for name, obj in strategies.items():
         if name not in INTRADAY_RESTORE:
+            continue
+        if name in EOD_FLATTEN_SKIP:
             continue
         pos = getattr(obj, "position", "flat")
         if pos in {"long", "short"}:

@@ -39,6 +39,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S13_EXIT_MINUTES_AFTER_OPEN",
         "S13_ALLOW_LONG",
         "S13_ALLOW_SHORT",
+        "S13_NO_FLIP",
         "IGNORE_FEES",
         "FLATTEN_ON_BAD_REGIME",
     }
@@ -97,7 +98,7 @@ def read_env(path: Path | None = None) -> dict[str, str]:
 
 def _validate_value(key: str, value: str) -> str:
     value = str(value).strip()
-    if key.startswith("ENABLE_") or key in {"DRY_RUN", "IGNORE_FEES", "FLATTEN_ON_BAD_REGIME", "S12_NO_FLIP", "S12_ALLOW_LONG", "S12_ALLOW_SHORT", "S13_ALLOW_LONG", "S13_ALLOW_SHORT"}:
+    if key.startswith("ENABLE_") or key in {"DRY_RUN", "IGNORE_FEES", "FLATTEN_ON_BAD_REGIME", "S12_NO_FLIP", "S12_ALLOW_LONG", "S12_ALLOW_SHORT", "S13_ALLOW_LONG", "S13_ALLOW_SHORT", "S13_NO_FLIP"}:
         low = value.lower()
         if low not in {"true", "false", "1", "0", "yes", "no", "y", "n"}:
             raise ValueError(f"{key} must be boolean-like, got {value!r}")

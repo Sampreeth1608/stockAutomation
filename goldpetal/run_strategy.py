@@ -345,7 +345,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S13      : daily HH/LL overnight "
+        f"S13      : daily HH/LL same-candle "
         f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
         f"{strategy_s13.status_line}",
         flush=True,
@@ -1107,7 +1107,7 @@ def run_once(
         logger.info(line)
 
     def emit_s12_if_changed(now: datetime, message: dict) -> None:
-        """S12: same-candle HH/LL confirm in last minute of the 30m bar."""
+        """S12: same-candle HH/LL — enter/exit only in last minute of *that* bar."""
         if not _strategy_active(strategy_s12.name):
             return
         if latest["cmp"] is None:
@@ -1185,7 +1185,7 @@ def run_once(
         logger.info(line)
 
     def emit_s13_if_changed(now: datetime, message: dict) -> None:
-        """S13: daily HH/LL near close → hold overnight → exit next open."""
+        """S13: daily HH/LL — enter/exit in last 15m of the signal day (not next open)."""
         if not _strategy_active(strategy_s13.name):
             return
         if latest["cmp"] is None:
@@ -1200,11 +1200,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = allow_new_entry(strategy_s13.name)
+            ok_enter, why = allow_new_entry(strategy_s13.name)
             if not ok_enter:
                 strategy_s13.position = "flat"
                 strategy_s13.entry_price = None
                 strategy_s13.entry_date = None
+                if hasattr(strategy_s13, "release_action_lock"):
+                    strategy_s13.release_action_lock()
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] S13_HHHL_DAY "
+                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
                 return
         _record_signal(
             time_label=now.isoformat(timespec="seconds"),
@@ -1323,7 +1332,7 @@ def run_once(
             emit_s10_if_changed(now, message)
             # S12: HH/LL candle breakout
             emit_s12_if_changed(now, message)
-            # S13: daily HH/LL overnight (S4-style windows)
+            # S13: daily HH/LL same-candle (last 15m of the signal day)
             emit_s13_if_changed(now, message)
 
             # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE

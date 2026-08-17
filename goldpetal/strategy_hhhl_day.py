@@ -1,11 +1,13 @@
-"""S13_HHHL_DAY — daily HH/LL signal, S4-style overnight hold (paper).
+"""S13_HHHL_DAY — daily HH/LL, same-candle confirm (paper).
 
-Same *same-candle* rule as S12, on the **trading day** vs **previous day**:
+Same rule as S12, on the **trading day** vs **previous day**. Every action
+is taken on the day candle that printed the signal, in that day's last 15
+minutes — never at the next day's open.
 
-  During the day, if **today's high > yesterday's high**, watch the day candle.
-  In the **last 15 minutes before market close** (configurable), if close > open → LONG overnight.
-  Short: today's low < yesterday's low, last-minute close < open → SHORT overnight.
-  EXIT after next open (delivery-style).
+  Watch: if today's high > yesterday's high (or LL for short).
+  LONG  entry: that same day's last-15m close > open.
+  LONG  exit:  a later day with high < prev_high AND last-15m close < open.
+  SHORT entry / exit: the LL / higher-low mirrors.
 
 Does not replace S4 ML overnight — separate paper strategy.
 """
@@ -48,11 +50,13 @@ class HhhlDayConfig:
     min_range: float = 5.0
     # Confirm in the last N minutes of the day candle (default: last 15 minutes).
     entry_minutes_before_close: int = 15
+    # Unused (old next-open exit). Kept so existing .env / tests still construct.
     exit_minutes_after_open: int = 5
     market_open: str = "09:00"
     market_close: str = "23:30"
     allow_long: bool = True
     allow_short: bool = True
+    no_flip: bool = True
 
 
 class HhhlDayOvernightStrategy:
@@ -73,8 +77,8 @@ class HhhlDayOvernightStrategy:
         self.last_signal: str | None = None
         self.prev_day: DayOhlc | None = None
         self._day: DayOhlc | None = None
-        self._entered_today = False
-        self._exited_today = False
+        self._acted_today = False
+        self._acted_date: str | None = None
         self.market_open = self._parse_hhmm(self.cfg.market_open)
         self.market_close = self._parse_hhmm(self.cfg.market_close)
         self._load_state()
@@ -93,9 +97,10 @@ class HhhlDayOvernightStrategy:
             else "prev=none"
         )
         return (
-            f"daily HH/LL overnight min_range={c.min_range:.0f} "
-            f"entry={c.entry_minutes_before_close}m_before_close "
-            f"L={c.allow_long} S={c.allow_short} {prev} pos={self.position}"
+            f"daily HH/LL same-candle min_range={c.min_range:.0f} "
+            f"confirm={c.entry_minutes_before_close}m_before_close "
+            f"no_flip={c.no_flip} L={c.allow_long} S={c.allow_short} "
+            f"{prev} pos={self.position}"
         )
 
     def _load_state(self) -> None:
@@ -110,6 +115,11 @@ class HhhlDayOvernightStrategy:
         self.position = raw.get("side", "flat")  # type: ignore[assignment]
         self.entry_price = raw.get("entry_price")
         self.entry_date = raw.get("entry_date")
+        acted = raw.get("acted_date")
+        if isinstance(acted, str) and acted:
+            self._acted_date = acted
+            today = datetime.now(IST).strftime("%Y-%m-%d")
+            self._acted_today = acted == today
         pd = raw.get("prev_day")
         if isinstance(pd, dict) and pd.get("date"):
             self.prev_day = DayOhlc(
@@ -178,6 +188,7 @@ class HhhlDayOvernightStrategy:
             "side": self.position,
             "entry_price": self.entry_price,
             "entry_date": self.entry_date,
+            "acted_date": self._acted_date,
             "prev_day": None,
             "today": None,
         }
@@ -199,7 +210,8 @@ class HhhlDayOvernightStrategy:
             }
         self.state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def _in_entry_window(self, now: datetime) -> bool:
+    def _in_confirm_window(self, now: datetime) -> bool:
+        """True in the last N minutes of *this* day candle (entry and exit)."""
         close_dt = now.replace(
             hour=self.market_close.hour,
             minute=self.market_close.minute,
@@ -209,23 +221,16 @@ class HhhlDayOvernightStrategy:
         start = close_dt - timedelta(minutes=self.cfg.entry_minutes_before_close)
         return start <= now <= close_dt
 
-    def _in_exit_window(self, now: datetime) -> bool:
-        open_dt = now.replace(
-            hour=self.market_open.hour,
-            minute=self.market_open.minute,
-            second=0,
-            microsecond=0,
-        )
-        end = open_dt + timedelta(minutes=self.cfg.exit_minutes_after_open)
-        return open_dt <= now <= end
+    def _in_entry_window(self, now: datetime) -> bool:
+        """Back-compat alias — confirm window is used for both entry and exit."""
+        return self._in_confirm_window(now)
 
     def _roll_day(self, today: str, px: float) -> None:
         """On calendar day change, seal yesterday as prev_day and start new bar."""
         if self._day is not None and self._day.date != today:
             self.prev_day = self._day
             self._day = DayOhlc(date=today, open=px, high=px, low=px, close=px)
-            self._entered_today = False
-            self._exited_today = False
+            self._acted_today = False
             self._save_state()
             return
         if self._day is None:
@@ -241,116 +246,183 @@ class HhhlDayOvernightStrategy:
         self._day.low = min(self._day.low, px)
         self._day.close = px
 
-    def _signal_from_day(self) -> tuple[str | None, str]:
-        """Return ('long'|'short'|None, reason) — same-day HH/LL + last-min close."""
+    def release_action_lock(self) -> None:
+        """Allow another confirm-window attempt (e.g. after entry gate reject)."""
+        self._acted_today = False
+        self._acted_date = None
+
+    def _mark_acted(self, today: str) -> None:
+        self._acted_today = True
+        self._acted_date = today
+
+    def _decide(self, px: float, today: str) -> SignalResult | None:
+        """Same-candle HH/LL vs previous day — used only in the confirm window."""
         day = self._day
         prev = self.prev_day
         if day is None or prev is None:
-            return None, "need_prev_day"
-        if day.range_pts < self.cfg.min_range:
-            return None, f"min_range {day.range_pts:.1f}<{self.cfg.min_range}"
-        # Watch flags: HH/LL must have printed on *this* day candle.
+            self.last_skip = "need_prev_day"
+            return None
+        range_pts = day.range_pts
         saw_hh = day.high > prev.high
         saw_ll = day.low < prev.low
         want_long = self.cfg.allow_long and saw_hh and day.close > day.open
         want_short = self.cfg.allow_short and saw_ll and day.close < day.open
-        if want_long and want_short:
-            return None, "conflict_hh_ll"
-        if want_long:
-            return (
-                "long",
-                (
+        exit_long = day.high < prev.high and day.close < day.open
+        exit_short = day.low > prev.low and day.close > day.open
+        can_enter = range_pts >= self.cfg.min_range
+
+        if self.position == "long":
+            if exit_long or (want_short and not self.cfg.no_flip):
+                self.position = "flat"
+                self.entry_price = None
+                self.entry_date = None
+                self._mark_acted(today)
+                if want_short and not self.cfg.no_flip and can_enter:
+                    self.position = "short"
+                    self.entry_price = px
+                    self.entry_date = today
+                    self._save_state()
+                    self.last_signal = "SHORT"
+                    return SignalResult(
+                        action="SHORT",
+                        position_after="short",
+                        price_delta=None,
+                        net=None,
+                        net_delta=None,
+                        prev_net_delta=None,
+                        reason=(
+                            f"s13 flip short same-day LL+red range={range_pts:.1f} "
+                            f"L={day.low:.1f}<prevL={prev.low:.1f}"
+                        ),
+                    )
+                self._save_state()
+                self.last_signal = "CLOSE"
+                return SignalResult(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=None,
+                    net=None,
+                    net_delta=None,
+                    prev_net_delta=None,
+                    reason=f"s13 exit long same-day LH+red range={range_pts:.1f}",
+                )
+            self.last_skip = "hold_long"
+            return None
+
+        if self.position == "short":
+            if exit_short or (want_long and not self.cfg.no_flip):
+                self.position = "flat"
+                self.entry_price = None
+                self.entry_date = None
+                self._mark_acted(today)
+                if want_long and not self.cfg.no_flip and can_enter:
+                    self.position = "long"
+                    self.entry_price = px
+                    self.entry_date = today
+                    self._save_state()
+                    self.last_signal = "BUY"
+                    return SignalResult(
+                        action="BUY",
+                        position_after="long",
+                        price_delta=None,
+                        net=None,
+                        net_delta=None,
+                        prev_net_delta=None,
+                        reason=(
+                            f"s13 flip long same-day HH+green range={range_pts:.1f} "
+                            f"H={day.high:.1f}>prevH={prev.high:.1f}"
+                        ),
+                    )
+                self._save_state()
+                self.last_signal = "CLOSE"
+                return SignalResult(
+                    action="CLOSE",
+                    position_after="flat",
+                    price_delta=None,
+                    net=None,
+                    net_delta=None,
+                    prev_net_delta=None,
+                    reason=f"s13 exit short same-day HL+green range={range_pts:.1f}",
+                )
+            self.last_skip = "hold_short"
+            return None
+
+        if not can_enter:
+            self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
+            return None
+        if want_long and not want_short:
+            self.position = "long"
+            self.entry_price = px
+            self.entry_date = today
+            self._mark_acted(today)
+            self._save_state()
+            self.last_signal = "BUY"
+            return SignalResult(
+                action="BUY",
+                position_after="long",
+                price_delta=None,
+                net=None,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=(
                     f"s13 LONG same-day HH+green dayH={day.high:.1f}>prevH={prev.high:.1f} "
-                    f"C={day.close:.1f}>O={day.open:.1f} range={day.range_pts:.1f}"
+                    f"C={day.close:.1f}>O={day.open:.1f} range={range_pts:.1f}"
                 ),
             )
-        if want_short:
-            return (
-                "short",
-                (
+        if want_short and not want_long:
+            self.position = "short"
+            self.entry_price = px
+            self.entry_date = today
+            self._mark_acted(today)
+            self._save_state()
+            self.last_signal = "SHORT"
+            return SignalResult(
+                action="SHORT",
+                position_after="short",
+                price_delta=None,
+                net=None,
+                net_delta=None,
+                prev_net_delta=None,
+                reason=(
                     f"s13 SHORT same-day LL+red dayL={day.low:.1f}<prevL={prev.low:.1f} "
-                    f"C={day.close:.1f}<O={day.open:.1f} range={day.range_pts:.1f}"
+                    f"C={day.close:.1f}<O={day.open:.1f} range={range_pts:.1f}"
                 ),
             )
         if saw_hh and not (day.close > day.open):
-            return None, "hh_but_not_green_at_close"
-        if saw_ll and not (day.close < day.open):
-            return None, "ll_but_not_red_at_close"
-        return None, "no_hhll_signal"
+            self.last_skip = "hh_but_not_green_at_close"
+        elif saw_ll and not (day.close < day.open):
+            self.last_skip = "ll_but_not_red_at_close"
+        else:
+            self.last_skip = "no_hhll_signal"
+        return None
 
-    def on_tick(self, now: datetime, ltp: float, message: dict[str, Any] | None = None) -> SignalResult | None:
+    def on_tick(
+        self, now: datetime, ltp: float, message: dict[str, Any] | None = None
+    ) -> SignalResult | None:
         del message
         now = now.astimezone(IST)
         today = now.strftime("%Y-%m-%d")
         px = float(ltp)
         self._update_day_bar(today, px)
 
-        # EXIT overnight position after next open
-        if (
-            self.position != "flat"
-            and self.entry_date
-            and self.entry_date < today
-            and self._in_exit_window(now)
-            and not self._exited_today
-        ):
-            side = self.position
-            entry_date = self.entry_date
-            self.position = "flat"
-            self.entry_price = None
-            self.entry_date = None
-            self._exited_today = True
-            self._save_state()
-            self.last_signal = "CLOSE"
-            return SignalResult(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=None,
-                net=None,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=f"s13 delivery exit after open; was_{side} entry_date={entry_date}",
-            )
-
-        # ENTRY in last minute(s) of *this* day candle (same-day HH/LL confirm)
-        if self.position != "flat":
-            self.last_skip = "already_in"
+        if self._acted_date == today:
+            self._acted_today = True
+        if self._acted_today:
+            self.last_skip = "acted_today"
             return None
-        if self._entered_today:
-            self.last_skip = "entered_today"
-            return None
-        if not self._in_entry_window(now):
-            # Still track watch state for status
+        if not self._in_confirm_window(now):
             if self._day and self.prev_day:
                 if self._day.high > self.prev_day.high:
                     self.last_skip = "watching_hh"
                 elif self._day.low < self.prev_day.low:
                     self.last_skip = "watching_ll"
                 else:
-                    self.last_skip = "outside_entry_window"
+                    self.last_skip = "outside_confirm_window"
             else:
-                self.last_skip = "outside_entry_window"
+                self.last_skip = "outside_confirm_window"
             return None
 
-        side, reason = self._signal_from_day()
-        self.last_skip = reason if side is None else None
-        if side is None:
-            return None
-
-        self.position = side  # type: ignore[assignment]
-        self.entry_price = px
-        self.entry_date = today
-        self._entered_today = True
-        self._save_state()
-        self.last_signal = "BUY" if side == "long" else "SHORT"
-        return SignalResult(
-            action="BUY" if side == "long" else "SHORT",
-            position_after=side,  # type: ignore[arg-type]
-            price_delta=None,
-            net=None,
-            net_delta=None,
-            prev_net_delta=None,
-            reason=reason,
-        )
+        return self._decide(px, today)
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -375,5 +447,6 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         market_close=os.getenv("MARKET_CLOSE", "23:30"),
         allow_long=_env_flag("S13_ALLOW_LONG", True),
         allow_short=_env_flag("S13_ALLOW_SHORT", True),
+        no_flip=_env_flag("S13_NO_FLIP", True),
     )
     return HhhlDayOvernightStrategy(cfg)

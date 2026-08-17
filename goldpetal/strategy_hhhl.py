@@ -1,15 +1,15 @@
 """S12_HHHL30 — Higher-high / lower-low on the *same* 30m candle (paper).
 
-Judgement (user rule):
-  During a 30m candle, if **current high > previous candle high**, watch it.
-  In that candle's **last minute**, if close > open → LONG.
-  Same for short: current low < prev low, last-minute close < open → SHORT.
-  Decision completes inside that 30m window (not after waiting another 30m).
+Judgement (user rule): every action is taken on the candle that printed the
+signal, in that candle's last minute — never on the next bar.
 
-Exits (still on last-minute of a later candle):
-  LONG  exit: high < prev_high AND close < open
-  SHORT exit: low  > prev_low  AND close > open
+  Watch: during a 30m candle, if current high > previous high (or LL for short).
+  LONG  entry: that same candle's last-minute close > open.
+  LONG  exit:  a later candle with high < prev_high AND last-minute close < open.
+  SHORT entry: same candle last-minute close < open after LL.
+  SHORT exit:  a later candle with low > prev_low AND last-minute close > open.
 
+No fallback on the first tick of the next bar (that was the 60-minute delay).
 Defaults: 30m bars, min_range=5, no_flip=True.
 Previous + in-progress candle OHLC seeded from ticks.db.
 """
@@ -172,21 +172,9 @@ class HhhlCandleStrategy:
             return None
 
         if key != self._bar_key:
-            # Candle ended — seal as previous; fallback decide if last-min missed.
-            result: SignalResult | None = None
-            if (
-                not self._decided_this_bar
-                and self.prev_h is not None
-                and self._bar_o is not None
-            ):
-                result = self._decide(
-                    float(self._bar_o),
-                    float(self._bar_h or px),
-                    float(self._bar_l or px),
-                    float(self._bar_c or px),
-                )
-                if result is not None:
-                    self._decided_this_bar = True
+            # Candle ended. Do not decide on this new bar's first tick — that
+            # would enter/exit on the *next* candle (60m delay). Missed last
+            # minute of the closed bar = no trade on that bar.
             self.prev_o = float(self._bar_o or px)
             self.prev_h = float(self._bar_h or px)
             self.prev_l = float(self._bar_l or px)
@@ -196,7 +184,7 @@ class HhhlCandleStrategy:
             self._bar_n = 1
             self._decided_this_bar = False
             self._watching = None
-            return result
+            return None
 
         # Same candle — update OHLC and watch for HH/LL breaks
         assert self._bar_h is not None and self._bar_l is not None
