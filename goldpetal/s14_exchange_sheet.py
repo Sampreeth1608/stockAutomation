@@ -20,6 +20,8 @@ import csv
 import html
 import io
 import json
+import os
+import subprocess
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -467,8 +469,11 @@ def load_sheet_meta(sheet_dir: Path | None = None) -> dict[str, Any]:
         return {
             "ok": False,
             "hint": (
-                "cd ~/goldpetal && ./venv/bin/python explain_s14_candles.py "
-                "--from-csv data/backtests/s14_candles --tf 30m,1h,1d --no-print-bars"
+                "On the VM: ./daily_s14_sheet.sh   "
+                "or  ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02 --no-print-bars\n"
+                "On your Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story "
+                "--zone=asia-south1-c -- -N -L 8787:127.0.0.1:8787\n"
+                "Then open http://127.0.0.1:8787/"
             ),
         }
     return json.loads(path.read_text(encoding="utf-8"))
@@ -490,9 +495,112 @@ def sheet_zip_bytes(sheet_dir: Path | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(folder.glob("*")):
-            if path.is_file() and path.suffix.lower() in {".csv", ".html", ".txt", ".json"}:
-                zf.write(path, arcname=path.name)
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".csv", ".html", ".txt", ".json"}:
+                continue
+            if path.name in {"refresh.lock", "refresh.json"}:
+                continue
+            zf.write(path, arcname=path.name)
     return buf.getvalue()
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def refresh_status(sheet_dir: Path | None = None) -> dict[str, Any]:
+    folder = Path(sheet_dir or SHEET_DIR)
+    lock_path = folder / "refresh.lock"
+    running = False
+    pid = 0
+    started = ""
+    if lock_path.is_file():
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            pid = int(lock.get("pid") or 0)
+            started = str(lock.get("started") or "")
+            running = _pid_alive(pid)
+        except (OSError, ValueError, json.JSONDecodeError):
+            running = False
+        if not running:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+    meta = load_sheet_meta(folder)
+    return {
+        "ok": True,
+        "running": running,
+        "pid": pid if running else 0,
+        "started": started if running else "",
+        "generated_at": meta.get("generated_at") or "",
+        "symbol": meta.get("symbol") or "",
+        "source": meta.get("source") or "",
+        "sheet_ok": bool(meta.get("ok")),
+    }
+
+
+def start_angel_refresh(
+    *,
+    root: Path,
+    python: str,
+    sheet_dir: Path | None = None,
+    date_from: str = "2026-08-02",
+) -> dict[str, Any]:
+    """Pull Angel/MCX candles in the background and rewrite the sheet."""
+    folder = Path(sheet_dir or SHEET_DIR)
+    folder.mkdir(parents=True, exist_ok=True)
+    st = refresh_status(folder)
+    if st["running"]:
+        return {**st, "started_new": False}
+    log_path = folder / "refresh.log"
+    lock_path = folder / "refresh.lock"
+    cmd = [
+        str(python),
+        str(Path(root) / "explain_s14_candles.py"),
+        "--tf",
+        "30m,1h,1d",
+        "--from",
+        date_from,
+        "--no-print-bars",
+        "--sheet-dir",
+        str(folder),
+    ]
+    logf = log_path.open("a", encoding="utf-8")
+    logf.write(f"\n--- {datetime.now(IST).isoformat(timespec='seconds')} ---\n")
+    logf.flush()
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(root),
+        stdout=logf,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": proc.pid,
+                "started": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST"),
+                "cmd": cmd,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "started_new": True,
+        "running": True,
+        "pid": proc.pid,
+        "generated_at": st.get("generated_at") or "",
+    }
 
 
 def missing_sheet_html() -> str:

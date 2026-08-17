@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,8 +56,10 @@ from s14_exchange_sheet import (
     load_sheet_csv,
     load_sheet_meta,
     missing_sheet_html,
+    refresh_status,
     rows_to_tsv as s14_rows_to_tsv,
     sheet_zip_bytes,
+    start_angel_refresh,
 )
 from panel_export import (
     TRADE_CSV_FIELDS,
@@ -268,15 +271,16 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
         <button class="btn" id="btn-reason" type="button">Re-run reasoner</button>
       </div>
       <p class="flash" id="flash"></p>
-      <p class="muted" style="margin-top:.75rem">Safer access: SSH tunnel (no public firewall). On your laptop run <span class="mono">ssh -N -L 8787:127.0.0.1:8787 USER@VM_IP</span> then open <span class="mono">http://127.0.0.1:8787/</span>. Bind panel with <span class="mono">--host 127.0.0.1</span>. Public <span class="mono">0.0.0.0/0</span> firewall is optional and less safe.</p>
+      <p class="muted" style="margin-top:.75rem">Open this desk through an SSH tunnel (no public 8787). On your Mac: <span class="mono">gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8787:127.0.0.1:8787</span> then <span class="mono">http://127.0.0.1:8787/</span>. Bind the panel with <span class="mono">--host 127.0.0.1</span>.</p>
     </section>
 
     <section class="panel">
       <h2>Gold Petal exchange candles</h2>
-      <p class="muted">Angel/MCX chart (the real candle). Green/red sticks = close vs open. Table under the chart is O/H/L/C + wick + S14 side. Hard-refresh after restarting this panel (not supervise).</p>
+      <p class="muted">Angel/MCX Gold Petal chart. Open this panel through the SSH tunnel, then Pull live candles (or wait for the weekday job). Green/red sticks = close vs open. Table is O/H/L/C + wick + S14 side.</p>
       <canvas id="s14-chart" width="1100" height="320"></canvas>
       <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
-        <a class="btn ok" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
+        <button class="btn ok" type="button" id="btn-s14-pull">Pull live candles</button>
+        <a class="btn" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
         <button class="btn" type="button" id="btn-s14-zip">Download sheet ZIP</button>
         <label class="muted">Tab
           <select id="s14-tf" style="margin-left:.35rem">
@@ -1123,8 +1127,26 @@ $("btn-s14-copy").onclick = async () => {
     s14Flash(`Copied ${data.rows.length} ${tf} rows — paste into Google Sheets`);
   } catch (e) { s14Flash(String(e.message || e)); }
 };
+$("btn-s14-pull").onclick = async () => {
+  try {
+    s14Flash("Pulling Angel/MCX Gold Petal candles… keep this tab open");
+    await api("/api/s14/refresh", { method: "POST", body: "{}" });
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const st = await api("/api/s14/refresh");
+      if (!st.running) {
+        await loadS14Preview();
+        s14Flash(st.generated_at ? `Chart updated ${st.generated_at}` : "Pull finished");
+        return;
+      }
+      s14Flash(`Still pulling from exchange… ${i * 2}s`);
+    }
+    s14Flash("Still running — wait and hard-refresh");
+  } catch (e) { s14Flash(String(e.message || e)); }
+};
 $("s14-tf").onchange = () => loadS14Preview();
 window.addEventListener("resize", () => loadS14Preview());
+setInterval(() => loadS14Preview().catch(() => {}), 60000);
 
 async function initExportDates() {
   const d = await api("/api/export/defaults");
@@ -1272,6 +1294,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/s14/meta":
                 status, body, ctype = _json_bytes(load_sheet_meta(S14_SHEET_DIR))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/refresh":
+                status, body, ctype = _json_bytes(refresh_status(S14_SHEET_DIR))
                 self._send(status, body, ctype)
                 return
             if path == "/api/s14/sheet":
@@ -1452,6 +1478,14 @@ class ControlHandler(BaseHTTPRequestHandler):
             path = parsed.path
             data = self._read_json()
 
+            if path == "/api/s14/refresh":
+                res = start_angel_refresh(
+                    root=ROOT,
+                    python=sys.executable,
+                    sheet_dir=S14_SHEET_DIR,
+                )
+                self._send(*_json_bytes(res))
+                return
             if path == "/api/emergency":
                 st = set_emergency(bool(data.get("off")))
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))

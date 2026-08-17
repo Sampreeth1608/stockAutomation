@@ -70,6 +70,21 @@ def test_format_table_no_column_binary() -> None:
     assert "open" in text.splitlines()[0]
 
 
+def test_refresh_status_idle() -> None:
+    import tempfile
+
+    from s14_exchange_sheet import refresh_status
+
+    with tempfile.TemporaryDirectory() as td:
+        st = refresh_status(Path(td))
+        assert st["running"] is False
+        lock = Path(td) / "refresh.lock"
+        lock.write_text('{"pid": 99999999, "started": "x"}', encoding="utf-8")
+        st = refresh_status(Path(td))
+        assert st["running"] is False
+        assert not lock.exists()
+
+
 def test_panel_mentions_s14_sheet() -> None:
     text = Path(__file__).resolve().parent.joinpath("control_panel.py").read_text(
         encoding="utf-8"
@@ -78,11 +93,14 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "btn-s14-copy" in text
     assert "Gold Petal exchange candles" in text
     assert "s14-chart" in text
+    assert "btn-s14-pull" in text
+    assert "127.0.0.1:8787" in text
 
 
 if __name__ == "__main__":
     test_display_row_prints_chart_values()
     test_workbook_html_and_csv()
     test_format_table_no_column_binary()
+    test_refresh_status_idle()
     test_panel_mentions_s14_sheet()
     print("ALL test_s14_exchange_sheet OK")
