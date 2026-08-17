@@ -98,6 +98,33 @@ def test_strict_exit_ignores_weak_opposite() -> None:
     assert r.trades[0].exit_px == 105.0
 
 
+def test_resettle_100_lots_scales_gross_not_brokerage() -> None:
+    from backtest_hhhl_candles import make_charge_cfg
+    from backtest_wick_candles import resettle_trade
+
+    row = {
+        "tf": "1h:raw",
+        "side": "LONG",
+        "entry_time": "2026-08-17 10:00:00",
+        "entry_px": "15450",
+        "exit_time": "2026-08-17 11:00:00",
+        "exit_px": "15550",
+        "gross_pts": "100",
+        "gross_pnl_inr": "100",
+        "after_tax_pnl_inr": "0",
+        "fees_inr": "50",
+        "lots": "1",
+    }
+    one = resettle_trade(row, lots=1, cfg=make_charge_cfg(fees=True, lots=1))
+    hun = resettle_trade(row, lots=100, cfg=make_charge_cfg(fees=True, lots=100))
+    assert one.gross_pts == 100.0
+    assert hun.gross_pts == 10000.0
+    assert hun.gross_pnl_inr == 10000.0
+    # Brokerage is per order, so 100-lot fees are not 100× the 1-lot fees.
+    assert hun.fees_inr < 80 * one.fees_inr
+    assert hun.after_tax_pnl_inr > one.after_tax_pnl_inr * 50
+
+
 def test_all_presets_run_on_toy_tape() -> None:
     from backtest_wick_candles import PRESETS
 
@@ -188,6 +215,8 @@ if __name__ == "__main__":
     print("ok nowick only")
     test_pin2_still_takes_bald_body()
     print("ok pin+nowick")
+    test_resettle_100_lots_scales_gross_not_brokerage()
+    print("ok resettle 100 lots")
     test_all_presets_run_on_toy_tape()
     print("ok preset grid")
     print("ALL test_wick_candles OK")

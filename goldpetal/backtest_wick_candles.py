@@ -13,11 +13,13 @@ Same command also prints the old FLIP book (reverse on every opposite wick)
 so HOLD vs FLIP is visible on one tape.
 
   python3 backtest_wick_candles.py --db data/ticks.db --lots 1 --session --fees
+  python3 backtest_wick_candles.py --resettle-from data/backtests/wick_candles --lots 100
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sqlite3
@@ -228,47 +230,7 @@ def simulate_wick(
     if side is not None and candles:
         close_trade(candles[-1])
 
-    by_day: dict[str, dict[str, float]] = {}
-    equity = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    for t in trades:
-        equity += t.after_tax_pnl_inr
-        peak = max(peak, equity)
-        max_dd = max(max_dd, peak - equity)
-        d = by_day.setdefault(
-            t.day,
-            {
-                "n_trades": 0.0,
-                "gross_pts": 0.0,
-                "gross_pnl_inr": 0.0,
-                "after_tax_pnl_inr": 0.0,
-                "fees_inr": 0.0,
-            },
-        )
-        d["n_trades"] += 1
-        d["gross_pts"] += t.gross_pts
-        d["gross_pnl_inr"] += t.gross_pnl_inr
-        d["after_tax_pnl_inr"] += t.after_tax_pnl_inr
-        d["fees_inr"] += t.fees_inr
-
-    wins = sum(1 for t in trades if t.gross_pnl_inr > 0)
-    n = len(trades)
-    return TfResult(
-        tf=tf,
-        n_bars=len(candles),
-        n_trades=n,
-        n_long=sum(1 for t in trades if t.side == "LONG"),
-        n_short=sum(1 for t in trades if t.side == "SHORT"),
-        win_rate=(wins / n) if n else 0.0,
-        gross_pts=sum(t.gross_pts for t in trades),
-        gross_pnl_inr=sum(t.gross_pnl_inr for t in trades),
-        after_tax_pnl_inr=sum(t.after_tax_pnl_inr for t in trades),
-        fees_inr=sum(t.fees_inr for t in trades),
-        max_dd_inr=max_dd,
-        by_day=by_day,
-        trades=trades,
-    )
+    return _tf_result_from_trades(tf, len(candles), trades)
 
 
 def load_ltp_rows(db: Path) -> list[tuple[str, float]]:
@@ -375,6 +337,149 @@ def print_hold_vs_flip(results: list[TfResult]) -> None:
     print()
 
 
+def _tf_result_from_trades(tf: str, n_bars: int, trades: list[Trade]) -> TfResult:
+    by_day: dict[str, dict[str, float]] = {}
+    equity = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for t in trades:
+        equity += t.after_tax_pnl_inr
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+        d = by_day.setdefault(
+            t.day,
+            {
+                "n_trades": 0.0,
+                "gross_pts": 0.0,
+                "gross_pnl_inr": 0.0,
+                "after_tax_pnl_inr": 0.0,
+                "fees_inr": 0.0,
+            },
+        )
+        d["n_trades"] += 1
+        d["gross_pts"] += t.gross_pts
+        d["gross_pnl_inr"] += t.gross_pnl_inr
+        d["after_tax_pnl_inr"] += t.after_tax_pnl_inr
+        d["fees_inr"] += t.fees_inr
+    wins = sum(1 for t in trades if t.gross_pnl_inr > 0)
+    n = len(trades)
+    return TfResult(
+        tf=tf,
+        n_bars=n_bars,
+        n_trades=n,
+        n_long=sum(1 for t in trades if t.side == "LONG"),
+        n_short=sum(1 for t in trades if t.side == "SHORT"),
+        win_rate=(wins / n) if n else 0.0,
+        gross_pts=sum(t.gross_pts for t in trades),
+        gross_pnl_inr=sum(t.gross_pnl_inr for t in trades),
+        after_tax_pnl_inr=sum(t.after_tax_pnl_inr for t in trades),
+        fees_inr=sum(t.fees_inr for t in trades),
+        max_dd_inr=max_dd,
+        by_day=by_day,
+        trades=trades,
+    )
+
+
+def resettle_trade(row: dict[str, str], *, lots: float, cfg: ChargeConfig) -> Trade:
+    """Re-apply Angel fees + tax at a new lot count. Fills stay the same."""
+    old_lots = float(row.get("lots") or 1.0) or 1.0
+    raw_pts = float(row["gross_pts"]) / old_lots
+    side = str(row["side"]).upper()
+    order_side = "BUY" if side == "LONG" else "SELL"
+    settled = apply_charges_and_tax(
+        raw_pts,
+        cfg,
+        side=order_side,
+        entry_price=float(row["entry_px"]),
+        exit_price=float(row["exit_px"]),
+    )
+    return Trade(
+        tf=str(row["tf"]),
+        side=side,
+        entry_time=str(row["entry_time"]),
+        entry_px=float(row["entry_px"]),
+        exit_time=str(row["exit_time"]),
+        exit_px=float(row["exit_px"]),
+        gross_pts=raw_pts * float(lots),
+        gross_pnl_inr=float(settled["gross_pnl"]),
+        after_tax_pnl_inr=float(settled["pnl_after_tax"]),
+        fees_inr=float(settled["charges"]),
+        lots=float(lots),
+    )
+
+
+def resettle_from_dir(src: Path, *, lots: float) -> list[TfResult]:
+    """Rebuild the wick scoreboard from trades_*.csv at a new lot size."""
+    if not src.exists():
+        raise SystemExit(f"missing resettle dir: {src}")
+    bars_by_tf: dict[str, int] = {}
+    summary_path = src / "summary.json"
+    if summary_path.exists():
+        for row in json.loads(summary_path.read_text(encoding="utf-8")):
+            bars_by_tf[str(row["tf"])] = int(row.get("n_bars") or 0)
+    paths = sorted(src.glob("trades_*.csv"))
+    if not paths:
+        raise SystemExit(f"no trades_*.csv in {src}")
+    cfg = make_charge_cfg(fees=True, lots=lots)
+    results: list[TfResult] = []
+    for path in paths:
+        with path.open(newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            tf = path.stem.removeprefix("trades_")
+            results.append(_tf_result_from_trades(tf, bars_by_tf.get(tf, 0), []))
+            continue
+        trades = [resettle_trade(r, lots=lots, cfg=cfg) for r in rows]
+        tf = trades[0].tf
+        results.append(_tf_result_from_trades(tf, bars_by_tf.get(tf, 0), trades))
+        r = results[-1]
+        print(
+            f"{r.tf:>16}  bars={r.n_bars:5d}  trades={r.n_trades:4d}  "
+            f"{r.n_long}/{r.n_short}  win={100 * r.win_rate:5.1f}%  "
+            f"pts={r.gross_pts:8.1f}  pnl={r.after_tax_pnl_inr:9.1f}",
+            flush=True,
+        )
+    return results
+
+
+def _print_and_write(results: list[TfResult], out_dir: Path) -> None:
+    hold_rows = [r for r in results if not r.tf.endswith("_flip")]
+    flip_rows = [r for r in results if r.tf.endswith("_flip")]
+    print_wick_summary(hold_rows, "HOLD — exit to flat, no reverse on that candle")
+    if flip_rows:
+        print_wick_summary(flip_rows, "FLIP — old reverse-on-every-opposite (for comparison)")
+        print_hold_vs_flip(results)
+    print_by_day(hold_rows)
+    write_outputs(results, out_dir)
+    lots_val = None
+    for r in results:
+        if r.trades:
+            lots_val = r.trades[0].lots
+            break
+    (out_dir / "scoreboard.json").write_text(
+        json.dumps(
+            [
+                {
+                    "row": r.tf,
+                    "n_bars": r.n_bars,
+                    "n_trades": r.n_trades,
+                    "n_long": r.n_long,
+                    "n_short": r.n_short,
+                    "win_rate": r.win_rate,
+                    "gross_pts": r.gross_pts,
+                    "after_tax_pnl_inr": r.after_tax_pnl_inr,
+                    "max_dd_inr": r.max_dd_inr,
+                    "fees_inr": r.fees_inr,
+                    "lots": lots_val,
+                }
+                for r in results
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def run_all(
     db: Path,
     *,
@@ -468,9 +573,31 @@ def main() -> None:
         type=Path,
         default=Path("data/backtests/wick_candles"),
     )
+    ap.add_argument(
+        "--resettle-from",
+        type=Path,
+        default=None,
+        help="Re-price existing trades_*.csv at --lots (same fills, new lot count). Skips ticks.",
+    )
     args = ap.parse_args()
-    if args.fees:
+    if args.fees or args.resettle_from is not None:
         os.environ["IGNORE_FEES"] = "false"
+
+    if args.resettle_from is not None:
+        out = args.out_dir
+        if args.out_dir == Path("data/backtests/wick_candles"):
+            out = Path(f"data/backtests/wick_candles_lots{int(args.lots)}")
+        print(
+            f"Wick-length resettle  src={args.resettle_from}  lots={args.lots}  "
+            f"out={out}"
+        )
+        print(
+            "Same HOLD fills as the 1-lot tape; Angel fees + 30% tax at the new lot size. "
+            "Brokerage stays ₹20/order; turnover fees scale with lots."
+        )
+        results = resettle_from_dir(args.resettle_from, lots=args.lots)
+        _print_and_write(results, out)
+        return
 
     if not args.db.exists():
         raise SystemExit(f"missing db: {args.db}")
@@ -538,34 +665,7 @@ def main() -> None:
         market_close=args.market_close,
         compare_flip=compare_flip,
     )
-    hold_rows = [r for r in results if not r.tf.endswith("_flip")]
-    flip_rows = [r for r in results if r.tf.endswith("_flip")]
-    print_wick_summary(hold_rows, "HOLD — exit to flat, no reverse on that candle")
-    if flip_rows:
-        print_wick_summary(flip_rows, "FLIP — old reverse-on-every-opposite (for comparison)")
-        print_hold_vs_flip(results)
-    print_by_day(hold_rows)
-    write_outputs(results, args.out_dir)
-    (args.out_dir / "scoreboard.json").write_text(
-        json.dumps(
-            [
-                {
-                    "row": r.tf,
-                    "n_bars": r.n_bars,
-                    "n_trades": r.n_trades,
-                    "n_long": r.n_long,
-                    "n_short": r.n_short,
-                    "win_rate": r.win_rate,
-                    "gross_pts": r.gross_pts,
-                    "after_tax_pnl_inr": r.after_tax_pnl_inr,
-                    "max_dd_inr": r.max_dd_inr,
-                }
-                for r in results
-            ],
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    _print_and_write(results, args.out_dir)
 
 
 if __name__ == "__main__":
