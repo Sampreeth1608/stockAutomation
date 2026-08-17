@@ -21,6 +21,7 @@ def test_lite_html_is_the_operator_page() -> None:
     assert "Download all (ZIP)" not in html
     assert "/api/history" not in html
     assert "s14-chart" not in html
+    assert "--bg:#ffffff" in html.replace(" ", "")
 
 
 def test_full_html_keeps_watch_downloads() -> None:
@@ -29,6 +30,7 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "Save strategies" in html
+    assert "--bg:#ffffff" in html.replace(" ", "")
 
 
 def test_control_panel_serves_lite_on_8501() -> None:

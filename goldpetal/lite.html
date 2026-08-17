@@ -5,36 +5,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal</title>
 <style>
-:root { --bg:#0e1412; --card:#17211c; --line:#2c3f34; --text:#e7eee8;
-  --muted:#8aa394; --ok:#3dba7a; --warn:#e0a045; --bad:#e05a4c; --gold:#d4a24c; }
+:root { --bg:#ffffff; --card:#ffffff; --line:#d0d0d0; --text:#111111;
+  --muted:#555555; --ok:#0d7a45; --warn:#a15c00; --bad:#c4281c; --gold:#8a5a12; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; }
 body { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
 h1 { font-size: 1.2rem; margin: 0 0 .35rem; }
+a { color: var(--gold); }
 .pills { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0 0 .9rem; }
 .pill { font: 12px/1 ui-monospace, monospace; padding: .25rem .45rem;
-  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); }
-.pill.ok { color: var(--ok); border-color: #2f6a4a; }
-.pill.bad { color: var(--bad); border-color: #6a2e28; }
-.pill.warn { color: var(--warn); border-color: #6a5220; }
+  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); background: #fff; }
+.pill.ok { color: var(--ok); border-color: #8fceb0; }
+.pill.bad { color: var(--bad); border-color: #f0b4ae; }
+.pill.warn { color: var(--warn); border-color: #e6c48a; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
   padding: .85rem .95rem; margin: 0 0 .7rem; }
 h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
   color: var(--gold); margin: 0 0 .55rem; }
 .row { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
-.btn { appearance: none; border: 1px solid var(--line); background: #1f2e26;
+.btn { appearance: none; border: 1px solid var(--line); background: #f4f4f4;
   color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .5rem .75rem;
   border-radius: 4px; cursor: pointer; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
-.btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
-.btn.danger { background: #3a1814; border-color: #6a2e28; color: #ffb4ab; }
+.btn.ok { background: #e8f6ee; border-color: #8fceb0; color: #0d7a45; }
+.btn.warn { background: #fff4e0; border-color: #e6c48a; color: #a15c00; }
+.btn.danger { background: #fdecea; border-color: #f0b4ae; color: #c4281c; }
 input[type=number], input[type=text] {
-  background: #0c1410; color: var(--text); border: 1px solid var(--line);
+  background: #fff; color: var(--text); border: 1px solid var(--line);
   border-radius: 4px; padding: .35rem .45rem; font: 13px ui-monospace, monospace; width: 7rem; }
 table { width: 100%; border-collapse: collapse; font: 13px ui-monospace, monospace; }
-th, td { text-align: left; padding: .32rem .3rem; border-bottom: 1px solid #24352c; }
+th, td { text-align: left; padding: .32rem .3rem; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
 .flash { min-height: 1.1rem; color: var(--gold); font-size: .85rem; margin: .4rem 0 0; }
 .flash.bad { color: var(--bad); }
@@ -45,7 +46,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 </head>
 <body>
   <h1>Gold Petal</h1>
-  <p class="hint">Controls only. <a href="/full" style="color:#d4a24c">Trade list, ticks, scoreboard, downloads</a></p>
+  <p class="hint">Controls only. <a href="/full">Trade list, ticks, scoreboard, downloads</a></p>
   <div class="pills" id="pills"></div>
 
   <section class="card">
