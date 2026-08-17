@@ -1,5 +1,5 @@
 # Sourced by VM start scripts. Prints how to open the desk from the Mac.
-# Do not run gcloud on the VM — that is what prints "insufficient authentication scopes".
+# Do not run gcloud or ssh-to-the-VM-IP here.
 
 print_open_on_mac() {
   local ip=""
@@ -7,28 +7,27 @@ print_open_on_mac() {
     http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null || true)"
 
   echo
-  echo "======== THIS WINDOW IS THE VM ========"
-  echo "Do not run gcloud compute ssh here. The VM cannot open Chrome,"
-  echo "and gcloud here fails with: insufficient authentication scopes."
+  echo "======== STOP — this window is the VM ========"
+  echo "Prompt looks like:  sampreeth1608@sampreeth-love-story"
+  echo "gcloud here → insufficient authentication scopes"
+  echo "ssh to ${ip:-8.231.125.120} here → Permission denied (publickey)"
+  echo "Both are the VM talking to itself. That cannot open Chrome."
   echo
-  echo "Open a NEW Terminal on your Mac (not this SSH session) and paste:"
+  echo "The Google Cloud Console SSH button is also the VM."
   echo
-  echo "  gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "On the Mac laptop (not this SSH tab):"
+  echo "  1. Click the desktop so the SSH window is not focused"
+  echo "  2. Press Cmd+Space, type Terminal, press Enter"
+  echo "  3. The new prompt must NOT say sampreeth-love-story"
+  echo "  4. Paste this and leave it running:"
   echo
-  if [[ -n "${ip}" ]]; then
-    echo "Or if gcloud is not installed on the Mac:"
-    echo
-    echo "  ssh -N -L 8501:127.0.0.1:8501 sampreeth1608@${ip}"
-    echo
-  else
-    echo "Or if gcloud is not installed on the Mac (use the VM public IP):"
-    echo
-    echo "  ssh -N -L 8501:127.0.0.1:8501 sampreeth1608@<VM_EXTERNAL_IP>"
-    echo
-  fi
-  echo "Leave that Mac window running. Then Chrome:"
-  echo "  http://127.0.0.1:8501/   → first tab Desk"
-  echo "Hard-refresh: Cmd+Shift+R"
-  echo "========================================"
+  echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo
+  echo "  5. Open Chrome on the Mac (not this SSH tab):"
+  echo "     http://127.0.0.1:8501/   → first tab Desk"
+  echo "     Hard-refresh: Cmd+Shift+R"
+  echo
+  echo "If a tunnel from earlier is still on the Mac, skip step 4 and just open Chrome."
+  echo "=============================================="
   echo
 }

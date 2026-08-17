@@ -67,10 +67,12 @@ def test_streamlit_desk_tab_is_the_writer() -> None:
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
     help_sh = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
     assert "print_open_on_mac" in sh
-    assert "THIS WINDOW IS THE VM" in help_sh
+    assert "STOP — this window is the VM" in help_sh
     assert "insufficient authentication scopes" in help_sh
+    assert "Permission denied (publickey)" in help_sh
     assert "first tab Desk" in help_sh
     assert "gcloud compute ssh" in help_sh
+    assert "Cmd+Space" in help_sh
 
 
 if __name__ == "__main__":
