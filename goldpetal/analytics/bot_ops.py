@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+_STATUS_CACHE: dict[str, Any] = {}
+
+
+def _status_cache_clear() -> None:
+    _STATUS_CACHE.clear()
 
 
 def _pgrep(pattern: str) -> list[dict[str, Any]]:
@@ -42,18 +47,31 @@ def _pgrep(pattern: str) -> list[dict[str, Any]]:
     return rows
 
 
-def bot_status() -> dict[str, Any]:
-    supervise = [r for r in _pgrep("supervise.sh") if "supervise.sh" in r.get("cmd", "")]
-    runner = [r for r in _pgrep("run_strategy.py") if "run_strategy.py" in r.get("cmd", "")]
-    desk = [r for r in _pgrep("streamlit") if "streamlit" in r.get("cmd", "").lower()]
-    log = ROOT / "data" / "strategy_run.log"
-    tail = ""
-    if log.exists():
-        try:
-            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-            tail = "\n".join(lines[-30:])
-        except OSError:
-            tail = ""
+def _tail_file(path: Path, n: int = 30) -> str:
+    if not path.exists():
+        return ""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - 65536))
+            data = fh.read().decode("utf-8", errors="replace")
+        return "\n".join(data.splitlines()[-n:])
+    except OSError:
+        return ""
+
+
+def bot_status(*, lite: bool = False) -> dict[str, Any]:
+    now = time.time()
+    key = "lite" if lite else "full"
+    hit = _STATUS_CACHE.get(key)
+    if hit and now - float(hit[0]) < 1.2:
+        return dict(hit[1])
+
+    rows = _pgrep("supervise.sh|run_strategy.py|collect_ticks.py|streamlit")
+    supervise = [r for r in rows if "supervise.sh" in r.get("cmd", "")]
+    runner = [r for r in rows if "run_strategy.py" in r.get("cmd", "")]
+    desk = [r for r in rows if "streamlit" in r.get("cmd", "").lower()]
+    tail = "" if lite else _tail_file(ROOT / "data" / "strategy_run.log", 30)
     health: dict[str, Any] = {}
     health_path = ROOT / "data" / "control" / "bot_health.json"
     if health_path.exists():
@@ -63,32 +81,30 @@ def bot_status() -> dict[str, Any]:
             health = json.loads(health_path.read_text(encoding="utf-8"))
         except Exception:
             health = {}
-    # DB open vs RAM mismatch hint
     mismatches: list[str] = []
-    try:
-        from position_safety import INTRADAY_RESTORE, last_open_position
+    if not lite:
+        try:
+            from position_safety import INTRADAY_RESTORE, last_open_position
 
-        ram = (health.get("positions") or {}) if isinstance(health, dict) else {}
-        # health may use short keys S5 or full names
-        for name in INTRADAY_RESTORE:
-            open_pos = last_open_position(name)
-            short = name.split("_")[0]  # S5, S8, S12…
-            ram_pos = ram.get(name) or ram.get(short) or "flat"
-            if open_pos is None:
-                db_pos = "flat"
-            else:
-                db_pos = open_pos.side
-            if str(ram_pos) != str(db_pos) and not (
-                str(ram_pos) == "flat" and db_pos == "flat"
-            ):
-                # Only flag when DB open but RAM flat (classic orphan) or opposite
-                if db_pos != "flat" and str(ram_pos) == "flat":
-                    mismatches.append(f"{name}: DB={db_pos} RAM=flat (orphan)")
-                elif db_pos == "flat" and str(ram_pos) != "flat":
-                    mismatches.append(f"{name}: DB=flat RAM={ram_pos}")
-    except Exception as exc:
-        mismatches.append(f"mismatch_check_error:{exc}")
-    return {
+            ram = (health.get("positions") or {}) if isinstance(health, dict) else {}
+            for name in INTRADAY_RESTORE:
+                open_pos = last_open_position(name)
+                short = name.split("_")[0]
+                ram_pos = ram.get(name) or ram.get(short) or "flat"
+                if open_pos is None:
+                    db_pos = "flat"
+                else:
+                    db_pos = open_pos.side
+                if str(ram_pos) != str(db_pos) and not (
+                    str(ram_pos) == "flat" and db_pos == "flat"
+                ):
+                    if db_pos != "flat" and str(ram_pos) == "flat":
+                        mismatches.append(f"{name}: DB={db_pos} RAM=flat (orphan)")
+                    elif db_pos == "flat" and str(ram_pos) != "flat":
+                        mismatches.append(f"{name}: DB=flat RAM={ram_pos}")
+        except Exception as exc:
+            mismatches.append(f"mismatch_check_error:{exc}")
+    result = {
         "ok": True,
         "supervise": supervise,
         "run_strategy": runner,
@@ -99,6 +115,8 @@ def bot_status() -> dict[str, Any]:
         "health": health,
         "mismatches": mismatches,
     }
+    _STATUS_CACHE[key] = (now, result)
+    return dict(result)
 
 
 def _kill_patterns(patterns: list[str]) -> list[int]:
@@ -159,7 +177,7 @@ def feed_status() -> dict[str, Any]:
         for r in _pgrep("collect_ticks.py")
         if "collect_ticks.py" in r.get("cmd", "") and "control_panel" not in r.get("cmd", "")
     ]
-    bot = bot_status()
+    bot = bot_status(lite=True)
     via_bot = bool(bot.get("running"))
     source = "bot" if via_bot else ("collector" if collector else "off")
     return {
@@ -182,7 +200,7 @@ def feed_status() -> dict[str, Any]:
 
 def start_feed() -> dict[str, Any]:
     """Start collect_ticks.py only when the bot is not running (one Angel socket)."""
-    if bot_status().get("running"):
+    if bot_status(lite=True).get("running"):
         return {
             "ok": False,
             "error": "Bot is running — it already has the Angel feed. Stop the bot first for feed-only.",
@@ -192,6 +210,7 @@ def start_feed() -> dict[str, Any]:
         return {"ok": True, "note": "feed-only already running", "feed": feed_status()}
     pid, err = _spawn([_python(), "collect_ticks.py"], "collect_ticks.log")
     time.sleep(1.0)
+    _status_cache_clear()
     return {
         "ok": bool(pid) and not err,
         "started_pid": pid,
@@ -204,12 +223,12 @@ def stop_feed() -> dict[str, Any]:
     """Stop feed-only collector. Does not stop the bot (bot feed dies with Stop bot)."""
     killed = _kill_patterns(["collect_ticks.py"])
     time.sleep(0.4)
+    _status_cache_clear()
     return {"ok": True, "killed": killed, "feed": feed_status()}
 
 
 def restart_bot(*, start_if_stopped: bool = True) -> dict[str, Any]:
     """Kill supervise/run_strategy and start supervise.sh again."""
-    # One Angel websocket: drop feed-only collector before starting the bot.
     killed = _kill_patterns(["collect_ticks.py", "run_strategy.py", "supervise.sh"])
     time.sleep(1.0)
     started = False
@@ -219,7 +238,8 @@ def restart_bot(*, start_if_stopped: bool = True) -> dict[str, Any]:
         pid, err = _spawn(["bash", "./supervise.sh"], "supervise.log")
         started = bool(pid) and not err
     time.sleep(2.0)
-    status = bot_status()
+    _status_cache_clear()
+    status = bot_status(lite=True)
     return {
         "ok": started and status.get("running"),
         "killed": killed,
@@ -231,7 +251,7 @@ def restart_bot(*, start_if_stopped: bool = True) -> dict[str, Any]:
 
 def start_bot() -> dict[str, Any]:
     """Start supervise if stopped. Does not kill a running bot (use restart)."""
-    st = bot_status()
+    st = bot_status(lite=True)
     if st.get("running"):
         slim = dict(st)
         slim.pop("log_tail", None)
@@ -246,4 +266,5 @@ def start_bot() -> dict[str, Any]:
 def stop_bot() -> dict[str, Any]:
     killed = _kill_patterns(["run_strategy.py", "supervise.sh"])
     time.sleep(0.5)
-    return {"ok": True, "killed": killed, "status": bot_status()}
+    _status_cache_clear()
+    return {"ok": True, "killed": killed, "status": bot_status(lite=True)}

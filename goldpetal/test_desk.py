@@ -70,9 +70,20 @@ def test_streamlit_desk_tab_is_the_writer() -> None:
     assert "STOP — this window is the VM" in help_sh
     assert "insufficient authentication scopes" in help_sh
     assert "Permission denied (publickey)" in help_sh
-    assert "first tab Desk" in help_sh
+    assert "sidebar Page: Desk" in help_sh
     assert "gcloud compute ssh" in help_sh
     assert "Cmd+Space" in help_sh
+    assert "st.sidebar.radio" in app
+    assert "PAGES" in app
+    assert app.find('"Desk"') < app.find('"S14 chart"')
+    assert "fonts.googleapis" not in app
+    assert "Load watch" in tab
+    assert "from control_panel import history_payload" not in tab
+    assert "from desk_data import history_payload" in tab
+    data_py = (ROOT / "desk_data.py").read_text(encoding="utf-8")
+    assert "def history_payload" in data_py
+    cfg = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+    assert "fastReruns" in cfg
 
 
 if __name__ == "__main__":

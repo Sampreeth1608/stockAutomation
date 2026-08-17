@@ -28,6 +28,7 @@ from capital import (
     update_strategy_budget,
 )
 from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
+from desk_data import history_payload, recent_trades as _recent_trades, row_to_dict as _row_to_dict
 from control_state import (
     SLIM_PAPER_STRATEGIES,
     entries_blocked,
@@ -97,12 +98,6 @@ def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
     return status, body, "application/json; charset=utf-8"
 
 
-def _row_to_dict(row: Any) -> dict[str, Any]:
-    if hasattr(row, "keys"):
-        return {k: row[k] for k in row.keys()}
-    return dict(row)
-
-
 def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, Any]:
     state = load_state()
     ticks = [_row_to_dict(r) for r in latest_ticks(limit=tick_limit)]
@@ -170,63 +165,11 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     }
 
 
-_TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": []}
-
-
-def _all_trades_cached() -> list[dict[str, Any]]:
-    import time
-
-    now = time.time()
-    if now - float(_TRADE_CACHE["at"]) < 12 and _TRADE_CACHE["rows"]:
-        return list(_TRADE_CACHE["rows"])
-    try:
-        rows = build_trades(strategy=None)
-    except Exception:
-        rows = []
-    _TRADE_CACHE["at"] = now
-    _TRADE_CACHE["rows"] = rows
-    return list(rows)
-
-
-def _recent_trades(limit: int = 8) -> list[dict[str, Any]]:
-    rows = _all_trades_cached()
-    open_t = [t for t in rows if t.get("status") == "OPEN"]
-    closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
-    return (open_t + list(reversed(closed)))[:limit]
-
-
-def history_payload(*, limit: int = 80, strategy: str | None = None) -> dict[str, Any]:
-    """Trade history, ticks, live orders, scoreboard — same data the old panel exported."""
-    rows = _all_trades_cached()
-    if strategy:
-        rows = [t for t in rows if t.get("strategy") == strategy]
-    open_t = [t for t in rows if t.get("status") == "OPEN"]
-    closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
-    closed_rev = list(reversed(closed))
-    all_rows = _all_trades_cached()
-    scoreboard = [summarize_trades(all_rows, s) for s in SLIM_PAPER_STRATEGIES]
-    scoreboard.append(summarize_trades(all_rows, None))
-    return {
-        "strategy": strategy or "",
-        "open": open_t,
-        "closed": closed_rev[:limit],
-        "trades": (open_t + closed_rev)[:limit],
-        "total_open": len(open_t),
-        "total_closed": len(closed),
-        "ticks": [_row_to_dict(r) for r in latest_ticks(limit=40)],
-        "signals": [_row_to_dict(r) for r in latest_signals(limit=40)],
-        "live_orders": recent_orders(limit=40),
-        "scoreboard": scoreboard,
-        "tick_count": count_ticks(),
-        "ltp": latest_ltp(),
-    }
-
-
 def desk_payload() -> dict[str, Any]:
     """Light snapshot for the operator desk (polls every few seconds)."""
     from analytics.bot_ops import bot_status, feed_status
 
-    bot = dict(bot_status())
+    bot = dict(bot_status(lite=True))
     bot.pop("log_tail", None)
     return {
         "writer": "8787",

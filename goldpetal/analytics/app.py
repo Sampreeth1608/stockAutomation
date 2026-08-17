@@ -37,7 +37,6 @@ from operator_desk import (  # noqa: E402
     streamlit_control_allowed,
     streamlit_write_blocked,
 )
-from analytics.operator_tab import render_operator_desk  # noqa: E402
 from analytics.local_bridge import (  # noqa: E402
     decide_proposal_local,
     desk_data_dir,
@@ -80,6 +79,23 @@ STRATEGIES = [
     "S13_HHHL_DAY",
     "S14_WICK30_STRICT",
     "S15_WICK30_NOWICK",
+]
+
+# One page at a time — st.tabs runs every tab on every load (that is why the desk felt late).
+PAGES = [
+    "Desk",
+    "S14 chart",
+    "Overview",
+    "Proposals / ML",
+    "Deploy / Ops (view)",
+    "Control (stop)",
+    "Live Deploy (view)",
+    "Capital (view)",
+    "Models",
+    "Reasoning",
+    "Trades",
+    "Signals / Ticks",
+    "Live orders",
 ]
 
 
@@ -350,11 +366,8 @@ def inject_style() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;600&display=swap');
-        html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
-        h1, h2, h3 { font-family: 'Fraunces', serif !important; letter-spacing: -0.02em; }
+        html, body, [class*="css"] { font-family: ui-sans-serif, system-ui, sans-serif; }
         .block-container { padding-top: 1rem; max-width: 1200px; }
-        div[data-testid="stMetricValue"] { font-family: 'Fraunces', serif; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -875,6 +888,7 @@ def main() -> None:
         return
 
     st.sidebar.title("Gold Petal desk")
+    page = st.sidebar.radio("Page", PAGES, index=0, key="gp_page")
     if LOCAL_DESK:
         st.sidebar.caption("VM local · live data/ · no Mac sync")
         if st.session_state.get("desk_authed"):
@@ -893,24 +907,26 @@ def main() -> None:
     st.session_state["data_dir"] = str(dd)
     db = dd / "ticks.db"
 
-    lot_size = float(
-        st.sidebar.number_input(
-            "Lots (fee display)",
-            min_value=1.0,
-            value=100.0 if LOCAL_DESK else 1.0,
-            step=1.0,
-            help="Scales gross PnL and Angel fees on the desk display.",
+    lot_size = 100.0 if LOCAL_DESK else 1.0
+    if page in {"Overview", "Trades"}:
+        lot_size = float(
+            st.sidebar.number_input(
+                "Lots (fee display)",
+                min_value=1.0,
+                value=lot_size,
+                step=1.0,
+                help="Scales gross PnL and Angel fees on the desk display.",
+            )
         )
-    )
-    st.sidebar.caption(
-        "IGNORE_FEES rides freely. Closed trades always show fees+tax here."
-    )
+        st.sidebar.caption(
+            "IGNORE_FEES rides freely. Closed trades always show fees+tax here."
+        )
 
     if LOCAL_DESK:
         if st.sidebar.button("Refresh", type="primary"):
             st.cache_data.clear()
             st.sidebar.success("Cache cleared")
-        st_status = bot_status()
+        st_status = bot_status(lite=True)
         st.sidebar.metric("Bot", "RUN" if st_status.get("running") else "STOP")
     else:
         cfg = VmConfig.from_env()
@@ -940,7 +956,7 @@ def main() -> None:
     st.title("Gold Petal research desk")
     mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
     st.caption(
-        f"{mode} · operator writes on tab Desk · "
+        f"{mode} · operator writes on page Desk · "
         f"S4/S5/S8/S11/S12/S13/S14/S15 · {date.today().isoformat()}"
     )
 
@@ -948,69 +964,34 @@ def main() -> None:
         st.warning("Data folder missing.")
         return
 
-    (
-        t_desk,
-        t_s14,
-        t0,
-        t1,
-        t_ops,
-        t2,
-        t_live,
-        t3,
-        t4,
-        t5,
-        t6,
-        t7,
-        t8,
-    ) = st.tabs(
-        [
-            "Desk",
-            "S14 chart",
-            "Overview",
-            "Proposals / ML",
-            "Deploy / Ops (view)",
-            "Control (stop)",
-            "Live Deploy (view)",
-            "Capital (view)",
-            "Models",
-            "Reasoning",
-            "Trades",
-            "Signals / Ticks",
-            "Live orders",
-        ]
-    )
-    with t_desk:
-        render_operator_desk(local=LOCAL_DESK)
-    with t_s14:
-        tab_s14_chart(dd)
-    with t0:
-        tab_overview(dd, db, lot_size=lot_size)
-    with t1:
-        tab_proposals(dd)
-    with t_ops:
-        tab_deploy_ops(dd)
-    with t2:
-        tab_control(dd)
-    with t_live:
-        tab_live_deploy(dd)
-    with t3:
-        tab_capital(dd)
-    with t4:
-        tab_ml(dd)
-    with t5:
-        tab_reasoning(dd)
-    with t6:
-        tab_trades(db, lot_size=lot_size)
-    with t7:
-        tab_signals_ticks(db)
-    with t8:
-        tab_live_orders(dd)
+    if page == "Desk":
+        from analytics.operator_tab import render_operator_desk
 
-    log_path = dd / "logs" / "strategy_run.log"
-    if log_path.exists():
-        with st.expander("strategy_run.log (tail)", expanded=False):
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            st.code("\n".join(text.splitlines()[-100:]), language="text")
+        render_operator_desk(local=LOCAL_DESK)
+    elif page == "S14 chart":
+        tab_s14_chart(dd)
+    elif page == "Overview":
+        tab_overview(dd, db, lot_size=lot_size)
+    elif page == "Proposals / ML":
+        tab_proposals(dd)
+    elif page == "Deploy / Ops (view)":
+        tab_deploy_ops(dd)
+    elif page == "Control (stop)":
+        tab_control(dd)
+    elif page == "Live Deploy (view)":
+        tab_live_deploy(dd)
+    elif page == "Capital (view)":
+        tab_capital(dd)
+    elif page == "Models":
+        tab_ml(dd)
+    elif page == "Reasoning":
+        tab_reasoning(dd)
+    elif page == "Trades":
+        tab_trades(db, lot_size=lot_size)
+    elif page == "Signals / Ticks":
+        tab_signals_ticks(db)
+    else:
+        tab_live_orders(dd)
 
 
 

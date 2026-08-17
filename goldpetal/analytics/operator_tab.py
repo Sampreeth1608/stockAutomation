@@ -51,29 +51,13 @@ def render_operator_desk(*, local: bool) -> None:
         stop_feed,
     )
     from capital import capital_snapshot, load_capital, save_capital
-    from control_panel import history_payload
     from control_state import set_emergency, set_live_unlocked, set_trading_enabled
     from live_readiness import apply_desk_books, apply_panel_live_env, live_readiness
     from live_readiness import panel_restart_allowed
-    from panel_export import (
-        TICK_CSV_FIELDS,
-        TRADE_CSV_FIELDS,
-        default_date_range,
-        export_pack_zip,
-        export_summary,
-        export_ticks_csv,
-        export_trades_csv,
-        rows_to_tsv,
-        ticks_in_range,
-        trades_in_range,
-    )
-    from s14_exchange_sheet import sheet_zip_bytes
-    from sheets_pack import SCORE_FIELDS, build_scoreboard_rows, sheets_pack_zip_bytes
 
     st.subheader("Operator desk")
     st.caption(
-        "Open this in **Chrome on your Mac** at http://127.0.0.1:8501/ → tab **Desk**. "
-        "Do not type URLs in the VM SSH window. "
+        "Start/stop loads first. Watch and downloads stay off until you open them. "
         f"Code: `{ROOT}`"
     )
     _show_flash()
@@ -85,7 +69,7 @@ def render_operator_desk(*, local: bool) -> None:
         )
 
     live = live_readiness()
-    bot = bot_status() if local else {}
+    bot = bot_status(lite=True) if local else {}
     feed = feed_status() if local else {}
     cap = capital_snapshot()
     armed = bool(live.get("would_place_real_orders"))
@@ -206,103 +190,126 @@ def render_operator_desk(*, local: bool) -> None:
         _set_flash({"ok": True, "note": "Capital saved"})
 
     st.markdown("##### Watch")
-    hist = history_payload(limit=80)
-    view = st.radio(
-        "Show",
-        ["Trades", "Open", "Ticks", "Live orders", "Signals", "Scoreboard"],
-        horizontal=True,
-        key="op_watch",
-    )
-    if view == "Trades":
-        st.dataframe(pd.DataFrame(hist.get("trades") or []), use_container_width=True, hide_index=True)
-    elif view == "Open":
-        st.dataframe(pd.DataFrame(hist.get("open") or []), use_container_width=True, hide_index=True)
-    elif view == "Ticks":
-        st.dataframe(pd.DataFrame(hist.get("ticks") or []), use_container_width=True, hide_index=True)
-    elif view == "Live orders":
-        st.dataframe(pd.DataFrame(hist.get("live_orders") or []), use_container_width=True, hide_index=True)
-    elif view == "Signals":
-        st.dataframe(pd.DataFrame(hist.get("signals") or []), use_container_width=True, hide_index=True)
+    if st.toggle("Load watch", value=False, key="op_watch_on"):
+        from desk_data import history_payload
+
+        hist = history_payload(limit=80)
+        view = st.radio(
+            "Show",
+            ["Trades", "Open", "Ticks", "Live orders", "Signals", "Scoreboard"],
+            horizontal=True,
+            key="op_watch",
+        )
+        if view == "Trades":
+            st.dataframe(pd.DataFrame(hist.get("trades") or []), use_container_width=True, hide_index=True)
+        elif view == "Open":
+            st.dataframe(pd.DataFrame(hist.get("open") or []), use_container_width=True, hide_index=True)
+        elif view == "Ticks":
+            st.dataframe(pd.DataFrame(hist.get("ticks") or []), use_container_width=True, hide_index=True)
+        elif view == "Live orders":
+            st.dataframe(pd.DataFrame(hist.get("live_orders") or []), use_container_width=True, hide_index=True)
+        elif view == "Signals":
+            st.dataframe(pd.DataFrame(hist.get("signals") or []), use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(pd.DataFrame(hist.get("scoreboard") or []), use_container_width=True, hide_index=True)
+        st.caption(
+            f"open {hist.get('total_open')} · closed {hist.get('total_closed')} · ticks {hist.get('tick_count')}"
+        )
     else:
-        st.dataframe(pd.DataFrame(hist.get("scoreboard") or []), use_container_width=True, hide_index=True)
-    st.caption(
-        f"open {hist.get('total_open')} · closed {hist.get('total_closed')} · ticks {hist.get('tick_count')}"
-    )
+        st.caption("Off on purpose — rebuilding every trade is slow. Turn on when you need it.")
 
     st.markdown("##### Downloads")
-    st.caption("CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive. Build, then download or copy.")
-    d0, d1 = default_date_range()
-    cfrom, cto = st.columns(2)
-    date_from = str(cfrom.date_input("From", value=pd.Timestamp(d0).date()))
-    date_to = str(cto.date_input("To", value=pd.Timestamp(d1).date()))
-    try:
-        summ = export_summary(date_from, date_to)
-        st.caption(f"{summ.get('tick_count')} ticks · {summ.get('trade_count')} trades")
-    except Exception as exc:
-        st.caption(str(exc))
-    kind = st.selectbox(
-        "File",
-        [
-            "Download all (ZIP)",
-            "Download trades CSV",
-            "Download ticks CSV",
-            "Copy trades → Sheets (TSV)",
-            "Copy ticks → Sheets (TSV)",
-            "Download Sheets pack",
-            "Copy scoreboard → Sheets (TSV)",
-            "Download S14 sheet ZIP",
-        ],
-        key="op_dl_kind",
-    )
-    if st.button("Build file"):
+    if st.toggle("Load downloads", value=False, key="op_dl_on"):
+        from panel_export import (
+            TICK_CSV_FIELDS,
+            TRADE_CSV_FIELDS,
+            default_date_range,
+            export_pack_zip,
+            export_summary,
+            export_ticks_csv,
+            export_trades_csv,
+            rows_to_tsv,
+            ticks_in_range,
+            trades_in_range,
+        )
+        from s14_exchange_sheet import sheet_zip_bytes
+        from sheets_pack import SCORE_FIELDS, build_scoreboard_rows, sheets_pack_zip_bytes
+
+        st.caption("CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive.")
+        d0, d1 = default_date_range()
+        cfrom, cto = st.columns(2)
+        date_from = str(cfrom.date_input("From", value=pd.Timestamp(d0).date()))
+        date_to = str(cto.date_input("To", value=pd.Timestamp(d1).date()))
         try:
-            st.session_state.pop("op_dl_bytes", None)
-            st.session_state.pop("op_dl_name", None)
-            st.session_state.pop("op_dl_mime", None)
-            st.session_state.pop("op_dl_text", None)
-            if kind == "Download all (ZIP)":
-                st.session_state["op_dl_bytes"] = export_pack_zip(date_from, date_to)
-                st.session_state["op_dl_name"] = f"goldpetal_export_{date_from}_to_{date_to}.zip"
-                st.session_state["op_dl_mime"] = "application/zip"
-            elif kind == "Download trades CSV":
-                st.session_state["op_dl_bytes"] = export_trades_csv(date_from, date_to).encode("utf-8")
-                st.session_state["op_dl_name"] = f"goldpetal_trades_{date_from}_to_{date_to}.csv"
-                st.session_state["op_dl_mime"] = "text/csv"
-            elif kind == "Download ticks CSV":
-                st.session_state["op_dl_bytes"] = export_ticks_csv(date_from, date_to).encode("utf-8")
-                st.session_state["op_dl_name"] = f"goldpetal_ticks_{date_from}_to_{date_to}.csv"
-                st.session_state["op_dl_mime"] = "text/csv"
-            elif kind == "Copy trades → Sheets (TSV)":
-                rows = trades_in_range(date_from, date_to)
-                st.session_state["op_dl_text"] = rows_to_tsv(rows, TRADE_CSV_FIELDS)
-            elif kind == "Copy ticks → Sheets (TSV)":
-                rows = ticks_in_range(date_from, date_to)
-                st.session_state["op_dl_text"] = rows_to_tsv(rows, TICK_CSV_FIELDS)
-            elif kind == "Download Sheets pack":
-                st.session_state["op_dl_bytes"] = sheets_pack_zip_bytes()
-                st.session_state["op_dl_name"] = "goldpetal_sheets_pack.zip"
-                st.session_state["op_dl_mime"] = "application/zip"
-            elif kind == "Copy scoreboard → Sheets (TSV)":
-                st.session_state["op_dl_text"] = rows_to_tsv(build_scoreboard_rows(), SCORE_FIELDS)
-            else:
-                st.session_state["op_dl_bytes"] = sheet_zip_bytes()
-                st.session_state["op_dl_name"] = "goldpetal_s14_sheet.zip"
-                st.session_state["op_dl_mime"] = "application/zip"
-            st.success("Ready — download or copy below.")
+            summ = export_summary(date_from, date_to)
+            st.caption(f"{summ.get('tick_count')} ticks · {summ.get('trade_count')} trades")
         except Exception as exc:
-            st.error(str(exc))
-    if st.session_state.get("op_dl_bytes"):
-        st.download_button(
-            "Download",
-            data=st.session_state["op_dl_bytes"],
-            file_name=st.session_state.get("op_dl_name") or "goldpetal.bin",
-            mime=st.session_state.get("op_dl_mime") or "application/octet-stream",
-            key="op_dl_btn",
+            st.caption(str(exc))
+        kind = st.selectbox(
+            "File",
+            [
+                "Download all (ZIP)",
+                "Download trades CSV",
+                "Download ticks CSV",
+                "Copy trades → Sheets (TSV)",
+                "Copy ticks → Sheets (TSV)",
+                "Download Sheets pack",
+                "Copy scoreboard → Sheets (TSV)",
+                "Download S14 sheet ZIP",
+            ],
+            key="op_dl_kind",
         )
-    if st.session_state.get("op_dl_text"):
-        st.text_area(
-            "Select all and paste into Google Sheets",
-            value=st.session_state["op_dl_text"],
-            height=160,
-            key="op_dl_tsv",
-        )
+        if st.button("Build file"):
+            try:
+                st.session_state.pop("op_dl_bytes", None)
+                st.session_state.pop("op_dl_name", None)
+                st.session_state.pop("op_dl_mime", None)
+                st.session_state.pop("op_dl_text", None)
+                if kind == "Download all (ZIP)":
+                    st.session_state["op_dl_bytes"] = export_pack_zip(date_from, date_to)
+                    st.session_state["op_dl_name"] = f"goldpetal_export_{date_from}_to_{date_to}.zip"
+                    st.session_state["op_dl_mime"] = "application/zip"
+                elif kind == "Download trades CSV":
+                    st.session_state["op_dl_bytes"] = export_trades_csv(date_from, date_to).encode("utf-8")
+                    st.session_state["op_dl_name"] = f"goldpetal_trades_{date_from}_to_{date_to}.csv"
+                    st.session_state["op_dl_mime"] = "text/csv"
+                elif kind == "Download ticks CSV":
+                    st.session_state["op_dl_bytes"] = export_ticks_csv(date_from, date_to).encode("utf-8")
+                    st.session_state["op_dl_name"] = f"goldpetal_ticks_{date_from}_to_{date_to}.csv"
+                    st.session_state["op_dl_mime"] = "text/csv"
+                elif kind == "Copy trades → Sheets (TSV)":
+                    rows = trades_in_range(date_from, date_to)
+                    st.session_state["op_dl_text"] = rows_to_tsv(rows, TRADE_CSV_FIELDS)
+                elif kind == "Copy ticks → Sheets (TSV)":
+                    rows = ticks_in_range(date_from, date_to)
+                    st.session_state["op_dl_text"] = rows_to_tsv(rows, TICK_CSV_FIELDS)
+                elif kind == "Download Sheets pack":
+                    st.session_state["op_dl_bytes"] = sheets_pack_zip_bytes()
+                    st.session_state["op_dl_name"] = "goldpetal_sheets_pack.zip"
+                    st.session_state["op_dl_mime"] = "application/zip"
+                elif kind == "Copy scoreboard → Sheets (TSV)":
+                    st.session_state["op_dl_text"] = rows_to_tsv(build_scoreboard_rows(), SCORE_FIELDS)
+                else:
+                    st.session_state["op_dl_bytes"] = sheet_zip_bytes()
+                    st.session_state["op_dl_name"] = "goldpetal_s14_sheet.zip"
+                    st.session_state["op_dl_mime"] = "application/zip"
+                st.success("Ready — download or copy below.")
+            except Exception as exc:
+                st.error(str(exc))
+        if st.session_state.get("op_dl_bytes"):
+            st.download_button(
+                "Download",
+                data=st.session_state["op_dl_bytes"],
+                file_name=st.session_state.get("op_dl_name") or "goldpetal.bin",
+                mime=st.session_state.get("op_dl_mime") or "application/octet-stream",
+                key="op_dl_btn",
+            )
+        if st.session_state.get("op_dl_text"):
+            st.text_area(
+                "Select all and paste into Google Sheets",
+                value=st.session_state["op_dl_text"],
+                height=160,
+                key="op_dl_tsv",
+            )
+    else:
+        st.caption("Off on purpose — ZIP/CSV scans ticks.db. Turn on when you need a file.")
