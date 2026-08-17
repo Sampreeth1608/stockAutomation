@@ -176,6 +176,36 @@ def test_apply_panel_enables_slim() -> None:
         td.cleanup()
 
 
+def test_apply_desk_books_live_requires_in_bot() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S12=true\nENABLE_S14=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S12_HHHL30"],
+            ["S12_HHHL30", "S14_WICK30_STRICT"],
+            path=env,
+            state_path=state,
+        )
+        assert res["ok"] is True
+        assert res["live_approved"] == ["S12_HHHL30"]
+        assert "S14_WICK30_STRICT" in res["skipped_live_not_in_bot"]
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_S12=true" in text
+        assert "ENABLE_S14=false" in text
+        assert "DRY_RUN=true" in text
+        assert "SECRET=keep" in text
+        assert res["restart_needed"] is True
+    finally:
+        td.cleanup()
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -193,4 +223,6 @@ if __name__ == "__main__":
     print("ok restart word")
     test_apply_panel_enables_slim()
     print("ok enables")
+    test_apply_desk_books_live_requires_in_bot()
+    print("ok desk books")
     print("ALL test_live_readiness OK")

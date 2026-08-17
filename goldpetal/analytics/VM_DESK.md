@@ -4,20 +4,20 @@ No Mac sync. Streamlit reads `data/` on the trading VM.
 
 ## One operator desk: 8787
 
-**All operator writes go on the 8787 control panel.** Streamlit (8501) is research
-(trades, ticks, proposals view). Its Deploy / Ops, Live Deploy, and Capital tabs
-are **read-only** so they cannot overwrite 8787.
+**8787 is the only writer.** Streamlit 8501 is research (chart, trades, ticks) and
+cannot overwrite start/stop, feed, live picks, DRY_RUN, or capital.
 
-| Job | Where |
+| Job | On 8787 |
 |---|---|
-| Emergency / trading / unlock live | **8787** Emergency & trading |
-| ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, Restart | **8787** Live money |
-| live_approved | **8787** Live money checkboxes |
-| Book ₹ / day-loss / per-strategy lots | **8787** Capital management |
-| Streamlit | View only. May **stop** (emergency / pause / lock live), not start or unlock |
+| Emergency / trading on-off | Stop / go |
+| Start / stop / restart bot | Engine + feed |
+| Tick feed only (no strategies) | Engine + feed |
+| Which books in RAM + live picks | Strategies → Save strategies |
+| Paper vs live money, lot cap, unlock | Live money |
+| Book ₹ / day-loss | Live money |
 
-Keep `DRY_RUN=true` until you intend Angel fills. Panel LIVE_MAX_LOTS cap is 10.
-Paper 100 lots on S12/S14/S15 is not live size.
+Keep `DRY_RUN=true` until you intend Angel fills. LIVE_MAX_LOTS cap is 10.
+Paper 100 lots is not live size. Restart the **bot** (type RESTART) after Save strategies / Save money.
 
 ## Gold Petal chart (Streamlit 8501 — this is the one that opens)
 

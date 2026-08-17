@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gold Petal</title>
+<style>
+:root {
+  --bg: #0e1412;
+  --card: #17211c;
+  --line: #2c3f34;
+  --text: #e7eee8;
+  --muted: #8aa394;
+  --ok: #3dba7a;
+  --warn: #e0a045;
+  --bad: #e05a4c;
+  --gold: #d4a24c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; }
+body { max-width: 920px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: .02em; }
+h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--gold); margin: 0 0 .7rem; }
+.sub { color: var(--muted); margin: 0 0 1rem; font-size: .9rem; }
+.bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+  justify-content: space-between; margin-bottom: 1rem; }
+.pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pill { font: 12px/1 ui-monospace, monospace; padding: .28rem .5rem;
+  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); }
+.pill.ok { color: var(--ok); border-color: #2f6a4a; }
+.pill.bad { color: var(--bad); border-color: #6a2e28; }
+.pill.warn { color: var(--warn); border-color: #6a5220; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  padding: 1rem 1.05rem; margin: 0 0 .85rem; }
+.row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+.btn { appearance: none; border: 1px solid var(--line); background: #1f2e26;
+  color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .55rem .85rem;
+  border-radius: 4px; cursor: pointer; }
+.btn:hover { border-color: var(--gold); color: #f0c674; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
+.btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
+.btn.danger { background: #3a1814; border-color: #6a2e28; color: #ffb4ab; }
+.btn.danger.on { background: var(--bad); color: #1a0504; }
+input[type=number], input[type=text] {
+  background: #0c1410; color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: .4rem .5rem; font: 13px ui-monospace, monospace; width: 7rem; }
+label.chk { display: flex; gap: .4rem; align-items: center; color: var(--muted); font-size: .9rem; }
+table { width: 100%; border-collapse: collapse; font: 13px/1.35 ui-monospace, monospace; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; padding: .35rem .4rem; border-bottom: 1px solid var(--line); }
+td { padding: .4rem; border-bottom: 1px solid #24352c; vertical-align: middle; }
+.flash { min-height: 1.2rem; color: var(--gold); font-size: .88rem; margin: .45rem 0 0; }
+.flash.bad { color: var(--bad); }
+.armed { color: var(--bad); font-weight: 700; }
+.hint { color: var(--muted); font-size: .82rem; margin: .45rem 0 0; }
+.mono { font-family: ui-monospace, monospace; }
+.tape { font: 12px/1.4 ui-monospace, monospace; color: var(--muted);
+  max-height: 9rem; overflow: auto; white-space: pre; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div>
+      <h1>Gold Petal</h1>
+      <p class="sub">Only writer. Streamlit 8501 is research — it cannot overwrite this desk.</p>
+    </div>
+    <div class="pills" id="pills"></div>
+  </div>
+
+  <section class="card">
+    <h2>Stop / go</h2>
+    <div class="row">
+      <button class="btn danger" id="btn-kill" type="button">Emergency off</button>
+      <button class="btn" id="btn-clear" type="button">Clear emergency</button>
+      <button class="btn ok" id="btn-trade-on" type="button">Trading on</button>
+      <button class="btn" id="btn-trade-off" type="button">Trading off</button>
+    </div>
+    <p class="hint">Emergency blocks every new entry. Trading off holds strategies but keeps the feed if the bot is up.</p>
+    <p class="flash" id="flash-stop"></p>
+  </section>
+
+  <section class="card">
+    <h2>Engine + feed</h2>
+    <p class="mono" id="engine-line">…</p>
+    <div class="row" style="margin-top:.7rem">
+      <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
+      <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
+      <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn" id="btn-feed-start" type="button">Start feed only</button>
+      <button class="btn" id="btn-feed-stop" type="button">Stop feed only</button>
+    </div>
+    <p class="hint">Bot = strategies + Angel feed (one socket). Feed only = ticks, no strategies. Do not run both.</p>
+    <p class="flash" id="flash-engine"></p>
+  </section>
+
+  <section class="card">
+    <h2>Strategies</h2>
+    <p class="hint">In bot = loaded after Restart (paper). Live pick = allowed to send Angel when money is LIVE + unlocked. One save. Live pick without In bot is ignored.</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th></tr>
+        </thead>
+        <tbody id="books"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:.75rem">
+      <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
+    </div>
+    <p class="flash" id="flash-books"></p>
+  </section>
+
+  <section class="card">
+    <h2>Live money</h2>
+    <p class="mono" id="money-line">…</p>
+    <div class="row" style="margin-top:.7rem">
+      <label class="chk"><input type="checkbox" id="paper-only" checked/> Paper only (DRY_RUN)</label>
+      <label class="chk">LIVE_MAX_LOTS
+        <input type="number" id="live-max" min="1" max="10" step="1" value="1"/>
+      </label>
+      <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
+      <button class="btn" id="btn-save-money" type="button">Save money</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn warn" id="btn-unlock" type="button">Unlock live</button>
+      <button class="btn" id="btn-lock" type="button">Lock live</button>
+    </div>
+    <div class="row" style="margin-top:.7rem">
+      <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
+      <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
+      <button class="btn" id="btn-save-cap" type="button">Save capital</button>
+    </div>
+    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–10.</p>
+    <p class="flash" id="flash-money"></p>
+  </section>
+
+  <section class="card">
+    <h2>Tape</h2>
+    <div class="tape" id="tape">no ticks yet</div>
+  </section>
+<script>
+const $ = (id) => document.getElementById(id);
+const SHORT = {
+  S4_OVERNIGHT: "S4 overnight",
+  S5_MINEDGE: "S5 minedge",
+  S8_NET_ZIGZAG: "S8 zigzag",
+  S11_DISCOVERED: "S11 pack",
+  S12_HHHL30: "S12 HHHL 30m",
+  S13_HHHL_DAY: "S13 HHHL day",
+  S14_WICK30_STRICT: "S14 wick",
+  S15_WICK30_NOWICK: "S15 no-wick",
+};
+let last = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
+  if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  return data;
+}
+function flash(id, msg, bad) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "flash" + (bad ? " bad" : "");
+}
+function pill(text, kind) {
+  return `<span class="pill ${kind || ""}">${text}</span>`;
+}
+function money(n) {
+  if (n == null || n === "") return "—";
+  const x = Number(n);
+  if (!Number.isFinite(x)) return String(n);
+  return x.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
+function render(d) {
+  last = d;
+  const live = d.live_desk || {};
+  const bot = d.bot || {};
+  const feed = d.feed || {};
+  const st = d.state || {};
+  const mode = live.would_place_real_orders ? "ARMED LIVE" : (live.dry_run === false ? "LIVE env / still gated" : "PAPER");
+  const modeKind = live.would_place_real_orders ? "bad" : (live.dry_run === false ? "warn" : "ok");
+  $("pills").innerHTML = [
+    pill(mode, modeKind),
+    pill("LTP " + (d.ltp != null ? d.ltp : "—"), ""),
+    pill((d.tick_count || 0) + " ticks", feed.running ? "ok" : "bad"),
+    pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
+    pill(st.emergency_off ? "EMERGENCY" : "entries ok", st.emergency_off ? "bad" : "ok"),
+    pill(st.trading_enabled ? "trading on" : "trading off", st.trading_enabled ? "ok" : "warn"),
+    pill(st.live_unlocked ? "live unlocked" : "live locked", st.live_unlocked ? "warn" : "ok"),
+  ].join("");
+  $("btn-kill").classList.toggle("on", !!st.emergency_off);
+  const src = feed.source === "bot" ? "feed via bot" : (feed.source === "collector" ? "feed-only collector" : "feed off");
+  $("engine-line").textContent =
+    (bot.running ? "Bot running" : "Bot stopped") + " · " + src +
+    (live.bot_health && live.bot_health.ts_ist ? " · heartbeat " + live.bot_health.ts_ist : "");
+  $("btn-feed-start").disabled = !!bot.running;
+  $("btn-feed-stop").disabled = !!bot.running || feed.source !== "collector";
+  const books = live.books || [];
+  const enables = live.enables || {};
+  $("books").innerHTML = books.map((b) => {
+    const name = b.strategy;
+    const inBot = !!enables[name];
+    const livePick = !!b.live_approved;
+    return `<tr>
+      <td>${SHORT[name] || name}</td>
+      <td><input type="checkbox" data-in="${name}" ${inBot ? "checked" : ""}/></td>
+      <td><input type="checkbox" data-live="${name}" ${livePick ? "checked" : ""}/></td>
+      <td>${b.ram || "—"}</td>
+      <td>${b.live_approved ? b.live_qty : 0}${b.warn_100 && b.live_approved ? " · paper 100≠live" : ""}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5">no books</td></tr>`;
+  const armed = live.would_place_real_orders
+    ? "ARMED — next signal on a live-picked book hits Angel."
+    : "Paper. Nothing hits Angel until Paper only is off, live is unlocked, a book is live-picked, and the bot is restarted.";
+  $("money-line").className = "mono" + (live.would_place_real_orders ? " armed" : "");
+  $("money-line").textContent = armed + "  DRY_RUN=" + live.dry_run + "  LIVE_MAX_LOTS=" + live.live_max_lots;
+  $("paper-only").checked = live.dry_run !== false;
+  $("live-max").value = live.live_max_lots || 1;
+  const cap = d.capital || {};
+  if (document.activeElement !== $("cap-total")) $("cap-total").value = cap.total_capital_inr || "";
+  if (document.activeElement !== $("cap-dd")) $("cap-dd").value = cap.daily_loss_limit_inr || "";
+  const ticks = (d.ticks || []).slice(0, 8).map((t) => {
+    const tltp = t.ltp != null ? t.ltp : t.last_traded_price;
+    return (t.received_at || t.time || "") + "  " + (tltp != null ? tltp : "");
+  });
+  const trades = (d.trades || []).slice(0, 6).map((t) =>
+    (t.strategy || "") + "  " + (t.side || "") + "  " + (t.status || "") + "  " + (t.pnl_after_tax || t.net_pnl || "")
+  );
+  const orders = (d.live_orders || []).slice(0, 6).map((o) =>
+    (o.ts || "") + "  " + (o.strategy || "") + "  " + (o.side || "") + "  " + (o.ok ? "Y" : "N") + "  " + (o.reason || "")
+  );
+  $("tape").textContent = [
+    "TICKS",
+    ticks.join("\n") || "(none)",
+    "",
+    "TRADES",
+    trades.join("\n") || "(none)",
+    "",
+    "LIVE ORDERS",
+    orders.join("\n") || "(none — normal in paper)",
+  ].join("\n");
+}
+
+async function load() {
+  const d = await api("/api/desk");
+  render(d);
+}
+
+$("btn-kill").onclick = async () => {
+  try {
+    await api("/api/emergency", { method: "POST", body: JSON.stringify({ off: true }) });
+    flash("flash-stop", "Emergency off — no new entries");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-clear").onclick = async () => {
+  try {
+    await api("/api/emergency", { method: "POST", body: JSON.stringify({ off: false }) });
+    flash("flash-stop", "Emergency cleared");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-trade-on").onclick = async () => {
+  try {
+    await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled: true }) });
+    flash("flash-stop", "Trading on");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-trade-off").onclick = async () => {
+  try {
+    await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled: false }) });
+    flash("flash-stop", "Trading off");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-bot-start").onclick = async () => {
+  try {
+    flash("flash-engine", "Starting bot…");
+    const res = await api("/api/bot/start", { method: "POST", body: "{}" });
+    flash("flash-engine", res.note || (res.ok ? "Bot started" : JSON.stringify(res)));
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-bot-stop").onclick = async () => {
+  if (!confirm("Stop the bot? Strategies stop. Feed-only collector is left alone.")) return;
+  try {
+    await api("/api/bot/stop", { method: "POST", body: "{}" });
+    flash("flash-engine", "Bot stopped");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-bot-restart").onclick = async () => {
+  const word = $("restart-word").value.trim();
+  if (word !== "RESTART") { flash("flash-engine", "Type RESTART to restart the bot", true); return; }
+  try {
+    flash("flash-engine", "Restarting bot…");
+    await api("/api/bot/restart", { method: "POST", body: JSON.stringify({ confirm: word }) });
+    $("restart-word").value = "";
+    flash("flash-engine", "Bot restarted — loads latest ENABLE_* / DRY_RUN");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-feed-start").onclick = async () => {
+  try {
+    const res = await api("/api/feed/start", { method: "POST", body: "{}" });
+    flash("flash-engine", res.note || "Feed-only started");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-feed-stop").onclick = async () => {
+  try {
+    await api("/api/feed/stop", { method: "POST", body: "{}" });
+    flash("flash-engine", "Feed-only stopped");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-save-books").onclick = async () => {
+  const inBot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  try {
+    const res = await api("/api/desk/books", { method: "POST", body: JSON.stringify({ in_bot: inBot, live }) });
+    flash("flash-books", res.note || "Saved. Type RESTART to load In-bot into RAM.");
+    await load();
+  } catch (e) { flash("flash-books", String(e.message || e), true); }
+};
+$("btn-save-money").onclick = async () => {
+  const paper = $("paper-only").checked;
+  const lots = Number($("live-max").value || 1);
+  const confirmWord = $("live-word").value.trim();
+  if (!paper) {
+    const ok = confirm("Write DRY_RUN=false? Real Angel fills still need Unlock + Live pick + Restart. LIVE_MAX_LOTS is the ceiling, not paper 100.");
+    if (!ok) return;
+  }
+  try {
+    const res = await api("/api/live/env", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: paper, live_max_lots: lots, confirm: confirmWord }),
+    });
+    $("live-word").value = "";
+    flash("flash-money", "Saved .env DRY_RUN=" + ((res.applied && res.applied.DRY_RUN) || "?") + " — Restart to load into the bot");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-unlock").onclick = async () => {
+  if (!confirm("Unlock live path? Orders still need DRY_RUN=false + Live pick + Restart.")) return;
+  try {
+    await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked: true }) });
+    flash("flash-money", "Live unlocked (still gated by Paper only / picks / restart)");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-lock").onclick = async () => {
+  try {
+    await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked: false }) });
+    flash("flash-money", "Live locked");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-save-cap").onclick = async () => {
+  try {
+    await api("/api/capital", {
+      method: "POST",
+      body: JSON.stringify({
+        total_capital_inr: Number($("cap-total").value || 0),
+        daily_loss_limit_inr: Number($("cap-dd").value || 0),
+      }),
+    });
+    flash("flash-money", "Capital saved");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+
+load().catch((e) => flash("flash-engine", String(e.message || e), true));
+setInterval(() => load().catch(() => {}), 4000);
+</script>
+</body>
+</html>

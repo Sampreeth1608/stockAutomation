@@ -42,6 +42,6 @@ def streamlit_control_allowed(kwargs: dict[str, Any]) -> tuple[bool, str]:
 def operator_readonly_markdown() -> str:
     return (
         f"**Operator writes live only on the 8787 panel** ({OPERATOR_URL}). "
-        f"This Streamlit tab is read-only: {OPERATOR_WRITES}. "
-        "Do not save the same switches here."
+        "This Streamlit tab is read-only. Do not save the same switches here — "
+        "8787 is the only writer (start/stop, feed, live picks, money)."
     )

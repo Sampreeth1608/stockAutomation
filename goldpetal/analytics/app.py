@@ -712,10 +712,10 @@ def tab_live_deploy(dd: Path) -> None:
     with st.expander("How live sizing works", expanded=False):
         st.markdown(
             f"""
-1. On **8787 Live money**: check Live? for the strategy, set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
-2. On **8787 Capital**: set ₹ / max lots.
-3. Unlock live on 8787. Type LIVE only if you intend `DRY_RUN=false`.
-4. Type RESTART on 8787. Size = min(strategy max_lots, LIVE_MAX_LOTS).
+1. On **8787 Strategies**: In bot + Live pick, Save strategies.
+2. On **8787 Live money**: set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
+3. Unlock live. Type LIVE only if you intend `DRY_RUN=false`.
+4. Type RESTART on 8787 Engine. Size = min(strategy max_lots, LIVE_MAX_LOTS).
 
 Do not also save these on Streamlit.
 """

@@ -94,11 +94,17 @@ def test_panel_mentions_s14_sheet() -> None:
         encoding="utf-8"
     )
     assert "/s14-sheet" in text
-    assert "btn-s14-copy" in text
-    assert "Gold Petal exchange candles" in text
-    assert "s14-chart" in text
-    assert "btn-s14-pull" in text
+    assert "load_desk_html" in text
+    assert "/api/desk" in text
     assert "127.0.0.1:8787" in text
+    assert "s14-chart" not in Path(__file__).resolve().parent.joinpath("desk.html").read_text(
+        encoding="utf-8"
+    )
+    desk_html = Path(__file__).resolve().parent.joinpath("desk.html").read_text(encoding="utf-8")
+    assert "Save strategies" in desk_html
+    assert "Start bot" in desk_html
+    assert "Start feed only" in desk_html
+    assert "cannot overwrite" in desk_html
     desk = Path(__file__).resolve().parent.joinpath("analytics/app.py").read_text(
         encoding="utf-8"
     )
@@ -112,8 +118,11 @@ def test_panel_mentions_s14_sheet() -> None:
         encoding="utf-8"
     )
     assert "scrollZoom" in chart_py
-    assert "bindOhlcChart" in text
-    assert "O/H/L/C is printed on each candle" in text
+    sheet_py = Path(__file__).resolve().parent.joinpath("s14_exchange_sheet.py").read_text(
+        encoding="utf-8"
+    )
+    assert "bindOhlcChart" in sheet_py
+    assert "O/H/L/C is printed on each candle" in sheet_py
 
 
 def test_candle_print_lives_on_bar() -> None:

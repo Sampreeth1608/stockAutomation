@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Restart 8787 only (not supervise). Listens on all interfaces so BOTH work:
-#   tunnel  → http://127.0.0.1:8787/  (gcloud -L 8787:127.0.0.1:8787)
-#   public  → http://<vm-ip>:8787/
+# Restart the 8787 operator desk only (not supervise).
+# This is the only writer for start/stop, feed, live picks, DRY_RUN.
+# Streamlit 8501 is research and cannot overwrite this desk.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST="${HOST:-0.0.0.0}"

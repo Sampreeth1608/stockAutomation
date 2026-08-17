@@ -124,30 +124,100 @@ def _kill_patterns(patterns: list[str]) -> list[int]:
     return killed
 
 
+def _python() -> str:
+    venv = ROOT / "venv" / "bin" / "python"
+    if venv.is_file():
+        return str(venv)
+    alt = ROOT / ".venv" / "bin" / "python"
+    if alt.is_file():
+        return str(alt)
+    return "python3"
+
+
+def _spawn(cmd: list[str], log_name: str) -> tuple[int | None, str]:
+    log = ROOT / "data" / log_name
+    log.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log.open("a", encoding="utf-8") as fh:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT),
+                stdout=fh,
+                stderr=fh,
+                start_new_session=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+        return proc.pid, ""
+    except Exception as exc:
+        return None, str(exc)
+
+
+def feed_status() -> dict[str, Any]:
+    """Angel tick feed: either inside run_strategy, or collect_ticks.py alone."""
+    collector = [
+        r
+        for r in _pgrep("collect_ticks.py")
+        if "collect_ticks.py" in r.get("cmd", "") and "control_panel" not in r.get("cmd", "")
+    ]
+    bot = bot_status()
+    via_bot = bool(bot.get("running"))
+    source = "bot" if via_bot else ("collector" if collector else "off")
+    return {
+        "ok": True,
+        "via_bot": via_bot,
+        "collector": collector,
+        "running": via_bot or bool(collector),
+        "source": source,
+        "note": (
+            "Bot already owns the Angel feed"
+            if via_bot
+            else (
+                "Feed-only collector (no strategies)"
+                if collector
+                else "No Angel feed"
+            )
+        ),
+    }
+
+
+def start_feed() -> dict[str, Any]:
+    """Start collect_ticks.py only when the bot is not running (one Angel socket)."""
+    if bot_status().get("running"):
+        return {
+            "ok": False,
+            "error": "Bot is running — it already has the Angel feed. Stop the bot first for feed-only.",
+            "feed": feed_status(),
+        }
+    if feed_status().get("collector"):
+        return {"ok": True, "note": "feed-only already running", "feed": feed_status()}
+    pid, err = _spawn([_python(), "collect_ticks.py"], "collect_ticks.log")
+    time.sleep(1.0)
+    return {
+        "ok": bool(pid) and not err,
+        "started_pid": pid,
+        "error": err or None,
+        "feed": feed_status(),
+    }
+
+
+def stop_feed() -> dict[str, Any]:
+    """Stop feed-only collector. Does not stop the bot (bot feed dies with Stop bot)."""
+    killed = _kill_patterns(["collect_ticks.py"])
+    time.sleep(0.4)
+    return {"ok": True, "killed": killed, "feed": feed_status()}
+
+
 def restart_bot(*, start_if_stopped: bool = True) -> dict[str, Any]:
     """Kill supervise/run_strategy and start supervise.sh again."""
-    killed = _kill_patterns(["run_strategy.py", "supervise.sh"])
+    # One Angel websocket: drop feed-only collector before starting the bot.
+    killed = _kill_patterns(["collect_ticks.py", "run_strategy.py", "supervise.sh"])
     time.sleep(1.0)
     started = False
     pid = None
     err = ""
     if start_if_stopped:
-        log = ROOT / "data" / "supervise.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with log.open("a", encoding="utf-8") as fh:
-                proc = subprocess.Popen(
-                    ["bash", "./supervise.sh"],
-                    cwd=str(ROOT),
-                    stdout=fh,
-                    stderr=fh,
-                    start_new_session=True,
-                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                )
-            pid = proc.pid
-            started = True
-        except Exception as exc:
-            err = str(exc)
+        pid, err = _spawn(["bash", "./supervise.sh"], "supervise.log")
+        started = bool(pid) and not err
     time.sleep(2.0)
     status = bot_status()
     return {
@@ -157,6 +227,20 @@ def restart_bot(*, start_if_stopped: bool = True) -> dict[str, Any]:
         "error": err or None,
         "status": status,
     }
+
+
+def start_bot() -> dict[str, Any]:
+    """Start supervise if stopped. Does not kill a running bot (use restart)."""
+    st = bot_status()
+    if st.get("running"):
+        slim = dict(st)
+        slim.pop("log_tail", None)
+        return {
+            "ok": True,
+            "note": "Bot already running. Type RESTART to reload .env.",
+            "status": slim,
+        }
+    return restart_bot(start_if_stopped=True)
 
 
 def stop_bot() -> dict[str, Any]:
