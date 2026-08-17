@@ -49,7 +49,7 @@ def test_simulate_long_exits_flat_no_reverse() -> None:
         Candle("2026-08-17 10:30:00", 101.0, 103.0, 100.0, 102.0),  # tiny, hold
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → EXIT flat
     ]
-        r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
+    r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
     assert r.n_trades == 1
     assert r.trades[0].side == "LONG"
     assert r.trades[0].entry_px == 101.0
@@ -103,7 +103,7 @@ def test_later_bar_can_enter_after_flat() -> None:
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # exit, no reverse
         Candle("2026-08-17 12:00:00", 103.0, 121.0, 102.0, 104.0),  # still upper → short
     ]
-        r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
+    r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
     assert r.n_trades == 2
     assert r.trades[0].side == "LONG"
     assert r.trades[1].side == "SHORT"
