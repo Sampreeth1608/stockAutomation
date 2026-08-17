@@ -20,28 +20,25 @@ Keep `DRY_RUN=true` until you intend Angel fills. Panel LIVE_MAX_LOTS cap is 10.
 Paper 100 lots on S12/S14/S15 is not live size.
 
 Restart **only** `control_panel.py` after this pull (not supervise). Bind
-**127.0.0.1** and open the chart through the SSH tunnel.
+**0.0.0.0** so the SSH tunnel **and** the VM IP both open the chart.
 
 On the **VM**:
 
 ```bash
 cd ~/goldpetal
-git pull origin cursor/s14-wick-length-a4b2
-chmod +x daily_s14_sheet.sh scripts/run_control_panel.sh
-./scripts/run_control_panel.sh
-./daily_s14_sheet.sh --install-cron
-./daily_s14_sheet.sh
+pkill -f control_panel.py || true
+nohup ./venv/bin/python control_panel.py --host 0.0.0.0 --port 8787 >> data/control_panel.log 2>&1 &
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/
 ```
 
-On your **Mac** (leave this running):
+You want `200`. Then on your **Mac** (leave running):
 
 ```bash
 gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8787:127.0.0.1:8787
 ```
 
-Then open **http://127.0.0.1:8787/** and hard-refresh (Ctrl+Shift+R). Gold Petal
-candlesticks are the second panel. **Pull live candles** fetches Angel now; the
-weekday cron refreshes the chart every 30 minutes. Do **not** restart supervise.
+Open **http://127.0.0.1:8787/**  — or **http://8.231.125.120:8787/** if the tunnel is not up.
+Hard-refresh (Ctrl+Shift+R). Do **not** restart supervise.
 
 ## Streamlit research desk
 
