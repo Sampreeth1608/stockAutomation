@@ -2,7 +2,10 @@
 # Restart the 8787 HTML operator desk only (not supervise).
 # Same writes as Streamlit 8501 tab Desk. Use 8501 if 8787 does not open.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
+# shellcheck source=print_open_on_mac.sh
+source "$SCRIPT_DIR/print_open_on_mac.sh"
 ROOT="$PWD"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8787}"
@@ -47,12 +50,5 @@ fi
 
 echo "desk is UP from $ROOT  (pid $pid)"
 echo "If this shell prints 'Terminated', that was the OLD panel. Ignore it."
-echo
-echo "If 8787 does not open in Chrome, skip it. Use the 8501 tunnel you already have:"
-echo "  gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
-echo "Then Chrome: http://127.0.0.1:8501/  → first tab Desk"
-echo "Do not type URLs in this SSH session."
-echo
-echo "Optional 8787 tunnel:"
-echo "  gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L ${PORT}:127.0.0.1:${PORT}"
-echo "Then http://127.0.0.1:${PORT}/  (hard-refresh Cmd+Shift+R)"
+echo "Skip 8787. Open the desk on 8501:"
+print_open_on_mac
