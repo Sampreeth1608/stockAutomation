@@ -140,7 +140,9 @@ Exchange candles (Angel MCX chart, formula + decision on every bar):
 
 ```bash
 cd ~/goldpetal
-python3 explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+# if venv is .venv:
+./.venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
 ```
 
 Prints O/H/L/C, upper, lower, O=H, O=L, rule, LONG/SHORT/skip. Writes CSV under

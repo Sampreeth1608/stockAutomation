@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from explain_s14_candles import explain_bar, format_line, walk_candles
+from explain_s14_candles import (
+    bot_python_candidates,
+    explain_bar,
+    format_line,
+    walk_candles,
+)
 from strategy_wick import s14_bar_decision
 
 
@@ -48,8 +53,14 @@ def test_walk_prints_formula_numbers() -> None:
     assert row["side"] == "skip"
 
 
+def test_bot_python_candidates_is_a_list() -> None:
+    found = bot_python_candidates()
+    assert isinstance(found, list)
+
+
 if __name__ == "__main__":
     test_s14_bar_decision_open_high_beats_lower_wick()
     test_s14_bar_decision_wick_when_both_sides()
     test_walk_prints_formula_numbers()
+    test_bot_python_candidates_is_a_list()
     print("ALL test_explain_s14_candles OK")

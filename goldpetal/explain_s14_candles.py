@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Pull Angel/MCX Gold Petal candles and print S14 formula + decision per bar.
 
-  python3 explain_s14_candles.py --tf 30m,1h,1d
-  python3 explain_s14_candles.py --tf 30m --from 2026-08-02
+  ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
   python3 explain_s14_candles.py --from-ticks --db data/ticks.db --tf 30m
 
 Exchange intervals Angel actually has: 1m 3m 5m 10m 15m 30m 1h 1d.
@@ -13,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -264,6 +265,63 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         w.writerows(rows)
 
 
+def _has_angel_login() -> bool:
+    try:
+        import pyotp  # noqa: F401
+        from SmartApi import SmartConnect  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def bot_python_candidates() -> list[Path]:
+    here = Path(__file__).resolve().parent
+    names = [
+        here / "venv" / "bin" / "python",
+        here / ".venv" / "bin" / "python",
+        here.parent / "venv" / "bin" / "python",
+        here.parent / ".venv" / "bin" / "python",
+        Path.home() / "goldpetal" / "venv" / "bin" / "python",
+        Path.home() / "goldpetal" / ".venv" / "bin" / "python",
+    ]
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for p in names:
+        if not p.is_file():
+            continue
+        try:
+            r = p.resolve()
+        except OSError:
+            continue
+        if r in seen:
+            continue
+        seen.add(r)
+        out.append(p)
+    return out
+
+
+def reexec_with_bot_python() -> None:
+    """System python3 on the VM often has no pyotp; the bot venv does."""
+    if _has_angel_login():
+        return
+    me = Path(sys.executable).resolve()
+    for cand in bot_python_candidates():
+        if cand.resolve() == me:
+            continue
+        os.execv(str(cand), [str(cand), *sys.argv])
+    checked = "\n".join(f"  {p}" for p in bot_python_candidates()) or "  (none found)"
+    raise SystemExit(
+        "Angel login needs pyotp + SmartApi. This python does not have them.\n"
+        "Use the same interpreter as the bot:\n"
+        "  ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02\n"
+        "  ./.venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02\n"
+        f"checked:\n{checked}\n"
+        "Or dump tick-built bars (not the exchange chart):\n"
+        "  python3 explain_s14_candles.py --from-ticks --db data/ticks.db --tf 30m,1h,1d"
+    )
+
+
 def _parse_tfs(raw: str) -> list[str]:
     out: list[str] = []
     for name in (x.strip().lower() for x in raw.split(",") if x.strip()):
@@ -296,6 +354,8 @@ def main() -> None:
     ap.add_argument("--token", default="")
     ap.add_argument("--symbol", default="")
     args = ap.parse_args()
+    if not args.from_ticks:
+        reexec_with_bot_python()
 
     tfs = _parse_tfs(args.tf)
     start = datetime.strptime(args.date_from, "%Y-%m-%d").replace(tzinfo=IST)
