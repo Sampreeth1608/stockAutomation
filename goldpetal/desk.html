@@ -174,6 +174,35 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <p class="flash" id="flash-hist"></p>
   </section>
 
+  <section class="card" id="s14-calc">
+    <h2>S14 calculation</h2>
+    <p class="hint" id="s14-formula">Wait for the 30m candle to finish. open=high SHORT, open=low LONG, else wick (L&gt;U LONG, U&gt;L SHORT). FLIP the other side. Fill at close. Forming bar is skipped.</p>
+    <p class="mono" id="s14-meta">loading S14…</p>
+    <h2 style="margin-top:.85rem">Opened / closed (from this formula)</h2>
+    <div class="scroll" style="max-height:12rem">
+      <table>
+        <thead>
+          <tr><th>side</th><th>status</th><th>entry</th><th>in</th><th>exit</th><th>out</th><th>pts</th><th>why</th></tr>
+        </thead>
+        <tbody id="s14-book"></tbody>
+      </table>
+    </div>
+    <h2 style="margin-top:.85rem">Each finished 30m candle</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>time</th><th>O</th><th>H</th><th>L</th><th>C</th>
+            <th>U</th><th>Lwick</th><th>O=H</th><th>O=L</th>
+            <th>rule</th><th>side</th><th>action</th><th>pos</th>
+          </tr>
+        </thead>
+        <tbody id="s14-bars"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-s14"></p>
+  </section>
+
   <section class="card">
     <h2>Downloads</h2>
     <p class="hint">CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV.</p>
@@ -347,6 +376,80 @@ async function loadHistory() {
   renderWatch(h);
   if (h.error) flash("flash-hist", h.error, true);
   else flash("flash-hist", "");
+}
+function yn(v) { return v ? "Y" : "N"; }
+function s14TradeRow(t) {
+  const why = t.exit_reason || t.entry_reason || t.rule || "";
+  const pts = t.pnl_pts === "" || t.pnl_pts == null ? "" : t.pnl_pts;
+  return `<tr>
+    <td>${esc(t.side || "")}</td>
+    <td>${esc(t.status || "")}</td>
+    <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
+    <td>${esc(t.entry_price ?? "")}</td>
+    <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+    <td>${esc(t.exit_price ?? "")}</td>
+    <td class="${pnlClass(pts)}">${esc(pts)}</td>
+    <td>${esc(why)}</td>
+  </tr>`;
+}
+function renderS14Calc(d) {
+  if (d.formula) $("s14-formula").textContent = d.formula;
+  const bits = [
+    (d.tf || "30m"),
+    "finished " + (d.n_finished || 0),
+    "open " + (d.total_open || 0),
+    "closed " + (d.total_closed || 0),
+  ];
+  if (d.db_path) bits.push(d.db_path);
+  if (d.error) bits.push(d.error);
+  $("s14-meta").textContent = bits.join(" · ");
+  const book = [];
+  if (d.open) book.push(d.open);
+  (d.closed || []).forEach((t) => book.push(t));
+  $("s14-book").innerHTML = book.map(s14TradeRow).join("")
+    || `<tr><td colspan="8">No S14 enter/FLIP on these finished 30m candles</td></tr>`;
+  const bars = [];
+  if (d.forming) bars.push(d.forming);
+  (d.bars || []).forEach((b) => bars.push(b));
+  $("s14-bars").innerHTML = bars.map((b) => {
+    const act = b.action || "";
+    const cls = act === "enter" || act === "FLIP" ? "ok" : (act === "skip" || act === "forming" ? "" : "");
+    return `<tr>
+      <td>${esc(String(b.time || "").slice(0, 19))}</td>
+      <td>${esc(b.open ?? "")}</td>
+      <td>${esc(b.high ?? "")}</td>
+      <td>${esc(b.low ?? "")}</td>
+      <td>${esc(b.close ?? "")}</td>
+      <td>${esc(b.upper ?? "")}</td>
+      <td>${esc(b.lower ?? "")}</td>
+      <td>${yn(b.open_eq_high)}</td>
+      <td>${yn(b.open_eq_low)}</td>
+      <td>${esc(b.rule || "")}</td>
+      <td>${esc(b.side || "")}</td>
+      <td class="${cls}">${esc(act)}</td>
+      <td>${esc((b.pos_before || "") + "→" + (b.pos_after || ""))}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="13">No 30m candles yet</td></tr>`;
+  const botN = (lastHist.total_open || 0) + (lastHist.total_closed || 0);
+  if ($("hist-strat").value === "S14_WICK30_STRICT" && (lastHist.from_formula || botN === 0)) {
+    const open = d.open ? [d.open] : [];
+    const closed = d.closed || [];
+    lastHist = Object.assign({}, lastHist, {
+      trades: open.concat(closed),
+      open,
+      total_open: open.length,
+      total_closed: closed.length,
+      trades_loading: false,
+      from_formula: true,
+    });
+    renderWatch(Object.assign({}, lastTape, lastHist));
+  }
+}
+async function loadS14Calc() {
+  const d = await api("/api/s14/calc");
+  renderS14Calc(d);
+  if (d.error) flash("flash-s14", d.error, true);
+  else flash("flash-s14", "");
 }
 
 function rangeQs() {
@@ -585,7 +688,10 @@ document.querySelectorAll("[data-watch]").forEach((btn) => {
     loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
   };
 });
-$("hist-strat").onchange = () => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+$("hist-strat").onchange = () => {
+  loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true));
+};
 $("exp-from").onchange = () => refreshExportMeta().catch(() => {});
 $("exp-to").onchange = () => refreshExportMeta().catch(() => {});
 $("btn-dl-pack").onclick = () => {
@@ -641,12 +747,14 @@ async function boot() {
     $("hist-meta").textContent = String(e.message || e);
   }
   loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true));
 }
 
 boot().catch((e) => flash("flash-engine", String(e.message || e), true));
 setInterval(() => load().catch(() => {}), 4000);
 setInterval(() => loadTape().catch((e) => flash("flash-hist", String(e.message || e), true)), 4000);
 setInterval(() => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true)), 12000);
+setInterval(() => loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true)), 15000);
 </script>
 </body>
 </html>

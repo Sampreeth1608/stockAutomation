@@ -197,6 +197,18 @@ def test_nowick_hammer_does_not_exit() -> None:
     assert s.position == "flat"
 
 
+def test_wick_record_actions_flip_emits_close_then_entry() -> None:
+    from types import SimpleNamespace
+    from strategy_wick import wick_record_actions
+
+    buy = SimpleNamespace(action="BUY", position_after="long")
+    short = SimpleNamespace(action="SHORT", position_after="short")
+    assert wick_record_actions("flat", buy) == [("BUY", "long")]
+    assert wick_record_actions("long", short) == [("CLOSE", "flat"), ("SHORT", "short")]
+    assert wick_record_actions("short", buy) == [("CLOSE", "flat"), ("BUY", "long")]
+    assert wick_record_actions("long", None) == []
+
+
 def test_seed_current_bar_from_sql() -> None:
     import sqlite3
     from pathlib import Path
@@ -227,6 +239,35 @@ def test_seed_current_bar_from_sql() -> None:
     db.unlink(missing_ok=True)
 
 
+def test_seed_restores_open_s14_position() -> None:
+    import tempfile
+    from pathlib import Path
+
+    from storage import init_db, save_signal
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        save_signal(
+            time_label="2026-08-17T10:30:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="enter",
+            price_delta=None,
+            net=0.0,
+            net_delta=None,
+            dry_run=True,
+            strategy="S14_WICK30_STRICT",
+            cmp=102.0,
+            db_path=db,
+        )
+        s = _s14(seed=False)
+        s.seed_from_ticks(db, now=ts("10:22"))
+        assert s.position == "long"
+        assert s.entry_price == 102.0
+
+
 if __name__ == "__main__":
     test_open_high_on_same_closed_candle_shorts()
     test_open_low_on_same_closed_candle_longs()
@@ -241,4 +282,6 @@ if __name__ == "__main__":
     test_nowick_bald_green_buys()
     test_nowick_hammer_does_not_exit()
     test_seed_current_bar_from_sql()
+    test_wick_record_actions_flip_emits_close_then_entry()
+    test_seed_restores_open_s14_position()
     print("ALL test_strategy_wick OK")

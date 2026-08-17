@@ -167,6 +167,27 @@ class WickCandleStrategy:
             self._open_hold_armed = False
             self._open_hold_done = True
 
+    def _seed_position_from_signals(self, db: Path) -> None:
+        """Restart must keep the open S14 book so the next bar can FLIP/CLOSE."""
+        try:
+            from storage import latest_signals
+
+            last = latest_signals(limit=1, strategy=self.name, db_path=db)
+            if not last:
+                return
+            row = last[0]
+            action = str(row["action"] or "").upper()
+            pos = str(row["position_after"] or "").lower()
+            if action in {"BUY", "SHORT"} and pos in {"long", "short"}:
+                self.position = pos  # type: ignore[assignment]
+                cmp = row["cmp"]
+                self.entry_price = float(cmp) if cmp is not None else None
+            elif action == "CLOSE" or pos == "flat":
+                self.position = "flat"
+                self.entry_price = None
+        except Exception:
+            return
+
     def seed_from_ticks(
         self, db_path: Path | None = None, *, now: datetime | None = None
     ) -> None:
@@ -175,6 +196,7 @@ class WickCandleStrategy:
             db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
             if not db.exists():
                 return
+            self._seed_position_from_signals(db)
             now = (now or datetime.now(IST)).astimezone(IST)
             cur_key = self._floor_bar(now)
             start = cur_key.strftime("%Y-%m-%dT%H:%M:%S")
@@ -539,6 +561,30 @@ def _open_hold_side(open_: float, high: float, low: float) -> str | None:
     if at_low:
         return "long"
     return None
+
+
+def wick_record_actions(
+    prev_position: str, result: Any
+) -> list[tuple[str, str]]:
+    """DB actions for one wick result. FLIP → CLOSE then BUY/SHORT (Watch closed+opened)."""
+    if result is None:
+        return []
+    action = str(getattr(result, "action", "") or "").upper()
+    if action not in {"BUY", "SHORT", "CLOSE"}:
+        return []
+    prev = str(prev_position or "flat").lower()
+    pos_after = str(getattr(result, "position_after", "") or "").lower()
+    if action == "BUY":
+        pos_after = pos_after or "long"
+    elif action == "SHORT":
+        pos_after = pos_after or "short"
+    else:
+        pos_after = pos_after or "flat"
+    out: list[tuple[str, str]] = []
+    if action in {"BUY", "SHORT"} and prev in {"long", "short"}:
+        out.append(("CLOSE", "flat"))
+    out.append((action, pos_after))
+    return out
 
 
 def s14_bar_decision(

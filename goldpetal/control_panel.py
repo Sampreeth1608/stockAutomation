@@ -243,6 +243,13 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "text/html; charset=utf-8",
                     )
                 return
+            if path == "/api/s14/calc":
+                from desk_data import resolve_desk_db
+                from s14_calc import cached_calc_payload
+
+                status, body, ctype = _json_bytes(cached_calc_payload(resolve_desk_db()))
+                self._send(status, body, ctype)
+                return
             if path == "/api/s14/meta":
                 status, body, ctype = _json_bytes(load_sheet_meta(S14_SHEET_DIR))
                 self._send(status, body, ctype)

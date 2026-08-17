@@ -17,6 +17,7 @@ def test_lite_html_is_the_operator_page() -> None:
     assert "Unlock live" in html
     assert 'href="/full"' in html
     assert "Trade list" in html
+    assert "S14 calculation" in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html
     assert "/api/history" not in html
@@ -34,6 +35,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "/api/tape" in html
     assert "loadTape" in html
     assert "/api/history" in html
+    assert "S14 calculation" in html
+    assert "/api/s14/calc" in html
 
 
 def test_control_panel_serves_lite_on_8501() -> None:
@@ -42,6 +45,7 @@ def test_control_panel_serves_lite_on_8501() -> None:
     assert "LITE_HTML_PATH" in text
     assert "/api/desk" in text
     assert "/api/tape" in text
+    assert "/api/s14/calc" in text
     assert "/api/desk/books" in text
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text

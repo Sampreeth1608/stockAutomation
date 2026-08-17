@@ -43,7 +43,7 @@ from strategy_net_zigzag import (
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from strategy_hhhl import HhhlCandleStrategy, hhhl_from_env
 from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env
-from strategy_wick import WickCandleStrategy, wick_nowick_from_env, wick_strict_from_env
+from strategy_wick import WickCandleStrategy, wick_nowick_from_env, wick_record_actions, wick_strict_from_env
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
@@ -1278,6 +1278,7 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
+        prev = strategy.position
         result = strategy.on_tick(now, float(latest["cmp"]), message)
         skip = getattr(strategy, "last_skip", None)
         if result is None and state["tick_count"] % 50 == 0:
@@ -1287,15 +1288,18 @@ def run_once(
             )
             print(line, flush=True)
             logger.info(line)
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        planned = wick_record_actions(prev, result)
+        if not planned:
             return
-        if result.action in {"BUY", "SHORT"}:
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
             ok_enter, why = _may_enter(strategy.name, regime_det.last.regime)
             if not ok_enter:
                 strategy.position = "flat"
                 strategy.entry_price = None
                 if hasattr(strategy, "release_decision_lock"):
                     strategy.release_decision_lock()
+                planned = [p for p in planned if p[0] == "CLOSE"]
                 line = (
                     f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
                     f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
@@ -1303,11 +1307,12 @@ def run_once(
                 )
                 print(line, flush=True)
                 logger.info(line)
-                return
+                if not planned:
+                    return
         if (
             strategy.position != "flat"
             and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and result.action != "CLOSE"
+            and enter_action != "CLOSE"
         ):
             from strategy import SignalResult as _SR
 
@@ -1322,24 +1327,29 @@ def run_once(
                 prev_net_delta=result.prev_net_delta,
                 reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
             )
-        _record_signal(
-            time_label=now.isoformat(timespec="seconds"),
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            strategy=strategy.name,
-            cmp=float(latest["cmp"]),
-        )
-        line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
-            f"=> {result.action} (pos={strategy.position}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
+            planned = [("CLOSE", "flat")]
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy.name,
+                cmp=float(latest["cmp"]),
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+                f"=> {action} (pos={pos_after}) | {reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
 
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
