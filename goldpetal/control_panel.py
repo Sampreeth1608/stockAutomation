@@ -50,6 +50,14 @@ from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
+from s14_exchange_sheet import (
+    HTML_NAME,
+    load_sheet_csv,
+    load_sheet_meta,
+    missing_sheet_html,
+    rows_to_tsv as s14_rows_to_tsv,
+    sheet_zip_bytes,
+)
 from panel_export import (
     TRADE_CSV_FIELDS,
     TICK_CSV_FIELDS,
@@ -71,6 +79,7 @@ from reasoning_cockpit import (
 from position_safety import read_bot_health
 
 ROOT = Path(__file__).resolve().parent
+S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 
 
 HTML_PAGE = r"""<!DOCTYPE html>
@@ -184,6 +193,7 @@ h2 {
 .btn.danger.on { background: var(--bad); color: #1a0504; border-color: var(--bad); }
 .btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
 .btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
+a.btn { text-decoration: none; display: inline-block; }
 .pill {
   display: inline-block; padding: .15rem .45rem; border-radius: 2px;
   font-family: "IBM Plex Mono", monospace; font-size: .75rem;
@@ -380,6 +390,28 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
           <tbody id="score-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Gold Petal exchange candles · S14 sheet</h2>
+      <p class="muted">Angel/MCX chart OHLC + wick formula (the real candle, not tick-built). Open the sheet any time, or copy a tab into Google Sheets. Rebuild: <span class="mono">./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d --no-print-bars</span></p>
+      <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
+        <a class="btn ok" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
+        <button class="btn" type="button" id="btn-s14-zip">Download sheet ZIP</button>
+        <label class="muted">Tab
+          <select id="s14-tf" style="margin-left:.35rem">
+            <option value="1d">1d</option>
+            <option value="1h">1h</option>
+            <option value="30m">30m</option>
+            <option value="pnl">pnl</option>
+            <option value="trades">trades</option>
+          </select>
+        </label>
+        <button class="btn warn" type="button" id="btn-s14-copy">Copy tab → Google Sheets</button>
+      </div>
+      <p class="mono" id="s14-meta">No sheet yet</p>
+      <p class="flash" id="s14-flash"></p>
+      <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
     </section>
 
     <section class="panel">
@@ -984,6 +1016,56 @@ $("btn-copy-score").onclick = async () => {
   } catch (e) { sheetsFlash(String(e.message || e)); }
 };
 
+const s14Flash = (msg) => { $("s14-flash").textContent = msg || ""; };
+function paintS14Table(fields, rows) {
+  $("s14-head").innerHTML = "<tr>" + fields.map((c) => `<th>${c}</th>`).join("") + "</tr>";
+  const body = rows.slice(0, 80).map((r) => {
+    const side = String(r.side || "");
+    const cls = side === "LONG" ? "ok" : side === "SHORT" ? "bad" : "";
+    return "<tr>" + fields.map((c) => {
+      const v = r[c] == null ? "" : String(r[c]);
+      return `<td class="${c==="side"?cls:""}">${v}</td>`;
+    }).join("") + "</tr>";
+  }).join("");
+  $("s14-body").innerHTML = body || `<tr><td>No rows. Run the dump command above.</td></tr>`;
+}
+async function loadS14Preview() {
+  const tf = $("s14-tf").value || "1d";
+  try {
+    const meta = await api("/api/s14/meta");
+    if (!meta.ok) {
+      $("s14-meta").textContent = meta.hint || "Sheet not built yet";
+      $("s14-head").innerHTML = "";
+      $("s14-body").innerHTML = "";
+      return;
+    }
+    $("s14-meta").textContent =
+      `${meta.generated_at || ""} · ${meta.symbol || ""} · source=${meta.source || ""} · tabs=${(meta.tfs||[]).join(",")}`;
+    const data = await api(`/api/s14/sheet?tf=${encodeURIComponent(tf)}`);
+    paintS14Table(data.fields || [], data.rows || []);
+    if ((data.rows || []).length > 80) {
+      s14Flash(`Showing first 80 of ${data.rows.length} rows — Open full sheet for all`);
+    } else {
+      s14Flash("");
+    }
+  } catch (e) {
+    $("s14-meta").textContent = String(e.message || e);
+  }
+}
+$("btn-s14-zip").onclick = () => {
+  downloadUrl("/api/s14/sheet.zip");
+  s14Flash("Downloading GoldPetal_S14 sheet ZIP (HTML + CSVs)");
+};
+$("btn-s14-copy").onclick = async () => {
+  try {
+    const tf = $("s14-tf").value || "1d";
+    const data = await api(`/api/s14/sheet?tf=${encodeURIComponent(tf)}`);
+    await navigator.clipboard.writeText(data.tsv || "");
+    s14Flash(`Copied ${data.rows.length} ${tf} rows — paste into Google Sheets`);
+  } catch (e) { s14Flash(String(e.message || e)); }
+};
+$("s14-tf").onchange = () => loadS14Preview();
+
 async function initExportDates() {
   const d = await api("/api/export/defaults");
   $("exp-from").value = d.date_from;
@@ -993,6 +1075,7 @@ async function initExportDates() {
 
 refresh().then(() => loadBars(currentTf).catch(() => {})).catch(e => flash("Failed: " + e));
 initExportDates().catch(e => expFlash(String(e.message || e)));
+loadS14Preview().catch(() => {});
 // Light poll often; full dashboard less often (tunnel-friendly).
 setInterval(() => refreshLight().catch(() => {}), 5000);
 setInterval(() => refresh().catch(() => {}), 30000);
@@ -1115,6 +1198,53 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path in {"/", "/index.html"}:
                 body = HTML_PAGE.encode("utf-8")
                 self._send(200, body, "text/html; charset=utf-8")
+                return
+            if path in {"/s14-sheet", "/s14-sheet.html"}:
+                html_path = S14_SHEET_DIR / HTML_NAME
+                if html_path.is_file():
+                    self._send(200, html_path.read_bytes(), "text/html; charset=utf-8")
+                else:
+                    self._send(
+                        200,
+                        missing_sheet_html().encode("utf-8"),
+                        "text/html; charset=utf-8",
+                    )
+                return
+            if path == "/api/s14/meta":
+                status, body, ctype = _json_bytes(load_sheet_meta(S14_SHEET_DIR))
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/sheet":
+                tf = ((qs.get("tf") or ["1d"])[0] or "1d").strip().lower()
+                fields, rows = load_sheet_csv(f"{tf}.csv", S14_SHEET_DIR)
+                tsv = s14_rows_to_tsv(rows, fields) if fields else ""
+                status, body, ctype = _json_bytes(
+                    {
+                        "tf": tf,
+                        "fields": fields,
+                        "rows": rows,
+                        "tsv": tsv,
+                    }
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s14/sheet.zip":
+                if not (S14_SHEET_DIR / HTML_NAME).is_file() and not any(
+                    S14_SHEET_DIR.glob("*.csv")
+                ):
+                    status, body, ctype = _json_bytes(
+                        load_sheet_meta(S14_SHEET_DIR), 404
+                    )
+                    self._send(status, body, ctype)
+                    return
+                blob = sheet_zip_bytes(S14_SHEET_DIR)
+                name = "GoldPetal_S14_sheet.zip"
+                self._send(
+                    200,
+                    blob,
+                    "application/zip",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
                 return
             if path == "/api/dashboard":
                 status, body, ctype = _json_bytes(dashboard_payload())

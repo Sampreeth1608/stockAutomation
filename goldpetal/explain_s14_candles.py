@@ -3,6 +3,7 @@
 
   ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
   ./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d
+  ./venv/bin/python s14_exchange_sheet.py --from-csv data/backtests/s14_candles
   python3 explain_s14_candles.py --from-ticks --db data/ticks.db --tf 30m
 
 Fill: enter/FLIP at that finished bar's close. Leftover flattened at the last
@@ -563,6 +564,18 @@ def main() -> None:
         help="print every fill (default: only when trades ≤ 20)",
     )
     ap.add_argument("--out-dir", type=Path, default=Path("data/backtests/s14_candles"))
+    ap.add_argument(
+        "--sheet-dir",
+        type=Path,
+        default=Path("data/s14_sheet"),
+        help="HTML + CSV workbook you can reopen any time",
+    )
+    ap.add_argument(
+        "--sheet",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="write data/s14_sheet/GoldPetal_S14.html (default on)",
+    )
     ap.add_argument("--token", default="")
     ap.add_argument("--symbol", default="")
     args = ap.parse_args()
@@ -624,6 +637,7 @@ def main() -> None:
         print(f"ticks db={args.db}", flush=True)
 
     results: list[TfResult] = []
+    walks: dict[str, list[dict[str, Any]]] = {}
     now = datetime.now(IST)
     for tf in tfs:
         if args.from_csv is not None:
@@ -655,6 +669,7 @@ def main() -> None:
             bars = raw
         bars = [b for b in bars if bar_is_finished(b["time"], tf, now)]
         rows = walk_candles(bars, open_hold=open_hold)
+        walks[tf] = rows
         n_enter = sum(1 for r in rows if r["action"] in {"enter", "FLIP"})
         print(flush=True)
         print(
@@ -691,6 +706,26 @@ def main() -> None:
         print(flush=True)
         print_by_day(results)
         write_outputs(results, args.out_dir)
+
+    if args.sheet and walks:
+        from s14_exchange_sheet import write_s14_workbook
+
+        meta = write_s14_workbook(
+            walks,
+            results,
+            out_dir=args.sheet_dir,
+            symbol=symbol,
+            source=source,
+            lots=args.lots,
+            fees=args.fees,
+            formula=FORMULA,
+        )
+        print(flush=True)
+        print(f"sheet {meta['html']}", flush=True)
+        print(
+            "  open data/s14_sheet/GoldPetal_S14.html  or  http://127.0.0.1:8787/s14-sheet",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
