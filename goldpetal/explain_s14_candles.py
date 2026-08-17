@@ -77,6 +77,18 @@ def in_session_dt(
     return start <= dt <= end
 
 
+def bar_is_finished(time_s: str, tf: str, now: datetime | None = None) -> bool:
+    """Angel includes the in-progress bar. S14 only decides on a closed candle."""
+    start = parse_bar_ts(time_s)
+    now = now or datetime.now(IST)
+    if tf == "1d":
+        end = start.replace(hour=23, minute=30, second=0, microsecond=0)
+        if end <= start:
+            end = start + timedelta(days=1)
+        return now >= end
+    return now >= start + timedelta(minutes=TF_MINUTES[tf])
+
+
 def explain_bar(
     *,
     time: str,
@@ -415,6 +427,8 @@ def main() -> None:
             ]
         else:
             bars = raw
+        now = datetime.now(IST)
+        bars = [b for b in bars if bar_is_finished(b["time"], tf, now)]
         rows = walk_candles(bars, open_hold=open_hold)
         n_enter = sum(1 for r in rows if r["action"] in {"enter", "FLIP"})
         print(flush=True)

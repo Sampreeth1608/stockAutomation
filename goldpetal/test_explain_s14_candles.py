@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from explain_s14_candles import (
+    bar_is_finished,
     bot_python_candidates,
     explain_bar,
     format_line,
     walk_candles,
 )
 from strategy_wick import s14_bar_decision
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def test_s14_bar_decision_open_high_beats_lower_wick() -> None:
@@ -53,6 +59,16 @@ def test_walk_prints_formula_numbers() -> None:
     assert row["side"] == "skip"
 
 
+def test_unfinished_bars_are_not_decided() -> None:
+    now = datetime.fromisoformat("2026-08-17T15:54:00+05:30").astimezone(IST)
+    assert bar_is_finished("2026-08-17 15:00:00", "30m", now) is True
+    assert bar_is_finished("2026-08-17 15:30:00", "30m", now) is False
+    assert bar_is_finished("2026-08-17 15:00:00", "1h", now) is False
+    assert bar_is_finished("2026-08-17 14:00:00", "1h", now) is True
+    assert bar_is_finished("2026-08-17 00:00:00", "1d", now) is False
+    assert bar_is_finished("2026-08-14 00:00:00", "1d", now) is True
+
+
 def test_bot_python_candidates_is_a_list() -> None:
     found = bot_python_candidates()
     assert isinstance(found, list)
@@ -62,5 +78,6 @@ if __name__ == "__main__":
     test_s14_bar_decision_open_high_beats_lower_wick()
     test_s14_bar_decision_wick_when_both_sides()
     test_walk_prints_formula_numbers()
+    test_unfinished_bars_are_not_decided()
     test_bot_python_candidates_is_a_list()
     print("ALL test_explain_s14_candles OK")
