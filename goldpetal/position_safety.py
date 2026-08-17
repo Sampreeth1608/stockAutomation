@@ -27,6 +27,7 @@ INTRADAY_RESTORE = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
+    "S13_HHHL_DAY",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -129,6 +130,14 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
     strategy_obj.position = open_pos.side  # type: ignore[assignment]
     if hasattr(strategy_obj, "entry_price"):
         strategy_obj.entry_price = open_pos.entry_price
+    if name == "S13_HHHL_DAY" and open_pos.time_label:
+        if hasattr(strategy_obj, "entry_date"):
+            strategy_obj.entry_date = str(open_pos.time_label)[:10]
+    if hasattr(strategy_obj, "_save_state"):
+        try:
+            strategy_obj._save_state()
+        except Exception:
+            pass
     # Best-effort: give S5 something to manage against until ATR warms
     if name == "S5_MINEDGE" and open_pos.entry_price is not None:
         if getattr(strategy_obj, "target_points", None) is None:

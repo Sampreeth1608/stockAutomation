@@ -22,9 +22,14 @@ class _Fake:
         self.name = name
         self.position = "flat"
         self.entry_price = None
+        self.entry_date = None
+        self.saved = False
         self.target_points = None
         self.stop_points = None
         self.required_points = 50.0
+
+    def _save_state(self) -> None:
+        self.saved = True
 
     @property
     def status_line(self) -> str:
@@ -52,6 +57,26 @@ def test_apply_restore_s5() -> None:
     assert s.position == "short"
     assert s.entry_price == 15300.0
     assert s.target_points == 50.0
+    assert s.saved is True
+
+
+def test_apply_restore_s13_sets_entry_date() -> None:
+    s = _Fake("S13_HHHL_DAY")
+    ok = apply_position_to_strategy(
+        s,
+        OpenPosition(
+            "S13_HHHL_DAY",
+            "long",
+            15462.0,
+            "2026-08-14T23:20:00+05:30",
+            "BUY",
+            15462.0,
+        ),
+    )
+    assert ok
+    assert s.position == "long"
+    assert s.entry_date == "2026-08-14"
+    assert s.saved is True
 
 
 def test_disabled_not_restorable() -> None:
@@ -129,6 +154,8 @@ def test_startup_reconcile_restore(monkeypatch_signals=None) -> None:
 if __name__ == "__main__":
     test_apply_restore_s5()
     print("ok apply")
+    test_apply_restore_s13_sets_entry_date()
+    print("ok s13 restore")
     test_disabled_not_restorable()
     print("ok disabled")
     test_eod_window()

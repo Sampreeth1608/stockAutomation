@@ -376,6 +376,7 @@ def run_once(
         strategy_s5.name: strategy_s5,
         strategy_s8.name: strategy_s8,
         strategy_s12.name: strategy_s12,
+        strategy_s13.name: strategy_s13,
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
         strategy_s6.name: strategy_s6,
@@ -1123,7 +1124,7 @@ def run_once(
         ):
             line = (
                 f"[{now.isoformat(timespec='seconds')}] S12_HHHL30 idle "
-                f"watch={watching} skip={skip} "
+                f"pos={strategy_s12.position} watch={watching} skip={skip} "
                 f"prevH={strategy_s12.prev_h} prevL={strategy_s12.prev_l} "
                 f"barH={strategy_s12._bar_h} barL={strategy_s12._bar_l} "
                 f"barO={strategy_s12._bar_o} barC={strategy_s12._bar_c}"
@@ -1197,6 +1198,26 @@ def run_once(
         ):
             return
         result = strategy_s13.on_tick(now, float(latest["cmp"]), message)
+        skip = getattr(strategy_s13, "last_skip", None)
+        day = getattr(strategy_s13, "_day", None)
+        prev = getattr(strategy_s13, "prev_day", None)
+        if result is None and state["tick_count"] % 50 == 0:
+            prev_s = (
+                f"prev={prev.date} prevH={prev.high} prevL={prev.low}"
+                if prev is not None
+                else "prev=none"
+            )
+            day_s = (
+                f"dayH={day.high} dayL={day.low} dayO={day.open} dayC={day.close}"
+                if day is not None
+                else "day=none"
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] S13_HHHL_DAY idle "
+                f"pos={strategy_s13.position} skip={skip} {prev_s} {day_s}"
+            )
+            print(line, flush=True)
+            logger.info(line)
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
@@ -1291,7 +1312,8 @@ def run_once(
                     f"/{strategy_s8.bias} s9={strategy_s9.position}"
                     f"/{strategy_s9.last_label} s10={strategy_s10.position}"
                     f"/{strategy_s10.bias} s11={strategy_s11.position} "
-                    f"s12={strategy_s12.position}{s3_extra}"
+                    f"s12={strategy_s12.position} "
+                    f"s13={strategy_s13.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
