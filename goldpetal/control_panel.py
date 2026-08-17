@@ -27,7 +27,13 @@ from capital import (
     update_strategy_budget,
 )
 from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
-from desk_data import history_payload, recent_trades as _recent_trades, row_to_dict as _row_to_dict
+from desk_data import (
+    history_payload,
+    json_safe,
+    recent_trades as _recent_trades,
+    row_to_dict as _row_to_dict,
+    tape_payload,
+)
 from control_state import (
     SLIM_PAPER_STRATEGIES,
     entries_blocked,
@@ -100,7 +106,7 @@ def load_full_desk_html() -> bytes:
 
 
 def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
-    body = json.dumps(payload, default=str).encode("utf-8")
+    body = json.dumps(json_safe(payload), default=str, allow_nan=False).encode("utf-8")
     return status, body, "application/json; charset=utf-8"
 
 
@@ -279,6 +285,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/desk":
                 status, body, ctype = _json_bytes(desk_payload())
+                self._send(status, body, ctype)
+                return
+            if path == "/api/tape":
+                status, body, ctype = _json_bytes(tape_payload())
                 self._send(status, body, ctype)
                 return
             if path == "/api/dashboard":

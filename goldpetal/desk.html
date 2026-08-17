@@ -152,7 +152,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
 
   <section class="card">
     <h2>Watch</h2>
-    <p class="hint">Live trade history, ticks, and scoreboard from ticks.db — same tape the old panel had.</p>
+    <p class="hint">Tape from ticks.db. Ticks and signals load first; trades follow. The db path is on the line below — if ticks stay 0, the desk is reading the wrong file.</p>
     <div class="row">
       <button class="tab on" type="button" data-watch="trades">Trades</button>
       <button class="tab" type="button" data-watch="open">Open</button>
@@ -164,7 +164,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
         <option value="">All books</option>
       </select>
     </div>
-    <p class="mono" id="hist-meta" style="margin:.55rem 0 .4rem">…</p>
+    <p class="mono" id="hist-meta" style="margin:.55rem 0 .4rem">loading…</p>
     <div class="scroll">
       <table>
         <thead id="hist-head"></thead>
@@ -211,6 +211,8 @@ const SHORT = {
 let last = null;
 let watchTab = "trades";
 let histReady = false;
+let lastTape = { ticks: [], signals: [], live_orders: [], tick_count: 0, ltp: null, db_path: "" };
+let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0, trades_loading: true };
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -237,9 +239,18 @@ function thead(cols) {
 function renderWatch(h) {
   const tab = watchTab;
   const strat = $("hist-strat").value;
-  $("hist-meta").textContent =
-    `open ${h.total_open || 0} · closed ${h.total_closed || 0} · ticks ${h.tick_count || 0}` +
-    (strat ? " · " + (SHORT[strat] || strat) : " · all books");
+  const bits = [
+    "open " + (h.total_open || 0),
+    "closed " + (h.total_closed || 0),
+    "ticks " + (h.tick_count || 0),
+  ];
+  if (h.ltp != null && h.ltp !== "") bits.push("ltp " + h.ltp);
+  if (h.db_path) bits.push(h.db_path);
+  if (h.trades_loading) bits.push("trades loading");
+  if (!(h.tick_count || 0) && !(h.ticks || []).length) bits.push("empty db or wrong folder");
+  if (strat) bits.push(SHORT[strat] || strat);
+  else bits.push("all books");
+  $("hist-meta").textContent = bits.join(" · ");
   if (tab === "trades" || tab === "open") {
     const rows = tab === "open" ? (h.open || []) : (h.trades || []);
     thead(["book", "side", "status", "entry", "in", "exit", "out", "after-tax ₹", "why"]);
@@ -257,7 +268,7 @@ function renderWatch(h) {
         <td class="${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
         <td>${esc(why)}</td>
       </tr>`;
-    }).join("") || `<tr><td colspan="9">No trades yet</td></tr>`;
+    }).join("") || `<tr><td colspan="9">${h.trades_loading ? "Loading trades…" : "No trades yet"}</td></tr>`;
     return;
   }
   if (tab === "ticks") {
@@ -312,12 +323,30 @@ function renderWatch(h) {
   }).join("") || `<tr><td colspan="7">No scoreboard yet</td></tr>`;
 }
 
+async function loadTape() {
+  const t = await api("/api/tape");
+  lastTape = t;
+  renderWatch(Object.assign({}, lastTape, lastHist));
+  if (t.error) flash("flash-hist", t.error, true);
+}
 async function loadHistory() {
   fillStratSelect();
   const strat = $("hist-strat").value;
   const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
   const h = await api(q);
+  lastHist = h;
+  lastTape = Object.assign({}, lastTape, {
+    ticks: h.ticks || lastTape.ticks,
+    signals: h.signals || lastTape.signals,
+    live_orders: h.live_orders || lastTape.live_orders,
+    tick_count: h.tick_count != null ? h.tick_count : lastTape.tick_count,
+    ltp: h.ltp != null ? h.ltp : lastTape.ltp,
+    db_path: h.db_path || lastTape.db_path,
+    last_tick_at: h.last_tick_at || lastTape.last_tick_at,
+  });
   renderWatch(h);
+  if (h.error) flash("flash-hist", h.error, true);
+  else flash("flash-hist", "");
 }
 
 function rangeQs() {
@@ -351,7 +380,7 @@ async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
   const text = await res.text();
   let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error("bad JSON from " + path); }
   if (!res.ok) throw new Error(data.error || data.note || text || res.status);
   return data;
 }
@@ -379,8 +408,8 @@ function render(d) {
   const modeKind = live.would_place_real_orders ? "bad" : (live.dry_run === false ? "warn" : "ok");
   $("pills").innerHTML = [
     pill(mode, modeKind),
-    pill("LTP " + (d.ltp != null ? d.ltp : "—"), ""),
-    pill((d.tick_count || 0) + " ticks", feed.running ? "ok" : "bad"),
+    pill("LTP " + ((lastTape.ltp != null ? lastTape.ltp : d.ltp) ?? "—"), ""),
+    pill((lastTape.tick_count || d.tick_count || 0) + " ticks", (lastTape.tick_count || 0) > 0 ? "ok" : "warn"),
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
     pill(st.emergency_off ? "EMERGENCY" : "entries ok", st.emergency_off ? "bad" : "ok"),
     pill(st.trading_enabled ? "trading on" : "trading off", st.trading_enabled ? "ok" : "warn"),
@@ -597,19 +626,27 @@ $("btn-s14-zip").onclick = () => {
 
 async function boot() {
   fillStratSelect();
+  $("hist-meta").textContent = "loading…";
   try {
     const d = await api("/api/export/defaults");
     $("exp-from").value = d.date_from;
     $("exp-to").value = d.date_to;
     await refreshExportMeta();
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
-  await load();
-  await loadHistory();
+  load().catch((e) => flash("flash-engine", String(e.message || e), true));
+  try {
+    await loadTape();
+  } catch (e) {
+    flash("flash-hist", String(e.message || e), true);
+    $("hist-meta").textContent = String(e.message || e);
+  }
+  loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
 }
 
 boot().catch((e) => flash("flash-engine", String(e.message || e), true));
 setInterval(() => load().catch(() => {}), 4000);
-setInterval(() => loadHistory().catch(() => {}), 8000);
+setInterval(() => loadTape().catch((e) => flash("flash-hist", String(e.message || e), true)), 4000);
+setInterval(() => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true)), 12000);
 </script>
 </body>
 </html>

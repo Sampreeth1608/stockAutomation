@@ -31,6 +31,9 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "Copy trades → Sheets" in html
     assert "Save strategies" in html
     assert "--bg:#ffffff" in html.replace(" ", "")
+    assert "/api/tape" in html
+    assert "loadTape" in html
+    assert "/api/history" in html
 
 
 def test_control_panel_serves_lite_on_8501() -> None:
@@ -38,6 +41,7 @@ def test_control_panel_serves_lite_on_8501() -> None:
     assert "load_desk_html" in text
     assert "LITE_HTML_PATH" in text
     assert "/api/desk" in text
+    assert "/api/tape" in text
     assert "/api/desk/books" in text
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
