@@ -1,22 +1,11 @@
-"""Candle wick lengths → long / short (S14).
+"""Candle wick lengths.
 
   upper = high − max(open, close)
   lower = min(open, close) − low
-  body  = |close − open|
-  range = high − low
 
-S14 uses this on every candle (entry and exit). No high−low skip.
-
-  if upper ≤ 1 and lower ≤ 1:          # bald
-      close > open → LONG
-      close < open → SHORT
-      close = open → skip
-  else:
-      winning wick ≥ 0.5 × range → that side
-      or winning wick ≥ 2 × body → that side
-      else skip
-
-HOLD: opposite → CLOSE on a later candle; no reverse on that same bar.
+S14 live uses raw dominance only (see strategy_wick.py):
+  lower > upper → LONG, upper > lower → SHORT, equal → skip.
+These helpers also serve S15 nowick and the research backtest presets.
 """
 
 from __future__ import annotations

@@ -354,7 +354,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S14      : 30m wick strict HOLD "
+        f"S14      : 30m wick FLIP + 2m open-hold "
         f"[{'ON' if portfolio.is_enabled(strategy_s14.name) else 'OFF'}] "
         f"{strategy_s14.status_line}",
         flush=True,
@@ -1273,7 +1273,7 @@ def run_once(
         logger.info(line)
 
     def emit_wick_if_changed(strategy: WickCandleStrategy, now: datetime, message: dict) -> None:
-        """S14/S15: 30m wick HOLD — enter/exit only in last minute of *that* bar."""
+        """S14/S15: 30m wick — S14 FLIPs when the wick changes; S15 last-minute nowick."""
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
@@ -1446,7 +1446,7 @@ def run_once(
             emit_s12_if_changed(now, message)
             # S13: daily HH/LL same-candle (last 15m of the signal day)
             emit_s13_if_changed(now, message)
-            # S14: 30m wick strict HOLD (bald / frac50 / pin2)
+            # S14: 30m wick FLIP + 2-minute open=high / open=low
             emit_wick_if_changed(strategy_s14, now, message)
             # S15: 30m wick nowick HOLD
             emit_wick_if_changed(strategy_s15, now, message)

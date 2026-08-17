@@ -108,29 +108,32 @@ S12_MIN_RANGE=5
 S12_CONFIRM_MINUTES=1
 ```
 
-## S14 / S15 30m wick HOLD (paper)
+## S14 / S15 30m wick (paper)
 
-**S14** uses this on every 30m candle (last minute). No high−low skip.
+**S14** (nothing else):
 
 ```
-if upper ≤ 1 and lower ≤ 1:          # bald
-    close > open → LONG
-    close < open → SHORT
-    close = open → skip
-else:
-    winning wick ≥ 0.5 × range → that side
-    or winning wick ≥ 2 × body → that side
-    else skip
+upper = high − max(open, close)
+lower = min(open, close) − low
+lower > upper → LONG
+upper > lower → SHORT
+upper = lower → skip
 ```
 
-HOLD: opposite → CLOSE, no reverse on that candle. Skip EOD flatten (`:29`).
-**S15** is bald-only. Keep `DRY_RUN=true`. Restart supervise after pull.
+Same candle: if the wick side changes, close and open that side (FLIP).
+Next candle (in a trade or flat): wait 2 minutes from that open.
+  open = high (high never left open) → close long, open SHORT
+  open = low  (low never left open)  → close existing, open LONG
+  both (flat tape) → skip the 2-minute rule
+
+No range skip, no bald body, no frac50/pin2. **S15** is still last-minute bald HOLD.
+Keep `DRY_RUN=true`. Restart supervise after pull.
 
 ```bash
 ENABLE_S14=true
 S14_BAR_MINUTES=30
 S14_MIN_RANGE=0
-S14_CONFIRM_MINUTES=1
+S14_OPEN_HOLD_MINUTES=2
 ENABLE_S15=true
 S15_BAR_MINUTES=30
 S15_MIN_RANGE=0

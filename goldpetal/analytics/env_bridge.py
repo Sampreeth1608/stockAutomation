@@ -46,6 +46,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S14_MIN_RANGE",
         "S14_CONFIRM_MINUTES",
         "S14_NOWICK_EPS",
+        "S14_OPEN_HOLD_MINUTES",
         "S14_ALLOW_LONG",
         "S14_ALLOW_SHORT",
         "S15_BAR_MINUTES",
@@ -151,7 +152,7 @@ def _validate_value(key: str, value: str) -> str:
         if n < 0 or n > 10_000:
             raise ValueError(f"{key} out of range")
         return str(n)
-    if key in {"S12_MIN_RANGE", "S13_MIN_RANGE", "S14_MIN_RANGE", "S14_NOWICK_EPS", "S15_MIN_RANGE", "S15_NOWICK_EPS"}:
+    if key in {"S12_MIN_RANGE", "S13_MIN_RANGE", "S14_MIN_RANGE", "S14_NOWICK_EPS", "S14_OPEN_HOLD_MINUTES", "S15_MIN_RANGE", "S15_NOWICK_EPS"}:
         f = float(value)
         if f < 0 or f > 1_000_000:
             raise ValueError(f"{key} out of range")
