@@ -4,13 +4,14 @@
 #   ./panel_tunnel.sh                 # 8501 (Desk tab)
 #   ./panel_tunnel.sh 8.231.125.120   # if gcloud is not on the Mac
 set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
 if curl -s -m 1 -H "Metadata-Flavor: Google" \
     http://metadata.google.internal/computeMetadata/v1/instance/name >/dev/null 2>&1; then
   echo "You are ON the VM. This tunnel runs on your Mac."
   echo "Open a new Terminal.app window and run it there."
   # shellcheck source=scripts/print_open_on_mac.sh
-  source "$(dirname "$0")/scripts/print_open_on_mac.sh"
+  source "$HERE/scripts/print_open_on_mac.sh"
   print_open_on_mac
   exit 1
 fi
