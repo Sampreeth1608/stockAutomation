@@ -21,7 +21,7 @@ FLIP (backtest / future S16): same last-minute rules, but a decisive opposite
 closes the open side and takes the new signal on that candle. Not papered
 until a `30m:raw_strict_flip` row is picked.
 
-Defaults: 30m bars, min_range=5, confirm=1 minute, nowick_eps=1 pt.
+Defaults: 30m bars, min_range=0 (no H−L skip), confirm=1 minute, nowick_eps=1 pt.
 Current in-progress 30m OHLC is seeded from ticks.db (fast SQL, not raw_json).
 """
 
@@ -44,7 +44,7 @@ IST = ZoneInfo("Asia/Kolkata")
 @dataclass
 class WickConfig:
     bar_minutes: int = 30
-    min_range: float = 5.0
+    min_range: float = 0.0
     confirm_minutes: int = 1
     nowick_eps: float = 1.0
     nowick_body: bool = True
@@ -423,7 +423,7 @@ def wick_strict_from_env() -> WickCandleStrategy:
     _load_dotenv()
     cfg = WickConfig(
         bar_minutes=int(os.getenv("S14_BAR_MINUTES", "30")),
-        min_range=float(os.getenv("S14_MIN_RANGE", "5")),
+        min_range=0.0,  # no H−L skip; not in the wick formula
         confirm_minutes=int(os.getenv("S14_CONFIRM_MINUTES", "1")),
         nowick_eps=float(os.getenv("S14_NOWICK_EPS", "1")),
         nowick_body=True,
@@ -455,7 +455,7 @@ def wick_nowick_from_env() -> WickCandleStrategy:
     _load_dotenv()
     cfg = WickConfig(
         bar_minutes=int(os.getenv("S15_BAR_MINUTES", "30")),
-        min_range=float(os.getenv("S15_MIN_RANGE", "5")),
+        min_range=0.0,  # no H−L skip; not in the wick formula
         confirm_minutes=int(os.getenv("S15_CONFIRM_MINUTES", "1")),
         nowick_eps=float(os.getenv("S15_NOWICK_EPS", "1")),
         nowick_body=True,

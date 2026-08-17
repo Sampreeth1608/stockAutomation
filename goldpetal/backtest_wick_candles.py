@@ -497,7 +497,7 @@ def run_all(
     allow_long: bool = True,
     fees: bool = False,
     session_filter: bool = False,
-    min_range: float = 5.0,
+    min_range: float = 0.0,
     no_flip: bool = False,
     nowick_eps: float = 1.0,
     market_open: str = "09:00",
@@ -556,7 +556,12 @@ def main() -> None:
     ap.add_argument("--short-only", action="store_true")
     ap.add_argument("--fees", action="store_true")
     ap.add_argument("--session", action="store_true")
-    ap.add_argument("--min-range", type=float, default=5.0)
+    ap.add_argument(
+        "--min-range",
+        type=float,
+        default=0.0,
+        help="skip bars with high−low below this (0 = use every candle)",
+    )
     ap.add_argument("--nowick-eps", type=float, default=1.0, help="pts: wick ≤ this counts as no wick")
     ap.add_argument(
         "--no-compare",

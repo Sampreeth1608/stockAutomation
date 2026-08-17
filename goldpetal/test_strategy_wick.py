@@ -15,7 +15,7 @@ def _strict(seed: bool = False) -> WickCandleStrategy:
         "S14_WICK30_STRICT",
         WickConfig(
             bar_minutes=30,
-            min_range=5,
+            min_range=0,
             confirm_minutes=1,
             nowick_eps=1.0,
             nowick_body=True,
@@ -31,7 +31,7 @@ def _nowick(seed: bool = False) -> WickCandleStrategy:
         "S15_WICK30_NOWICK",
         WickConfig(
             bar_minutes=30,
-            min_range=5,
+            min_range=0,
             confirm_minutes=1,
             nowick_eps=1.0,
             nowick_body=True,
@@ -47,7 +47,7 @@ def _flip() -> WickCandleStrategy:
         "S16_WICK30_STRICT_FLIP",
         WickConfig(
             bar_minutes=30,
-            min_range=5,
+            min_range=0,
             confirm_minutes=1,
             nowick_eps=1.0,
             nowick_body=True,
@@ -210,6 +210,14 @@ def test_min_range_blocks() -> None:
     assert s.position == "flat"
 
 
+def test_small_range_candle_is_taken() -> None:
+    """Default has no H−L gate: range 3 still shorts (upper 2.5 > lower 0)."""
+    s = _strict()
+    sig = s.on_bar_row({"open": 100, "high": 103, "low": 100, "close": 100.5})
+    assert sig is not None and sig.action == "SHORT"
+    assert s.position == "short"
+
+
 def test_seed_current_bar_from_sql() -> None:
     import sqlite3
     from pathlib import Path
@@ -265,6 +273,7 @@ if __name__ == "__main__":
     test_nowick_bald_green_buys()
     test_nowick_hammer_does_not_exit()
     test_min_range_blocks()
+    test_small_range_candle_is_taken()
     test_seed_current_bar_from_sql()
     test_gate_reject_can_retry()
     print("ALL test_strategy_wick OK")

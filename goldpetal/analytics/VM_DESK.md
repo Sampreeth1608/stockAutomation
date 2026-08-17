@@ -117,16 +117,18 @@ nowick TFs were luck). Do **not** paper `3h:frac50` (6 trades, DD > pnl).
 Same last-minute confirm as S12. HOLD: opposite → CLOSE, no reverse on that
 candle. S14 exits only on a decisive opposite (frac50 / pin2 / bald body).
 S15 ignores hammers; bald green/red only. Both skip EOD flatten (`:29`).
+No high−low size gate. Live S14/S15 hardcode `min_range=0` (a leftover
+`S14_MIN_RANGE=5` in `.env` is ignored). Restart supervise after pull.
 Keep `DRY_RUN=true`.
 
 ```bash
 ENABLE_S14=true
 S14_BAR_MINUTES=30
-S14_MIN_RANGE=5
+S14_MIN_RANGE=0
 S14_CONFIRM_MINUTES=1
 ENABLE_S15=true
 S15_BAR_MINUTES=30
-S15_MIN_RANGE=5
+S15_MIN_RANGE=0
 ```
 
 Restart supervise after pull. Look for `S14_WICK30_STRICT` / `S15_WICK30_NOWICK`

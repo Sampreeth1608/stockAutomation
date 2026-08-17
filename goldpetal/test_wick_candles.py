@@ -49,7 +49,7 @@ def test_simulate_long_exits_flat_no_reverse() -> None:
         Candle("2026-08-17 10:30:00", 101.0, 103.0, 100.0, 102.0),  # tiny, hold
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → EXIT flat
     ]
-    r = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
+        r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
     assert r.n_trades == 1
     assert r.trades[0].side == "LONG"
     assert r.trades[0].entry_px == 101.0
@@ -61,8 +61,8 @@ def test_flip_reverses_on_exit_candle() -> None:
         Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # lower wick → long
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → reverse short
     ]
-    hold = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
-    flip = simulate_wick(candles, tf="30m:raw_flip", min_range=5, reenter=True)
+    hold = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
+    flip = simulate_wick(candles, tf="30m:raw_flip", min_range=0, reenter=True)
     assert hold.n_trades == 1
     assert hold.trades[0].side == "LONG"
     assert hold.trades[0].exit_px == 103.0
@@ -78,10 +78,10 @@ def test_raw_strict_flip_reverses_on_decisive_exit() -> None:
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # U=17 range=19 frac>0.5
     ]
     hold = simulate_wick(
-        candles, tf="30m:raw_strict", min_range=5, reenter=False, exit_strict=True
+        candles, tf="30m:raw_strict", min_range=0, reenter=False, exit_strict=True
     )
     flip = simulate_wick(
-        candles, tf="30m:raw_strict_flip", min_range=5, reenter=True, exit_strict=True
+        candles, tf="30m:raw_strict_flip", min_range=0, reenter=True, exit_strict=True
     )
     assert hold.n_trades == 1
     assert hold.trades[0].exit_px == 103.0
@@ -103,7 +103,7 @@ def test_later_bar_can_enter_after_flat() -> None:
         Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # exit, no reverse
         Candle("2026-08-17 12:00:00", 103.0, 121.0, 102.0, 104.0),  # still upper → short
     ]
-    r = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
+        r = simulate_wick(candles, tf="30m:raw", min_range=0, reenter=False)
     assert r.n_trades == 2
     assert r.trades[0].side == "LONG"
     assert r.trades[1].side == "SHORT"
@@ -117,7 +117,7 @@ def test_strict_exit_ignores_weak_opposite() -> None:
         Candle("2026-08-17 12:00:00", 104.0, 130.0, 103.0, 105.0),  # upper 25, pin/frac → exit
     ]
     r = simulate_wick(
-        candles, tf="30m:raw_strict", min_range=5, reenter=False, exit_strict=True
+        candles, tf="30m:raw_strict", min_range=0, reenter=False, exit_strict=True
     )
     assert r.n_trades == 1
     assert r.trades[0].exit_px == 105.0
@@ -171,7 +171,7 @@ def test_all_presets_run_on_toy_tape() -> None:
         "pin2_strict",
     ]
     for name, filt in PRESETS:
-        r = simulate_wick(candles, tf=f"toy:{name}", min_range=5, **filt)
+        r = simulate_wick(candles, tf=f"toy:{name}", min_range=0, **filt)
         assert r.n_bars == 4
         if name == "nowick":
             assert r.n_trades >= 1
@@ -187,7 +187,7 @@ def test_equal_wick_holds() -> None:
         Candle("2026-08-17 10:30:00", 101.0, 111.0, 91.0, 101.0),  # equal 10/10, hold
         Candle("2026-08-17 11:00:00", 101.0, 102.0, 90.0, 101.5),  # still lower wick
     ]
-    r = simulate_wick(candles, tf="30m:raw", min_range=5, no_flip=True)
+    r = simulate_wick(candles, tf="30m:raw", min_range=0, no_flip=True)
     assert r.n_trades == 1
     assert r.trades[0].side == "LONG"
     assert r.trades[0].exit_time == candles[-1].time
@@ -211,6 +211,12 @@ def test_nowick_only_ignores_hammer() -> None:
 def test_pin2_still_takes_bald_body() -> None:
     # pin2 would reject a marubozu (no wick), but nowick_body is along with it
     assert wick_side(100.0, 110.0, 100.0, 110.0, min_body_ratio=2.0) == "long"
+
+
+def test_small_range_not_gated() -> None:
+    # range 3, upper 2.5, lower 0 → short; default min_range=0 keeps it
+    assert wick_side(100.0, 103.0, 100.0, 100.5) == "short"
+    assert wick_side(100.0, 103.0, 100.0, 100.5, min_range=5) is None
 
 
 if __name__ == "__main__":
@@ -242,6 +248,8 @@ if __name__ == "__main__":
     print("ok nowick only")
     test_pin2_still_takes_bald_body()
     print("ok pin+nowick")
+    test_small_range_not_gated()
+    print("ok small range")
     test_resettle_100_lots_scales_gross_not_brokerage()
     print("ok resettle 100 lots")
     test_all_presets_run_on_toy_tape()
