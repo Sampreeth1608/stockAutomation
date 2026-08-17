@@ -13,6 +13,11 @@ def test_desk_html_is_the_operator_page() -> None:
     assert "Stop bot" in html
     assert "Start feed only" in html
     assert "Save strategies" in html
+    assert "Watch" in html
+    assert "Download all (ZIP)" in html
+    assert "Download trades CSV" in html
+    assert "Copy trades → Sheets" in html
+    assert "/api/history" in html or "loadHistory" in html
     assert "Live pick" in html
     assert "Paper only" in html
     assert "Unlock live" in html
@@ -29,6 +34,8 @@ def test_control_panel_serves_desk_file() -> None:
     assert "/api/bot/start" in text
     assert "/api/bot/stop" in text
     assert "/api/feed/start" in text
+    assert "/api/history" in text
+    assert "history_payload" in text
     assert "HTML_PAGE = r" not in text
 
 

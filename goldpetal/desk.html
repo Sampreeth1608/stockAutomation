@@ -19,7 +19,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; }
-body { max-width: 920px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+body { max-width: 1080px; margin: 0 auto; padding: 1rem 1rem 3rem; }
 h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: .02em; }
 h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em;
   color: var(--gold); margin: 0 0 .7rem; }
@@ -44,9 +44,18 @@ h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em;
 .btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
 .btn.danger { background: #3a1814; border-color: #6a2e28; color: #ffb4ab; }
 .btn.danger.on { background: var(--bad); color: #1a0504; }
-input[type=number], input[type=text] {
+input[type=number], input[type=text], input[type=date], select {
   background: #0c1410; color: var(--text); border: 1px solid var(--line);
-  border-radius: 4px; padding: .4rem .5rem; font: 13px ui-monospace, monospace; width: 7rem; }
+  border-radius: 4px; padding: .4rem .5rem; font: 13px ui-monospace, monospace; }
+input[type=number], input[type=text] { width: 7rem; }
+input[type=date] { width: 10.8rem; }
+.scroll { overflow: auto; max-height: 22rem; border: 1px solid #24352c; border-radius: 4px; }
+.tab { appearance: none; border: 1px solid var(--line); background: transparent;
+  color: var(--muted); font: 650 12px/1 ui-sans-serif, system-ui; padding: .4rem .7rem;
+  border-radius: 4px; cursor: pointer; }
+.tab.on { background: #1f2e26; color: var(--text); border-color: var(--gold); }
+td.ok { color: var(--ok); }
+td.bad { color: var(--bad); }
 label.chk { display: flex; gap: .4rem; align-items: center; color: var(--muted); font-size: .9rem; }
 table { width: 100%; border-collapse: collapse; font: 13px/1.35 ui-monospace, monospace; }
 th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
@@ -141,8 +150,50 @@ td { padding: .4rem; border-bottom: 1px solid #24352c; vertical-align: middle; }
   </section>
 
   <section class="card">
-    <h2>Tape</h2>
-    <div class="tape" id="tape">no ticks yet</div>
+    <h2>Watch</h2>
+    <p class="hint">Live trade history, ticks, and scoreboard from ticks.db — same tape the old panel had.</p>
+    <div class="row">
+      <button class="tab on" type="button" data-watch="trades">Trades</button>
+      <button class="tab" type="button" data-watch="open">Open</button>
+      <button class="tab" type="button" data-watch="ticks">Ticks</button>
+      <button class="tab" type="button" data-watch="orders">Live orders</button>
+      <button class="tab" type="button" data-watch="signals">Signals</button>
+      <button class="tab" type="button" data-watch="score">Scoreboard</button>
+      <select id="hist-strat">
+        <option value="">All books</option>
+      </select>
+    </div>
+    <p class="mono" id="hist-meta" style="margin:.55rem 0 .4rem">…</p>
+    <div class="scroll">
+      <table>
+        <thead id="hist-head"></thead>
+        <tbody id="hist-body"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-hist"></p>
+  </section>
+
+  <section class="card">
+    <h2>Downloads</h2>
+    <p class="hint">CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV.</p>
+    <div class="row">
+      <label class="chk">From <input type="date" id="exp-from"/></label>
+      <label class="chk">To <input type="date" id="exp-to"/></label>
+      <span class="mono" id="exp-meta"></span>
+    </div>
+    <div class="row" style="margin-top:.7rem">
+      <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
+      <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
+      <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+      <button class="btn warn" type="button" id="btn-copy-trades">Copy trades → Sheets</button>
+      <button class="btn warn" type="button" id="btn-copy-ticks">Copy ticks → Sheets</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn" type="button" id="btn-sheets-pack">Download Sheets pack</button>
+      <button class="btn warn" type="button" id="btn-copy-score">Copy scoreboard → Sheets</button>
+      <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
+    </div>
+    <p class="flash" id="flash-dl"></p>
   </section>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -157,6 +208,143 @@ const SHORT = {
   S15_WICK30_NOWICK: "S15 no-wick",
 };
 let last = null;
+let watchTab = "trades";
+let histReady = false;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function pnlClass(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x === 0) return "";
+  return x > 0 ? "ok" : "bad";
+}
+function fillStratSelect() {
+  if (histReady) return;
+  const sel = $("hist-strat");
+  Object.keys(SHORT).forEach((k) => {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = SHORT[k];
+    sel.appendChild(opt);
+  });
+  histReady = true;
+}
+function thead(cols) {
+  $("hist-head").innerHTML = "<tr>" + cols.map((c) => `<th>${esc(c)}</th>`).join("") + "</tr>";
+}
+function renderWatch(h) {
+  const tab = watchTab;
+  const strat = $("hist-strat").value;
+  $("hist-meta").textContent =
+    `open ${h.total_open || 0} · closed ${h.total_closed || 0} · ticks ${h.tick_count || 0}` +
+    (strat ? " · " + (SHORT[strat] || strat) : " · all books");
+  if (tab === "trades" || tab === "open") {
+    const rows = tab === "open" ? (h.open || []) : (h.trades || []);
+    thead(["book", "side", "status", "entry", "in", "exit", "out", "after-tax ₹", "why"]);
+    $("hist-body").innerHTML = rows.map((t) => {
+      const pnl = t.pnl_after_tax != null && t.pnl_after_tax !== "" ? t.pnl_after_tax : t.net_pnl;
+      const why = t.exit_reason || t.entry_reason || "";
+      return `<tr>
+        <td>${esc(SHORT[t.strategy] || t.strategy || "")}</td>
+        <td>${esc(t.side || "")}</td>
+        <td>${esc(t.status || "")}</td>
+        <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
+        <td>${esc(t.entry_price ?? "")}</td>
+        <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+        <td>${esc(t.exit_price ?? "")}</td>
+        <td class="${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
+        <td>${esc(why)}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="9">No trades yet</td></tr>`;
+    return;
+  }
+  if (tab === "ticks") {
+    thead(["time", "ltp", "bid", "ask", "vol"]);
+    $("hist-body").innerHTML = (h.ticks || []).map((t) => `<tr>
+      <td>${esc(t.received_at || "")}</td>
+      <td>${esc(t.ltp ?? "")}</td>
+      <td>${esc(t.bp ?? "")}</td>
+      <td>${esc(t.sp ?? "")}</td>
+      <td>${esc(t.volume ?? "")}</td>
+    </tr>`).join("") || `<tr><td colspan="5">No ticks yet</td></tr>`;
+    return;
+  }
+  if (tab === "orders") {
+    thead(["time", "book", "side", "ok", "id", "reason"]);
+    $("hist-body").innerHTML = (h.live_orders || []).map((o) => `<tr>
+      <td>${esc(o.ts || o.time || "")}</td>
+      <td>${esc(o.strategy || "")}</td>
+      <td>${esc(o.side || "")}</td>
+      <td>${o.ok ? "Y" : (o.skipped ? "skip" : "N")}</td>
+      <td>${esc(o.order_id || "")}</td>
+      <td>${esc(o.reason || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6">No live orders (normal in paper)</td></tr>`;
+    return;
+  }
+  if (tab === "signals") {
+    thead(["time", "book", "action", "pos", "cmp", "reason"]);
+    $("hist-body").innerHTML = (h.signals || []).map((s) => `<tr>
+      <td>${esc(s.time_label || "")}</td>
+      <td>${esc(SHORT[s.strategy] || s.strategy || "")}</td>
+      <td>${esc(s.action || "")}</td>
+      <td>${esc(s.position_after || "")}</td>
+      <td>${esc(s.cmp ?? "")}</td>
+      <td>${esc(s.reason || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6">No signals yet</td></tr>`;
+    return;
+  }
+  thead(["book", "closed", "open", "win %", "gross ₹", "fees ₹", "after-tax ₹"]);
+  $("hist-body").innerHTML = (h.scoreboard || []).map((r) => {
+    const pnl = r.pnl_after_tax;
+    const closedN = (Number(r.wins) || 0) + (Number(r.losses) || 0);
+    const win = r.win_rate != null ? Number(r.win_rate).toFixed(1) : "";
+    return `<tr>
+      <td>${esc(SHORT[r.strategy] || r.strategy || "")}</td>
+      <td>${closedN}</td>
+      <td>${esc(r.open ?? "")}</td>
+      <td>${esc(win)}</td>
+      <td>${esc(r.gross_pnl ?? "")}</td>
+      <td>${esc(r.charges ?? "")}</td>
+      <td class="${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7">No scoreboard yet</td></tr>`;
+}
+
+async function loadHistory() {
+  fillStratSelect();
+  const strat = $("hist-strat").value;
+  const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
+  const h = await api(q);
+  renderWatch(h);
+}
+
+function rangeQs() {
+  const from = $("exp-from").value;
+  const to = $("exp-to").value;
+  if (!from || !to) throw new Error("Pick From and To dates");
+  return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+}
+function downloadUrl(path) {
+  const a = document.createElement("a");
+  a.href = path;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+async function refreshExportMeta() {
+  try {
+    const s = await api("/api/export/summary?" + rangeQs());
+    $("exp-meta").textContent = `${s.tick_count || 0} ticks · ${s.trade_count || 0} trades`;
+  } catch (e) {
+    $("exp-meta").textContent = String(e.message || e);
+  }
+}
+async function copyExport(kind) {
+  const data = await api(`/api/export/tsv?kind=${encodeURIComponent(kind)}&` + rangeQs());
+  await navigator.clipboard.writeText(data.tsv || "");
+  flash("flash-dl", `Copied ${data.rows || 0} ${kind} rows — paste into Google Sheets`);
+}
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
@@ -228,26 +416,6 @@ function render(d) {
   const cap = d.capital || {};
   if (document.activeElement !== $("cap-total")) $("cap-total").value = cap.total_capital_inr || "";
   if (document.activeElement !== $("cap-dd")) $("cap-dd").value = cap.daily_loss_limit_inr || "";
-  const ticks = (d.ticks || []).slice(0, 8).map((t) => {
-    const tltp = t.ltp != null ? t.ltp : t.last_traded_price;
-    return (t.received_at || t.time || "") + "  " + (tltp != null ? tltp : "");
-  });
-  const trades = (d.trades || []).slice(0, 6).map((t) =>
-    (t.strategy || "") + "  " + (t.side || "") + "  " + (t.status || "") + "  " + (t.pnl_after_tax || t.net_pnl || "")
-  );
-  const orders = (d.live_orders || []).slice(0, 6).map((o) =>
-    (o.ts || "") + "  " + (o.strategy || "") + "  " + (o.side || "") + "  " + (o.ok ? "Y" : "N") + "  " + (o.reason || "")
-  );
-  $("tape").textContent = [
-    "TICKS",
-    ticks.join("\n") || "(none)",
-    "",
-    "TRADES",
-    trades.join("\n") || "(none)",
-    "",
-    "LIVE ORDERS",
-    orders.join("\n") || "(none — normal in paper)",
-  ].join("\n");
 }
 
 async function load() {
@@ -380,8 +548,67 @@ $("btn-save-cap").onclick = async () => {
   } catch (e) { flash("flash-money", String(e.message || e), true); }
 };
 
-load().catch((e) => flash("flash-engine", String(e.message || e), true));
+document.querySelectorAll("[data-watch]").forEach((btn) => {
+  btn.onclick = () => {
+    watchTab = btn.dataset.watch;
+    document.querySelectorAll("[data-watch]").forEach((b) => b.classList.toggle("on", b === btn));
+    loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  };
+});
+$("hist-strat").onchange = () => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+$("exp-from").onchange = () => refreshExportMeta().catch(() => {});
+$("exp-to").onchange = () => refreshExportMeta().catch(() => {});
+$("btn-dl-pack").onclick = () => {
+  try {
+    downloadUrl("/api/export/pack.zip?" + rangeQs());
+    flash("flash-dl", "Downloading ZIP (ticks + all strategy trades)");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-trades").onclick = () => {
+  try {
+    downloadUrl("/api/export/trades.csv?" + rangeQs());
+    flash("flash-dl", "Downloading trades.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-ticks").onclick = () => {
+  try {
+    downloadUrl("/api/export/ticks.csv?" + rangeQs());
+    flash("flash-dl", "Downloading ticks.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-copy-trades").onclick = () => copyExport("trades").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-copy-ticks").onclick = () => copyExport("ticks").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-sheets-pack").onclick = () => {
+  downloadUrl("/api/sheets/pack.zip");
+  flash("flash-dl", "Downloading Sheets pack (scoreboard + trades + opens + signals)");
+};
+$("btn-copy-score").onclick = async () => {
+  try {
+    const data = await api("/api/sheets/scoreboard.tsv");
+    await navigator.clipboard.writeText(data.tsv || "");
+    flash("flash-dl", `Copied ${data.rows || 0} scoreboard rows — paste into Google Sheets`);
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-s14-zip").onclick = () => {
+  downloadUrl("/api/s14/sheet.zip");
+  flash("flash-dl", "Downloading S14 sheet ZIP (HTML + CSVs)");
+};
+
+async function boot() {
+  fillStratSelect();
+  try {
+    const d = await api("/api/export/defaults");
+    $("exp-from").value = d.date_from;
+    $("exp-to").value = d.date_to;
+    await refreshExportMeta();
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+  await load();
+  await loadHistory();
+}
+
+boot().catch((e) => flash("flash-engine", String(e.message || e), true));
 setInterval(() => load().catch(() => {}), 4000);
+setInterval(() => loadHistory().catch(() => {}), 8000);
 </script>
 </body>
 </html>

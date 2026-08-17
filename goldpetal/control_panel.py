@@ -29,6 +29,7 @@ from capital import (
 )
 from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
 from control_state import (
+    SLIM_PAPER_STRATEGIES,
     entries_blocked,
     is_live_mode_allowed,
     load_state,
@@ -172,22 +173,53 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
 _TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": []}
 
 
-def _recent_trades(limit: int = 8) -> list[dict[str, Any]]:
+def _all_trades_cached() -> list[dict[str, Any]]:
     import time
 
     now = time.time()
-    if now - float(_TRADE_CACHE["at"]) < 15 and _TRADE_CACHE["rows"]:
-        return list(_TRADE_CACHE["rows"])[:limit]
+    if now - float(_TRADE_CACHE["at"]) < 12 and _TRADE_CACHE["rows"]:
+        return list(_TRADE_CACHE["rows"])
     try:
-        all_trades = build_trades(strategy=None)
-        closed = [t for t in all_trades if str(t.get("status", "")).startswith("CLOSED")]
-        open_t = [t for t in all_trades if t.get("status") == "OPEN"]
-        rows = (open_t + list(reversed(closed)))[:40]
+        rows = build_trades(strategy=None)
     except Exception:
         rows = []
     _TRADE_CACHE["at"] = now
     _TRADE_CACHE["rows"] = rows
-    return rows[:limit]
+    return list(rows)
+
+
+def _recent_trades(limit: int = 8) -> list[dict[str, Any]]:
+    rows = _all_trades_cached()
+    open_t = [t for t in rows if t.get("status") == "OPEN"]
+    closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
+    return (open_t + list(reversed(closed)))[:limit]
+
+
+def history_payload(*, limit: int = 80, strategy: str | None = None) -> dict[str, Any]:
+    """Trade history, ticks, live orders, scoreboard — same data the old panel exported."""
+    rows = _all_trades_cached()
+    if strategy:
+        rows = [t for t in rows if t.get("strategy") == strategy]
+    open_t = [t for t in rows if t.get("status") == "OPEN"]
+    closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
+    closed_rev = list(reversed(closed))
+    all_rows = _all_trades_cached()
+    scoreboard = [summarize_trades(all_rows, s) for s in SLIM_PAPER_STRATEGIES]
+    scoreboard.append(summarize_trades(all_rows, None))
+    return {
+        "strategy": strategy or "",
+        "open": open_t,
+        "closed": closed_rev[:limit],
+        "trades": (open_t + closed_rev)[:limit],
+        "total_open": len(open_t),
+        "total_closed": len(closed),
+        "ticks": [_row_to_dict(r) for r in latest_ticks(limit=40)],
+        "signals": [_row_to_dict(r) for r in latest_signals(limit=40)],
+        "live_orders": recent_orders(limit=40),
+        "scoreboard": scoreboard,
+        "tick_count": count_ticks(),
+        "ltp": latest_ltp(),
+    }
 
 
 def desk_payload() -> dict[str, Any]:
@@ -325,6 +357,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 )
                 self._send(status, body, ctype)
                 return
+            if path == "/api/history":
+                limit = int((qs.get("limit") or ["80"])[0])
+                strat = ((qs.get("strategy") or [""])[0] or "").strip() or None
+                status, body, ctype = _json_bytes(history_payload(limit=limit, strategy=strat))
+                self._send(status, body, ctype)
+                return
             if path == "/api/ticks":
                 limit = int((qs.get("limit") or ["40"])[0])
                 rows = [_row_to_dict(r) for r in latest_ticks(limit=limit)]
@@ -332,11 +370,16 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(status, body, ctype)
                 return
             if path == "/api/trades":
-                limit = int((qs.get("limit") or ["40"])[0])
-                trades = build_trades(strategy=None)
-                closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
+                limit = int((qs.get("limit") or ["80"])[0])
+                strat = ((qs.get("strategy") or [""])[0] or "").strip() or None
+                hist = history_payload(limit=limit, strategy=strat)
                 status, body, ctype = _json_bytes(
-                    {"trades": list(reversed(closed))[:limit], "total_closed": len(closed)}
+                    {
+                        "trades": hist["trades"],
+                        "open": hist["open"],
+                        "total_closed": hist["total_closed"],
+                        "total_open": hist["total_open"],
+                    }
                 )
                 self._send(status, body, ctype)
                 return
