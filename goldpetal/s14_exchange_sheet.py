@@ -201,6 +201,103 @@ def _plain_table(rows: list[dict[str, Any]], fields: list[str]) -> str:
     )
 
 
+def format_table(rows: list[dict[str, Any]], fields: list[str]) -> str:
+    """Fixed-width table for a VM that has no `column` binary."""
+    if not rows:
+        return "(no rows)"
+    widths = [
+        max(len(str(f)), max((len(str(r.get(f, ""))) for r in rows), default=0))
+        for f in fields
+    ]
+    def line(vals: list[Any]) -> str:
+        return "  ".join(str(v).ljust(w) for v, w in zip(vals, widths))
+    out = [line(list(fields)), line(["-" * w for w in widths])]
+    for r in rows:
+        out.append(line([r.get(f, "") for f in fields]))
+    return "\n".join(out)
+
+
+def _ohlc_json(rows: list[dict[str, Any]]) -> str:
+    data = [
+        {
+            "t": r["time"],
+            "o": r["open"],
+            "h": r["high"],
+            "l": r["low"],
+            "c": r["close"],
+        }
+        for r in rows
+    ]
+    return json.dumps(data, separators=(",", ":"))
+
+
+def _bar_pane(tf: str, rows: list[dict[str, Any]]) -> str:
+    safe = html.escape(tf)
+    return (
+        f'<canvas class="ohlc" id="chart-{safe}"></canvas>'
+        f'<script type="application/json" id="ohlc-{safe}">{_ohlc_json(rows)}</script>'
+        f"{_bar_table(rows)}"
+    )
+
+
+CANDLE_JS = r"""
+function drawOhlc(canvas, bars, dark) {
+  if (!canvas || !bars || !bars.length) return;
+  const cssW = Math.max(canvas.clientWidth || 900, 320);
+  const cssH = Math.max(canvas.clientHeight || 320, 220);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const padL = 56, padR = 10, padT = 12, padB = 28;
+  const w = cssW - padL - padR, h = cssH - padT - padB;
+  const lo = Math.min.apply(null, bars.map((b) => +b.l));
+  const hi = Math.max.apply(null, bars.map((b) => +b.h));
+  const span = (hi - lo) || 1;
+  const y = (px) => padT + (hi - px) / span * h;
+  ctx.fillStyle = dark ? "#0c1410" : "#ffffff";
+  ctx.fillRect(0, 0, cssW, cssH);
+  ctx.font = "11px ui-monospace, monospace";
+  ctx.fillStyle = dark ? "#8aa394" : "#555";
+  ctx.strokeStyle = dark ? "#2a4034" : "#d0d7ca";
+  for (let i = 0; i <= 4; i++) {
+    const px = hi - span * i / 4;
+    const yy = y(px);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(cssW - padR, yy); ctx.stroke();
+    ctx.fillText(String(Math.round(px)), 4, yy + 4);
+  }
+  const slot = w / bars.length;
+  bars.forEach((b, i) => {
+    const o = +b.o, hh = +b.h, l = +b.l, c = +b.c;
+    const x = padL + (i + 0.5) * slot;
+    const up = c >= o;
+    ctx.strokeStyle = up ? "#1f9d55" : "#d64545";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.moveTo(x, y(hh)); ctx.lineTo(x, y(l)); ctx.stroke();
+    const top = y(Math.max(o, c)), bot = y(Math.min(o, c));
+    const bw = Math.max(2, Math.min(14, slot * 0.62));
+    ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
+  });
+  ctx.fillStyle = dark ? "#8aa394" : "#555";
+  const labels = [0, Math.floor(bars.length / 2), bars.length - 1];
+  labels.forEach((i) => {
+    const t = String(bars[i].t || "").slice(0, 16);
+    const x = padL + (i + 0.5) * slot;
+    ctx.fillText(t, Math.max(padL, x - 40), cssH - 8);
+  });
+}
+function drawSheetCharts() {
+  document.querySelectorAll("canvas.ohlc").forEach((c) => {
+    const tf = c.id.replace(/^chart-/, "");
+    const el = document.getElementById("ohlc-" + tf);
+    if (!el) return;
+    try { drawOhlc(c, JSON.parse(el.textContent), false); } catch (e) {}
+  });
+}
+"""
+
+
 def render_html(
     *,
     tabs: dict[str, str],
@@ -210,6 +307,7 @@ def render_html(
     generated: str,
     default_tab: str,
 ) -> str:
+    default_tab = default_tab or next(iter(tabs), "")
     buttons = []
     panes = []
     for i, (name, inner) in enumerate(tabs.items()):
@@ -222,7 +320,7 @@ def render_html(
         panes.append(
             f'<div class="pane{hide}" id="pane-{html.escape(name)}">{inner}</div>'
         )
-    return f"""<!DOCTYPE html>
+    head = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -243,6 +341,8 @@ def render_html(
   .pane {{ padding: .6rem 1rem 2rem; overflow: auto; max-height: calc(100vh - 9rem);
            background: #fff; }}
   .pane.hidden {{ display: none; }}
+  canvas.ohlc {{ display: block; width: 100%; height: 320px; background: #fff;
+                 border: 1px solid #d0d7ca; margin: 0 0 .8rem; }}
   table {{ border-collapse: collapse; font-size: 12px; font-family: "IBM Plex Mono", ui-monospace, monospace; }}
   th, td {{ border: 1px solid #d0d7ca; padding: 3px 7px; white-space: nowrap; }}
   th {{ position: sticky; top: 0; background: #1f6b3a; color: #fff; z-index: 1; }}
@@ -269,18 +369,24 @@ def render_html(
 <nav class="tabs">{''.join(buttons)}</nav>
 {''.join(panes)}
 <script>
-document.querySelectorAll(".tab").forEach((btn) => {{
-  btn.addEventListener("click", () => {{
+"""
+    tail = """
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".pane").forEach((p) => p.classList.add("hidden"));
     btn.classList.add("active");
     document.getElementById("pane-" + btn.dataset.tab).classList.remove("hidden");
-  }});
-}});
+    requestAnimationFrame(drawSheetCharts);
+  });
+});
+window.addEventListener("load", drawSheetCharts);
+window.addEventListener("resize", drawSheetCharts);
 </script>
 </body>
 </html>
 """
+    return head + CANDLE_JS + tail
 
 
 def write_s14_workbook(
@@ -311,7 +417,7 @@ def write_s14_workbook(
 
     html_tabs: dict[str, str] = {}
     for tf, rows in bar_tabs.items():
-        html_tabs[tf] = _bar_table(rows)
+        html_tabs[tf] = _bar_pane(tf, rows)
     html_tabs["pnl"] = _plain_table(pnl_rows, PNL_COLUMNS)
     html_tabs["trades"] = _plain_table(trade_rows, TRADE_COLUMNS)
     default_tab = "1d" if "1d" in html_tabs else next(iter(html_tabs), "pnl")
@@ -421,7 +527,25 @@ def main() -> None:
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--fees", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--open-hold", type=float, default=2.0)
+    ap.add_argument(
+        "--print",
+        dest="print_tf",
+        default="",
+        help="print a tab (1d / 1h / 30m / pnl / trades) — no column(1) needed",
+    )
     args = ap.parse_args()
+    if args.print_tf:
+        name = args.print_tf.strip().lower()
+        if not name.endswith(".csv"):
+            name = f"{name}.csv"
+        fields, rows = load_sheet_csv(name, args.out_dir)
+        if not rows:
+            raise SystemExit(
+                f"no {name} in {args.out_dir}. Build first:\n"
+                "  ./venv/bin/python s14_exchange_sheet.py --from-csv data/backtests/s14_candles"
+            )
+        print(format_table(rows, fields))
+        return
     tfs = _parse_tfs(args.tf)
     open_hold = float(args.open_hold) > 0
     now = datetime.now(IST)

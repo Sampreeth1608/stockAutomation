@@ -46,6 +46,8 @@ def test_workbook_html_and_csv() -> None:
         html = (out / HTML_NAME).read_text(encoding="utf-8")
         assert "14324" in html
         assert "Gold Petal exchange candles" in html
+        assert 'canvas class="ohlc"' in html
+        assert "drawOhlc" in html
         csv_text = (out / "1d.csv").read_text(encoding="utf-8")
         assert csv_text.splitlines()[0].startswith("time,open,high,low,close")
         assert "14324" in csv_text
@@ -57,6 +59,17 @@ def test_workbook_html_and_csv() -> None:
         assert "1d" in loaded["tfs"]
 
 
+def test_format_table_no_column_binary() -> None:
+    from s14_exchange_sheet import format_table
+
+    text = format_table(
+        [{"time": "2026-08-03", "open": 14379, "close": 14324}],
+        ["time", "open", "close"],
+    )
+    assert "14324" in text
+    assert "open" in text.splitlines()[0]
+
+
 def test_panel_mentions_s14_sheet() -> None:
     text = Path(__file__).resolve().parent.joinpath("control_panel.py").read_text(
         encoding="utf-8"
@@ -64,10 +77,12 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "/s14-sheet" in text
     assert "btn-s14-copy" in text
     assert "Gold Petal exchange candles" in text
+    assert "s14-chart" in text
 
 
 if __name__ == "__main__":
     test_display_row_prints_chart_values()
     test_workbook_html_and_csv()
+    test_format_table_no_column_binary()
     test_panel_mentions_s14_sheet()
     print("ALL test_s14_exchange_sheet OK")

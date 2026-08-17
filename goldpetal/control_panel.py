@@ -245,6 +245,7 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 .check.warn { color: var(--warn); }
 #live-desk-banner.armed { color: var(--bad); font-weight: 700; }
 #live-desk-banner.paper { color: var(--ok); }
+#s14-chart { width: 100%; height: 320px; background: #0c1410; border: 1px solid var(--line); border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -268,6 +269,29 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
       </div>
       <p class="flash" id="flash"></p>
       <p class="muted" style="margin-top:.75rem">Safer access: SSH tunnel (no public firewall). On your laptop run <span class="mono">ssh -N -L 8787:127.0.0.1:8787 USER@VM_IP</span> then open <span class="mono">http://127.0.0.1:8787/</span>. Bind panel with <span class="mono">--host 127.0.0.1</span>. Public <span class="mono">0.0.0.0/0</span> firewall is optional and less safe.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Gold Petal exchange candles</h2>
+      <p class="muted">Angel/MCX chart (the real candle). Green/red sticks = close vs open. Table under the chart is O/H/L/C + wick + S14 side. Hard-refresh after restarting this panel (not supervise).</p>
+      <canvas id="s14-chart" width="1100" height="320"></canvas>
+      <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
+        <a class="btn ok" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
+        <button class="btn" type="button" id="btn-s14-zip">Download sheet ZIP</button>
+        <label class="muted">Tab
+          <select id="s14-tf" style="margin-left:.35rem">
+            <option value="1d">1d</option>
+            <option value="1h">1h</option>
+            <option value="30m">30m</option>
+            <option value="pnl">pnl</option>
+            <option value="trades">trades</option>
+          </select>
+        </label>
+        <button class="btn warn" type="button" id="btn-s14-copy">Copy tab → Google Sheets</button>
+      </div>
+      <p class="mono" id="s14-meta">No sheet yet — restart this panel after git pull</p>
+      <p class="flash" id="s14-flash"></p>
+      <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
     </section>
 
     <section class="panel">
@@ -390,28 +414,6 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
           <tbody id="score-body"></tbody>
         </table>
       </div>
-    </section>
-
-    <section class="panel">
-      <h2>Gold Petal exchange candles · S14 sheet</h2>
-      <p class="muted">Angel/MCX chart OHLC + wick formula (the real candle, not tick-built). Open the sheet any time, or copy a tab into Google Sheets. Rebuild: <span class="mono">./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d --no-print-bars</span></p>
-      <div class="row" style="margin:.6rem 0 .85rem;gap:.6rem;align-items:center">
-        <a class="btn ok" href="/s14-sheet" target="_blank" rel="noopener">Open full sheet</a>
-        <button class="btn" type="button" id="btn-s14-zip">Download sheet ZIP</button>
-        <label class="muted">Tab
-          <select id="s14-tf" style="margin-left:.35rem">
-            <option value="1d">1d</option>
-            <option value="1h">1h</option>
-            <option value="30m">30m</option>
-            <option value="pnl">pnl</option>
-            <option value="trades">trades</option>
-          </select>
-        </label>
-        <button class="btn warn" type="button" id="btn-s14-copy">Copy tab → Google Sheets</button>
-      </div>
-      <p class="mono" id="s14-meta">No sheet yet</p>
-      <p class="flash" id="s14-flash"></p>
-      <div class="scroll" style="max-height:22rem"><table><thead id="s14-head"></thead><tbody id="s14-body"></tbody></table></div>
     </section>
 
     <section class="panel">
@@ -1029,6 +1031,60 @@ function paintS14Table(fields, rows) {
   }).join("");
   $("s14-body").innerHTML = body || `<tr><td>No rows. Run the dump command above.</td></tr>`;
 }
+function drawS14Chart(rows) {
+  const canvas = $("s14-chart");
+  if (!canvas) return;
+  const bars = (rows || []).map((r) => ({
+    t: String(r.time || ""),
+    o: +r.open, h: +r.high, l: +r.low, c: +r.close
+  })).filter((b) => Number.isFinite(b.o) && Number.isFinite(b.h) && Number.isFinite(b.l) && Number.isFinite(b.c));
+  const cssW = Math.max(canvas.clientWidth || 900, 320);
+  const cssH = 320;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(cssW * dpr);
+  canvas.height = Math.floor(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0c1410";
+  ctx.fillRect(0, 0, cssW, cssH);
+  if (!bars.length) {
+    ctx.fillStyle = "#8aa394";
+    ctx.font = "13px IBM Plex Mono, monospace";
+    ctx.fillText("No OHLC in this tab — pick 1d / 1h / 30m", 16, 40);
+    return;
+  }
+  const padL = 56, padR = 10, padT = 12, padB = 28;
+  const w = cssW - padL - padR, h = cssH - padT - padB;
+  const lo = Math.min.apply(null, bars.map((b) => b.l));
+  const hi = Math.max.apply(null, bars.map((b) => b.h));
+  const span = (hi - lo) || 1;
+  const y = (px) => padT + (hi - px) / span * h;
+  ctx.font = "11px IBM Plex Mono, monospace";
+  ctx.fillStyle = "#8aa394";
+  ctx.strokeStyle = "#2a4034";
+  for (let i = 0; i <= 4; i++) {
+    const px = hi - span * i / 4;
+    const yy = y(px);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(cssW - padR, yy); ctx.stroke();
+    ctx.fillText(String(Math.round(px)), 4, yy + 4);
+  }
+  const slot = w / bars.length;
+  bars.forEach((b, i) => {
+    const x = padL + (i + 0.5) * slot;
+    const up = b.c >= b.o;
+    ctx.strokeStyle = up ? "#3dba7a" : "#e05a4c";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.moveTo(x, y(b.h)); ctx.lineTo(x, y(b.l)); ctx.stroke();
+    const top = y(Math.max(b.o, b.c)), bot = y(Math.min(b.o, b.c));
+    const bw = Math.max(2, Math.min(16, slot * 0.62));
+    ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
+  });
+  const labels = [0, Math.floor(bars.length / 2), bars.length - 1];
+  ctx.fillStyle = "#8aa394";
+  labels.forEach((i) => {
+    ctx.fillText(String(bars[i].t || "").slice(0, 16), Math.max(padL, padL + (i + 0.5) * slot - 40), cssH - 8);
+  });
+}
 async function loadS14Preview() {
   const tf = $("s14-tf").value || "1d";
   try {
@@ -1037,12 +1093,14 @@ async function loadS14Preview() {
       $("s14-meta").textContent = meta.hint || "Sheet not built yet";
       $("s14-head").innerHTML = "";
       $("s14-body").innerHTML = "";
+      drawS14Chart([]);
       return;
     }
     $("s14-meta").textContent =
       `${meta.generated_at || ""} · ${meta.symbol || ""} · source=${meta.source || ""} · tabs=${(meta.tfs||[]).join(",")}`;
     const data = await api(`/api/s14/sheet?tf=${encodeURIComponent(tf)}`);
     paintS14Table(data.fields || [], data.rows || []);
+    drawS14Chart(data.rows || []);
     if ((data.rows || []).length > 80) {
       s14Flash(`Showing first 80 of ${data.rows.length} rows — Open full sheet for all`);
     } else {
@@ -1050,6 +1108,7 @@ async function loadS14Preview() {
     }
   } catch (e) {
     $("s14-meta").textContent = String(e.message || e);
+    drawS14Chart([]);
   }
 }
 $("btn-s14-zip").onclick = () => {
@@ -1065,6 +1124,7 @@ $("btn-s14-copy").onclick = async () => {
   } catch (e) { s14Flash(String(e.message || e)); }
 };
 $("s14-tf").onchange = () => loadS14Preview();
+window.addEventListener("resize", () => loadS14Preview());
 
 async function initExportDates() {
   const d = await api("/api/export/defaults");

@@ -726,6 +726,19 @@ def main() -> None:
             "  open data/s14_sheet/GoldPetal_S14.html  or  http://127.0.0.1:8787/s14-sheet",
             flush=True,
         )
+        from s14_exchange_sheet import BAR_COLUMNS, display_bar_row, format_table
+
+        if "1d" in walks:
+            print(flush=True)
+            print("=== 1d exchange candles (Angel OHLC) ===", flush=True)
+            print(
+                format_table([display_bar_row(r) for r in walks["1d"]], BAR_COLUMNS),
+                flush=True,
+            )
+        print(
+            "print any tab:  ./venv/bin/python s14_exchange_sheet.py --print 1d",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

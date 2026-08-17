@@ -22,6 +22,15 @@ Paper 100 lots on S12/S14/S15 is not live size.
 Restart **only** `control_panel.py` after this pull (not supervise), unless you
 meant to load a new `.env`.
 
+```bash
+cd ~/goldpetal
+pkill -f 'python.*control_panel.py' || true
+nohup ./venv/bin/python control_panel.py --host 127.0.0.1 --port 8787 >> data/control_panel.log 2>&1 &
+```
+
+Then hard-refresh http://127.0.0.1:8787/ (Ctrl+Shift+R). The Gold Petal candlestick
+is the second panel. Do **not** restart supervise.
+
 ## Streamlit research desk
 
 On the VM desk you can:
