@@ -464,6 +464,80 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
         st.info("Sync ticks.db to see PnL (uncheck skip-db).")
 
 
+def tab_s14_chart(dd: Path) -> None:
+    """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
+    from s14_exchange_sheet import refresh_status, start_angel_refresh
+
+    sheet = dd / "s14_sheet"
+    st.subheader("Gold Petal exchange candles")
+    st.caption(
+        "This is the Angel/MCX chart (O/H/L/C). Open the desk with "
+        "`gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
+        "http://127.0.0.1:8501/ → tab **S14 chart**. "
+        "Do not use 8787 for this."
+    )
+    st_status = refresh_status(sheet)
+    if st_status.get("running"):
+        st.warning("Angel pull running — wait ~30s and hit Rerun (top right).")
+    elif st_status.get("generated_at"):
+        st.caption(f"Last pull: {st_status['generated_at']}  {st_status.get('source') or ''}")
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        tf = st.selectbox("Timeframe", ["1d", "1h", "30m"], index=0)
+    with cols[1]:
+        pull = st.button("Pull live candles", type="primary")
+    if pull:
+        py = ROOT / "venv" / "bin" / "python"
+        if not py.is_file():
+            py = Path(sys.executable)
+        res = start_angel_refresh(root=ROOT, python=str(py), sheet_dir=sheet)
+        if res.get("started_new"):
+            st.info("Pulling Angel/MCX now. Wait 30–60s, then Rerun.")
+        elif res.get("running"):
+            st.info("A pull is already running.")
+        else:
+            st.error(str(res))
+    path = sheet / f"{tf}.csv"
+    if not path.is_file():
+        st.error(
+            "No sheet yet. On the VM run:\n\n"
+            "`cd ~/goldpetal && ./venv/bin/python explain_s14_candles.py "
+            "--tf 30m,1h,1d --from 2026-08-02 --no-print-bars`"
+        )
+        return
+    df = pd.read_csv(path)
+    for col in ("open", "high", "low", "close", "upper", "lower"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    try:
+        import plotly.graph_objects as go
+
+        fig = go.Figure(
+            data=[
+                go.Candlestick(
+                    x=df["time"] if "time" in df.columns else df.index,
+                    open=df["open"],
+                    high=df["high"],
+                    low=df["low"],
+                    close=df["close"],
+                    name="GOLDPETAL",
+                )
+            ]
+        )
+        fig.update_layout(
+            title=f"Gold Petal {tf} · exchange OHLC",
+            xaxis_title="time IST",
+            yaxis_title="₹ / g",
+            xaxis_rangeslider_visible=False,
+            height=460,
+            margin=dict(l=40, r=20, t=40, b=40),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as exc:
+        st.warning(f"Candlestick needs plotly ({exc}). Table still below.")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
 def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
@@ -885,6 +959,7 @@ def main() -> None:
         return
 
     (
+        t_s14,
         t0,
         t1,
         t_ops,
@@ -898,6 +973,7 @@ def main() -> None:
         t8,
     ) = st.tabs(
         [
+            "S14 chart",
             "Overview",
             "Proposals / ML",
             "Deploy / Ops (view)",
@@ -911,6 +987,8 @@ def main() -> None:
             "Live orders",
         ]
     )
+    with t_s14:
+        tab_s14_chart(dd)
     with t0:
         tab_overview(dd, db, lot_size=lot_size)
     with t1:

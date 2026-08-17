@@ -19,31 +19,33 @@ are **read-only** so they cannot overwrite 8787.
 Keep `DRY_RUN=true` until you intend Angel fills. Panel LIVE_MAX_LOTS cap is 10.
 Paper 100 lots on S12/S14/S15 is not live size.
 
-Restart **only** `control_panel.py` after this pull (not supervise). Bind
-**0.0.0.0** so the SSH tunnel **and** the VM IP both open the chart.
+## Gold Petal chart (Streamlit 8501 — this is the one that opens)
+
+Do **not** use 8787 for the candle chart. Use the desk you already tunnel:
 
 On the **VM**:
 
 ```bash
 cd ~/goldpetal
-pkill -f control_panel.py || true
-nohup ./venv/bin/python control_panel.py --host 0.0.0.0 --port 8787 >> data/control_panel.log 2>&1 &
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/
+git pull origin cursor/s14-wick-length-a4b2
+./scripts/run_desk_vm.sh --detach
+./daily_s14_sheet.sh
 ```
 
-You want `200`. Then on your **Mac** (leave running):
+On your **Mac** (leave running):
 
 ```bash
-gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8787:127.0.0.1:8787
+gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501
 ```
 
-Open **http://127.0.0.1:8787/**  — or **http://8.231.125.120:8787/** if the tunnel is not up.
-Hard-refresh (Ctrl+Shift+R). Do **not** restart supervise.
+Then Chrome: **http://127.0.0.1:8501/** — first tab **S14 chart**. Pull live candles there.
+8787 is emergency / live / capital only — not this chart. Do **not** restart supervise.
 
 ## Streamlit research desk
 
 On the VM desk you can:
 
+- **S14 chart** — Angel/MCX Gold Petal candlesticks (this is the exchange chart)
 - **Overview / Trades / Ticks** — research
 - **Proposals** — Approve → paper (whitelist env). Restart on **8787**. Approve → live is on 8787.
 - **Deploy / Ops, Live Deploy, Capital** — read-only snapshots

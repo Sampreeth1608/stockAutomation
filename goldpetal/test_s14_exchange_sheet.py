@@ -95,6 +95,11 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "s14-chart" in text
     assert "btn-s14-pull" in text
     assert "127.0.0.1:8787" in text
+    desk = Path(__file__).resolve().parent.joinpath("analytics/app.py").read_text(
+        encoding="utf-8"
+    )
+    assert "S14 chart" in desk
+    assert "def tab_s14_chart" in desk
 
 
 if __name__ == "__main__":

@@ -30,7 +30,23 @@ mkdir -p data/control
 
 if [[ "${1:-}" == "--fg" ]]; then
   echo "→ desk foreground :8501  data=$GP_DATA_DIR"
+  echo "   Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "   then http://127.0.0.1:8501/  → tab S14 chart"
   exec "${CMD[@]}"
+fi
+
+if [[ "${1:-}" == "--detach" ]]; then
+  SESSION="${TMUX_DESK_SESSION:-gp-desk}"
+  if tmux has-session -t "=$SESSION" 2>/dev/null; then
+    echo "desk already running in tmux $SESSION"
+  else
+    tmux new-session -d -s "$SESSION" -c "$PWD" \
+      "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
+    echo "started tmux $SESSION"
+  fi
+  echo "Mac: gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "then http://127.0.0.1:8501/  → first tab S14 chart"
+  exit 0
 fi
 
 SESSION="${TMUX_DESK_SESSION:-gp-desk}"
