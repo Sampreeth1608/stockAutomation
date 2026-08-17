@@ -182,6 +182,30 @@ def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> f
     return (now - ts.astimezone(IST)).total_seconds()
 
 
+def desk_snapshot() -> dict[str, Any]:
+    """Minimal Desk-page state. No scoreboard, no per-book live qty, no checklist."""
+    st = load_state()
+    env = read_live_env()
+    dry = bool(env["dry_run"])
+    live_ok, _why = is_live_mode_allowed()
+    approved = list(st.live_approved or [])
+    from analytics.env_bridge import strategy_enable_snapshot
+
+    enables_all = strategy_enable_snapshot()
+    enables = {name: bool(enables_all.get(name)) for name in SLIM_PAPER_STRATEGIES}
+    books = [
+        {"strategy": name, "live_approved": name in approved}
+        for name in SLIM_PAPER_STRATEGIES
+    ]
+    return {
+        "dry_run": dry,
+        "live_max_lots": env["live_max_lots"],
+        "enables": enables,
+        "books": books,
+        "would_place_real_orders": bool(live_ok and not dry and approved),
+    }
+
+
 def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     """Checklist + per-strategy live size for the 8787 panel."""
     st = load_state()

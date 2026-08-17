@@ -104,12 +104,20 @@ def bot_status(*, lite: bool = False) -> dict[str, Any]:
                         mismatches.append(f"{name}: DB=flat RAM={ram_pos}")
         except Exception as exc:
             mismatches.append(f"mismatch_check_error:{exc}")
+    collector = [
+        r
+        for r in rows
+        if "collect_ticks.py" in r.get("cmd", "") and "control_panel" not in r.get("cmd", "")
+    ]
+    running = bool(supervise and runner)
+    feed_source = "bot" if running else ("collector" if collector else "off")
     result = {
         "ok": True,
         "supervise": supervise,
         "run_strategy": runner,
         "desk": desk,
-        "running": bool(supervise and runner),
+        "running": running,
+        "feed_source": feed_source,
         "log_tail": tail,
         "cwd": str(ROOT),
         "health": health,

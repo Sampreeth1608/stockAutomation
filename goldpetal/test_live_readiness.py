@@ -12,6 +12,7 @@ from live_readiness import (
     apply_panel_enables,
     apply_panel_live_env,
     bot_age_seconds,
+    desk_snapshot,
     live_readiness,
     panel_restart_allowed,
     read_live_env,
@@ -206,6 +207,15 @@ def test_apply_desk_books_live_requires_in_bot() -> None:
         td.cleanup()
 
 
+def test_desk_snapshot_skips_checklist() -> None:
+    os.environ["DRY_RUN"] = "true"
+    snap = desk_snapshot()
+    assert "steps" not in snap
+    assert "S14_WICK30_STRICT" in snap["enables"]
+    assert any(b["strategy"] == "S14_WICK30_STRICT" for b in snap["books"])
+    assert snap["would_place_real_orders"] is False
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -225,4 +235,6 @@ if __name__ == "__main__":
     print("ok enables")
     test_apply_desk_books_live_requires_in_bot()
     print("ok desk books")
+    test_desk_snapshot_skips_checklist()
+    print("ok desk snapshot")
     print("ALL test_live_readiness OK")

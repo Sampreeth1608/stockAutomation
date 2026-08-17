@@ -54,7 +54,6 @@ from analytics.desk_auth import (  # noqa: E402
     dangerous_requires_totp,
     desk_password_configured,
     desk_password_hint,
-    desk_totp_configured,
     verify_password,
     verify_totp,
 )
@@ -881,84 +880,71 @@ def main() -> None:
         page_title="Gold Petal Desk",
         page_icon="◆",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
-    inject_style()
     if not require_desk_login():
         return
 
-    st.sidebar.title("Gold Petal desk")
-    page = st.sidebar.radio("Page", PAGES, index=0, key="gp_page")
-    if LOCAL_DESK:
-        st.sidebar.caption("VM local · live data/ · no Mac sync")
-        if st.session_state.get("desk_authed"):
-            if st.sidebar.button("Lock desk"):
-                st.session_state["desk_authed"] = False
-                st.rerun()
-            st.sidebar.caption(
-                "Auth: password"
-                + (" + OTP for dangerous ops" if desk_totp_configured() else "")
-            )
-    else:
-        st.sidebar.caption("Mac snapshot · sync from VM")
-    dd = Path(
-        st.sidebar.text_input("Data folder", value=str(DEFAULT_DATA))
-    ).expanduser()
-    st.session_state["data_dir"] = str(dd)
+    st.sidebar.title("Gold Petal")
+    page = st.sidebar.selectbox("Page", PAGES, index=0, key="gp_page")
+    if page != "Desk":
+        inject_style()
+    if LOCAL_DESK and st.session_state.get("desk_authed"):
+        if st.sidebar.button("Lock desk"):
+            st.session_state["desk_authed"] = False
+            st.rerun()
+
+    dd = DEFAULT_DATA
     db = dd / "ticks.db"
-
     lot_size = 100.0 if LOCAL_DESK else 1.0
-    if page in {"Overview", "Trades"}:
-        lot_size = float(
-            st.sidebar.number_input(
-                "Lots (fee display)",
-                min_value=1.0,
-                value=lot_size,
-                step=1.0,
-                help="Scales gross PnL and Angel fees on the desk display.",
+
+    if page != "Desk":
+        if LOCAL_DESK:
+            st.sidebar.caption("VM local")
+        else:
+            st.sidebar.caption("Mac snapshot")
+        dd = Path(
+            st.sidebar.text_input("Data folder", value=str(DEFAULT_DATA))
+        ).expanduser()
+        st.session_state["data_dir"] = str(dd)
+        db = dd / "ticks.db"
+        if page in {"Overview", "Trades"}:
+            lot_size = float(
+                st.sidebar.number_input(
+                    "Lots (fee display)",
+                    min_value=1.0,
+                    value=lot_size,
+                    step=1.0,
+                )
             )
-        )
-        st.sidebar.caption(
-            "IGNORE_FEES rides freely. Closed trades always show fees+tax here."
-        )
+        if LOCAL_DESK:
+            if st.sidebar.button("Refresh"):
+                st.cache_data.clear()
+        else:
+            cfg = VmConfig.from_env()
+            st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
+            st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
+            cfg = VmConfig(
+                vm=st.session_state.get("vm_name", cfg.vm),
+                zone=st.session_state.get("vm_zone", cfg.zone),
+                remote_dir=cfg.remote_dir,
+            )
+            skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=True)
+            if st.sidebar.button("Sync from VM", type="primary"):
+                with st.spinner("Syncing…"):
+                    os.environ["GP_VM"] = cfg.vm
+                    os.environ["GP_ZONE"] = cfg.zone
+                    code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
+                st.sidebar.code(out[-2000:] if out else f"exit {code}")
+                st.cache_data.clear()
+                if code == 0:
+                    st.sidebar.success("Synced")
+                else:
+                    st.sidebar.error(f"sync exit {code}")
 
-    if LOCAL_DESK:
-        if st.sidebar.button("Refresh", type="primary"):
-            st.cache_data.clear()
-            st.sidebar.success("Cache cleared")
-        st_status = bot_status(lite=True)
-        st.sidebar.metric("Bot", "RUN" if st_status.get("running") else "STOP")
-    else:
-        cfg = VmConfig.from_env()
-        st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
-        st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
-        cfg = VmConfig(
-            vm=st.session_state.get("vm_name", cfg.vm),
-            zone=st.session_state.get("vm_zone", cfg.zone),
-            remote_dir=cfg.remote_dir,
-        )
-        skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=True)
-        if st.sidebar.button("Sync from VM", type="primary"):
-            with st.spinner("Syncing…"):
-                os.environ["GP_VM"] = cfg.vm
-                os.environ["GP_ZONE"] = cfg.zone
-                code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
-            st.sidebar.code(out[-2000:] if out else f"exit {code}")
-            st.cache_data.clear()
-            if code == 0:
-                st.sidebar.success("Synced")
-            else:
-                st.sidebar.error(f"sync exit {code}")
-
-    if st.sidebar.button("Clear cache"):
-        st.cache_data.clear()
-
-    st.title("Gold Petal research desk")
-    mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
-    st.caption(
-        f"{mode} · operator writes on page Desk · "
-        f"S4/S5/S8/S11/S12/S13/S14/S15 · {date.today().isoformat()}"
-    )
+    if page != "Desk":
+        st.title("Gold Petal research")
+        st.caption(f"{'VM local' if LOCAL_DESK else 'Mac snapshot'} · {date.today().isoformat()}")
 
     if not dd.exists():
         st.warning("Data folder missing.")

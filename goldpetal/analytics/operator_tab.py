@@ -1,8 +1,7 @@
-"""Operator desk on Streamlit 8501 — same writer as 8787, on the tunnel that opens."""
+"""Operator desk on Streamlit 8501 — start/stop, books, live money only."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -18,8 +17,6 @@ SHORT = {
     "S14_WICK30_STRICT": "S14 wick",
     "S15_WICK30_NOWICK": "S15 no-wick",
 }
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def _flash(res: dict[str, Any]) -> None:
@@ -43,7 +40,6 @@ def _set_flash(res: dict[str, Any]) -> None:
 def render_operator_desk(*, local: bool) -> None:
     from analytics.bot_ops import (
         bot_status,
-        feed_status,
         restart_bot,
         start_bot,
         start_feed,
@@ -52,39 +48,24 @@ def render_operator_desk(*, local: bool) -> None:
     )
     from capital import capital_snapshot, load_capital, save_capital
     from control_state import set_emergency, set_live_unlocked, set_trading_enabled
-    from live_readiness import apply_desk_books, apply_panel_live_env, live_readiness
+    from live_readiness import apply_desk_books, apply_panel_live_env, desk_snapshot
     from live_readiness import panel_restart_allowed
 
-    st.subheader("Operator desk")
-    st.caption(
-        "Start/stop loads first. Watch and downloads stay off until you open them. "
-        f"Code: `{ROOT}`"
-    )
     _show_flash()
-
-    if not local:
-        st.warning(
-            "This Streamlit is a Mac snapshot. Start/stop and live writes only work "
-            "on the VM desk (8501 tunnel → tab Desk)."
-        )
-
-    live = live_readiness()
+    live = desk_snapshot()
     bot = bot_status(lite=True) if local else {}
-    feed = feed_status() if local else {}
     cap = capital_snapshot()
     armed = bool(live.get("would_place_real_orders"))
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(
-        "Mode",
-        "ARMED LIVE" if armed else ("LIVE env" if live.get("dry_run") is False else "PAPER"),
-    )
-    m2.metric("Bot", "on" if bot.get("running") else "off")
-    m3.metric("Feed", str(feed.get("source") or "off"))
-    m4.metric("LIVE_MAX_LOTS", live.get("live_max_lots") or 1)
-    if armed:
-        st.error("ARMED — next signal on a live-picked book hits Angel.")
+    feed = str(bot.get("feed_source") or "off")
 
-    st.markdown("##### Stop / go")
+    a, b, c, d = st.columns(4)
+    a.metric("Mode", "ARMED" if armed else ("LIVE env" if live.get("dry_run") is False else "PAPER"))
+    b.metric("Bot", "on" if bot.get("running") else "off")
+    c.metric("Feed", feed)
+    d.metric("Lots cap", live.get("live_max_lots") or 1)
+    if armed:
+        st.error("ARMED — live-picked books send Angel orders.")
+
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("Emergency off", type="primary", disabled=not local):
         set_emergency(True)
@@ -99,13 +80,6 @@ def render_operator_desk(*, local: bool) -> None:
         set_trading_enabled(False)
         st.rerun()
 
-    st.markdown("##### Engine + feed")
-    st.caption(
-        ("Bot running" if bot.get("running") else "Bot stopped")
-        + " · "
-        + str(feed.get("note") or feed.get("source") or "—")
-        + " · type RESTART after Save strategies / Save money. Does not paper S14 by itself."
-    )
     e1, e2, e3 = st.columns(3)
     if e1.button("Start bot", disabled=not local):
         _set_flash(start_bot())
@@ -126,41 +100,45 @@ def render_operator_desk(*, local: bool) -> None:
                 }
             )
     f1, f2 = st.columns(2)
-    if f1.button(
-        "Start feed only",
-        disabled=(not local) or bool(bot.get("running")),
-    ):
+    if f1.button("Start feed only", disabled=(not local) or bool(bot.get("running"))):
         _set_flash(start_feed())
     if f2.button(
         "Stop feed only",
-        disabled=(not local) or bool(bot.get("running")) or feed.get("source") != "collector",
+        disabled=(not local) or bool(bot.get("running")) or feed != "collector",
     ):
         _set_flash(stop_feed())
 
-    st.markdown("##### Strategies")
-    st.caption(
-        "In bot = RAM after Restart. Live pick = Angel when money is LIVE + unlocked. "
-        "Live pick without In bot is ignored. Does not change DRY_RUN."
-    )
-    books = live.get("books") or []
     enables = live.get("enables") or {}
-    in_bot: list[str] = []
-    live_picks: list[str] = []
-    for b in books:
+    rows = []
+    for b in live.get("books") or []:
         name = str(b.get("strategy") or "")
-        cols = st.columns([3, 1, 1, 2, 2])
-        cols[0].write(SHORT.get(name, name))
-        if cols[1].checkbox("In bot", value=bool(enables.get(name)), key=f"in_{name}"):
-            in_bot.append(name)
-        if cols[2].checkbox("Live", value=bool(b.get("live_approved")), key=f"lv_{name}"):
-            live_picks.append(name)
-        cols[3].write(str(b.get("ram") or "—"))
-        cols[4].write(f"qty {b.get('live_qty') or 0}")
+        rows.append(
+            {
+                "book": SHORT.get(name, name),
+                "id": name,
+                "in_bot": bool(enables.get(name)),
+                "live": bool(b.get("live_approved")),
+            }
+        )
+    edited = st.data_editor(
+        pd.DataFrame(rows),
+        column_order=["book", "in_bot", "live"],
+        column_config={
+            "book": st.column_config.TextColumn("Book", disabled=True),
+            "id": None,
+            "in_bot": st.column_config.CheckboxColumn("In bot"),
+            "live": st.column_config.CheckboxColumn("Live"),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="op_books",
+        disabled=not local,
+    )
     if st.button("Save strategies", type="primary", disabled=not local):
+        in_bot = [str(r["id"]) for r in edited.to_dict("records") if r.get("in_bot")]
+        live_picks = [str(r["id"]) for r in edited.to_dict("records") if r.get("live")]
         _set_flash(apply_desk_books(in_bot, live_picks))
 
-    st.markdown("##### Live money")
-    st.caption("Keep Paper only unless you mean Angel. LIVE_MAX_LOTS cap is 10. Paper 100 lots is not live size.")
     paper = st.checkbox("Paper only (DRY_RUN)", value=bool(live.get("dry_run", True)))
     lots = st.number_input(
         "LIVE_MAX_LOTS (1–10)",
@@ -188,128 +166,4 @@ def render_operator_desk(*, local: bool) -> None:
         plan.daily_loss_limit_inr = float(dd_rs)
         save_capital(plan)
         _set_flash({"ok": True, "note": "Capital saved"})
-
-    st.markdown("##### Watch")
-    if st.toggle("Load watch", value=False, key="op_watch_on"):
-        from desk_data import history_payload
-
-        hist = history_payload(limit=80)
-        view = st.radio(
-            "Show",
-            ["Trades", "Open", "Ticks", "Live orders", "Signals", "Scoreboard"],
-            horizontal=True,
-            key="op_watch",
-        )
-        if view == "Trades":
-            st.dataframe(pd.DataFrame(hist.get("trades") or []), use_container_width=True, hide_index=True)
-        elif view == "Open":
-            st.dataframe(pd.DataFrame(hist.get("open") or []), use_container_width=True, hide_index=True)
-        elif view == "Ticks":
-            st.dataframe(pd.DataFrame(hist.get("ticks") or []), use_container_width=True, hide_index=True)
-        elif view == "Live orders":
-            st.dataframe(pd.DataFrame(hist.get("live_orders") or []), use_container_width=True, hide_index=True)
-        elif view == "Signals":
-            st.dataframe(pd.DataFrame(hist.get("signals") or []), use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(pd.DataFrame(hist.get("scoreboard") or []), use_container_width=True, hide_index=True)
-        st.caption(
-            f"open {hist.get('total_open')} · closed {hist.get('total_closed')} · ticks {hist.get('tick_count')}"
-        )
-    else:
-        st.caption("Off on purpose — rebuilding every trade is slow. Turn on when you need it.")
-
-    st.markdown("##### Downloads")
-    if st.toggle("Load downloads", value=False, key="op_dl_on"):
-        from panel_export import (
-            TICK_CSV_FIELDS,
-            TRADE_CSV_FIELDS,
-            default_date_range,
-            export_pack_zip,
-            export_summary,
-            export_ticks_csv,
-            export_trades_csv,
-            rows_to_tsv,
-            ticks_in_range,
-            trades_in_range,
-        )
-        from s14_exchange_sheet import sheet_zip_bytes
-        from sheets_pack import SCORE_FIELDS, build_scoreboard_rows, sheets_pack_zip_bytes
-
-        st.caption("CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive.")
-        d0, d1 = default_date_range()
-        cfrom, cto = st.columns(2)
-        date_from = str(cfrom.date_input("From", value=pd.Timestamp(d0).date()))
-        date_to = str(cto.date_input("To", value=pd.Timestamp(d1).date()))
-        try:
-            summ = export_summary(date_from, date_to)
-            st.caption(f"{summ.get('tick_count')} ticks · {summ.get('trade_count')} trades")
-        except Exception as exc:
-            st.caption(str(exc))
-        kind = st.selectbox(
-            "File",
-            [
-                "Download all (ZIP)",
-                "Download trades CSV",
-                "Download ticks CSV",
-                "Copy trades → Sheets (TSV)",
-                "Copy ticks → Sheets (TSV)",
-                "Download Sheets pack",
-                "Copy scoreboard → Sheets (TSV)",
-                "Download S14 sheet ZIP",
-            ],
-            key="op_dl_kind",
-        )
-        if st.button("Build file"):
-            try:
-                st.session_state.pop("op_dl_bytes", None)
-                st.session_state.pop("op_dl_name", None)
-                st.session_state.pop("op_dl_mime", None)
-                st.session_state.pop("op_dl_text", None)
-                if kind == "Download all (ZIP)":
-                    st.session_state["op_dl_bytes"] = export_pack_zip(date_from, date_to)
-                    st.session_state["op_dl_name"] = f"goldpetal_export_{date_from}_to_{date_to}.zip"
-                    st.session_state["op_dl_mime"] = "application/zip"
-                elif kind == "Download trades CSV":
-                    st.session_state["op_dl_bytes"] = export_trades_csv(date_from, date_to).encode("utf-8")
-                    st.session_state["op_dl_name"] = f"goldpetal_trades_{date_from}_to_{date_to}.csv"
-                    st.session_state["op_dl_mime"] = "text/csv"
-                elif kind == "Download ticks CSV":
-                    st.session_state["op_dl_bytes"] = export_ticks_csv(date_from, date_to).encode("utf-8")
-                    st.session_state["op_dl_name"] = f"goldpetal_ticks_{date_from}_to_{date_to}.csv"
-                    st.session_state["op_dl_mime"] = "text/csv"
-                elif kind == "Copy trades → Sheets (TSV)":
-                    rows = trades_in_range(date_from, date_to)
-                    st.session_state["op_dl_text"] = rows_to_tsv(rows, TRADE_CSV_FIELDS)
-                elif kind == "Copy ticks → Sheets (TSV)":
-                    rows = ticks_in_range(date_from, date_to)
-                    st.session_state["op_dl_text"] = rows_to_tsv(rows, TICK_CSV_FIELDS)
-                elif kind == "Download Sheets pack":
-                    st.session_state["op_dl_bytes"] = sheets_pack_zip_bytes()
-                    st.session_state["op_dl_name"] = "goldpetal_sheets_pack.zip"
-                    st.session_state["op_dl_mime"] = "application/zip"
-                elif kind == "Copy scoreboard → Sheets (TSV)":
-                    st.session_state["op_dl_text"] = rows_to_tsv(build_scoreboard_rows(), SCORE_FIELDS)
-                else:
-                    st.session_state["op_dl_bytes"] = sheet_zip_bytes()
-                    st.session_state["op_dl_name"] = "goldpetal_s14_sheet.zip"
-                    st.session_state["op_dl_mime"] = "application/zip"
-                st.success("Ready — download or copy below.")
-            except Exception as exc:
-                st.error(str(exc))
-        if st.session_state.get("op_dl_bytes"):
-            st.download_button(
-                "Download",
-                data=st.session_state["op_dl_bytes"],
-                file_name=st.session_state.get("op_dl_name") or "goldpetal.bin",
-                mime=st.session_state.get("op_dl_mime") or "application/octet-stream",
-                key="op_dl_btn",
-            )
-        if st.session_state.get("op_dl_text"):
-            st.text_area(
-                "Select all and paste into Google Sheets",
-                value=st.session_state["op_dl_text"],
-                height=160,
-                key="op_dl_tsv",
-            )
-    else:
-        st.caption("Off on purpose — ZIP/CSV scans ticks.db. Turn on when you need a file.")
+    st.caption("Trades / S14 / downloads: sidebar Page. Restart after Save strategies or Save money.")
