@@ -27,16 +27,20 @@ from capital import (
     save_capital,
     update_strategy_budget,
 )
+from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
 from control_state import (
     entries_blocked,
     is_live_mode_allowed,
     load_state,
     save_state,
     set_emergency,
+    set_live_approved,
     set_live_unlocked,
     set_trading_enabled,
 )
 from live_orders import live_lots, recent_orders
+from live_readiness import live_readiness
+from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
@@ -58,7 +62,7 @@ from reasoning_cockpit import (
     panel_timeframes,
     refresh_and_save,
 )
-from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
+from position_safety import read_bot_health
 
 ROOT = Path(__file__).resolve().parent
 
@@ -218,7 +222,12 @@ input[type="date"] {
 .toast.show { display: block; }
 .toast.bad { border-color: var(--bad); color: #ffb4ab; background: #2a1412; }
 .toast.ok { border-color: #2f6a4a; color: #a8efc6; background: #143224; }
-.btn:disabled { opacity: .55; cursor: wait; }
+.check { font-family: "IBM Plex Mono", monospace; font-size: .78rem; padding: .35rem .55rem; border: 1px solid var(--line); border-radius: 3px; }
+.check.ok { color: var(--ok); }
+.check.bad { color: var(--bad); }
+.check.warn { color: var(--warn); }
+#live-desk-banner.armed { color: var(--bad); font-weight: 700; }
+#live-desk-banner.paper { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -242,6 +251,25 @@ input[type="date"] {
       </div>
       <p class="flash" id="flash"></p>
       <p class="muted" style="margin-top:.75rem">Safer access: SSH tunnel (no public firewall). On your laptop run <span class="mono">ssh -N -L 8787:127.0.0.1:8787 USER@VM_IP</span> then open <span class="mono">http://127.0.0.1:8787/</span>. Bind panel with <span class="mono">--host 127.0.0.1</span>. Public <span class="mono">0.0.0.0/0</span> firewall is optional and less safe.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Live money — readiness (does not arm itself)</h2>
+      <p class="muted">Real orders need <strong>every</strong> gate below. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). Keep <span class="mono">DRY_RUN=true</span> until you intend Angel fills. This panel never writes DRY_RUN.</p>
+      <p class="mono" id="live-desk-banner">Loading…</p>
+      <div class="row" id="live-desk-steps" style="margin:.6rem 0"></div>
+      <p class="muted" id="live-desk-bot"></p>
+      <div class="scroll" style="margin-top:.5rem">
+        <table>
+          <thead><tr><th>Strategy</th><th>RAM</th><th>Paper lots</th><th>Live?</th><th>Live qty</th></tr></thead>
+          <tbody id="live-desk-books"></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:.75rem">
+        <button class="btn warn" type="button" id="btn-save-live-approved">Save live-approved list</button>
+        <button class="btn" type="button" id="btn-clear-live-approved">Clear live-approved</button>
+      </div>
+      <p class="flash" id="live-desk-flash"></p>
     </section>
 
     <section class="panel span-7">
@@ -295,6 +323,13 @@ input[type="date"] {
     <section class="panel span-6">
       <h2>Finished trades</h2>
       <p class="muted" id="trades-meta"></p>
+      <div class="row" style="margin:.35rem 0 .55rem">
+        <label class="muted">Filter
+          <select id="trade-filter" style="margin-left:.4rem">
+            <option value="">all slim + others</option>
+          </select>
+        </label>
+      </div>
       <div class="scroll">
         <table>
           <thead><tr><th>Strat</th><th>Side</th><th>Entry</th><th>Exit</th><th>After tax</th><th>Status</th></tr></thead>
@@ -512,8 +547,18 @@ function renderReasoning(r) {
 }
 
 function renderTrades(trades, meta) {
-  $("trades-meta").textContent = meta;
-  $("trades-body").innerHTML = (trades || []).map(t => `
+  window._allTrades = trades || [];
+  const sel = $("trade-filter");
+  if (sel && !sel.dataset.wired) {
+    const names = [...new Set((trades || []).map(t => t.strategy).filter(Boolean))].sort();
+    sel.innerHTML = `<option value="">all</option>` + names.map(n => `<option value="${n}">${n}</option>`).join("");
+    sel.dataset.wired = "1";
+    sel.addEventListener("change", () => renderTrades(window._allTrades, $("trades-meta").textContent));
+  }
+  const want = sel ? sel.value : "";
+  const rows = (trades || []).filter(t => !want || t.strategy === want);
+  $("trades-meta").textContent = meta + (want ? ` · filter ${want}` : "");
+  $("trades-body").innerHTML = rows.map(t => `
     <tr>
       <td>${t.strategy || ""}</td>
       <td>${t.side || ""}</td>
@@ -522,6 +567,37 @@ function renderTrades(trades, meta) {
       <td>${t.pnl_after_tax !== "" && t.pnl_after_tax != null ? money(t.pnl_after_tax) : (t.net_pnl ?? "")}</td>
       <td>${t.status || ""}</td>
     </tr>`).join("") || `<tr><td colspan="6">No finished trades</td></tr>`;
+}
+
+function renderLiveDesk(data) {
+  const d = data.live_desk || {};
+  const banner = $("live-desk-banner");
+  if (!banner) return;
+  if (d.would_place_real_orders) {
+    banner.className = "mono armed";
+    banner.textContent = "ARMED — next BUY/SHORT on an approved strategy will hit Angel. Lock live or set DRY_RUN=true if that is wrong.";
+  } else {
+    banner.className = "mono paper";
+    banner.textContent = `PAPER · ${d.steps_ok || 0}/${d.steps_n || 0} gates green · DRY_RUN=${d.dry_run} · LIVE_MAX_LOTS=${d.live_max_lots} · ${d.note || ""}`;
+  }
+  $("live-desk-steps").innerHTML = (d.steps || []).map(s =>
+    `<div class="check ${s.ok ? "ok" : (s.id === "dry_run" || s.id === "unlocked" ? "warn" : "bad")}">${s.ok ? "OK" : "NO"} · ${s.label} — ${s.detail}</div>`
+  ).join("");
+  const bot = d.bot_health || {};
+  $("live-desk-bot").textContent =
+    `Heartbeat: ${bot.alive ? "alive" : "stale/missing"} · ${bot.ts_ist || "—"} · LTP=${bot.ltp ?? "—"} · regime=${bot.regime || "—"} · RAM ${JSON.stringify(bot.positions || {})}`;
+  $("live-desk-books").innerHTML = (d.books || []).map(b => `
+    <tr>
+      <td>${b.strategy}${b.warn_100 ? " · paper 100 lots" : ""}</td>
+      <td>${b.ram}</td>
+      <td>${b.paper_max_lots}</td>
+      <td><input type="checkbox" data-live-strat="${b.strategy}" ${b.live_approved ? "checked" : ""}/></td>
+      <td>${b.live_approved ? b.live_qty : "—"}</td>
+    </tr>`).join("");
+}
+
+function selectedLiveApproved() {
+  return [...document.querySelectorAll("input[data-live-strat]:checked")].map(el => el.dataset.liveStrat);
 }
 
 function renderLiveOrders(data) {
@@ -636,6 +712,7 @@ async function refresh() {
   renderTicks(data.ticks, `${data.tick_count} ticks stored · showing latest ${data.ticks.length}`);
   renderTrades(data.trades, `Closed/open from signals · showing latest ${data.trades.length}`);
   renderLiveOrders(data);
+  renderLiveDesk(data);
   renderProposals(data.proposals);
   renderScore(data.scoreboard);
   renderReasoning(data.reasoning);
@@ -647,6 +724,7 @@ async function refreshLight() {
   // Fast path: status + ticks only (no full trade rebuild / bars).
   const s = await api("/api/status");
   renderStatus(s);
+  renderLiveDesk(s);
   const t = await api("/api/ticks?limit=40");
   renderTicks(t.ticks, `${t.count} ticks stored · showing latest ${(t.ticks||[]).length}`);
 }
@@ -687,6 +765,35 @@ $("btn-refresh").onclick = async () => {
     await refresh();
     flash("✓ Refreshed");
   } catch (e) { flash("Failed: " + (e.message || e)); }
+};
+const liveDeskFlash = (msg) => {
+  const el = $("live-desk-flash");
+  if (el) el.textContent = msg || "";
+  if (msg) toast(msg, msg.toLowerCase().includes("fail") ? "bad" : "ok");
+};
+$("btn-save-live-approved").onclick = async () => {
+  try {
+    const names = selectedLiveApproved();
+    if (names.some(n => n === "S14_WICK30_STRICT" || n === "S15_WICK30_NOWICK" || n === "S12_HHHL30" || n === "S13_HHHL_DAY")) {
+      const ok = confirm("These books paper at 100 lots. Live qty will be min(100, LIVE_MAX_LOTS), currently often 1.\n\nThis only adds them to live_approved. DRY_RUN stays whatever is in .env. Continue?");
+      if (!ok) { liveDeskFlash("cancelled"); return; }
+    } else if (!names.length) {
+      const ok = confirm("Clear live_approved? No strategy will place Angel orders.");
+      if (!ok) return;
+    }
+    const res = await api("/api/live/approved", { method: "POST", body: JSON.stringify({ strategies: names }) });
+    liveDeskFlash("Saved live_approved: " + ((res.live_approved || []).join(", ") || "(none)"));
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-clear-live-approved").onclick = async () => {
+  try {
+    const ok = confirm("Clear live_approved for every strategy?");
+    if (!ok) return;
+    await api("/api/live/approved", { method: "POST", body: JSON.stringify({ strategies: [] }) });
+    liveDeskFlash("Cleared live_approved");
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
 };
 $("btn-reason").onclick = async () => {
   try {
@@ -859,6 +966,8 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "scoreboard": scoreboard,
         "reasoning": reasoning,
         "timeframes": panel_timeframes(),
+        "live_desk": live_readiness(),
+        "open_positions": [t for t in all_trades if t.get("status") == "OPEN"][:20],
         "where": {
             "host": "Same trading VM as run_strategy.py / supervise.sh",
             "url": "SSH tunnel → http://127.0.0.1:8788/",
@@ -915,6 +1024,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "state": load_state().to_dict(),
                         "entries_blocked": list(entries_blocked()),
                         "live_allowed": list(is_live_mode_allowed()),
+                        "live_desk": live_readiness(),
                         "ltp": latest_ltp(),
                         "tick_count": count_ticks(),
                     }
@@ -1061,6 +1171,24 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/live":
                 st = set_live_unlocked(bool(data.get("unlocked")))
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
+                return
+            if path == "/api/live/approved":
+                names = [
+                    str(s).strip()
+                    for s in (data.get("strategies") or [])
+                    if str(s).strip()
+                ]
+                st = set_live_approved(names, note="control panel live_approved")
+                self._send(
+                    *_json_bytes(
+                        {
+                            "ok": True,
+                            "live_approved": list(st.live_approved),
+                            "state": st.to_dict(),
+                            "live_desk": live_readiness(),
+                        }
+                    )
+                )
                 return
             if path == "/api/reasoning/refresh":
                 payload = refresh_and_save(
