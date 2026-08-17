@@ -136,18 +136,23 @@ cd ~/goldpetal
 python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
 ```
 
-Exchange candles (Angel MCX chart, formula + decision on every bar):
+Exchange candles (Angel MCX chart, formula + decision + close-fill PnL):
 
 ```bash
 cd ~/goldpetal
 ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+# already dumped:
+./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d
 # if venv is .venv:
 ./.venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
 ```
 
-Prints O/H/L/C, upper, lower, O=H, O=L, rule, LONG/SHORT/skip. Writes CSV under
-`data/backtests/s14_candles/`. Angel has 1m 3m 5m 10m 15m 30m 1h 1d (not 45m/2h/3h).
-`--from-ticks` uses `ticks.db` instead of the exchange.
+Prints O/H/L/C, upper, lower, O=H, O=L, rule, LONG/SHORT/skip, then the same
+100-lot Angel-fee after-tax row as the tick tape. Fill is the **signal bar
+close** (not the next open). Leftover flattened at the last **finished** close.
+Writes CSV under `data/backtests/s14_candles/`. Angel has 1m 3m 5m 10m 15m 30m
+1h 1d (not 45m/2h/3h). `--from-ticks` uses `ticks.db` instead of the exchange.
+`--no-fees` is gross only.
 
 Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
 Writes `data/backtests/s14_tick/`. `S14_OPEN_HOLD_MINUTES=0` turns off open=high/low (wick only).

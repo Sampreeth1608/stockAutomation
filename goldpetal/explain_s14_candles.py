@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Pull Angel/MCX Gold Petal candles and print S14 formula + decision per bar.
+"""Pull Angel/MCX Gold Petal candles, print S14 per bar, and settle PnL.
 
   ./venv/bin/python explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+  ./venv/bin/python explain_s14_candles.py --from-csv data/backtests/s14_candles --tf 30m,1h,1d
   python3 explain_s14_candles.py --from-ticks --db data/ticks.db --tf 30m
+
+Fill: enter/FLIP at that finished bar's close. Leftover flattened at the last
+finished close. Default 100 lots + Angel fees + 30% tax (same tape as the tick
+replay). Skips Angel's still-forming last bar.
 
 Exchange intervals Angel actually has: 1m 3m 5m 10m 15m 30m 1h 1d.
 45m / 2h / 3h are not on the exchange chart (those were tick-built).
@@ -20,6 +25,14 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backtest_hhhl_candles import (
+    TfResult,
+    Trade,
+    make_charge_cfg,
+    print_by_day,
+    write_outputs,
+)
+from charges import ChargeConfig, apply_charges_and_tax
 from strategy_wick import s14_bar_decision
 from wick_candles import wick_measure
 
@@ -164,6 +177,164 @@ def walk_candles(
         pos = str(row["pos_after"])
         out.append(row)
     return out
+
+
+def _book_side(side: str | None) -> str | None:
+    if side is None:
+        return None
+    s = str(side).strip().lower()
+    if s in {"", "skip", "flat", "none"}:
+        return None
+    if s == "long":
+        return "LONG"
+    if s == "short":
+        return "SHORT"
+    raise ValueError(f"unknown side {side!r}")
+
+
+def _close_leg_at(
+    *,
+    tf: str,
+    side: str,
+    entry_time: str,
+    entry_px: float,
+    exit_time: str,
+    exit_px: float,
+    cfg: ChargeConfig,
+) -> Trade:
+    if side == "LONG":
+        pts = exit_px - entry_px
+        order_side = "BUY"
+    else:
+        pts = entry_px - exit_px
+        order_side = "SELL"
+    settled = apply_charges_and_tax(
+        pts,
+        cfg,
+        side=order_side,
+        entry_price=entry_px,
+        exit_price=exit_px,
+    )
+    return Trade(
+        tf=tf,
+        side=side,
+        entry_time=entry_time,
+        entry_px=entry_px,
+        exit_time=exit_time,
+        exit_px=exit_px,
+        gross_pts=float(pts) * float(cfg.lot_size),
+        gross_pnl_inr=float(settled["gross_pnl"]),
+        after_tax_pnl_inr=float(settled["pnl_after_tax"]),
+        fees_inr=float(settled["charges"]),
+        lots=float(cfg.lot_size),
+    )
+
+
+def settle_s14_from_walk(
+    rows: list[dict[str, Any]],
+    *,
+    tf: str,
+    lots: float = 100.0,
+    fees: bool = True,
+    charge_cfg: ChargeConfig | None = None,
+) -> TfResult:
+    """Fill enter/FLIP at the signal bar's close. Flatten leftover at last close."""
+    from backtest_wick_candles import _tf_result_from_trades
+
+    cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
+    trades: list[Trade] = []
+    book: str | None = None
+    entry_px = 0.0
+    entry_time = ""
+
+    def flatten(when: str, px: float) -> None:
+        nonlocal book, entry_px, entry_time
+        if book is None:
+            return
+        trades.append(
+            _close_leg_at(
+                tf=tf,
+                side=book,
+                entry_time=entry_time,
+                entry_px=entry_px,
+                exit_time=when,
+                exit_px=px,
+                cfg=cfg,
+            )
+        )
+        book = None
+
+    for row in rows:
+        when = str(row["time"])
+        px = float(row["close"])
+        if str(row["action"]) not in {"enter", "FLIP"}:
+            continue
+        want = _book_side(row.get("side"))
+        if want is None:
+            continue
+        if book is not None:
+            flatten(when, px)
+        book = want
+        entry_px = px
+        entry_time = when
+
+    if rows:
+        last = rows[-1]
+        flatten(str(last["time"]), float(last["close"]))
+    return _tf_result_from_trades(tf, len(rows), trades)
+
+
+def print_pnl_row(r: TfResult) -> None:
+    print(
+        f"{r.tf:>22}  bars={r.n_bars:5d}  trades={r.n_trades:6d}  "
+        f"{r.n_long}/{r.n_short}  win={100 * r.win_rate:5.1f}%  "
+        f"pts={r.gross_pts:10.1f}  pnl={r.after_tax_pnl_inr:12.1f}  "
+        f"fees={r.fees_inr:10.1f}  dd={r.max_dd_inr:12.1f}",
+        flush=True,
+    )
+
+
+def format_trade_line(t: Trade) -> str:
+    lots = float(t.lots) or 1.0
+    pts_per_lot = float(t.gross_pts) / lots
+    return (
+        f"  {t.side:<5}  {t.entry_time} @{t.entry_px:.1f}  →  "
+        f"{t.exit_time} @{t.exit_px:.1f}  "
+        f"pts={pts_per_lot:+.1f}/lot  "
+        f"gross={t.gross_pnl_inr:+.0f}  fees={t.fees_inr:.0f}  "
+        f"after_tax={t.after_tax_pnl_inr:+.0f}"
+    )
+
+
+def candles_from_walk_csv(path: Path) -> list[dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8") as f:
+        raw = list(csv.DictReader(f))
+    out: list[dict[str, Any]] = []
+    for row in raw:
+        out.append(
+            {
+                "time": str(row["time"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            }
+        )
+    return out
+
+
+def find_tf_csv(folder: Path, tf: str) -> Path | None:
+    if folder.is_file():
+        return folder
+    hits = [
+        p
+        for p in sorted(folder.glob(f"{tf}_*.csv"))
+        if "trades" not in p.name.lower()
+    ]
+    if hits:
+        return hits[0]
+    direct = folder / f"{tf}.csv"
+    return direct if direct.is_file() else None
 
 
 def _parse_angel_row(row: Any) -> dict[str, Any] | None:
@@ -358,15 +529,46 @@ def main() -> None:
     ap.add_argument("--from", dest="date_from", default="2026-08-02")
     ap.add_argument("--to", dest="date_to", default="")
     ap.add_argument("--from-ticks", action="store_true")
+    ap.add_argument(
+        "--from-csv",
+        type=Path,
+        default=None,
+        help="settle an existing dump dir (or one CSV) without Angel login",
+    )
     ap.add_argument("--db", type=Path, default=Path("data/ticks.db"))
     ap.add_argument("--session", action="store_true", default=True)
     ap.add_argument("--no-session", action="store_false", dest="session")
     ap.add_argument("--open-hold", type=float, default=2.0, help=">0 same-candle open=high/low")
+    ap.add_argument("--lots", type=float, default=100.0)
+    ap.add_argument(
+        "--fees",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Angel fees + 30%% tax (default on; --no-fees for gross)",
+    )
+    ap.add_argument(
+        "--pnl",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="print close-fill PnL after the bar dump (default on)",
+    )
+    ap.add_argument(
+        "--print-bars",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    ap.add_argument(
+        "--print-trades",
+        action="store_true",
+        help="print every fill (default: only when trades ≤ 20)",
+    )
     ap.add_argument("--out-dir", type=Path, default=Path("data/backtests/s14_candles"))
     ap.add_argument("--token", default="")
     ap.add_argument("--symbol", default="")
     args = ap.parse_args()
-    if not args.from_ticks:
+    if args.from_csv and args.from_ticks:
+        raise SystemExit("use either --from-csv or --from-ticks, not both")
+    if not args.from_ticks and args.from_csv is None:
         reexec_with_bot_python()
 
     tfs = _parse_tfs(args.tf)
@@ -378,17 +580,32 @@ def main() -> None:
     else:
         end = datetime.now(IST)
     open_hold = float(args.open_hold) > 0
+    if args.from_csv:
+        source = f"csv {args.from_csv}"
+    elif args.from_ticks:
+        source = "ticks"
+    else:
+        source = "Angel MCX"
 
     print(FORMULA, flush=True)
     print(
+        "Fill at signal-bar close. Leftover flattened at last finished close. "
+        f"lots={args.lots:g}  fees={args.fees}",
+        flush=True,
+    )
+    print(
         f"range {start.strftime('%Y-%m-%d %H:%M')} → {end.strftime('%Y-%m-%d %H:%M')} IST  "
-        f"open_hold={open_hold}  source={'ticks' if args.from_ticks else 'Angel MCX'}",
+        f"open_hold={open_hold}  source={source}",
         flush=True,
     )
 
     contract: dict[str, Any] = {}
     api = None
-    if not args.from_ticks:
+    if args.from_csv is not None:
+        token = args.token or "csv"
+        symbol = args.symbol or "GOLDPETAL"
+        print(f"csv {args.from_csv}", flush=True)
+    elif not args.from_ticks:
         from auth import login
         from symbols import find_goldpetal_futures
 
@@ -406,8 +623,17 @@ def main() -> None:
         symbol = args.symbol or "GOLDPETAL_TICKS"
         print(f"ticks db={args.db}", flush=True)
 
+    results: list[TfResult] = []
+    now = datetime.now(IST)
     for tf in tfs:
-        if args.from_ticks:
+        if args.from_csv is not None:
+            path = find_tf_csv(args.from_csv, tf)
+            if path is None:
+                print(f"=== {tf}  missing CSV under {args.from_csv} ===", flush=True)
+                continue
+            raw = candles_from_walk_csv(path)
+            symbol = args.symbol or path.stem.replace(f"{tf}_", "", 1)
+        elif args.from_ticks:
             raw = candles_from_ticks(args.db, TF_MINUTES[tf])
         else:
             assert api is not None
@@ -427,7 +653,6 @@ def main() -> None:
             ]
         else:
             bars = raw
-        now = datetime.now(IST)
         bars = [b for b in bars if bar_is_finished(b["time"], tf, now)]
         rows = walk_candles(bars, open_hold=open_hold)
         n_enter = sum(1 for r in rows if r["action"] in {"enter", "FLIP"})
@@ -436,15 +661,36 @@ def main() -> None:
             f"=== {tf}  bars={len(rows)}  decisions={n_enter}  {symbol} ===",
             flush=True,
         )
-        print(
-            f"{'time':<22} O H L C   upper  lower   O=H O=L  rule → SIDE  action  pos",
-            flush=True,
-        )
-        for row in rows:
-            print(format_line(row), flush=True)
+        if args.print_bars:
+            print(
+                f"{'time':<22} O H L C   upper  lower   O=H O=L  rule → SIDE  action  pos",
+                flush=True,
+            )
+            for row in rows:
+                print(format_line(row), flush=True)
         out = args.out_dir / f"{tf}_{symbol}.csv"
         write_csv(out, rows)
         print(f"wrote {out}", flush=True)
+        if not args.pnl:
+            continue
+        settled = settle_s14_from_walk(
+            rows,
+            tf=f"{tf}:s14",
+            lots=args.lots,
+            fees=args.fees,
+        )
+        results.append(settled)
+        print_pnl_row(settled)
+        show_trades = args.print_trades or settled.n_trades <= 20
+        if show_trades and settled.trades:
+            print("  fills (signal close → next opposite close / last close):", flush=True)
+            for t in settled.trades:
+                print(format_trade_line(t), flush=True)
+
+    if results:
+        print(flush=True)
+        print_by_day(results)
+        write_outputs(results, args.out_dir)
 
 
 if __name__ == "__main__":
