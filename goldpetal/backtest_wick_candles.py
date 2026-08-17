@@ -3,7 +3,8 @@
 
   LONG  when lower wick > upper wick
   SHORT when upper wick > lower wick
-  Exit when the opposite wick wins; re-enter on that same candle if it qualifies.
+  HOLD: exit to flat on opposite signal; do not reverse on that same candle.
+  STRICT exit: only flatten on a decisive opposite (frac50 or pin2 or bald body).
 
 Fill at signal-bar close. Bald candles (no wick on either side) use the body:
 green → long, red → short. That rule is included in every wick preset.
@@ -16,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 from typing import Any
 from pathlib import Path
 
@@ -24,7 +26,6 @@ from backtest_hhhl_candles import (
     Candle,
     TfResult,
     Trade,
-    candles_from_rich,
     count_ticks,
     db_diagnostics,
     in_session,
@@ -33,16 +34,29 @@ from backtest_hhhl_candles import (
     write_outputs,
 )
 from charges import ChargeConfig, apply_charges_and_tax
-from mtf_bars import build_rich_bars, load_tick_rows, parse_ts
-from wick_candles import wick_side
+from mtf_bars import floor_bar, parse_ts
+from wick_candles import wick_exit_strict, wick_side
 
+HOLD_TIMEFRAMES: list[tuple[str, int]] = [
+    ("15m", 15),
+    ("30m", 30),
+    ("45m", 45),
+    ("1h", 60),
+    ("2h", 120),
+    ("3h", 180),
+    ("1d", 1440),
+]
+
+_HOLD = {"reenter": False, "nowick_body": True}
 PRESETS: list[tuple[str, dict[str, Any]]] = [
-    ("raw", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
-    ("diff5", {"min_diff": 5.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
-    ("diff10", {"min_diff": 10.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_body": True}),
-    ("frac50", {"min_diff": 0.0, "min_frac": 0.5, "min_body_ratio": 0.0, "nowick_body": True}),
-    ("pin2", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 2.0, "nowick_body": True}),
-    ("nowick", {"min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "nowick_only": True, "nowick_body": True}),
+    ("raw", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
+    ("diff5", {**_HOLD, "min_diff": 5.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
+    ("diff10", {**_HOLD, "min_diff": 10.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
+    ("frac50", {**_HOLD, "min_frac": 0.5, "min_diff": 0.0, "min_body_ratio": 0.0}),
+    ("pin2", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0}),
+    ("nowick", {**_HOLD, "nowick_only": True, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0}),
+    ("raw_strict", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "exit_strict": True}),
+    ("pin2_strict", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0, "exit_strict": True}),
 ]
 
 
@@ -63,6 +77,8 @@ def simulate_wick(
     nowick_eps: float = 1.0,
     nowick_body: bool = True,
     nowick_only: bool = False,
+    reenter: bool = False,
+    exit_strict: bool = False,
     market_open: str = "09:00",
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
@@ -126,6 +142,25 @@ def simulate_wick(
             return None
         return want
 
+    def exit_want(cur: Candle) -> str | None:
+        if exit_strict:
+            want = wick_exit_strict(
+                cur.open,
+                cur.high,
+                cur.low,
+                cur.close,
+                min_range=min_range,
+                nowick_eps=nowick_eps,
+                nowick_body=nowick_body,
+            )
+        else:
+            want = signal(cur)
+        if want == "long" and not allow_long:
+            return None
+        if want == "short" and not allow_short:
+            return None
+        return want
+
     def can_enter(cur: Candle) -> bool:
         if session_filter and not in_session(
             cur, open_hhmm=market_open, close_hhmm=market_close
@@ -142,21 +177,22 @@ def simulate_wick(
             continue
 
         want = signal(cur)
+        xwant = exit_want(cur)
         want_long = want == "long"
         want_short = want == "short"
 
         if side == "LONG":
-            if want_short:
+            if xwant == "short":
                 close_trade(cur)
-                if can_enter(cur) and want_short:
+                if reenter and can_enter(cur) and want_short:
                     side = "SHORT"
                     entry_px = cur.close
                     entry_time = cur.time
             continue
         if side == "SHORT":
-            if want_long:
+            if xwant == "long":
                 close_trade(cur)
-                if can_enter(cur) and want_long:
+                if reenter and can_enter(cur) and want_long:
                     side = "LONG"
                     entry_px = cur.close
                     entry_time = cur.time
@@ -219,16 +255,65 @@ def simulate_wick(
     )
 
 
+def load_ltp_rows(db: Path) -> list[tuple[str, float]]:
+    """OHLC-only tick load — skip raw_json parse (was the slow path)."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return [
+            (str(r[0]), float(r[1]))
+            for r in con.execute(
+                "SELECT received_at, ltp FROM ticks "
+                "WHERE ltp IS NOT NULL ORDER BY received_at ASC, id ASC"
+            )
+        ]
+    finally:
+        con.close()
+
+
+def build_ohlc_candles(rows: list[tuple[str, float]], minutes: int) -> list[Candle]:
+    candles: list[Candle] = []
+    cur_key = None
+    o = h = l = c = None
+
+    def flush(key) -> None:
+        nonlocal o, h, l, c
+        if o is None or h is None or l is None or c is None:
+            return
+        candles.append(
+            Candle(key.strftime("%Y-%m-%d %H:%M:%S"), float(o), float(h), float(l), float(c))
+        )
+        o = h = l = c = None
+
+    for received_at, ltp in rows:
+        ts = parse_ts(received_at)
+        key = floor_bar(ts, minutes)
+        px = float(ltp)
+        if cur_key is None:
+            cur_key = key
+        if key != cur_key:
+            flush(cur_key)
+            cur_key = key
+        if o is None:
+            o = h = l = c = px
+        else:
+            h = max(h, px)
+            l = min(l, px)
+            c = px
+    if cur_key is not None:
+        flush(cur_key)
+    return candles
+
+
 def print_wick_summary(results: list[TfResult]) -> None:
     print()
     print(
-        f"{'row':>14}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
+        f"{'row':>18}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
         f"{'win%':>6}  {'gross_pts':>10}  {'fees_₹':>10}  {'pnl_₹':>10}  {'maxDD_₹':>10}"
     )
     print("-" * 102)
     for r in results:
         print(
-            f"{r.tf:>14}  {r.n_bars:6d}  {r.n_trades:6d}  "
+            f"{r.tf:>18}  {r.n_bars:6d}  {r.n_trades:6d}  "
             f"{r.n_long:3d}/{r.n_short:<3d}  {100 * r.win_rate:5.1f}%  "
             f"{r.gross_pts:10.1f}  {r.fees_inr:10.1f}  "
             f"{r.after_tax_pnl_inr:10.1f}  {r.max_dd_inr:10.1f}"
@@ -252,34 +337,39 @@ def run_all(
     market_open: str = "09:00",
     market_close: str = "23:30",
 ) -> list[TfResult]:
-    rows = load_tick_rows(db)
+    rows = load_ltp_rows(db)
     if not rows:
         raise SystemExit(f"no ticks in {db}")
     cfg = make_charge_cfg(fees=fees, lots=lots)
     results: list[TfResult] = []
-    chosen_tfs = tfs or TIMEFRAMES
+    chosen_tfs = tfs or HOLD_TIMEFRAMES
     chosen_presets = presets or PRESETS
     for name, minutes in chosen_tfs:
-        bars = build_rich_bars(rows, name, minutes)
-        candles = candles_from_rich(bars)
+        candles = build_ohlc_candles(rows, minutes)
+        use_session = session_filter and name != "1d"
         for preset_name, filt in chosen_presets:
-            results.append(
-                simulate_wick(
-                    candles,
-                    tf=f"{name}:{preset_name}",
-                    lots=lots,
-                    allow_short=allow_short,
-                    allow_long=allow_long,
-                    fees=fees,
-                    session_filter=session_filter,
-                    min_range=min_range,
-                    no_flip=no_flip,
-                    nowick_eps=nowick_eps,
-                    market_open=market_open,
-                    market_close=market_close,
-                    charge_cfg=cfg,
-                    **filt,
-                )
+            r = simulate_wick(
+                candles,
+                tf=f"{name}:{preset_name}",
+                lots=lots,
+                allow_short=allow_short,
+                allow_long=allow_long,
+                fees=fees,
+                session_filter=use_session,
+                min_range=min_range,
+                no_flip=no_flip,
+                nowick_eps=nowick_eps,
+                market_open=market_open,
+                market_close=market_close,
+                charge_cfg=cfg,
+                **filt,
+            )
+            results.append(r)
+            print(
+                f"{r.tf:>16}  bars={r.n_bars:5d}  trades={r.n_trades:4d}  "
+                f"{r.n_long}/{r.n_short}  win={100 * r.win_rate:5.1f}%  "
+                f"pts={r.gross_pts:8.1f}  pnl={r.after_tax_pnl_inr:9.1f}",
+                flush=True,
             )
     return results
 
@@ -304,7 +394,7 @@ def main() -> None:
     ap.add_argument(
         "--presets",
         default="",
-        help="comma list: raw,diff5,diff10,frac50,pin2,nowick (default: all)",
+        help="comma list: raw,diff5,diff10,frac50,pin2,nowick,raw_strict,pin2_strict (default: all hold)",
     )
     ap.add_argument(
         "--out-dir",
@@ -325,12 +415,15 @@ def main() -> None:
             f"  {db_diagnostics(args.db)}\n"
         )
 
-    tfs = TIMEFRAMES
+    tfs = HOLD_TIMEFRAMES
     if args.tfs.strip():
-        want = {x.strip() for x in args.tfs.split(",") if x.strip()}
-        tfs = [(n_, m) for n_, m in TIMEFRAMES if n_ in want]
-        if not tfs:
-            raise SystemExit(f"no matching tfs in {want}")
+        if args.tfs.strip().lower() == "all":
+            tfs = TIMEFRAMES
+        else:
+            want = {x.strip() for x in args.tfs.split(",") if x.strip()}
+            tfs = [(n_, m) for n_, m in TIMEFRAMES if n_ in want]
+            if not tfs:
+                raise SystemExit(f"no matching tfs in {want}")
     presets = PRESETS
     if args.presets.strip():
         want_p = {x.strip() for x in args.presets.split(",") if x.strip()}
@@ -338,18 +431,19 @@ def main() -> None:
         if not presets:
             raise SystemExit(f"no matching presets in {want_p}")
 
-    rows = load_tick_rows(args.db)
-    t0 = parse_ts(rows[0]["received_at"])
-    t1 = parse_ts(rows[-1]["received_at"])
+    ltp_rows = load_ltp_rows(args.db)
+    t0 = parse_ts(ltp_rows[0][0])
+    t1 = parse_ts(ltp_rows[-1][0])
     print(
-        f"Wick-length backtest  db={args.db}  ticks={n}  "
+        f"Wick-length HOLD backtest  db={args.db}  ticks={n}  "
         f"range={t0.isoformat(timespec='seconds')} → {t1.isoformat(timespec='seconds')}  "
         f"lots={args.lots}"
     )
     print(
-        "Rules: LONG lower_wick>upper_wick | SHORT upper_wick>lower_wick | "
-        "no wick either side → body C>O long / C<O short | "
-        "exit on opposite signal; re-enter same candle"
+        "Rules: LONG lower>upper wick | SHORT upper>lower wick | "
+        "bald → body C>O long / C<O short | "
+        "HOLD: exit to flat, no reverse on that candle | "
+        "strict: exit only frac50/pin2/bald"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "

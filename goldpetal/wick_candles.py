@@ -15,8 +15,9 @@ This body rule is applied together with raw / diff5 / diff10 / frac50 / pin2.
 Equal *non-zero* wicks → no new signal (hold if already in a trade).
 One bald side is already covered: no upper wick + lower wick → LONG, and mirror.
 
-Exit is the opposite signal on a later candle. Same-candle re-entry
-is allowed when the exit bar itself prints the other side.
+Exit is the opposite signal on a **later** candle. Default is hold:
+flatten on that exit candle, do **not** reverse into the other side
+until a later bar prints a fresh signal.
 """
 
 from __future__ import annotations
@@ -109,3 +110,32 @@ def wick_side(
         if winner < float(min_body_ratio) * max(m.body, 1e-9):
             return None
     return m.dominant
+
+
+def wick_exit_strict(
+    open_: float,
+    high: float,
+    low: float,
+    close: float,
+    *,
+    min_range: float = 0.0,
+    nowick_eps: float = 1.0,
+    nowick_body: bool = True,
+) -> str | None:
+    """Opposite-side exit only when the reversal is decisive.
+
+    Bald body, or winning wick ≥ 50% of range, or winning wick ≥ 2× body.
+    """
+    m = wick_measure(open_, high, low, close)
+    if min_range > 0 and m.range_pts < min_range:
+        return None
+    if m.bald(nowick_eps):
+        return _body_side(open_, close) if nowick_body else None
+    if m.dominant is None:
+        return None
+    winner = m.lower if m.dominant == "long" else m.upper
+    frac_ok = m.range_pts > 0 and (winner / m.range_pts) >= 0.5
+    pin_ok = winner >= 2.0 * max(m.body, 1e-9)
+    if frac_ok or pin_ok:
+        return m.dominant
+    return None

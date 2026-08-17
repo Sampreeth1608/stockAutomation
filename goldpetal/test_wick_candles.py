@@ -43,19 +43,74 @@ def test_pin_requires_wick_vs_body() -> None:
     assert wick_side(100.0, 102.0, 90.0, 101.0, min_body_ratio=2.0) == "long"
 
 
-def test_simulate_long_then_flip_short() -> None:
+def test_simulate_long_exits_flat_no_reverse() -> None:
     candles = [
         Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # lower wick → long
         Candle("2026-08-17 10:30:00", 101.0, 103.0, 100.0, 102.0),  # tiny, hold
-        Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → short
+        Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # upper wick → EXIT flat
     ]
-    r = simulate_wick(candles, tf="30m:raw", min_range=5, no_flip=True)
-    assert r.n_trades == 2
+    r = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
+    assert r.n_trades == 1
     assert r.trades[0].side == "LONG"
     assert r.trades[0].entry_px == 101.0
     assert r.trades[0].exit_px == 103.0
+
+
+def test_later_bar_can_enter_after_flat() -> None:
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # long
+        Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # exit, no reverse
+        Candle("2026-08-17 12:00:00", 103.0, 121.0, 102.0, 104.0),  # still upper → short
+    ]
+    r = simulate_wick(candles, tf="30m:raw", min_range=5, reenter=False)
+    assert r.n_trades == 2
+    assert r.trades[0].side == "LONG"
     assert r.trades[1].side == "SHORT"
-    assert r.trades[1].entry_px == 103.0
+    assert r.trades[1].entry_px == 104.0
+
+
+def test_strict_exit_ignores_weak_opposite() -> None:
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # long (lower 10)
+        Candle("2026-08-17 11:00:00", 101.0, 106.0, 100.0, 104.0),  # upper 2, not strict
+        Candle("2026-08-17 12:00:00", 104.0, 130.0, 103.0, 105.0),  # upper 25, pin/frac → exit
+    ]
+    r = simulate_wick(
+        candles, tf="30m:raw_strict", min_range=5, reenter=False, exit_strict=True
+    )
+    assert r.n_trades == 1
+    assert r.trades[0].exit_px == 105.0
+
+
+def test_all_presets_run_on_toy_tape() -> None:
+    from backtest_wick_candles import PRESETS
+
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # hammer long
+        Candle("2026-08-17 10:30:00", 101.0, 120.0, 100.0, 102.0),  # star → exit
+        Candle("2026-08-17 11:00:00", 102.0, 115.0, 102.0, 115.0),  # green bald
+        Candle("2026-08-17 11:30:00", 115.0, 115.0, 100.0, 100.0),  # red bald
+    ]
+    names = [n for n, _ in PRESETS]
+    assert names == [
+        "raw",
+        "diff5",
+        "diff10",
+        "frac50",
+        "pin2",
+        "nowick",
+        "raw_strict",
+        "pin2_strict",
+    ]
+    for name, filt in PRESETS:
+        r = simulate_wick(candles, tf=f"toy:{name}", min_range=5, **filt)
+        assert r.n_bars == 4
+        if name == "nowick":
+            assert r.n_trades >= 1
+            assert r.trades[0].side == "LONG"
+            assert r.trades[0].entry_px == 115.0
+        else:
+            assert r.n_trades >= 1, name
 
 
 def test_equal_wick_holds() -> None:
@@ -90,26 +145,6 @@ def test_pin2_still_takes_bald_body() -> None:
     assert wick_side(100.0, 110.0, 100.0, 110.0, min_body_ratio=2.0) == "long"
 
 
-def test_all_presets_run_on_toy_tape() -> None:
-    from backtest_wick_candles import PRESETS
-
-    candles = [
-        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # hammer long
-        Candle("2026-08-17 10:30:00", 101.0, 120.0, 100.0, 102.0),  # star short
-        Candle("2026-08-17 11:00:00", 102.0, 115.0, 102.0, 115.0),  # green bald
-        Candle("2026-08-17 11:30:00", 115.0, 115.0, 100.0, 100.0),  # red bald
-    ]
-    names = [n for n, _ in PRESETS]
-    assert names == ["raw", "diff5", "diff10", "frac50", "pin2", "nowick"]
-    for name, filt in PRESETS:
-        r = simulate_wick(candles, tf=f"toy:{name}", min_range=5, **filt)
-        assert r.n_bars == 4
-        assert r.n_trades >= 1, name
-        if name == "nowick":
-            assert r.trades[0].side == "LONG"
-            assert r.trades[0].entry_px == 115.0
-
-
 if __name__ == "__main__":
     test_wick_measure_hammer()
     print("ok hammer")
@@ -121,8 +156,12 @@ if __name__ == "__main__":
     print("ok filters")
     test_pin_requires_wick_vs_body()
     print("ok pin")
-    test_simulate_long_then_flip_short()
-    print("ok flip")
+    test_simulate_long_exits_flat_no_reverse()
+    print("ok hold exit")
+    test_later_bar_can_enter_after_flat()
+    print("ok later entry")
+    test_strict_exit_ignores_weak_opposite()
+    print("ok strict")
     test_equal_wick_holds()
     print("ok hold")
     test_no_wick_either_side_uses_body()
