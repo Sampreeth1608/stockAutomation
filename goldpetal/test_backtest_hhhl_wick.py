@@ -65,9 +65,26 @@ def test_hhhl_only_would_buy_upper_wick_breakout() -> None:
     assert both.n_trades == 0
 
 
+def test_entry_after_skips_morning() -> None:
+    candles = [
+        _c("2026-08-17 10:00:00", 100.0, 105.0, 99.0, 104.0),
+        _c("2026-08-17 10:30:00", 104.0, 112.0, 90.0, 110.0),
+    ]
+    r = simulate_combo(
+        candles,
+        tf="30m:and",
+        join="and",
+        min_range=5,
+        fees=False,
+        entry_after="11:00",
+    )
+    assert r.n_trades == 0
+
+
 if __name__ == "__main__":
     test_and_skips_hh_green_with_upper_wick()
     test_and_takes_hh_green_hammer()
     test_and_hold_no_reverse()
     test_hhhl_only_would_buy_upper_wick_breakout()
+    test_entry_after_skips_morning()
     print("ALL test_backtest_hhhl_wick OK")

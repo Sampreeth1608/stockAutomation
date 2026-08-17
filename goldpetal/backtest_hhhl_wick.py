@@ -110,6 +110,8 @@ def simulate_combo(
     min_diff: float = 0.0,
     min_frac: float = 0.0,
     min_body_ratio: float = 0.0,
+    entry_after: str | None = None,
+    entry_before: str | None = None,
     market_open: str = "09:00",
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
@@ -235,6 +237,11 @@ def simulate_combo(
         if session_filter and not in_session(
             cur, open_hhmm=market_open, close_hhmm=market_close
         ):
+            return False
+        hhmm = cur.time[11:16] if len(cur.time) >= 16 else "00:00"
+        if entry_after and hhmm < entry_after:
+            return False
+        if entry_before and hhmm >= entry_before:
             return False
         return True
 
