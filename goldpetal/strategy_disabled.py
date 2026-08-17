@@ -27,6 +27,13 @@ class DisabledStrategy:
     def on_tick(self, *args: Any, **kwargs: Any) -> None:
         return None
 
+    def release_decision_lock(self) -> None:
+        return None
+
+    @property
+    def bar_debug(self) -> str:
+        return "disabled"
+
     def maybe_signal(self, *args: Any, **kwargs: Any) -> None:
         return None
 

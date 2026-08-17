@@ -4,7 +4,7 @@ Institutional minimum:
   - Restore RAM position from last DB signal after restart (so exits can fire)
   - Or auto-CLOSE orphans when restore is impossible / mode=close
   - Flatten intraday books in the last N minutes before MARKET_CLOSE
-    (S12/S13 skipped — they only exit on same-candle HH/LL confirm)
+    (S12/S13/S14/S15 skipped — last-minute confirm overlaps EOD flatten)
   - Write data/control/bot_health.json for the desk
 """
 
@@ -28,6 +28,8 @@ INTRADAY_RESTORE = (
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
     "S13_HHHL_DAY",
+    "S14_WICK30_STRICT",
+    "S15_WICK30_NOWICK",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -36,9 +38,11 @@ INTRADAY_RESTORE = (
     "S11_DISCOVERED",
 )
 
-# S12 must only flatten on same-candle last-minute HH/LL (confirm window
-# overlaps the last 5m before MARKET_CLOSE). S13 is a multi-day hold.
-EOD_FLATTEN_SKIP = frozenset({"S12_HHHL30", "S13_HHHL_DAY"})
+# S12/S14/S15 last-minute confirm overlaps the last 5m before MARKET_CLOSE.
+# S13 is a multi-day hold.
+EOD_FLATTEN_SKIP = frozenset(
+    {"S12_HHHL30", "S13_HHHL_DAY", "S14_WICK30_STRICT", "S15_WICK30_NOWICK"}
+)
 
 
 def _env_flag(name: str, default: bool) -> bool:

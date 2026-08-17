@@ -827,6 +827,8 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
         "S11_DISCOVERED",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     )
     scoreboard = [summarize_trades(all_trades, s) for s in strat_names]
     scoreboard.append(summarize_trades(all_trades, None))

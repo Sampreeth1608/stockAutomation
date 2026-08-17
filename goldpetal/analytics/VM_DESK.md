@@ -87,6 +87,30 @@ S12_MIN_RANGE=5
 S12_CONFIRM_MINUTES=1
 ```
 
+## S14 / S15 30m wick HOLD (paper)
+
+100-lot HOLD + fees tape (not 1-lot). **S14** is `30m:raw_strict` (43 trades,
++₹29,640) — the only real candidate. **S15** is `30m:nowick` only (other
+nowick TFs were luck). Do **not** paper `3h:frac50` (6 trades, DD > pnl).
+
+Same last-minute confirm as S12. HOLD: opposite → CLOSE, no reverse on that
+candle. S14 exits only on a decisive opposite (frac50 / pin2 / bald body).
+S15 ignores hammers; bald green/red only. Both skip EOD flatten (`:29`).
+Keep `DRY_RUN=true`.
+
+```bash
+ENABLE_S14=true
+S14_BAR_MINUTES=30
+S14_MIN_RANGE=5
+S14_CONFIRM_MINUTES=1
+ENABLE_S15=true
+S15_BAR_MINUTES=30
+S15_MIN_RANGE=5
+```
+
+Restart supervise after pull. Look for `S14_WICK30_STRICT` / `S15_WICK30_NOWICK`
+and heartbeat `s14=` / `s15=` in `data/strategy_run.log`.
+
 
 ## Day-by-day HH/LL on S4 horizon
 
@@ -122,6 +146,9 @@ ENABLE_S5=true
 ENABLE_S8=true
 ENABLE_S11=true
 ENABLE_S12=true
+ENABLE_S13=true
+ENABLE_S14=true
+ENABLE_S15=true
 ```
 
 4. Restart supervise. Trades tab may still show **old** S9 history — filter to slim strategies.

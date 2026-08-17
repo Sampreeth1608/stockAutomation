@@ -72,7 +72,7 @@ LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "ye
     DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
 )
 
-# Slim paper set (S4/S5/S8/S11/S12/S13)
+# Slim paper set (S4/S5/S8/S11/S12/S13/S14/S15)
 STRATEGIES = [
     "S4_OVERNIGHT",
     "S5_MINEDGE",
@@ -80,6 +80,8 @@ STRATEGIES = [
     "S11_DISCOVERED",
     "S12_HHHL30",
     "S13_HHHL_DAY",
+    "S14_WICK30_STRICT",
+    "S15_WICK30_NOWICK",
 ]
 
 

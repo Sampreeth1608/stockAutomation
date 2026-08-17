@@ -24,6 +24,8 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
@@ -35,6 +37,8 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S10_LEGACY30",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     },
     "QUIET": {
         "S1_NETDELTA",
@@ -48,6 +52,8 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -63,6 +69,8 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S12_HHHL30",
         "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
     },
 }
 
@@ -99,7 +107,7 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S4, S5, S8, S11, S12, S13 only (saves RAM).
+    Slim paper default: S4, S5, S8, S11, S12, S13, S14, S15 only (saves RAM).
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -129,6 +137,10 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S12_HHHL30")
     if on("ENABLE_S13", "true"):
         enabled.add("S13_HHHL_DAY")
+    if on("ENABLE_S14", "true"):
+        enabled.add("S14_WICK30_STRICT")
+    if on("ENABLE_S15", "true"):
+        enabled.add("S15_WICK30_NOWICK")
 
     if not enabled:
         enabled = {
@@ -138,6 +150,8 @@ def portfolio_from_env() -> PortfolioConfig:
             "S11_DISCOVERED",
             "S12_HHHL30",
             "S13_HHHL_DAY",
+            "S14_WICK30_STRICT",
+            "S15_WICK30_NOWICK",
         }
 
     flatten = on("FLATTEN_ON_BAD_REGIME", "true")
