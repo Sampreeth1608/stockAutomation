@@ -170,6 +170,11 @@ Streamlit tab **Live Deploy**:
 
 Keep `DRY_RUN=true` until you are ready for real orders.
 
+The **8787 control panel** now has a **Live money — readiness** block: gate checklist,
+RAM positions, paper lots vs live qty, and live-approved checkboxes. It never writes
+`DRY_RUN`. Paper 100 lots on S12/S14/S15 is not live size (`LIVE_MAX_LOTS` caps it).
+Restart `control_panel.py` after pull (do not kill supervise).
+
 ## One-time on VM
 
 ```bash
