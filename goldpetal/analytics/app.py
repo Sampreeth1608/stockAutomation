@@ -466,12 +466,8 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
 
 def tab_s14_chart(dd: Path) -> None:
     """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
-    from s14_exchange_sheet import (
-        PLOTLY_ZOOM_CONFIG,
-        labeled_candlestick_figure,
-        refresh_status,
-        start_angel_refresh,
-    )
+    from analytics.s14_chart import PLOTLY_ZOOM_CONFIG, labeled_candlestick_figure
+    from s14_exchange_sheet import refresh_status, start_angel_refresh
 
     sheet = dd / "s14_sheet"
     st.subheader("Gold Petal exchange candles")
@@ -482,6 +478,7 @@ def tab_s14_chart(dd: Path) -> None:
         "Open with `gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
         "http://127.0.0.1:8501/ → tab **S14 chart**."
     )
+    st.caption(f"Desk code: `{ROOT}`")
     st_status = refresh_status(sheet)
     if st_status.get("running"):
         st.warning("Angel pull running — wait ~30s and hit Rerun (top right).")

@@ -25,10 +25,12 @@ Do **not** use 8787 for the candle chart. Use the desk you already tunnel:
 
 On the **VM**:
 
+The desk that is actually open is the folder Streamlit prints as **Desk code** on the S14 chart tab (often `~/goldpetal-repo/goldpetal`, not `~/goldpetal`). Pull and restart **that** folder:
+
 ```bash
-cd ~/goldpetal
+cd ~/goldpetal-repo/goldpetal   # or ~/goldpetal — match the path on the S14 tab
 git pull origin cursor/s14-wick-length-a4b2
-./scripts/run_desk_vm.sh --detach
+./scripts/run_desk_vm.sh --restart
 ./daily_s14_sheet.sh
 ```
 
@@ -68,12 +70,11 @@ manually (browser autofill often does not update Streamlit). Confirm you are edi
 same path shown on screen (or set `GP_ENV_PATH=~/goldpetal/.env`). Instant unblock:
 `DESK_AUTH=false` then restart the desk.
 
-Restart desk after pulling:
+Restart desk after pulling (use the folder shown as **Desk code** on the S14 tab):
 ```bash
-cd ~/goldpetal
-git pull
-tmux kill-session -t gp-desk 2>/dev/null || true
-./scripts/run_desk_vm.sh
+cd ~/goldpetal-repo/goldpetal   # or ~/goldpetal
+git pull origin cursor/s14-wick-length-a4b2
+./scripts/run_desk_vm.sh --restart
 ```
 
 ## S13 daily HH/LL same-candle (paper)

@@ -106,10 +106,12 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "def tab_s14_chart" in desk
     assert "labeled_candlestick_figure" in desk
     assert "PLOTLY_ZOOM_CONFIG" in desk
-    sheet_py = Path(__file__).resolve().parent.joinpath("s14_exchange_sheet.py").read_text(
+    assert "analytics.s14_chart" in desk
+    assert "from s14_exchange_sheet import (\n        PLOTLY_ZOOM_CONFIG" not in desk
+    chart_py = Path(__file__).resolve().parent.joinpath("analytics/s14_chart.py").read_text(
         encoding="utf-8"
     )
-    assert "scrollZoom" in sheet_py
+    assert "scrollZoom" in chart_py
     assert "bindOhlcChart" in text
     assert "O/H/L/C is printed on each candle" in text
 
@@ -135,6 +137,7 @@ def test_labeled_figure_prints_and_zooms() -> None:
         import plotly.graph_objects as go  # noqa: F401
     except ImportError:
         return
+    from analytics.s14_chart import labeled_candlestick_figure as desk_fig
     from s14_exchange_sheet import labeled_candlestick_figure
 
     rows = [display_bar_row(r) for r in walk_candles(EXCHANGE_1D_AUG)]
@@ -148,6 +151,8 @@ def test_labeled_figure_prints_and_zooms() -> None:
     assert "C 14324" in joined
     assert fig.layout.dragmode == "pan"
     assert fig.layout.xaxis.rangeslider.visible is True
+    desk = desk_fig(rows, title="Gold Petal 1d")
+    assert "O 14379" in " ".join(str(x) for x in desk.data[1].text)
 
 
 if __name__ == "__main__":
