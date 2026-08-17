@@ -303,22 +303,16 @@ class WickCandleStrategy:
         return self._wick_closed(o, h, l, c)
 
     def _wick_closed(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
-        if self.cfg.open_hold_on_close:
-            hold = _open_hold_side(o, h, l)
-            if hold is not None:
-                result = self._flip_to(
-                    hold, o, h, l, c, why=_open_hold_reason(hold)
-                )
-                self._last_wick_seen = hold
-                if result is None:
-                    self.last_skip = "open_hold_same_side"
-                return result
-        want = wick_measure(o, h, l, c).dominant
+        want, why = s14_bar_decision(
+            o, h, l, c, open_hold=self.cfg.open_hold_on_close
+        )
         if want is None:
-            self.last_skip = "equal_wick"
+            self.last_skip = why
             return None
-        result = self._flip_to(want, o, h, l, c, why="wick (bar closed)")
+        result = self._flip_to(want, o, h, l, c, why=why)
         self._last_wick_seen = want
+        if result is None and why.startswith("open="):
+            self.last_skip = "open_hold_same_side"
         return result
 
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
@@ -535,7 +529,7 @@ class WickCandleStrategy:
 
 
 def _open_hold_side(open_: float, high: float, low: float) -> str | None:
-    """After 2 minutes: O=H → short, O=L → long. Both (flat) → skip."""
+    """Same closed candle: O=H → short, O=L → long. Both (flat) → skip."""
     at_high = float(high) == float(open_)
     at_low = float(low) == float(open_)
     if at_high and at_low:
@@ -545,6 +539,25 @@ def _open_hold_side(open_: float, high: float, low: float) -> str | None:
     if at_low:
         return "long"
     return None
+
+
+def s14_bar_decision(
+    o: float,
+    h: float,
+    l: float,
+    c: float,
+    *,
+    open_hold: bool = True,
+) -> tuple[str | None, str]:
+    """One finished candle → ('long'|'short'|None, why)."""
+    if open_hold:
+        hold = _open_hold_side(o, h, l)
+        if hold is not None:
+            return hold, _open_hold_reason(hold)
+    want = wick_measure(o, h, l, c).dominant
+    if want is None:
+        return None, "equal_wick"
+    return want, "wick (bar closed)"
 
 
 def _open_hold_reason(side: str) -> str:

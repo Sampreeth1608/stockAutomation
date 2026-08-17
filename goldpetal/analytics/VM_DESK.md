@@ -136,6 +136,17 @@ cd ~/goldpetal
 python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
 ```
 
+Exchange candles (Angel MCX chart, formula + decision on every bar):
+
+```bash
+cd ~/goldpetal
+python3 explain_s14_candles.py --tf 30m,1h,1d --from 2026-08-02
+```
+
+Prints O/H/L/C, upper, lower, O=H, O=L, rule, LONG/SHORT/skip. Writes CSV under
+`data/backtests/s14_candles/`. Angel has 1m 3m 5m 10m 15m 30m 1h 1d (not 45m/2h/3h).
+`--from-ticks` uses `ticks.db` instead of the exchange.
+
 Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
 Writes `data/backtests/s14_tick/`. `S14_OPEN_HOLD_MINUTES=0` turns off open=high/low (wick only).
 
