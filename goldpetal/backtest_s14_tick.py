@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Tick-replay backtest for live S14 (closed-bar wick FLIP + 2-minute open-hold).
+"""Tick-replay backtest for live S14 (same closed candle: open=high/low, else wick).
 
-Replays every LTP through WickCandleStrategy. The wick formula runs once
-the candle is finished (first tick of the next bar). The 2-minute
-open=high / open=low rule still fires intra-bar at +2m.
+Replays every LTP through WickCandleStrategy. Decisions run once the candle
+is finished (first tick of the next bar):
+
+  open = high → SHORT, open = low → LONG, both → skip this check
+  else wick: lower>upper LONG, upper>lower SHORT, equal skip
 
   python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
-
-S14 rule:
-  lower > upper → LONG, upper > lower → SHORT, equal → skip
-  finished candle opposite the open trade → close and open that side
-  next candle, 2 minutes from open:
-    open = high → SHORT, open = low → LONG, both → skip
 """
 
 from __future__ import annotations
@@ -53,6 +49,7 @@ _TF_BY_NAME = {n: m for n, m in TIMEFRAMES}
 
 
 def s14_cfg(*, open_hold_minutes: float = 2.0, bar_minutes: int = 30) -> WickConfig:
+    """``open_hold_minutes>0`` enables open=high/low on the closed candle (not a timer)."""
     return WickConfig(
         bar_minutes=bar_minutes,
         min_range=0.0,
@@ -64,7 +61,8 @@ def s14_cfg(*, open_hold_minutes: float = 2.0, bar_minutes: int = 30) -> WickCon
         reenter=True,
         wick_anytime=False,
         wick_on_close=True,
-        open_hold_minutes=float(open_hold_minutes),
+        open_hold_minutes=0.0,
+        open_hold_on_close=float(open_hold_minutes) > 0,
         allow_long=True,
         allow_short=True,
     )
@@ -242,7 +240,12 @@ def main() -> None:
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--fees", action="store_true")
     ap.add_argument("--session", action="store_true")
-    ap.add_argument("--open-hold", type=float, default=2.0)
+    ap.add_argument(
+        "--open-hold",
+        type=float,
+        default=2.0,
+        help=">0 apply open=high/low on the closed candle; 0 is wick-only",
+    )
     ap.add_argument(
         "--tfs",
         default=DEFAULT_TFS,
@@ -258,7 +261,7 @@ def main() -> None:
     ap.add_argument(
         "--compare",
         action="store_true",
-        help="also print wick-only (open-hold=0) for each TF",
+        help="also print wick-only (no open=high/low) for each TF",
     )
     args = ap.parse_args()
 
@@ -287,18 +290,17 @@ def main() -> None:
         f"lots={args.lots}"
     )
     print(
-        "Rules: lower>upper LONG | upper>lower SHORT | equal skip | "
-        "wick on finished candle only | "
-        f"open=high {args.open_hold:.0f}m SHORT | open=low {args.open_hold:.0f}m LONG | "
-        "open=high and open=low skip"
+        "Rules: on the same finished candle | "
+        "open=high SHORT | open=low LONG | open=high and open=low skip | "
+        "else lower>upper LONG | upper>lower SHORT | equal skip"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "
         f"({args.market_open}-{args.market_close})  tfs={','.join(n for n, _ in tfs)}"
     )
     print(
-        "Note: wick waits for the bar to close. 2-minute open-hold only fires "
-        "if the candle is still open at +2m (so 1m bars are closed-wick only).",
+        "Note: open=high / open=low and wick all wait for the bar to close "
+        "(no +2-minute look). --compare is wick-only (no open=high/low).",
         flush=True,
     )
 

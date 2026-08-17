@@ -120,12 +120,11 @@ upper > lower → SHORT
 upper = lower → skip
 ```
 
-Wait for the candle to **finish**, then:
-  lower > upper → LONG, upper > lower → SHORT (FLIP if already the other side).
-Next candle (in a trade or flat): wait 2 minutes from that open.
-  open = high (high never left open) → close long, open SHORT
-  open = low  (low never left open)  → close existing, open LONG
-  both (flat tape) → skip the 2-minute rule
+Wait for the candle to **finish**, then on that **same** candle:
+  open = high (high never left open) → SHORT
+  open = low  (low never left open)  → LONG
+  both (flat tape) → skip this check, use the wick
+  else wick: lower > upper LONG, upper > lower SHORT (FLIP if already the other side)
 
 No range skip, no bald body, no frac50/pin2. **S15** is still last-minute bald HOLD.
 Keep `DRY_RUN=true`. Restart supervise after pull.
@@ -138,7 +137,7 @@ python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
 ```
 
 Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
-1m candles end before +2m, so 1m is wick-FLIP only. Writes `data/backtests/s14_tick/`.
+Writes `data/backtests/s14_tick/`. `S14_OPEN_HOLD_MINUTES=0` turns off open=high/low (wick only).
 
 ```bash
 ENABLE_S14=true

@@ -8,15 +8,16 @@ S14 formula (nothing else):
   upper > lower → SHORT
   upper = lower → skip
 
-Wick formula runs once the candle is **finished** (first tick of the next bar),
-not on every LTP while the bar is still forming. If that closed candle's
-dominant side differs from the open trade, close and open that side (FLIP).
-Do not stay flat after an exit.
+Wait for the candle to **finish** (first tick of the next bar). On that
+**same** closed candle, in this order:
 
-Next candle (in a position or flat): wait 2 minutes from that candle's open.
-  open = high (high never left open) → close long, open SHORT
-  open = low  (low never left open)  → close existing, open LONG
-  open = high and open = low (flat)  → skip this 2-minute rule
+  open = high (high never left open) → SHORT
+  open = low  (low never left open)  → LONG
+  open = high and open = low (flat)  → skip this check, use the wick
+  otherwise → wick: lower>upper LONG, upper>lower SHORT, equal skip
+
+If that side differs from the open trade, close and open it (FLIP).
+Do not stay flat after an exit. No +2-minute look while the bar is forming.
 
 No range skip. No bald-body rule. No frac50 / pin2.
 
@@ -59,8 +60,10 @@ class WickConfig:
     wick_anytime: bool = False
     # S14: wick formula once, on the finished candle (bar roll).
     wick_on_close: bool = False
-    # S14: next-candle open=high / open=low confirm, minutes from bar open.
+    # Legacy intra-bar timer (off for S14). Kept so old configs still parse.
     open_hold_minutes: float = 0.0
+    # S14: open=high / open=low on the same finished candle as the wick.
+    open_hold_on_close: bool = False
 
 
 class WickCandleStrategy:
@@ -125,7 +128,8 @@ class WickCandleStrategy:
         c = self.cfg
         return (
             f"TF={c.bar_minutes}m {self.preset_label} "
-            f"confirm={c.confirm_minutes}m open_hold={c.open_hold_minutes:.0f}m "
+            f"confirm={c.confirm_minutes}m "
+            f"open_hold_on_close={c.open_hold_on_close} "
             f"wick_on_close={c.wick_on_close} wick_anytime={c.wick_anytime} "
             f"reenter={c.reenter} nowick_only={c.nowick_only} "
             f"{'FLIP on closed bar' if c.wick_on_close else ('FLIP same-candle reverse' if c.reenter else 'HOLD no-reverse')} "
@@ -299,6 +303,16 @@ class WickCandleStrategy:
         return self._wick_closed(o, h, l, c)
 
     def _wick_closed(self, o: float, h: float, l: float, c: float) -> SignalResult | None:
+        if self.cfg.open_hold_on_close:
+            hold = _open_hold_side(o, h, l)
+            if hold is not None:
+                result = self._flip_to(
+                    hold, o, h, l, c, why=_open_hold_reason(hold)
+                )
+                self._last_wick_seen = hold
+                if result is None:
+                    self.last_skip = "open_hold_same_side"
+                return result
         want = wick_measure(o, h, l, c).dominant
         if want is None:
             self.last_skip = "equal_wick"
@@ -308,7 +322,7 @@ class WickCandleStrategy:
         return result
 
     def on_bar_row(self, row: dict[str, Any]) -> SignalResult | None:
-        """Offline path from a completed OHLC row (wick only; no 2-minute rule)."""
+        """Offline path from a completed OHLC row (same-candle open=high/low + wick)."""
         o = float(row["open"])
         h = float(row["high"])
         l = float(row["low"])
@@ -535,8 +549,8 @@ def _open_hold_side(open_: float, high: float, low: float) -> str | None:
 
 def _open_hold_reason(side: str) -> str:
     if side == "short":
-        return "open=high 2m"
-    return "open=low 2m"
+        return "open=high (same candle)"
+    return "open=low (same candle)"
 
 
 def _parse_ts(raw: str) -> datetime | None:
@@ -574,8 +588,13 @@ def _load_dotenv() -> None:
 
 
 def wick_strict_from_env() -> WickCandleStrategy:
-    """S14 — wick FLIP on the finished candle + 2-minute open=high / open=low."""
+    """S14 — same closed candle: open=high/low first, else wick FLIP."""
     _load_dotenv()
+    hold_raw = os.getenv("S14_OPEN_HOLD_MINUTES", "2")
+    try:
+        hold_on = float(hold_raw) > 0
+    except ValueError:
+        hold_on = True
     cfg = WickConfig(
         bar_minutes=int(os.getenv("S14_BAR_MINUTES", "30")),
         min_range=0.0,
@@ -593,7 +612,8 @@ def wick_strict_from_env() -> WickCandleStrategy:
         reenter=True,
         wick_anytime=False,
         wick_on_close=True,
-        open_hold_minutes=float(os.getenv("S14_OPEN_HOLD_MINUTES", "2")),
+        open_hold_minutes=0.0,
+        open_hold_on_close=hold_on,
     )
     return WickCandleStrategy("S14_WICK30_STRICT", cfg)
 
@@ -625,5 +645,6 @@ def wick_nowick_from_env() -> WickCandleStrategy:
         wick_anytime=False,
         wick_on_close=False,
         open_hold_minutes=0.0,
+        open_hold_on_close=False,
     )
     return WickCandleStrategy("S15_WICK30_NOWICK", cfg)

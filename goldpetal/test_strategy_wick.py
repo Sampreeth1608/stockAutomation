@@ -1,4 +1,4 @@
-"""Tests for S14 closed-bar wick FLIP + 2m open-hold, and S15 nowick HOLD."""
+"""Tests for S14 same-candle open=high/low + wick on close, and S15 nowick HOLD."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from strategy_wick import WickCandleStrategy, WickConfig, _open_hold_side
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _s14(seed: bool = False, *, open_hold_minutes: float = 2) -> WickCandleStrategy:
+def _s14(seed: bool = False, *, open_hold_on_close: bool = True) -> WickCandleStrategy:
     return WickCandleStrategy(
         "S14_WICK30_STRICT",
         WickConfig(
@@ -23,7 +23,8 @@ def _s14(seed: bool = False, *, open_hold_minutes: float = 2) -> WickCandleStrat
             reenter=True,
             wick_anytime=False,
             wick_on_close=True,
-            open_hold_minutes=open_hold_minutes,
+            open_hold_minutes=0.0,
+            open_hold_on_close=open_hold_on_close,
         ),
         seed=seed,
     )
@@ -43,6 +44,7 @@ def _nowick(seed: bool = False) -> WickCandleStrategy:
             wick_anytime=False,
             wick_on_close=False,
             open_hold_minutes=0,
+            open_hold_on_close=False,
         ),
         seed=seed,
     )
@@ -52,41 +54,79 @@ def ts(hhmm: str) -> datetime:
     return datetime.fromisoformat(f"2026-08-17T{hhmm}:00+05:30").astimezone(IST)
 
 
-def test_lower_wick_waits_for_bar_close() -> None:
-    """lower > upper → LONG only after the 10:00 bar finishes at 10:30."""
-    s = _s14(open_hold_minutes=0)
+def test_open_high_on_same_closed_candle_shorts() -> None:
+    """Finished candle: high never left open → SHORT (not the lower-wick LONG)."""
+    s = _s14()
     assert s.on_tick(ts("10:00"), 100.0) is None
     assert s.on_tick(ts("10:10"), 90.0) is None
     assert s.on_tick(ts("10:11"), 95.0) is None
     assert s.position == "flat"
-    buy = s.on_tick(ts("10:30"), 96.0)
-    assert buy is not None and buy.action == "BUY"
+    sig = s.on_tick(ts("10:30"), 94.0)
+    assert sig is not None and sig.action == "SHORT"
+    assert s.position == "short"
+    assert "open=high" in (sig.reason or "")
+
+
+def test_open_low_on_same_closed_candle_longs() -> None:
+    """Finished candle: low never left open → LONG."""
+    s = _s14()
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:10"), 110.0)
+    s.on_tick(ts("10:29"), 105.0)
+    assert s.position == "flat"
+    sig = s.on_tick(ts("10:30"), 105.0)
+    assert sig is not None and sig.action == "BUY"
     assert s.position == "long"
+    assert "open=low" in (sig.reason or "")
+
+
+def test_open_high_and_low_flat_uses_wick() -> None:
+    """O=H=L: skip open=high/low, equal wick → stay flat."""
+    s = _s14()
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:10"), 100.0)
+    s.on_tick(ts("10:29"), 100.0)
+    none = s.on_tick(ts("10:30"), 100.0)
+    assert none is None
+    assert s.position == "flat"
+    assert s.last_skip == "equal_wick"
+
+
+def test_neither_open_high_nor_low_uses_wick() -> None:
+    """Price left open both ways: wick on the same closed candle."""
+    s = _s14()
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:05"), 90.0)
+    s.on_tick(ts("10:10"), 105.0)
+    s.on_tick(ts("10:29"), 102.0)
+    buy = s.on_tick(ts("10:30"), 102.0)
+    # O=100 H=105 L=90 C=102 → U=3 L=10 → LONG
+    assert buy is not None and buy.action == "BUY"
     assert "bar closed" in (buy.reason or "")
 
 
-def test_forming_bar_does_not_flip() -> None:
-    """Upper wick printing mid-bar must not trade; decision is the finished OHLC."""
-    s = _s14(open_hold_minutes=0)
+def test_forming_bar_does_not_trade() -> None:
+    s = _s14()
     s.on_tick(ts("10:00"), 100.0)
     s.on_tick(ts("10:10"), 90.0)
     s.on_tick(ts("10:11"), 95.0)
     assert s.on_tick(ts("10:20"), 120.0) is None
     assert s.on_tick(ts("10:21"), 100.0) is None
     assert s.position == "flat"
-    # Closed: O=100 H=120 L=90 C=100 → U=20 L=10 → SHORT
+    # Closed: O=100 H=120 L=90 C=100 → neither OH/OL, U=20 L=10 → SHORT
     rev = s.on_tick(ts("10:30"), 100.0)
     assert rev is not None and rev.action == "SHORT"
     assert s.position == "short"
 
 
 def test_next_closed_bar_flips() -> None:
-    """Finished bar opposite the open trade → close and open that side."""
-    s = _s14(open_hold_minutes=0)
+    s = _s14()
     s.on_tick(ts("10:00"), 100.0)
-    s.on_tick(ts("10:10"), 90.0)
-    s.on_tick(ts("10:29"), 95.0)
+    s.on_tick(ts("10:05"), 90.0)
+    s.on_tick(ts("10:10"), 105.0)
+    s.on_tick(ts("10:29"), 102.0)
     assert s.on_tick(ts("10:30"), 100.0).action == "BUY"
+    s.on_tick(ts("10:35"), 90.0)
     s.on_tick(ts("10:40"), 120.0)
     s.on_tick(ts("10:50"), 100.0)
     rev = s.on_tick(ts("11:00"), 100.0)
@@ -96,56 +136,19 @@ def test_next_closed_bar_flips() -> None:
 
 
 def test_equal_wick_skips() -> None:
-    s = _s14(open_hold_minutes=0)
+    s = _s14()
     s.on_tick(ts("10:00"), 100.0)
-    s.on_tick(ts("10:10"), 90.0)
-    s.on_tick(ts("10:29"), 95.0)
+    s.on_tick(ts("10:05"), 90.0)
+    s.on_tick(ts("10:10"), 105.0)
+    s.on_tick(ts("10:29"), 102.0)
     assert s.on_tick(ts("10:30"), 100.0).action == "BUY"
     s.on_tick(ts("10:40"), 110.0)
     s.on_tick(ts("10:45"), 90.0)
     s.on_tick(ts("10:50"), 100.0)
     none = s.on_tick(ts("11:00"), 100.0)
-    # O=100 H=110 L=90 C=100 → U=10 L=10
     assert none is None
     assert s.position == "long"
     assert s.last_skip == "equal_wick"
-
-
-def test_open_high_two_minutes_shorts() -> None:
-    """Next candle: open=high for 2 minutes → close long, open short."""
-    s = _s14()
-    s.on_tick(ts("10:00"), 100.0)
-    s.on_tick(ts("10:10"), 90.0)
-    s.on_tick(ts("10:11"), 95.0)
-    buy = s.on_tick(ts("10:30"), 100.0)
-    assert buy is not None and buy.action == "BUY"
-    assert s.position == "long"
-    assert s.on_tick(ts("10:31"), 99.0) is None
-    sig = s.on_tick(ts("10:32"), 98.0)
-    assert sig is not None and sig.action == "SHORT"
-    assert s.position == "short"
-    assert "open=high" in (sig.reason or "")
-
-
-def test_open_low_two_minutes_longs_from_flat() -> None:
-    """No position: open=low for 2 minutes → LONG."""
-    s = _s14()
-    assert s.on_tick(ts("10:30"), 100.0) is None
-    assert s.position == "flat"
-    s.on_tick(ts("10:31"), 101.0)
-    sig = s.on_tick(ts("10:32"), 102.0)
-    assert sig is not None and sig.action == "BUY"
-    assert s.position == "long"
-    assert "open=low" in (sig.reason or "")
-
-
-def test_open_high_and_low_flat_skips() -> None:
-    s = _s14()
-    assert s.on_tick(ts("10:30"), 100.0) is None
-    assert s.on_tick(ts("10:31"), 100.0) is None
-    none = s.on_tick(ts("10:32"), 100.0)
-    assert none is None
-    assert s.position == "flat"
 
 
 def test_open_hold_side_math() -> None:
@@ -155,16 +158,13 @@ def test_open_hold_side_math() -> None:
     assert _open_hold_side(100.0, 110.0, 90.0) is None
 
 
-def test_open_high_does_not_instantly_wick_flip_back() -> None:
-    """After O=H short, forming lower wick must not BUY before the bar closes."""
+def test_two_minutes_does_not_trade() -> None:
+    """open=high/low is the finished candle, not +2 minutes."""
     s = _s14()
     assert s.on_tick(ts("10:30"), 100.0) is None
     assert s.on_tick(ts("10:31"), 90.0) is None
-    sig = s.on_tick(ts("10:32"), 90.0)
-    assert sig is not None and sig.action == "SHORT"
-    assert s.position == "short"
-    assert s.on_tick(ts("10:33"), 90.0) is None
-    assert s.position == "short"
+    assert s.on_tick(ts("10:32"), 90.0) is None
+    assert s.position == "flat"
 
 
 def test_nowick_ignores_hammer() -> None:
@@ -228,15 +228,15 @@ def test_seed_current_bar_from_sql() -> None:
 
 
 if __name__ == "__main__":
-    test_lower_wick_waits_for_bar_close()
-    test_forming_bar_does_not_flip()
+    test_open_high_on_same_closed_candle_shorts()
+    test_open_low_on_same_closed_candle_longs()
+    test_open_high_and_low_flat_uses_wick()
+    test_neither_open_high_nor_low_uses_wick()
+    test_forming_bar_does_not_trade()
     test_next_closed_bar_flips()
     test_equal_wick_skips()
-    test_open_high_two_minutes_shorts()
-    test_open_low_two_minutes_longs_from_flat()
-    test_open_high_and_low_flat_skips()
     test_open_hold_side_math()
-    test_open_high_does_not_instantly_wick_flip_back()
+    test_two_minutes_does_not_trade()
     test_nowick_ignores_hammer()
     test_nowick_bald_green_buys()
     test_nowick_hammer_does_not_exit()
