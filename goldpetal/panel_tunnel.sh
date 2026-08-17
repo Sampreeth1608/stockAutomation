@@ -23,5 +23,5 @@ if [[ -z "$HOST" ]]; then
 fi
 
 echo "Tunneling Mac:8501 → ${HOST}:8501 (Ctrl+C to stop)"
-echo "Chrome: http://127.0.0.1:8501/  → tab Desk"
+echo "Chrome: http://127.0.0.1:8501/"
 exec ssh -N -L 8501:127.0.0.1:8501 "sampreeth1608@${HOST}"

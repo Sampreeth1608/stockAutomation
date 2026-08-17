@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Gold Petal operator desk (HTML on 8787).
+"""Gold Petal operator desk — lightweight HTML on 8501.
 
-Same writer as Streamlit 8501 tab Desk. Use 8501 if 8787 does not open.
-
-  ./scripts/run_control_panel.sh
-  python3 control_panel.py --host 0.0.0.0 --port 8787
+  ./scripts/run_desk_vm.sh --restart
+  python3 control_panel.py --host 127.0.0.1 --port 8501
+  then http://127.0.0.1:8501/
 """
 
 from __future__ import annotations
@@ -45,6 +44,7 @@ from live_readiness import (
     apply_desk_books,
     apply_panel_enables,
     apply_panel_live_env,
+    desk_snapshot,
     live_readiness,
     panel_restart_allowed,
     read_live_env,
@@ -87,9 +87,15 @@ S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 
 
 DESK_HTML_PATH = ROOT / "desk.html"
+LITE_HTML_PATH = ROOT / "lite.html"
 
 
 def load_desk_html() -> bytes:
+    path = LITE_HTML_PATH if LITE_HTML_PATH.is_file() else DESK_HTML_PATH
+    return path.read_bytes()
+
+
+def load_full_desk_html() -> bytes:
     return DESK_HTML_PATH.read_bytes()
 
 
@@ -166,27 +172,16 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
 
 
 def desk_payload() -> dict[str, Any]:
-    """Light snapshot for the operator desk (polls every few seconds)."""
-    from analytics.bot_ops import bot_status, feed_status
+    """Light snapshot for the HTML desk (no trade rebuild, no tick count)."""
+    from analytics.bot_ops import bot_status
 
     bot = dict(bot_status(lite=True))
     bot.pop("log_tail", None)
     return {
-        "writer": "8787",
-        "writer_url": "http://127.0.0.1:8787/",
-        "research": "http://127.0.0.1:8501/",
         "bot": bot,
-        "feed": feed_status(),
-        "live_desk": live_readiness(),
+        "live_desk": desk_snapshot(),
         "state": load_state().to_dict(),
-        "ltp": latest_ltp(),
-        "tick_count": count_ticks(),
-        "ticks": [_row_to_dict(r) for r in latest_ticks(limit=8)],
-        "trades": _recent_trades(8),
-        "live_orders": recent_orders(limit=8),
         "capital": capital_snapshot(),
-        "entries_blocked": list(entries_blocked()),
-        "live_allowed": list(is_live_mode_allowed()),
     }
 
 
@@ -223,10 +218,13 @@ class ControlHandler(BaseHTTPRequestHandler):
             path = parsed.path
             qs = parse_qs(parsed.query)
             if path in {"/", "/index.html"}:
-                if not DESK_HTML_PATH.is_file():
-                    self._send(500, b"desk.html missing", "text/plain; charset=utf-8")
+                if not LITE_HTML_PATH.is_file() and not DESK_HTML_PATH.is_file():
+                    self._send(500, b"lite.html missing", "text/plain; charset=utf-8")
                     return
                 self._send(200, load_desk_html(), "text/html; charset=utf-8")
+                return
+            if path in {"/full", "/full.html"}:
+                self._send(200, load_full_desk_html(), "text/html; charset=utf-8")
                 return
             if path in {"/s14-sheet", "/s14-sheet.html"}:
                 html_path = S14_SHEET_DIR / HTML_NAME
@@ -620,14 +618,12 @@ class ControlHandler(BaseHTTPRequestHandler):
 def main() -> None:
     ap = argparse.ArgumentParser(description="Gold Petal control panel")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
-    # Ensure default control files exist.
     load_state()
     load_capital()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
-    print(f"cwd {ROOT}  Gold Petal operator desk → http://{args.host}:{args.port}/", flush=True)
-    print("Same desk is on Streamlit 8501 tab Desk (use that if this URL does not open).", flush=True)
+    print(f"cwd {ROOT}  Gold Petal lite desk → http://{args.host}:{args.port}/", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

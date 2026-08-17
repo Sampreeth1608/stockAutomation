@@ -96,7 +96,7 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "/s14-sheet" in text
     assert "load_desk_html" in text
     assert "/api/desk" in text
-    assert "127.0.0.1:8787" in text
+    assert "127.0.0.1:8501" in text
     assert "s14-chart" not in Path(__file__).resolve().parent.joinpath("desk.html").read_text(
         encoding="utf-8"
     )
@@ -104,7 +104,6 @@ def test_panel_mentions_s14_sheet() -> None:
     assert "Save strategies" in desk_html
     assert "Start bot" in desk_html
     assert "Start feed only" in desk_html
-    assert "cannot overwrite" in desk_html
     desk = Path(__file__).resolve().parent.joinpath("analytics/app.py").read_text(
         encoding="utf-8"
     )

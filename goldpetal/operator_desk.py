@@ -1,17 +1,14 @@
-"""Operator writes: Streamlit Desk tab (8501). Other Streamlit tabs stay read-only.
-
-8787 is the same desk if that tunnel is up. 8501 is the URL that actually opens.
-"""
+"""Operator writes: lightweight HTML desk on 8501."""
 
 from __future__ import annotations
 
 from typing import Any
 
-OPERATOR_PANEL = "8501 Desk"
+OPERATOR_PANEL = "8501"
 OPERATOR_URL = "http://127.0.0.1:8501/"
 OPERATOR_WRITES = (
     "Emergency & trading, start/stop/feed, ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, "
-    "live_approved, Restart bot, Capital — Desk tab on 8501"
+    "live_approved, Restart bot, Capital — HTML desk on 8501"
 )
 
 
@@ -19,10 +16,10 @@ def streamlit_write_blocked(action: str) -> dict[str, Any]:
     return {
         "ok": False,
         "error": (
-            f"{action} is disabled on this Streamlit tab. "
-            "Use the Desk tab at http://127.0.0.1:8501/ "
+            f"{action} is disabled on Streamlit. "
+            "Use the lite desk at http://127.0.0.1:8501/ "
             "(8787 is the same desk if that tunnel is running). "
-            "Other Streamlit tabs stay read-only so they cannot overwrite Desk."
+            "Streamlit stays read-only so it cannot overwrite the HTML desk."
         ),
         "use": OPERATOR_URL,
     }
@@ -45,7 +42,6 @@ def streamlit_control_allowed(kwargs: dict[str, Any]) -> tuple[bool, str]:
 
 def operator_readonly_markdown() -> str:
     return (
-        f"**Writes live on the Desk tab** ({OPERATOR_URL} → **Desk**). "
-        "This tab is read-only. 8787 is the same desk if you have that tunnel. "
-        "Do not save the same switches here."
+        f"**Writes live on the lite desk** ({OPERATOR_URL}). "
+        "This Streamlit page is read-only."
     )

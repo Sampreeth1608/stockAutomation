@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Restart the 8787 HTML operator desk only (not supervise).
-# Same writes as Streamlit 8501 tab Desk. Use 8501 if 8787 does not open.
+# Same lite HTML desk as run_desk_vm.sh (port 8501).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
 # shellcheck source=print_open_on_mac.sh
 source "$SCRIPT_DIR/print_open_on_mac.sh"
 ROOT="$PWD"
-HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8787}"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8501}"
 LOG="data/control_panel.log"
 PY="./venv/bin/python"
 if [[ ! -x "$PY" ]]; then
@@ -20,7 +19,8 @@ fi
 mkdir -p data
 
 echo "desk folder: $ROOT"
-echo "stopping any old control_panel.py (including ~/goldpetal)…"
+echo "stopping Streamlit and old control_panel.py…"
+pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
 pkill -f '[p]ython.*control_panel.py' 2>/dev/null || pkill -f 'control_panel.py' || true
 sleep 1
 
@@ -43,12 +43,11 @@ fi
 code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 3 "http://127.0.0.1:${PORT}/" || true)"
 echo "local GET / → HTTP ${code:-down}"
 if [[ "${code:-}" != "200" ]] || ! grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
-  echo "FAILED — expected the new desk HTML (Start bot / Save strategies)."
+  echo "FAILED — expected the lite desk HTML (Start bot / Save strategies)."
   tail -n 20 "$LOG" || true
   exit 1
 fi
 
-echo "desk is UP from $ROOT  (pid $pid)"
+echo "lite desk is UP from $ROOT  (pid $pid)"
 echo "If this shell prints 'Terminated', that was the OLD panel. Ignore it."
-echo "Skip 8787. Open the desk on 8501:"
 print_open_on_mac

@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Run Streamlit desk ON the trading VM inside tmux (survives SSH disconnect).
+# Lightweight HTML operator desk on 8501 (not Streamlit).
 #
-#   ./scripts/run_desk_vm.sh --detach   # kill old 8501 and start in tmux
-#   ./scripts/run_desk_vm.sh --restart  # same as --detach
-#   ./scripts/run_desk_vm.sh --fg       # foreground (no tmux)
-#   tmux attach -t gp-desk             # reattach later
-#   tmux kill-session -t gp-desk       # stop desk
+#   ./scripts/run_desk_vm.sh --restart
+#   ./scripts/run_desk_vm.sh --fg
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
@@ -13,27 +10,44 @@ cd "$SCRIPT_DIR/.."
 source "$SCRIPT_DIR/print_open_on_mac.sh"
 export GP_DESK_LOCAL=1
 export GP_DATA_DIR="${GP_DATA_DIR:-$PWD/data}"
-
-if [[ -x ./venv/bin/streamlit ]]; then
-  ST=./venv/bin/streamlit
-elif command -v streamlit >/dev/null 2>&1; then
-  ST=streamlit
-else
-  echo "Install streamlit: pip install -r requirements-analytics.txt"
-  exit 1
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8501}"
+LOG="data/control_panel.log"
+PY="./venv/bin/python"
+if [[ ! -x "$PY" ]]; then
+  PY="./.venv/bin/python"
 fi
-
-CMD=(
-  "$ST" run analytics/app.py
-  --server.address 127.0.0.1
-  --server.port 8501
-  --server.headless true
-)
-
+if [[ ! -x "$PY" ]]; then
+  PY="python3"
+fi
 mkdir -p data/control
 
+CMD=("$PY" control_panel.py --host "$HOST" --port "$PORT")
+
+stop_old() {
+  pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
+  pkill -f '[p]ython.*control_panel.py' 2>/dev/null || pkill -f 'control_panel.py' || true
+  sleep 1
+}
+
+wait_up() {
+  local i code
+  for i in 1 2 3 4 5 6; do
+    code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" || true)"
+    if [[ "${code:-}" == "200" ]] && grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
+      echo "lite desk UP  pid=$(pgrep -f 'control_panel.py' | head -n1)  $PWD  http://127.0.0.1:${PORT}/"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "FAILED — expected lite HTML (Start bot / Save strategies). HTTP ${code:-down}"
+  tail -n 25 "$LOG" || true
+  return 1
+}
+
 if [[ "${1:-}" == "--fg" ]]; then
-  echo "→ desk foreground :8501  data=$GP_DATA_DIR"
+  stop_old
+  echo "→ lite desk foreground :${PORT}"
   print_open_on_mac
   exec "${CMD[@]}"
 fi
@@ -41,39 +55,28 @@ fi
 start_detached() {
   local session="${TMUX_DESK_SESSION:-gp-desk}"
   tmux kill-session -t "=$session" 2>/dev/null || true
-  pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
-  sleep 1
+  stop_old
+  {
+    echo
+    echo "===== START $(date '+%F %T')  cwd=$PWD  bind=${HOST}:${PORT} ====="
+  } >> "$LOG"
   tmux new-session -d -s "$session" -c "$PWD" \
-    "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
+    "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]} >> '$LOG' 2>&1; echo DESK_EXITED; sleep 5"
   echo "started tmux $session from $PWD"
+  wait_up
   print_open_on_mac
 }
 
-if [[ "${1:-}" == "--detach" || "${1:-}" == "--restart" ]]; then
+if [[ "${1:-}" == "--detach" || "${1:-}" == "--restart" || "${1:-}" == "" ]]; then
+  if [[ "${1:-}" == "" ]] && command -v tmux >/dev/null 2>&1; then
+    if tmux has-session -t "=${TMUX_DESK_SESSION:-gp-desk}" 2>/dev/null && [[ -t 0 ]]; then
+      echo "→ tmux session already running — attaching"
+      exec tmux attach -t "${TMUX_DESK_SESSION:-gp-desk}"
+    fi
+  fi
   start_detached
   exit 0
 fi
 
-SESSION="${TMUX_DESK_SESSION:-gp-desk}"
-if ! command -v tmux >/dev/null 2>&1; then
-  echo "tmux not found — install with: sudo apt-get install -y tmux"
-  echo "Or run: ./scripts/run_desk_vm.sh --fg"
-  exit 1
-fi
-
-# Stop any stray streamlit on 8501 outside this session
-pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
-sleep 1
-
-if tmux has-session -t "=$SESSION" 2>/dev/null; then
-  echo "→ tmux session '$SESSION' already running — attaching"
-  exec tmux attach -t "$SESSION"
-fi
-
-echo "→ starting desk in tmux session '$SESSION' on 127.0.0.1:8501 (localhost only)"
-echo "   detach: Ctrl+B then D    reattach: tmux attach -t $SESSION"
-print_open_on_mac
-tmux new-session -d -s "$SESSION" -c "$PWD" \
-  "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]}; echo DESK_EXITED; sleep 5"
-sleep 2
-tmux attach -t "$SESSION"
+echo "usage: $0 [--restart|--fg]"
+exit 1

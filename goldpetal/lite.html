@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gold Petal</title>
+<style>
+:root { --bg:#0e1412; --card:#17211c; --line:#2c3f34; --text:#e7eee8;
+  --muted:#8aa394; --ok:#3dba7a; --warn:#e0a045; --bad:#e05a4c; --gold:#d4a24c; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; }
+body { max-width: 720px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
+h1 { font-size: 1.2rem; margin: 0 0 .35rem; }
+.pills { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0 0 .9rem; }
+.pill { font: 12px/1 ui-monospace, monospace; padding: .25rem .45rem;
+  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); }
+.pill.ok { color: var(--ok); border-color: #2f6a4a; }
+.pill.bad { color: var(--bad); border-color: #6a2e28; }
+.pill.warn { color: var(--warn); border-color: #6a5220; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  padding: .85rem .95rem; margin: 0 0 .7rem; }
+h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--gold); margin: 0 0 .55rem; }
+.row { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+.btn { appearance: none; border: 1px solid var(--line); background: #1f2e26;
+  color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .5rem .75rem;
+  border-radius: 4px; cursor: pointer; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.ok { background: #143224; border-color: #2f6a4a; color: #a8efc6; }
+.btn.warn { background: #3a2a12; border-color: #6a5220; color: #f0d28a; }
+.btn.danger { background: #3a1814; border-color: #6a2e28; color: #ffb4ab; }
+input[type=number], input[type=text] {
+  background: #0c1410; color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: .35rem .45rem; font: 13px ui-monospace, monospace; width: 7rem; }
+table { width: 100%; border-collapse: collapse; font: 13px ui-monospace, monospace; }
+th, td { text-align: left; padding: .32rem .3rem; border-bottom: 1px solid #24352c; }
+th { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.flash { min-height: 1.1rem; color: var(--gold); font-size: .85rem; margin: .4rem 0 0; }
+.flash.bad { color: var(--bad); }
+.armed { color: var(--bad); font-weight: 700; font: 13px ui-monospace, monospace; }
+.hint { color: var(--muted); font-size: .8rem; margin: .4rem 0 0; }
+label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+  <h1>Gold Petal</h1>
+  <div class="pills" id="pills"></div>
+
+  <section class="card">
+    <h2>Stop / go</h2>
+    <div class="row">
+      <button class="btn danger" id="btn-kill" type="button">Emergency off</button>
+      <button class="btn" id="btn-clear" type="button">Clear emergency</button>
+      <button class="btn ok" id="btn-trade-on" type="button">Trading on</button>
+      <button class="btn" id="btn-trade-off" type="button">Trading off</button>
+    </div>
+    <p class="flash" id="flash-stop"></p>
+  </section>
+
+  <section class="card">
+    <h2>Engine</h2>
+    <div class="row">
+      <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
+      <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
+      <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
+    </div>
+    <div class="row" style="margin-top:.45rem">
+      <button class="btn" id="btn-feed-start" type="button">Start feed only</button>
+      <button class="btn" id="btn-feed-stop" type="button">Stop feed only</button>
+    </div>
+    <p class="flash" id="flash-engine"></p>
+  </section>
+
+  <section class="card">
+    <h2>Strategies</h2>
+    <table>
+      <thead><tr><th>Book</th><th>In bot</th><th>Live</th></tr></thead>
+      <tbody id="books"></tbody>
+    </table>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
+    </div>
+    <p class="hint">Live without In bot is ignored. Type RESTART after save to load RAM.</p>
+    <p class="flash" id="flash-books"></p>
+  </section>
+
+  <section class="card">
+    <h2>Live money</h2>
+    <p class="armed" id="money-line"></p>
+    <div class="row" style="margin-top:.5rem">
+      <label class="chk"><input type="checkbox" id="paper-only"/> Paper only</label>
+      <label class="chk">Lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
+      <input id="live-word" placeholder="LIVE" autocomplete="off"/>
+      <button class="btn" id="btn-save-money" type="button">Save money</button>
+    </div>
+    <div class="row" style="margin-top:.45rem">
+      <button class="btn warn" id="btn-unlock" type="button">Unlock live</button>
+      <button class="btn" id="btn-lock" type="button">Lock live</button>
+      <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
+      <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
+      <button class="btn" id="btn-save-cap" type="button">Save capital</button>
+    </div>
+    <p class="flash" id="flash-money"></p>
+  </section>
+<script>
+const $ = (id) => document.getElementById(id);
+const SHORT = {
+  S4_OVERNIGHT: "S4 overnight", S5_MINEDGE: "S5 minedge", S8_NET_ZIGZAG: "S8 zigzag",
+  S11_DISCOVERED: "S11 pack", S12_HHHL30: "S12 HHHL 30m", S13_HHHL_DAY: "S13 HHHL day",
+  S14_WICK30_STRICT: "S14 wick", S15_WICK30_NOWICK: "S15 no-wick",
+};
+function pill(text, kind) {
+  return `<span class="pill ${kind || ""}">${text}</span>`;
+}
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
+  if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  return data;
+}
+function flash(id, msg, bad) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "flash" + (bad ? " bad" : "");
+}
+function typing() {
+  const el = document.activeElement;
+  return el && el.matches && el.matches("input, textarea");
+}
+function render(d) {
+  const live = d.live_desk || {};
+  const bot = d.bot || {};
+  const st = d.state || {};
+  const feed = bot.feed_source || "off";
+  const mode = live.would_place_real_orders ? "ARMED" : (live.dry_run === false ? "LIVE env" : "PAPER");
+  $("pills").innerHTML = [
+    pill(mode, live.would_place_real_orders ? "bad" : "ok"),
+    pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
+    pill("feed " + feed, feed === "off" ? "warn" : "ok"),
+    pill(st.emergency_off ? "EMERGENCY" : "ok", st.emergency_off ? "bad" : "ok"),
+    pill(st.live_unlocked ? "unlocked" : "locked", st.live_unlocked ? "warn" : "ok"),
+  ].join("");
+  $("btn-feed-start").disabled = !!bot.running;
+  $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
+  if (!typing()) {
+    const enables = live.enables || {};
+    $("books").innerHTML = (live.books || []).map((b) => {
+      const name = b.strategy;
+      return `<tr>
+        <td>${SHORT[name] || name}</td>
+        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
+        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="3">no books</td></tr>`;
+    $("paper-only").checked = live.dry_run !== false;
+    $("live-max").value = live.live_max_lots || 1;
+    const cap = d.capital || {};
+    $("cap-total").value = cap.total_capital_inr || "";
+    $("cap-dd").value = cap.daily_loss_limit_inr || "";
+  }
+  $("money-line").textContent = live.would_place_real_orders
+    ? "ARMED — live-picked books send Angel orders."
+    : "Paper. Unlock + Live pick + type LIVE + Restart to arm.";
+}
+async function load() {
+  render(await api("/api/desk"));
+}
+async function act(id, path, body, okMsg) {
+  try {
+    const res = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
+    flash(id, okMsg || res.note || "ok");
+    await load();
+  } catch (e) { flash(id, String(e.message || e), true); }
+}
+$("btn-kill").onclick = () => act("flash-stop", "/api/emergency", { off: true }, "Emergency off");
+$("btn-clear").onclick = () => act("flash-stop", "/api/emergency", { off: false }, "Emergency cleared");
+$("btn-trade-on").onclick = () => act("flash-stop", "/api/trading", { enabled: true }, "Trading on");
+$("btn-trade-off").onclick = () => act("flash-stop", "/api/trading", { enabled: false }, "Trading off");
+$("btn-bot-start").onclick = () => act("flash-engine", "/api/bot/start", {}, "Bot started");
+$("btn-bot-stop").onclick = () => act("flash-engine", "/api/bot/stop", {}, "Bot stopped");
+$("btn-bot-restart").onclick = () => {
+  const word = $("restart-word").value.trim();
+  if (word !== "RESTART") { flash("flash-engine", "Type RESTART", true); return; }
+  $("restart-word").value = "";
+  act("flash-engine", "/api/bot/restart", { confirm: word }, "Bot restarted");
+};
+$("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
+$("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
+$("btn-save-books").onclick = () => {
+  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  act("flash-books", "/api/desk/books", { in_bot, live }, "Saved. Type RESTART to load RAM.");
+};
+$("btn-save-money").onclick = () => {
+  const paper = $("paper-only").checked;
+  act("flash-money", "/api/live/env", {
+    dry_run: paper,
+    live_max_lots: Number($("live-max").value || 1),
+    confirm: $("live-word").value.trim(),
+  }, "Money saved — Restart to load");
+  $("live-word").value = "";
+};
+$("btn-unlock").onclick = () => act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+$("btn-lock").onclick = () => act("flash-money", "/api/live", { unlocked: false }, "Live locked");
+$("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
+  total_capital_inr: Number($("cap-total").value || 0),
+  daily_loss_limit_inr: Number($("cap-dd").value || 0),
+}, "Capital saved");
+load().catch((e) => flash("flash-engine", String(e.message || e), true));
+setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
+</script>
+</body>
+</html>

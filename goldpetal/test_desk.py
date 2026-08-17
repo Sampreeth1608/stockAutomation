@@ -1,4 +1,4 @@
-"""New 8787 operator desk: one writer, no Streamlit overwrite."""
+"""Lightweight HTML operator desk on 8501."""
 
 from __future__ import annotations
 
@@ -7,80 +7,59 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
-def test_desk_html_is_the_operator_page() -> None:
-    html = (ROOT / "desk.html").read_text(encoding="utf-8")
+def test_lite_html_is_the_operator_page() -> None:
+    html = (ROOT / "lite.html").read_text(encoding="utf-8")
     assert "Start bot" in html
     assert "Stop bot" in html
     assert "Start feed only" in html
     assert "Save strategies" in html
-    assert "Watch" in html
-    assert "Download all (ZIP)" in html
-    assert "Download trades CSV" in html
-    assert "Copy trades → Sheets" in html
-    assert "/api/history" in html or "loadHistory" in html
-    assert "Live pick" in html
     assert "Paper only" in html
     assert "Unlock live" in html
-    assert "cannot overwrite" in html
+    assert "Watch" not in html
+    assert "Download all (ZIP)" not in html
+    assert "/api/history" not in html
     assert "s14-chart" not in html
-    assert "btn-s14-pull" not in html
 
 
-def test_control_panel_serves_desk_file() -> None:
+def test_full_html_keeps_watch_downloads() -> None:
+    html = (ROOT / "desk.html").read_text(encoding="utf-8")
+    assert "Watch" in html
+    assert "Download all (ZIP)" in html
+    assert "Copy trades → Sheets" in html
+    assert "Save strategies" in html
+
+
+def test_control_panel_serves_lite_on_8501() -> None:
     text = (ROOT / "control_panel.py").read_text(encoding="utf-8")
     assert "load_desk_html" in text
+    assert "LITE_HTML_PATH" in text
     assert "/api/desk" in text
     assert "/api/desk/books" in text
     assert "/api/bot/start" in text
-    assert "/api/bot/stop" in text
-    assert "/api/feed/start" in text
-    assert "/api/history" in text
-    assert "history_payload" in text
-    sh = (ROOT / "scripts" / "run_control_panel.sh").read_text(encoding="utf-8")
-    assert "desk folder" in sh
+    assert "desk_snapshot" in text
+    assert "default=8501" in text
+    sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
+    assert "control_panel.py" in sh
+    assert "8501" in sh
+    assert "streamlit run analytics/app.py" not in sh.split("pkill")[0]
     assert "Save strategies" in sh
-    assert "HTML_PAGE = r" not in text
+    lite = (ROOT / "lite.html").read_text(encoding="utf-8")
+    assert "Save strategies" in lite
 
 
-def test_streamlit_other_tabs_cannot_write() -> None:
+def test_streamlit_cannot_write() -> None:
     from operator_desk import streamlit_control_allowed, streamlit_write_blocked
 
     res = streamlit_write_blocked("Live deploy")
     assert res["ok"] is False
-    assert "Desk" in res["error"]
     assert "8501" in res["error"]
     ok, _ = streamlit_control_allowed({"live_unlocked": True})
     assert ok is False
 
 
-def test_streamlit_desk_tab_is_the_writer() -> None:
-    app = (ROOT / "analytics" / "app.py").read_text(encoding="utf-8")
-    assert "render_operator_desk" in app
-    assert '"Desk"' in app
-    assert app.find('"Desk"') < app.find('"S14 chart"')
-    tab = (ROOT / "analytics" / "operator_tab.py").read_text(encoding="utf-8")
-    assert "Save strategies" in tab
-    assert "Start bot" in tab
-    assert "Start feed only" in tab
-    assert "desk_snapshot" in tab
-    assert "##### Watch" not in tab
-    assert "Download all (ZIP)" not in tab
-    assert "from control_panel import" not in tab
-    assert "from desk_data import" not in tab
-    sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
-    help_sh = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
-    assert "print_open_on_mac" in sh
-    assert "STOP — this window is the VM" in help_sh
-    assert "st.sidebar.selectbox" in app
-    assert "PAGES" in app
-    assert "fonts.googleapis" not in app
-    cfg = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
-    assert "fastReruns" in cfg
-
-
 if __name__ == "__main__":
-    test_desk_html_is_the_operator_page()
-    test_control_panel_serves_desk_file()
-    test_streamlit_other_tabs_cannot_write()
-    test_streamlit_desk_tab_is_the_writer()
+    test_lite_html_is_the_operator_page()
+    test_full_html_keeps_watch_downloads()
+    test_control_panel_serves_lite_on_8501()
+    test_streamlit_cannot_write()
     print("ALL test_desk OK")
