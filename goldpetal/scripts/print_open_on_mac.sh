@@ -24,7 +24,8 @@ print_open_on_mac() {
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
   echo
   echo "  5. Open Chrome on the Mac (not this SSH tab):"
-  echo "     http://127.0.0.1:8501/"
+  echo "     http://127.0.0.1:8501/          lite controls"
+  echo "     http://127.0.0.1:8501/full     trade list + downloads"
   echo "     Hard-refresh: Cmd+Shift+R"
   echo "     This is a small HTML page (not Streamlit)."
   echo

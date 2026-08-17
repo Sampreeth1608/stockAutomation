@@ -15,6 +15,8 @@ def test_lite_html_is_the_operator_page() -> None:
     assert "Save strategies" in html
     assert "Paper only" in html
     assert "Unlock live" in html
+    assert 'href="/full"' in html
+    assert "Trade list" in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html
     assert "/api/history" not in html
