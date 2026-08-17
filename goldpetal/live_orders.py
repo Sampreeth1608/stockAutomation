@@ -4,7 +4,7 @@ Safety stack (all required unless noted):
   1. DRY_RUN=false
   2. control panel live_unlocked=true
   3. trading_enabled and not emergency_off
-  4. strategy listed in live_approved (desk Live Deploy / Approve → live)
+  4. strategy listed in live_approved (8787 Live money checkboxes)
   5. quantity = strategy capital.max_lots capped by LIVE_MAX_LOTS
 
 Paper remains the default. This module places MARKET DAY CARRYFORWARD

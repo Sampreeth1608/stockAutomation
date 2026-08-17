@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from live_readiness import (
+    apply_panel_enables,
     apply_panel_live_env,
     bot_age_seconds,
     live_readiness,
@@ -40,6 +41,8 @@ def test_readiness_paper_by_default() -> None:
     s14 = next(b for b in r["books"] if b["strategy"] == "S14_WICK30_STRICT")
     assert s14["live_approved"] is False
     assert s14["live_qty"] == 0
+    assert "enables" in r
+    assert "S14_WICK30_STRICT" in r["enables"]
 
 
 def test_apply_panel_live_env_paper_ok() -> None:
@@ -155,6 +158,24 @@ def test_panel_restart_requires_word() -> None:
     assert why3 == "ok"
 
 
+def test_apply_panel_enables_slim() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text("ENABLE_S4=true\nENABLE_S9=true\nSECRET=keep\n", encoding="utf-8")
+        res = apply_panel_enables(["S4_OVERNIGHT", "S14_WICK30_STRICT"], path=env)
+        assert res["ok"] is True
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_S4=true" in text
+        assert "ENABLE_S14=true" in text
+        assert "ENABLE_S9=false" in text
+        assert "ENABLE_S5=false" in text
+        assert "SECRET=keep" in text
+        assert "S14_WICK30_STRICT" in res["enabled"]
+    finally:
+        td.cleanup()
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -170,4 +191,6 @@ if __name__ == "__main__":
     print("ok LIVE word")
     test_panel_restart_requires_word()
     print("ok restart word")
+    test_apply_panel_enables_slim()
+    print("ok enables")
     print("ALL test_live_readiness OK")

@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import SLIM_PAPER_STRATEGIES, is_live_mode_allowed, load_state
+from operator_desk import OPERATOR_PANEL, OPERATOR_URL
 from live_orders import live_lots, live_lots_for
 from position_safety import read_bot_health
 
@@ -102,6 +103,26 @@ def panel_restart_allowed(confirm: str) -> tuple[bool, str]:
     if str(confirm).strip() != RESTART_CONFIRM_WORD:
         return False, "Type RESTART to restart supervise"
     return True, "ok"
+
+
+def apply_panel_enables(
+    enabled_names: list[str],
+    *,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Write ENABLE_* for known strategies. Unchecked known names become false."""
+    from analytics.env_bridge import STRATEGY_ENABLE, apply_strategy_enables
+
+    known = list(STRATEGY_ENABLE.keys())
+    want = [str(n).strip() for n in enabled_names if str(n).strip() in STRATEGY_ENABLE]
+    res = apply_strategy_enables(want, known=known, path=path)
+    res["enabled"] = want
+    res["restart_needed"] = True
+    res["note"] = (
+        "Saved ENABLE_*. Restart supervise to load into RAM. "
+        "This is not live-approved and does not set DRY_RUN."
+    )
+    return res
 
 
 def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> float | None:
@@ -209,7 +230,13 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         )
 
     n_ok = sum(1 for s in steps if s["ok"])
+    from analytics.env_bridge import strategy_enable_snapshot
+
+    enables_all = strategy_enable_snapshot()
+    enables = {name: bool(enables_all.get(name)) for name in SLIM_PAPER_STRATEGIES}
     return {
+        "operator_panel": OPERATOR_PANEL,
+        "operator_url": OPERATOR_URL,
         "dry_run": dry,
         "live_allowed": [live_ok, live_why],
         "live_max_lots": cap,
@@ -218,6 +245,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "steps_ok": n_ok,
         "steps_n": len(steps),
         "steps": steps,
+        "enables": enables,
         "books": books,
         "bot_health": {
             "event": health.get("event"),
@@ -229,6 +257,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "alive": bot_ok,
         },
         "note": (
+            f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
             "DRY_RUN=false, Restart supervise. Size is LIVE_MAX_LOTS (panel cap 10), not paper 100."
         ),

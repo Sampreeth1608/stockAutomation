@@ -39,7 +39,13 @@ from control_state import (
     set_trading_enabled,
 )
 from live_orders import live_lots, recent_orders
-from live_readiness import apply_panel_live_env, live_readiness, panel_restart_allowed, read_live_env
+from live_readiness import (
+    apply_panel_enables,
+    apply_panel_live_env,
+    live_readiness,
+    panel_restart_allowed,
+    read_live_env,
+)
 from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import decide_proposal, proposals_snapshot
@@ -235,7 +241,7 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <header class="brand">
     <h1>Gold Petal</h1>
-    <p class="tag">Control + reasoning cockpit on your trading VM. See ticks, 1m→day bars, entry/hold/exit plans, capital, and weekend approvals. Nothing goes live without you.</p>
+    <p class="tag">Operator desk on the trading VM. Streamlit (8501) is research-only and cannot overwrite these switches. Ticks, bars, capital, live gates, weekend approvals. Nothing goes live without you.</p>
     <div class="where">Runs on VM · :8787</div>
   </header>
 
@@ -255,8 +261,8 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
     </section>
 
     <section class="panel">
-      <h2>Live money — readiness (does not arm itself)</h2>
-      <p class="muted">Real orders need <strong>every</strong> gate below. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). <strong>Save .env</strong> writes the file only. <strong>Restart supervise</strong> loads it into the bot. Type <span class="mono">LIVE</span> to set <span class="mono">DRY_RUN=false</span>. Panel cap is 10 lots.</p>
+      <h2>Live money — operator desk (only writer)</h2>
+      <p class="muted">This panel is the <strong>only</strong> place that writes DRY_RUN, LIVE_MAX_LOTS, ENABLE_*, live_approved, and Restart. Streamlit Deploy/Ops, Live Deploy, and Capital are read-only. Paper 100 lots on S12/S14/S15 is <strong>not</strong> live size. Live qty = min(strategy max lots, <span class="mono">LIVE_MAX_LOTS</span>). <strong>Save .env</strong> writes the file only. <strong>Restart supervise</strong> loads it into the bot. Type <span class="mono">LIVE</span> to set <span class="mono">DRY_RUN=false</span>. Panel cap is 10 lots.</p>
       <p class="mono" id="live-desk-banner">Loading…</p>
       <div class="row" id="live-desk-steps" style="margin:.6rem 0"></div>
       <p class="muted" id="live-desk-bot"></p>
@@ -265,6 +271,11 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
           <thead><tr><th>Strategy</th><th>RAM</th><th>Paper lots</th><th>Live?</th><th>Live qty</th></tr></thead>
           <tbody id="live-desk-books"></tbody>
         </table>
+      </div>
+      <p class="muted" style="margin-top:.7rem">Loaded after Restart (<span class="mono">ENABLE_*</span>) — this is not live-approved. Unchecked books are not in RAM.</p>
+      <div class="row" id="live-desk-enables" style="margin:.35rem 0 .5rem"></div>
+      <div class="row">
+        <button class="btn" type="button" id="btn-save-enables">Save ENABLE_*</button>
       </div>
       <div class="row" style="gap:.8rem;align-items:flex-end;margin-top:.75rem">
         <label class="muted" style="display:flex;align-items:center;gap:.4rem"><input type="checkbox" id="live-dry-run" checked/> Paper only (<span class="mono">DRY_RUN</span>)</label>
@@ -284,6 +295,7 @@ input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--gold); }
 
     <section class="panel span-7">
       <h2>Capital management</h2>
+      <p class="muted">Book ₹, day-loss, and per-strategy lots. Same <span class="mono">capital.json</span> the bot uses. Do not also Push capital from Streamlit.</p>
       <div class="row" id="capital-stats"></div>
       <div class="row" style="gap:.8rem;align-items:flex-end;margin:.75rem 0">
         <label class="muted">Total capital ₹<br/><input type="number" id="cap-total" step="1000" style="margin-top:.25rem;width:9rem"/></label>
@@ -614,6 +626,15 @@ function renderLiveDesk(data) {
       ? "Paper. Save writes .env; Restart supervise loads it into the bot."
       : "DRY_RUN is false in .env. Restart supervise if you just changed it. Lock live or check Paper only if that is wrong.";
   }
+  const enBox = $("live-desk-enables");
+  if (enBox) {
+    const enables = d.enables || {};
+    enBox.innerHTML = Object.keys(enables).map(name => {
+      const on = enables[name];
+      const short = name.split("_")[0];
+      return `<label class="muted" style="display:flex;align-items:center;gap:.35rem"><input type="checkbox" data-enable-strat="${name}" ${on ? "checked" : ""}/> ${short}</label>`;
+    }).join("");
+  }
 }
 
 function selectedLiveApproved() {
@@ -812,6 +833,19 @@ $("btn-clear-live-approved").onclick = async () => {
     if (!ok) return;
     await api("/api/live/approved", { method: "POST", body: JSON.stringify({ strategies: [] }) });
     liveDeskFlash("Cleared live_approved");
+    await refresh();
+  } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
+};
+$("btn-save-enables").onclick = async () => {
+  try {
+    const names = [...document.querySelectorAll("input[data-enable-strat]:checked")].map(el => el.dataset.enableStrat);
+    const ok = confirm("Write ENABLE_* to .env? Unchecked slim books (and S1/S2/S3/S6/S9/S10) become false. Restart supervise after this. This does not approve live.");
+    if (!ok) { liveDeskFlash("cancelled"); return; }
+    const res = await api("/api/live/enables", {
+      method: "POST",
+      body: JSON.stringify({ strategies: names })
+    });
+    liveDeskFlash("Saved ENABLE_*: " + ((res.enabled || []).join(", ") || "(none)") + " — Restart supervise to load into RAM.");
     await refresh();
   } catch (e) { liveDeskFlash("Failed: " + (e.message || e)); }
 };
@@ -1258,6 +1292,17 @@ class ControlHandler(BaseHTTPRequestHandler):
                     )
                 )
                 return
+            if path == "/api/live/enables":
+                names = [
+                    str(s).strip()
+                    for s in (data.get("strategies") or [])
+                    if str(s).strip()
+                ]
+                res = apply_panel_enables(names)
+                status = 200 if res.get("ok") else 400
+                res = {**res, "live_desk": live_readiness()}
+                self._send(*_json_bytes(res, status))
+                return
             if path == "/api/live/env":
                 dry_raw = data.get("dry_run")
                 dry_run = True if dry_raw is None else bool(dry_raw)
@@ -1351,7 +1396,7 @@ def main() -> None:
     print(f"Gold Petal control panel → http://{args.host}:{args.port}/", flush=True)
     print(
         "Endpoints: /api/dashboard /api/ticks /api/bars /api/reasoning "
-        "/api/trades /api/proposals /api/capital /api/live/env /api/bot/restart",
+        "/api/trades /api/proposals /api/capital /api/live/env /api/live/enables /api/bot/restart",
         flush=True,
     )
     try:
