@@ -1,4 +1,4 @@
-"""Tests for S14 raw wick FLIP + 2m open-hold, and S15 nowick HOLD."""
+"""Tests for S14 closed-bar wick FLIP + 2m open-hold, and S15 nowick HOLD."""
 
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ def _s14(seed: bool = False, *, open_hold_minutes: float = 2) -> WickCandleStrat
             entry_strict=False,
             exit_strict=False,
             reenter=True,
-            wick_anytime=True,
+            wick_anytime=False,
+            wick_on_close=True,
             open_hold_minutes=open_hold_minutes,
         ),
         seed=seed,
@@ -40,6 +41,7 @@ def _nowick(seed: bool = False) -> WickCandleStrategy:
             exit_strict=False,
             reenter=False,
             wick_anytime=False,
+            wick_on_close=False,
             open_hold_minutes=0,
         ),
         seed=seed,
@@ -50,43 +52,59 @@ def ts(hhmm: str) -> datetime:
     return datetime.fromisoformat(f"2026-08-17T{hhmm}:00+05:30").astimezone(IST)
 
 
-def test_lower_wick_long_mid_bar() -> None:
-    """lower > upper → LONG as soon as the wick prints (not last minute)."""
+def test_lower_wick_waits_for_bar_close() -> None:
+    """lower > upper → LONG only after the 10:00 bar finishes at 10:30."""
     s = _s14(open_hold_minutes=0)
     assert s.on_tick(ts("10:00"), 100.0) is None
-    assert s.on_tick(ts("10:10"), 90.0) is None  # print the low (no wick yet)
-    buy = s.on_tick(ts("10:11"), 95.0)
+    assert s.on_tick(ts("10:10"), 90.0) is None
+    assert s.on_tick(ts("10:11"), 95.0) is None
+    assert s.position == "flat"
+    buy = s.on_tick(ts("10:30"), 96.0)
     assert buy is not None and buy.action == "BUY"
     assert s.position == "long"
+    assert "bar closed" in (buy.reason or "")
 
 
-def test_same_candle_wick_flip_closes_and_opens() -> None:
-    """Wick changes on the same candle → close long and open short."""
+def test_forming_bar_does_not_flip() -> None:
+    """Upper wick printing mid-bar must not trade; decision is the finished OHLC."""
     s = _s14(open_hold_minutes=0)
     s.on_tick(ts("10:00"), 100.0)
     s.on_tick(ts("10:10"), 90.0)
-    assert s.on_tick(ts("10:11"), 95.0).action == "BUY"
-    # Print the high; close still at low → still lower wick
+    s.on_tick(ts("10:11"), 95.0)
     assert s.on_tick(ts("10:20"), 120.0) is None
-    assert s.position == "long"
-    # Close back: upper 20 > lower 10 → SHORT (close long and open short)
-    rev = s.on_tick(ts("10:21"), 100.0)
+    assert s.on_tick(ts("10:21"), 100.0) is None
+    assert s.position == "flat"
+    # Closed: O=100 H=120 L=90 C=100 → U=20 L=10 → SHORT
+    rev = s.on_tick(ts("10:30"), 100.0)
+    assert rev is not None and rev.action == "SHORT"
+    assert s.position == "short"
+
+
+def test_next_closed_bar_flips() -> None:
+    """Finished bar opposite the open trade → close and open that side."""
+    s = _s14(open_hold_minutes=0)
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:10"), 90.0)
+    s.on_tick(ts("10:29"), 95.0)
+    assert s.on_tick(ts("10:30"), 100.0).action == "BUY"
+    s.on_tick(ts("10:40"), 120.0)
+    s.on_tick(ts("10:50"), 100.0)
+    rev = s.on_tick(ts("11:00"), 100.0)
     assert rev is not None and rev.action == "SHORT"
     assert s.position == "short"
     assert "FLIP" in (rev.reason or "")
-    later = s.on_tick(ts("10:22"), 100.0)
-    assert later is None
-    assert s.position == "short"
 
 
 def test_equal_wick_skips() -> None:
     s = _s14(open_hold_minutes=0)
     s.on_tick(ts("10:00"), 100.0)
     s.on_tick(ts("10:10"), 90.0)
-    s.on_tick(ts("10:11"), 95.0)
-    assert s.position == "long"
-    s.on_tick(ts("10:15"), 110.0)
-    none = s.on_tick(ts("10:16"), 100.0)
+    s.on_tick(ts("10:29"), 95.0)
+    assert s.on_tick(ts("10:30"), 100.0).action == "BUY"
+    s.on_tick(ts("10:40"), 110.0)
+    s.on_tick(ts("10:45"), 90.0)
+    s.on_tick(ts("10:50"), 100.0)
+    none = s.on_tick(ts("11:00"), 100.0)
     # O=100 H=110 L=90 C=100 → U=10 L=10
     assert none is None
     assert s.position == "long"
@@ -99,11 +117,10 @@ def test_open_high_two_minutes_shorts() -> None:
     s.on_tick(ts("10:00"), 100.0)
     s.on_tick(ts("10:10"), 90.0)
     s.on_tick(ts("10:11"), 95.0)
+    buy = s.on_tick(ts("10:30"), 100.0)
+    assert buy is not None and buy.action == "BUY"
     assert s.position == "long"
-    # New 10:30 bar, only sells — high stays at open
-    assert s.on_tick(ts("10:30"), 100.0) is None
-    mid = s.on_tick(ts("10:31"), 99.0)
-    assert mid is None or mid.action in {"BUY", "SHORT"}
+    assert s.on_tick(ts("10:31"), 99.0) is None
     sig = s.on_tick(ts("10:32"), 98.0)
     assert sig is not None and sig.action == "SHORT"
     assert s.position == "short"
@@ -139,14 +156,13 @@ def test_open_hold_side_math() -> None:
 
 
 def test_open_high_does_not_instantly_wick_flip_back() -> None:
-    """After O=H short, a still-long wick must not immediately BUY back."""
+    """After O=H short, forming lower wick must not BUY before the bar closes."""
     s = _s14()
     assert s.on_tick(ts("10:30"), 100.0) is None
-    s.on_tick(ts("10:31"), 90.0)  # lower wick — may BUY before 2m
+    assert s.on_tick(ts("10:31"), 90.0) is None
     sig = s.on_tick(ts("10:32"), 90.0)
     assert sig is not None and sig.action == "SHORT"
     assert s.position == "short"
-    # Same wick (lower still longer) stays short
     assert s.on_tick(ts("10:33"), 90.0) is None
     assert s.position == "short"
 
@@ -212,8 +228,9 @@ def test_seed_current_bar_from_sql() -> None:
 
 
 if __name__ == "__main__":
-    test_lower_wick_long_mid_bar()
-    test_same_candle_wick_flip_closes_and_opens()
+    test_lower_wick_waits_for_bar_close()
+    test_forming_bar_does_not_flip()
+    test_next_closed_bar_flips()
     test_equal_wick_skips()
     test_open_high_two_minutes_shorts()
     test_open_low_two_minutes_longs_from_flat()

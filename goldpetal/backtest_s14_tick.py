@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Tick-replay backtest for live S14 (wick FLIP + 2-minute open=high/open=low).
+"""Tick-replay backtest for live S14 (closed-bar wick FLIP + 2-minute open-hold).
 
-Bar-close wick backtests cannot see intra-bar wick changes or the first
-two minutes of a candle. This replays every LTP through WickCandleStrategy.
+Replays every LTP through WickCandleStrategy. The wick formula runs once
+the candle is finished (first tick of the next bar). The 2-minute
+open=high / open=low rule still fires intra-bar at +2m.
 
   python3 backtest_s14_tick.py --db data/ticks.db --lots 100 --session --fees
 
 S14 rule:
   lower > upper → LONG, upper > lower → SHORT, equal → skip
-  same candle: wick side change → close and open the new side
+  finished candle opposite the open trade → close and open that side
   next candle, 2 minutes from open:
     open = high → SHORT, open = low → LONG, both → skip
 """
@@ -61,7 +62,8 @@ def s14_cfg(*, open_hold_minutes: float = 2.0, bar_minutes: int = 30) -> WickCon
         entry_strict=False,
         exit_strict=False,
         reenter=True,
-        wick_anytime=True,
+        wick_anytime=False,
+        wick_on_close=True,
         open_hold_minutes=float(open_hold_minutes),
         allow_long=True,
         allow_short=True,
@@ -286,7 +288,7 @@ def main() -> None:
     )
     print(
         "Rules: lower>upper LONG | upper>lower SHORT | equal skip | "
-        "same-candle FLIP | "
+        "wick on finished candle only | "
         f"open=high {args.open_hold:.0f}m SHORT | open=low {args.open_hold:.0f}m LONG | "
         "open=high and open=low skip"
     )
@@ -295,8 +297,8 @@ def main() -> None:
         f"({args.market_open}-{args.market_close})  tfs={','.join(n for n, _ in tfs)}"
     )
     print(
-        "Note: 2-minute open-hold only fires if the candle is still open at +2m "
-        "(so 1m bars are wick-FLIP only).",
+        "Note: wick waits for the bar to close. 2-minute open-hold only fires "
+        "if the candle is still open at +2m (so 1m bars are closed-wick only).",
         flush=True,
     )
 

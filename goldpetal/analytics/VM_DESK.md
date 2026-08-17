@@ -120,7 +120,8 @@ upper > lower → SHORT
 upper = lower → skip
 ```
 
-Same candle: if the wick side changes, close and open that side (FLIP).
+Wait for the candle to **finish**, then:
+  lower > upper → LONG, upper > lower → SHORT (FLIP if already the other side).
 Next candle (in a trade or flat): wait 2 minutes from that open.
   open = high (high never left open) → close long, open SHORT
   open = low  (low never left open)  → close existing, open LONG
