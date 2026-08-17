@@ -42,6 +42,23 @@ def _nowick(seed: bool = False) -> WickCandleStrategy:
     )
 
 
+def _flip() -> WickCandleStrategy:
+    return WickCandleStrategy(
+        "S16_WICK30_STRICT_FLIP",
+        WickConfig(
+            bar_minutes=30,
+            min_range=5,
+            confirm_minutes=1,
+            nowick_eps=1.0,
+            nowick_body=True,
+            nowick_only=False,
+            exit_strict=True,
+            reenter=True,
+        ),
+        seed=False,
+    )
+
+
 def ts(hhmm: str) -> datetime:
     return datetime.fromisoformat(f"2026-08-17T{hhmm}:00+05:30").astimezone(IST)
 
@@ -95,6 +112,24 @@ def test_hold_exit_no_reverse_same_bar() -> None:
     later = s.on_tick(ts_ss("10:59:20"), 102.0)
     assert later is None
     assert s.position == "flat"
+
+
+def test_flip_reverses_same_last_minute() -> None:
+    """S16: decisive opposite in last minute → SHORT, not CLOSE-to-flat."""
+    s = _flip()
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:10"), 90.0)
+    buy = s.on_tick(ts("10:29"), 101.0)
+    assert buy is not None and buy.action == "BUY"
+    assert s.on_tick(ts("10:30"), 101.0) is None
+    s.on_tick(ts("10:40"), 120.0)
+    rev = s.on_tick(ts("10:59"), 103.0)
+    assert rev is not None and rev.action == "SHORT"
+    assert s.position == "short"
+    assert "FLIP" in (rev.reason or "")
+    later = s.on_tick(ts_ss("10:59:20"), 102.0)
+    assert later is None
+    assert s.position == "short"
 
 
 def test_later_bar_can_enter_after_flat() -> None:
@@ -222,6 +257,7 @@ if __name__ == "__main__":
     test_last_minute_long_hammer()
     test_no_next_bar_fallback_entry()
     test_hold_exit_no_reverse_same_bar()
+    test_flip_reverses_same_last_minute()
     test_later_bar_can_enter_after_flat()
     test_strict_ignores_weak_opposite()
     test_strict_exits_on_decisive_opposite()

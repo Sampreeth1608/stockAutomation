@@ -72,6 +72,31 @@ def test_flip_reverses_on_exit_candle() -> None:
     assert flip.trades[1].entry_px == 103.0
 
 
+def test_raw_strict_flip_reverses_on_decisive_exit() -> None:
+    candles = [
+        Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # long
+        Candle("2026-08-17 11:00:00", 102.0, 120.0, 101.0, 103.0),  # U=17 range=19 frac>0.5
+    ]
+    hold = simulate_wick(
+        candles, tf="30m:raw_strict", min_range=5, reenter=False, exit_strict=True
+    )
+    flip = simulate_wick(
+        candles, tf="30m:raw_strict_flip", min_range=5, reenter=True, exit_strict=True
+    )
+    assert hold.n_trades == 1
+    assert hold.trades[0].exit_px == 103.0
+    assert flip.n_trades == 2
+    assert flip.trades[1].side == "SHORT"
+    assert flip.trades[1].entry_px == 103.0
+    from backtest_wick_candles import FLIP_PRESETS
+
+    names = {n for n, _ in FLIP_PRESETS}
+    assert "raw_strict_flip" in names
+    filt = dict(next(f for n, f in FLIP_PRESETS if n == "raw_strict_flip"))
+    assert filt.get("reenter") is True
+    assert filt.get("exit_strict") is True
+
+
 def test_later_bar_can_enter_after_flat() -> None:
     candles = [
         Candle("2026-08-17 10:00:00", 100.0, 102.0, 90.0, 101.0),  # long
@@ -203,6 +228,8 @@ if __name__ == "__main__":
     print("ok hold exit")
     test_flip_reverses_on_exit_candle()
     print("ok flip reverse")
+    test_raw_strict_flip_reverses_on_decisive_exit()
+    print("ok raw_strict flip")
     test_later_bar_can_enter_after_flat()
     print("ok later entry")
     test_strict_exit_ignores_weak_opposite()

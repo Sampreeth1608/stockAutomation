@@ -17,6 +17,10 @@ HOLD: opposite → CLOSE to flat. Do **not** reverse on that same candle.
 A later bar may enter the other side. CLOSE locks the confirm window so a
 later last-minute tick cannot flip. Equal non-zero wicks → hold.
 
+FLIP (backtest / future S16): same last-minute rules, but a decisive opposite
+closes the open side and takes the new signal on that candle. Not papered
+until a `30m:raw_strict_flip` row is picked.
+
 Defaults: 30m bars, min_range=5, confirm=1 minute, nowick_eps=1 pt.
 Current in-progress 30m OHLC is seeded from ticks.db (fast SQL, not raw_json).
 """
@@ -49,6 +53,7 @@ class WickConfig:
     min_frac: float = 0.0
     min_body_ratio: float = 0.0
     exit_strict: bool = False
+    reenter: bool = False
     allow_long: bool = True
     allow_short: bool = True
 
@@ -79,10 +84,12 @@ class WickCandleStrategy:
     @property
     def preset_label(self) -> str:
         if self.cfg.nowick_only:
-            return "nowick"
-        if self.cfg.exit_strict:
-            return "raw_strict"
-        return "raw"
+            base = "nowick"
+        elif self.cfg.exit_strict:
+            base = "raw_strict"
+        else:
+            base = "raw"
+        return f"{base}_flip" if self.cfg.reenter else base
 
     @property
     def bar_debug(self) -> str:
@@ -106,8 +113,8 @@ class WickCandleStrategy:
         return (
             f"TF={c.bar_minutes}m {self.preset_label} min_range={c.min_range:.0f} "
             f"confirm={c.confirm_minutes}m nowick_eps={c.nowick_eps:.0f} "
-            f"exit_strict={c.exit_strict} nowick_only={c.nowick_only} "
-            f"HOLD no-reverse {self.bar_debug} "
+            f"exit_strict={c.exit_strict} reenter={c.reenter} nowick_only={c.nowick_only} "
+            f"{'FLIP same-candle reverse' if c.reenter else 'HOLD no-reverse'} {self.bar_debug} "
             f"skip={self.last_skip or '-'} pos={self.position}"
         )
 
@@ -277,6 +284,21 @@ class WickCandleStrategy:
 
         if self.position == "long":
             if xside == "short":
+                if self.cfg.reenter and side == "short":
+                    self.position = "short"
+                    self.entry_price = c
+                    return SignalResult(
+                        action="SHORT",
+                        position_after="short",
+                        price_delta=None,
+                        net=None,
+                        net_delta=None,
+                        prev_net_delta=None,
+                        reason=(
+                            f"{tag} FLIP long→short range={range_pts:.1f} "
+                            f"U={m.upper:.1f} L={m.lower:.1f} C={c:.1f}"
+                        ),
+                    )
                 self.position = "flat"
                 self.entry_price = None
                 return SignalResult(
@@ -296,6 +318,21 @@ class WickCandleStrategy:
 
         if self.position == "short":
             if xside == "long":
+                if self.cfg.reenter and side == "long":
+                    self.position = "long"
+                    self.entry_price = c
+                    return SignalResult(
+                        action="BUY",
+                        position_after="long",
+                        price_delta=None,
+                        net=None,
+                        net_delta=None,
+                        prev_net_delta=None,
+                        reason=(
+                            f"{tag} FLIP short→long range={range_pts:.1f} "
+                            f"U={m.upper:.1f} L={m.lower:.1f} C={c:.1f}"
+                        ),
+                    )
                 self.position = "flat"
                 self.entry_price = None
                 return SignalResult(
@@ -397,8 +434,20 @@ def wick_strict_from_env() -> WickCandleStrategy:
         exit_strict=True,
         allow_long=_env_flag("S14_ALLOW_LONG", True),
         allow_short=_env_flag("S14_ALLOW_SHORT", True),
+        reenter=False,
     )
     return WickCandleStrategy("S14_WICK30_STRICT", cfg)
+
+
+def wick_strict_flip_from_env() -> WickCandleStrategy:
+    """Same as S14 but FLIP: close and reverse on that same last-minute candle.
+
+    Not loaded by run_strategy until a backtest row is picked as a new S-number.
+    """
+    s = wick_strict_from_env()
+    s.cfg.reenter = True
+    s.name = "S16_WICK30_STRICT_FLIP"
+    return s
 
 
 def wick_nowick_from_env() -> WickCandleStrategy:

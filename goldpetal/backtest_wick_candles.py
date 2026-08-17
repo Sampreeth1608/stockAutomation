@@ -63,12 +63,19 @@ PRESETS: list[tuple[str, dict[str, Any]]] = [
     ("raw_strict", {**_HOLD, "min_diff": 0.0, "min_frac": 0.0, "min_body_ratio": 0.0, "exit_strict": True}),
     ("pin2_strict", {**_HOLD, "min_body_ratio": 2.0, "min_diff": 0.0, "min_frac": 0.0, "exit_strict": True}),
 ]
-_FLIP_BASES = {"raw", "diff5", "diff10", "frac50", "pin2", "nowick"}
+# Same-candle reverse (FLIP). Keep exit_strict on *_strict rows — that is S14's exit.
+_FLIP_BASES = {
+    "raw",
+    "diff5",
+    "diff10",
+    "frac50",
+    "pin2",
+    "nowick",
+    "raw_strict",
+    "pin2_strict",
+}
 FLIP_PRESETS: list[tuple[str, dict[str, Any]]] = [
-    (
-        f"{name}_flip",
-        {k: v for k, v in {**filt, "reenter": True}.items() if k != "exit_strict"},
-    )
+    (f"{name}_flip", {**filt, "reenter": True})
     for name, filt in PRESETS
     if name in _FLIP_BASES
 ]
@@ -311,7 +318,7 @@ def print_hold_vs_flip(results: list[TfResult]) -> None:
     rows: list[tuple[TfResult, TfResult]] = []
     for hold in results:
         tf, preset = _row_parts(hold.tf)
-        if preset.endswith("_flip") or preset.endswith("_strict"):
+        if preset.endswith("_flip"):
             continue
         flip = by.get(f"{tf}:{preset}_flip")
         if flip is None:
@@ -447,7 +454,7 @@ def _print_and_write(results: list[TfResult], out_dir: Path) -> None:
     flip_rows = [r for r in results if r.tf.endswith("_flip")]
     print_wick_summary(hold_rows, "HOLD — exit to flat, no reverse on that candle")
     if flip_rows:
-        print_wick_summary(flip_rows, "FLIP — old reverse-on-every-opposite (for comparison)")
+        print_wick_summary(flip_rows, "FLIP — close and reverse on that same candle")
         print_hold_vs_flip(results)
     print_by_day(hold_rows)
     write_outputs(results, out_dir)
@@ -566,7 +573,8 @@ def main() -> None:
     ap.add_argument(
         "--presets",
         default="",
-        help="comma list: raw,diff5,diff10,frac50,pin2,nowick,raw_strict,pin2_strict (default: all hold)",
+        help="comma list: raw,diff5,diff10,frac50,pin2,nowick,raw_strict,pin2_strict "
+        "(default: all hold). FLIP twins including raw_strict_flip are added unless --no-compare",
     )
     ap.add_argument(
         "--out-dir",
@@ -640,8 +648,8 @@ def main() -> None:
         "Rules: LONG lower>upper wick | SHORT upper>lower wick | "
         "bald → body C>O long / C<O short | "
         "HOLD: exit to flat, no reverse on that candle | "
-        "FLIP (comparison): reverse on the opposite wick | "
-        "strict: exit only frac50/pin2/bald"
+        "FLIP: close and take the opposite on that same candle | "
+        "strict: exit/reverse only frac50/pin2/bald"
     )
     print(
         f"Filters: fees={args.fees} session={args.session} "
