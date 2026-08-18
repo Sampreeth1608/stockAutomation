@@ -6,7 +6,8 @@ after Angel charges (tax excluded) by expectancy / profit factor /
 drawdown / walk-forward. Win rate is printed last on purpose.
 
   ./venv/bin/python backtest_ohlcv_lab.py --csv /tmp/goldpetal_1h_upstox.csv \\
-      --csv-30m /tmp/goldpetal_30m_upstox.csv --lots 100 --fees
+      --csv-30m /tmp/goldpetal_30m_upstox.csv --lots 100 --fees --one-by-one
+  ./venv/bin/python backtest_ohlcv_lab.py --csv hours.csv --strategy breakout --one-by-one --lots 100 --fees
   ./venv/bin/python backtest_ohlcv_lab.py --db data/ticks.db --lots 100 --session --fees
   ./venv/bin/python backtest_ohlcv_lab.py --from-angel --from 2026-08-02 --lots 100 --fees
 """
@@ -34,6 +35,7 @@ from ohlcv_lab import (
     LabMetrics,
     after_charges_inr,
     run_lab_book,
+    selected_strategies,
     session_bars,
     trade_after_charges,
 )
@@ -261,6 +263,95 @@ def _fill_trade_stats(m: LabMetrics) -> LabMetrics:
     )
 
 
+def _print_trades(result: Any, *, title: str) -> None:
+    print()
+    print(title)
+    trades = list(getattr(result, "trades", []) or [])
+    if not trades:
+        print("  (no trades)")
+        return
+    print("  n  signal  entry_time            entry      exit_time             exit        AC₹")
+    for i, t in enumerate(trades, 1):
+        sig = "BUY  " if t.side == "LONG" else "SHORT"
+        print(
+            f"  {i:2d}  {sig}  {t.entry_time}  {t.entry_px:8.1f}  "
+            f"{t.exit_time}  {t.exit_px:8.1f}  {trade_after_charges(t):10.1f}"
+        )
+
+
+def _book_verdict(m: LabMetrics, s16: LabMetrics, s18: LabMetrics | None) -> str:
+    bits: list[str] = []
+    if m.n_trades < MIN_TRADES:
+        bits.append(f"thin sample ({m.n_trades} < {MIN_TRADES} trades)")
+    if m.after_charges <= 0:
+        bits.append("after charges ≤ 0")
+    if m.after_charges > s16.after_charges:
+        bits.append(f"beats S16 (AC₹={s16.after_charges:.1f})")
+    else:
+        bits.append(f"loses to S16 (AC₹={s16.after_charges:.1f})")
+    if s18 is not None:
+        if m.after_charges > s18.after_charges:
+            bits.append(f"beats S18 (AC₹={s18.after_charges:.1f})")
+        else:
+            bits.append(f"loses to S18 (AC₹={s18.after_charges:.1f})")
+    enough = (
+        m.n_trades >= MIN_TRADES
+        and m.after_charges > 0
+        and m.after_charges > s16.after_charges
+        and (s18 is None or m.after_charges > s18.after_charges)
+    )
+    if enough:
+        bits.append("still research — do not ENABLE unless asked to paper")
+    else:
+        bits.append("do not paper, do not ENABLE")
+    return "; ".join(bits)
+
+
+def _print_one(
+    *,
+    index: int,
+    name: str,
+    family: str,
+    idea: str,
+    rows_1h: list[LabMetrics],
+    rows_30: list[LabMetrics],
+    s16: LabMetrics,
+    s18: LabMetrics | None,
+) -> None:
+    print()
+    print("=" * 88)
+    print(f"{index}. {name}  [{family}]  {idea}")
+    print("=" * 88)
+    flip = next((m for m in rows_1h if m.name == name and m.exit_mode == EXIT_FLIP), None)
+    atr = next((m for m in rows_1h if m.name == name and m.exit_mode == EXIT_ATR), None)
+    if flip is not None:
+        print("1h flip+EOD (same hold style as S16/S18):")
+        print(" ", _fmt(flip))
+        if flip.wf_rows:
+            for i, fold in enumerate(flip.wf_rows, 1):
+                print(
+                    f"    walk-forward fold {i}: n={fold.n_trades} "
+                    f"AC₹={fold.after_charges:.1f} exp₹={fold.expectancy:.1f} "
+                    f"PF={fold.profit_factor:.2f} wr%={100.0 * fold.win_rate:.1f}"
+                )
+        print(" ", _book_verdict(flip, s16, s18))
+        if flip.result is not None:
+            _print_trades(
+                flip.result,
+                title=f"1h {name} flip+EOD BUY/SHORT (after charges, tax excluded)",
+            )
+    if atr is not None:
+        print()
+        print("1h 2ATR target / 1.5ATR trail:")
+        print(" ", _fmt(atr))
+        print(" ", _book_verdict(atr, s16, s18))
+    m30_flip = next((m for m in rows_30 if m.name == name and m.exit_mode == EXIT_FLIP), None)
+    if m30_flip is not None:
+        print()
+        print("30m flip+EOD (research baseline, not the paper 1h books):")
+        print(" ", _fmt(m30_flip))
+
+
 def _run_tf(
     bars: list[VolBar],
     *,
@@ -268,10 +359,12 @@ def _run_tf(
     lots: float,
     fees: bool,
     n_folds: int,
+    strategies: tuple[tuple[str, str, str], ...] | None = None,
 ) -> list[LabMetrics]:
     rows: list[LabMetrics] = []
     kw = dict(lots=lots, fees=fees, flatten_eod=True)
-    for name, family, _idea in STRATEGIES:
+    use = strategies or STRATEGIES
+    for name, family, _idea in use:
         for exit_mode in (EXIT_FLIP, EXIT_ATR):
             m = run_lab_book(
                 bars,
@@ -332,6 +425,17 @@ def main() -> None:
     ap.add_argument("--session", action="store_true", default=True)
     ap.add_argument("--no-session", action="store_true")
     ap.add_argument("--folds", type=int, default=3)
+    ap.add_argument(
+        "--strategy",
+        action="append",
+        default=None,
+        help="test only these lab names (repeat or comma: breakout,climax,pullback,consol,vwap,rvol_mom,three)",
+    )
+    ap.add_argument(
+        "--one-by-one",
+        action="store_true",
+        help="print each strategy separately with BUY/SHORT trades (1h flip+EOD)",
+    )
     ap.add_argument("--out-dir", default="data/backtests/ohlcv_lab")
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
@@ -364,18 +468,29 @@ def main() -> None:
     if len(hours) < 25:
         raise SystemExit(f"need ≥25 1h bars, got {len(hours)} from {source}")
 
+    try:
+        picked = selected_strategies(args.strategy)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
     print(LAB_NAME, "(research — not a paper book, not live)")
     print(FORMULA)
-    for name, family, idea in STRATEGIES:
+    for name, family, idea in picked:
         print(f"  {name:10} [{family}] {idea}")
     print(
         f"lots={args.lots:g} fees={fees} session={session_filter} "
         f"hours={len(hours)} {hours[0].time}→{hours[-1].time} "
-        f"30m={len(m30)} days={len(days)} folds={args.folds} source={source}",
+        f"30m={len(m30)} days={len(days)} folds={args.folds} "
+        f"one_by_one={bool(args.one_by_one)} source={source}",
         flush=True,
     )
 
-    kw_base = dict(lots=float(args.lots), fees=fees, n_folds=int(args.folds))
+    kw_base = dict(
+        lots=float(args.lots),
+        fees=fees,
+        n_folds=int(args.folds),
+        strategies=picked,
+    )
     lab_1h = _run_tf(hours, tf="1h", **kw_base)
     s16_1h = _fill_trade_stats(
         _baseline_s16(hours, tf="1h:S16", lots=float(args.lots), fees=fees)
@@ -410,12 +525,7 @@ def main() -> None:
             )
         )
 
-    _print_table(
-        "1h OHLCV lab vs S16/S18  (after charges, tax excluded)",
-        lab_1h + [s16_1h] + ([s18_1h] if s18_1h is not None else []),
-    )
-    print(_verdict(lab_1h, s16_1h, s18_1h))
-
+    lab_30: list[LabMetrics] = []
     all_rows = list(lab_1h) + [s16_1h]
     if s18_1h is not None:
         all_rows.append(s18_1h)
@@ -425,33 +535,68 @@ def main() -> None:
         s16_30 = _fill_trade_stats(
             _baseline_s16(m30, tf="30m:S16", lots=float(args.lots), fees=fees)
         )
-        _print_table(
-            "30m OHLCV lab vs S16  (after charges, tax excluded)",
-            lab_30 + [s16_30],
-        )
-        print(_verdict(lab_30, s16_30, None))
-        print(
-            "30m S16 is a research baseline on 30m bars, not the paper 1h S16 book. "
-            "Paper rank is the 1h table vs S16 and S18."
-        )
         all_rows.extend(lab_30)
         all_rows.append(s16_30)
 
-    best = max(lab_1h, key=lambda m: m.after_charges)
-    if best.result is not None and best.result.trades:
+    if args.one_by_one:
         print()
         print(
-            f"Trade-by-trade for best 1h lab row {best.name}/{best.exit_mode} "
-            f"(BUY=LONG, SHORT=SHORT). Full CSVs under {args.out_dir}."
+            "Testing one strategy at a time on 1h (flip+EOD trades). "
+            "Rank after charges, tax excluded. S16 AC₹="
+            f"{s16_1h.after_charges:.1f}"
+            + (
+                f"  S18 AC₹={s18_1h.after_charges:.1f}"
+                if s18_1h is not None
+                else ""
+            )
+            + "."
         )
-        print_by_day([best.result])
-        # print each BUY/SHORT line for the best book
-        print("entry_time            signal  entry      exit_time            exit       AC₹")
-        for t in best.result.trades:
-            sig = "BUY  " if t.side == "LONG" else "SHORT"
+        for i, (name, family, idea) in enumerate(picked, 1):
+            _print_one(
+                index=i,
+                name=name,
+                family=family,
+                idea=idea,
+                rows_1h=lab_1h,
+                rows_30=lab_30,
+                s16=s16_1h,
+                s18=s18_1h,
+            )
+        print()
+        print("Recap vs S16/S18 (1h, after charges):")
+        _print_table(
+            "1h OHLCV lab vs S16/S18  (after charges, tax excluded)",
+            lab_1h + [s16_1h] + ([s18_1h] if s18_1h is not None else []),
+        )
+        print(_verdict(lab_1h, s16_1h, s18_1h))
+    else:
+        _print_table(
+            "1h OHLCV lab vs S16/S18  (after charges, tax excluded)",
+            lab_1h + [s16_1h] + ([s18_1h] if s18_1h is not None else []),
+        )
+        print(_verdict(lab_1h, s16_1h, s18_1h))
+        if lab_30:
+            s16_30_row = next(m for m in all_rows if m.name == "S16" and m.result and m.result.tf.startswith("30m"))
+            _print_table(
+                "30m OHLCV lab vs S16  (after charges, tax excluded)",
+                lab_30 + [s16_30_row],
+            )
+            print(_verdict(lab_30, s16_30_row, None))
             print(
-                f"{t.entry_time}  {sig}  {t.entry_px:8.1f}  "
-                f"{t.exit_time}  {t.exit_px:8.1f}  {trade_after_charges(t):10.1f}"
+                "30m S16 is a research baseline on 30m bars, not the paper 1h S16 book. "
+                "Paper rank is the 1h table vs S16 and S18."
+            )
+        best = max(lab_1h, key=lambda m: m.after_charges)
+        if best.result is not None and best.result.trades:
+            print()
+            print(
+                f"Trade-by-trade for best 1h lab row {best.name}/{best.exit_mode} "
+                f"(BUY=LONG, SHORT=SHORT). Full CSVs under {args.out_dir}."
+            )
+            print_by_day([best.result])
+            _print_trades(
+                best.result,
+                title=f"1h {best.name} {best.exit_mode} BUY/SHORT (after charges, tax excluded)",
             )
 
     out = Path(args.out_dir)

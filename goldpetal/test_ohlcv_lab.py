@@ -26,6 +26,7 @@ from ohlcv_lab import (
     profit_factor,
     rvol_class,
     score_result,
+    selected_strategies,
     session_bars,
     simulate_lab,
     trade_after_charges,
@@ -59,6 +60,18 @@ def _series(
 
 
 P = LabParams(lookback=3, atr_n=2, box=3)
+
+
+def test_selected_strategies_order_and_filter() -> None:
+    assert selected_strategies(None) == STRATEGIES
+    picked = selected_strategies(["vwap", "breakout"])
+    assert [n for n, _, _ in picked] == ["breakout", "vwap"]
+    try:
+        selected_strategies(["nope"])
+    except ValueError as exc:
+        assert "unknown" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_rvol_class() -> None:
@@ -255,6 +268,7 @@ def test_not_wired_to_paper_or_live() -> None:
 
 
 if __name__ == "__main__":
+    test_selected_strategies_order_and_filter()
     test_rvol_class()
     test_breakout_long_and_short()
     test_breakout_skips_low_volume()

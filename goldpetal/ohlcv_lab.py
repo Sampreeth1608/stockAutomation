@@ -102,6 +102,7 @@ class LabMetrics:
     wf_folds: int = 0
     n_bars: int = 0
     result: Any = None
+    wf_rows: list[LabMetrics] | None = None
 
     @property
     def stability(self) -> str:
@@ -707,6 +708,23 @@ def walk_forward(
     return rows, wins, len(rows)
 
 
+def selected_strategies(names: list[str] | None) -> tuple[tuple[str, str, str], ...]:
+    """Filter STRATEGIES, keeping lab order (breakout → … → three)."""
+    if not names:
+        return STRATEGIES
+    want: list[str] = []
+    for item in names:
+        want.extend(x.strip() for x in str(item).split(",") if x.strip())
+    known = {row[0] for row in STRATEGIES}
+    unknown = [n for n in want if n not in known]
+    if unknown:
+        raise ValueError(
+            f"unknown lab strategy {unknown!r}; choose from {[n for n, _, _ in STRATEGIES]}"
+        )
+    pick = set(want)
+    return tuple(row for row in STRATEGIES if row[0] in pick)
+
+
 def run_lab_book(
     bars: list[VolBar],
     strategy: str,
@@ -719,11 +737,11 @@ def run_lab_book(
     sim_kwargs = {k: v for k, v in kwargs.items() if k != "n_folds"}
     res = simulate_lab(bars, strategy, exit_mode=exit_mode, **sim_kwargs)
     wf_kwargs = {k: v for k, v in sim_kwargs.items() if k not in {"tf", "entry_days"}}
-    _wf, wf_wins, wf_folds = walk_forward(
+    wf_rows, wf_wins, wf_folds = walk_forward(
         bars, strategy, exit_mode=exit_mode, n_folds=n_folds, **wf_kwargs
     )
     fam = family or next((f for n, f, _ in STRATEGIES if n == strategy), "")
-    return score_result(
+    metrics = score_result(
         res,
         name=strategy,
         family=fam,
@@ -731,3 +749,5 @@ def run_lab_book(
         wf_wins=wf_wins,
         wf_folds=wf_folds,
     )
+    metrics.wf_rows = wf_rows
+    return metrics
