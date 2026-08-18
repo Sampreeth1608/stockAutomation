@@ -60,6 +60,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S11", None)
     os.environ.pop("ENABLE_S13", None)
     os.environ.pop("ENABLE_S16", None)
+    os.environ.pop("ENABLE_S18", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" not in p.enabled
     assert "S2_BALANCE" not in p.enabled
@@ -68,6 +69,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S5_MINEDGE" in p.enabled
     assert "S13_HHHL_DAY" in p.enabled
     assert "S16_HHHL_WICK_1H" in p.enabled
+    assert "S18_OHLC_VOL_HTF" in p.enabled
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
     assert "S10_LEGACY30" not in p.enabled

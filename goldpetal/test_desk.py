@@ -21,6 +21,10 @@ def test_station_is_the_operator_page() -> None:
     assert "Downloads" in html
     assert 'data-tab="ml"' in html
     assert "Approve → paper" in html
+    assert "S18_OHLC_VOL_HTF" in html
+    assert "After charges ₹" in html
+    assert "weekly_s18.sh" in html
+    assert 'value="S18_OHLC_VOL_HTF"' in html
     assert "/api/ml" in html
     assert "/api/s11/activate" in html
     assert "/api/proposals/" in html
@@ -44,6 +48,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S16_HHHL_WICK_1H" in html
     paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S16_HHHL_WICK_1H" in paper
+    assert "S18_OHLC_VOL_HTF" in paper
     assert "S13_HHHL_DAY" in paper
     assert "S4_OVERNIGHT" not in paper
     assert "S12_HHHL30" not in paper
@@ -62,7 +67,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Start bot" in html
     assert "Save strategies" in html
     assert "Trading station" in html
-    assert "ML / S11" in html
+    assert "ML / S11 + S18" in html
+    assert "after charges" in html
+    assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html

@@ -25,6 +25,7 @@ RESTART_CONFIRM_WORD = "RESTART"
 
 # S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
 DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
+PAPER_ONLY_BOOKS = frozenset({"S18_OHLC_VOL_HTF"})
 
 
 def _truthy(raw: str | None, default: str = "true") -> bool:
@@ -124,8 +125,11 @@ def apply_desk_books(
     known = list(SLIM_PAPER_STRATEGIES)
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
     live_raw = [str(n).strip() for n in live if str(n).strip() in known]
-    live_set = [n for n in live_raw if n in in_set]
+    live_set = [n for n in live_raw if n in in_set and n not in PAPER_ONLY_BOOKS]
     skipped = [n for n in live_raw if n not in in_set]
+    skipped_paper_only = [n for n in live_raw if n in PAPER_ONLY_BOOKS]
+    if skipped_paper_only:
+        skipped = list(dict.fromkeys(skipped + skipped_paper_only))
     en = apply_panel_enables(in_set, path=path)
     st = set_live_approved(
         live_set,

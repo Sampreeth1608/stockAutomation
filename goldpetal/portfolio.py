@@ -24,6 +24,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
@@ -35,6 +36,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S10_LEGACY30",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
     },
     "QUIET": {
         "S1_NETDELTA",
@@ -48,6 +50,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -63,6 +66,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S11_DISCOVERED",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
     },
 }
 
@@ -99,7 +103,7 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S5, S8, S11, S13, S16 (S4 off — Angel/ticks daily
+    Slim paper default: S5, S8, S11, S13, S16, S18 (S4 off — Angel/ticks daily
     swing pick was S13).
     """
     def on(key: str, default: str) -> bool:
@@ -130,6 +134,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S13_HHHL_DAY")
     if on("ENABLE_S16", "true"):
         enabled.add("S16_HHHL_WICK_1H")
+    if on("ENABLE_S18", "true"):
+        enabled.add("S18_OHLC_VOL_HTF")
 
     if not enabled:
         enabled = {
@@ -138,6 +144,7 @@ def portfolio_from_env() -> PortfolioConfig:
             "S11_DISCOVERED",
             "S13_HHHL_DAY",
             "S16_HHHL_WICK_1H",
+            "S18_OHLC_VOL_HTF",
         }
 
     flatten = on("FLATTEN_ON_BAD_REGIME", "true")

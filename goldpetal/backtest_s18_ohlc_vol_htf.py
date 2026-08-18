@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backtest S18: 1h green/HH/up-close + volume-up + above yesterday.
 
-Research only. Not paper. Not live.
+Paper book with pack overlay. Not live. Default sim is the base AND.
 
   ./venv/bin/python backtest_s18_ohlc_vol_htf.py --db data/ticks.db --lots 100 --session --fees
 """
@@ -35,7 +35,7 @@ def main() -> None:
     rows = load_vol_rows(db)
     hours = build_vol_bars(rows, 60)
     days = build_vol_bars(rows, 1440)
-    print(S18_NAME, "(research, not paper)")
+    print(S18_NAME, "(paper pack overlay, not live)")
     print(FORMULA)
     print(f"ticks={len(rows)} hours={len(hours)} days={len(days)} db={db}")
     result = simulate_s18(

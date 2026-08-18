@@ -89,10 +89,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
-    <h2>ML / S11</h2>
-    <p class="hint" id="ml-s11-line">Loading pack…</p>
+    <h2>ML / S11 + S18</h2>
+    <p class="hint" id="ml-s11-line">Loading S11 pack…</p>
+    <p class="hint" id="ml-s18-line">Loading S18 pack…</p>
     <div id="ml-pending"></div>
-    <p class="hint">Full inspector, pack compare, and discovery report: <a href="/#ml">station ML tab</a>.</p>
+    <p class="hint">S18 ranks after Angel charges (tax excluded). Approve → paper, then type RESTART. Full inspector: <a href="/#ml">station ML tab</a>.</p>
     <p class="flash" id="flash-ml"></p>
   </section>
 
@@ -120,6 +121,7 @@ const SHORT = {
   S4_OVERNIGHT: "S4 HHHL swing", S5_MINEDGE: "S5 minedge", S8_NET_ZIGZAG: "S8 zigzag",
   S11_DISCOVERED: "S11 pack", S13_HHHL_DAY: "S13 daily S16",
   S16_HHHL_WICK_1H: "S16 HHHL+wick 1h",
+  S18_OHLC_VOL_HTF: "S18 OHLC+vol+day",
 };
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -181,20 +183,26 @@ function render(d) {
 }
 function renderMl(d) {
   const s11 = (d && d.s11) || {};
+  const s18 = (d && d.s18) || {};
   const pending = ((d && d.proposals) || {}).pending || [];
   $("ml-s11-line").textContent = s11.load_hint || (s11.pack_path || "S11_PACK_PATH not set");
+  $("ml-s18-line").textContent = s18.load_hint || ("S18 pack " + (s18.pack_name || "base") + " — after charges, tax excluded");
   $("ml-pending").innerHTML = pending.map((p) => {
     const paper = p.paper || {};
+    const extra = p.extra || (paper.extra || {});
+    const isS18 = p.strategy === "S18_OHLC_VOL_HTF";
+    const pnl = p.pnl_value != null ? p.pnl_value : (isS18 ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
+    const pnlLabel = p.pnl_label || (isS18 ? "after charges ₹" : "after-tax ₹");
     return `<div style="border-top:1px solid var(--line);padding:.55rem 0">
       <div><b>${esc(p.title || p.strategy)}</b></div>
-      <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ₹ ${esc(paper.after_tax_pnl_inr ?? "—")}</div>
+      <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ${esc(pnlLabel)} ${esc(pnl ?? "—")}</div>
       ${p.safety_ok === false ? `<label class="chk"><input type="checkbox" data-unsafe="${esc(p.id)}"/> Accept risk</label>` : ""}
       <div class="row" style="margin-top:.35rem">
         <button class="btn ok" type="button" data-ml="approve" data-id="${esc(p.id)}">Approve → paper</button>
         <button class="btn danger" type="button" data-ml="reject" data-id="${esc(p.id)}">Reject</button>
       </div>
     </div>`;
-  }).join("") || `<p class="hint">No pending proposals.</p>`;
+  }).join("") || `<p class="hint">No pending. Run weekly_discover.sh (S11) or ./weekly_s18.sh (S18) on the VM.</p>`;
 }
 async function loadMl() {
   renderMl(await api("/api/ml"));

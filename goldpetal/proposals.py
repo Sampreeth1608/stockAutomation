@@ -161,6 +161,7 @@ def decide_proposal(
     note: str = "",
     path: Path = PROPOSALS_PATH,
     state_path: Path | None = None,
+    touch_control: bool = True,
 ) -> StrategyProposal:
     """decision: approved_paper | approved_live | rejected"""
     if decision not in {"approved_paper", "approved_live", "rejected"}:
@@ -181,12 +182,13 @@ def decide_proposal(
     found.decision_note = note
     save_proposals(items, path=path)
 
-    if decision == "approved_paper":
-        approve_strategy_paper(found.strategy, path=state_path)
-    elif decision == "approved_live":
-        approve_strategy_live(found.strategy, path=state_path)
-    else:
-        reject_strategy(found.strategy, path=state_path)
+    if touch_control:
+        if decision == "approved_paper":
+            approve_strategy_paper(found.strategy, path=state_path)
+        elif decision == "approved_live":
+            approve_strategy_live(found.strategy, path=state_path)
+        else:
+            reject_strategy(found.strategy, path=state_path)
     return found
 
 
@@ -329,6 +331,67 @@ def proposal_from_weekly_s5(
             "S5_ML_MODEL_PATH": model_path,
             "S5_REQUIRE_ML": "true" if safety_ok else "false",
             "S5_REASONING": "true",
+            "DRY_RUN": "true",
+        },
+    )
+
+
+def proposal_from_weekly_s18(
+    *,
+    week_id: str,
+    winner: dict[str, Any],
+    current: dict[str, Any],
+    model_path: str,
+    safety_ok: bool,
+    safety_reasons: list[str],
+    env_patch: dict[str, str] | None = None,
+) -> StrategyProposal:
+    """S18 pack proposal. Ranked on after-charges PnL (tax excluded). Not live."""
+    te = winner.get("test") or {}
+    cur = current.get("test") or {}
+    pack = winner.get("pack") or {}
+    name = str(pack.get("name") or "pack")
+    after_ch = float(te.get("after_charges_inr") or 0)
+    cur_ch = float(cur.get("after_charges_inr") or 0)
+    n = int(te.get("n_trades") or 0)
+    win = float(te.get("win_rate") or 0)
+    paper = PaperResult(
+        n_trades=n,
+        win_rate=win,
+        gross_pnl_inr=float(te.get("gross_pnl_inr") or 0),
+        after_tax_pnl_inr=after_ch,
+        baseline_after_tax_inr=cur_ch,
+        delta_vs_baseline_inr=round(after_ch - cur_ch, 2),
+        extra={
+            "metric": "after_charges_ex_tax",
+            "after_charges_inr": after_ch,
+            "after_tax_inr": float(te.get("after_tax_inr") or 0),
+            "fees_inr": float(te.get("fees_inr") or 0),
+            "pack": pack,
+            "current_pack": (current.get("pack") or {}).get("name"),
+            "current_after_charges_inr": cur_ch,
+        },
+    )
+    return StrategyProposal(
+        id=uuid.uuid4().hex[:10],
+        week_id=week_id,
+        kind="improved",
+        strategy="S18_OHLC_VOL_HTF",
+        title=f"S18 pack {name} — week {week_id}",
+        summary=(
+            f"{name} after charges ₹{after_ch:+.0f} vs "
+            f"{(current.get('pack') or {}).get('name') or 'current'} ₹{cur_ch:+.0f} "
+            f"(tax excluded), test trades={n}, win={win:.0f}%. Paper only."
+        ),
+        paper=paper,
+        model_path=model_path,
+        safety_ok=safety_ok,
+        safety_reasons=list(safety_reasons),
+        status="pending",
+        created_at_ist=_now_iso(),
+        env_patch=env_patch
+        or {
+            "ENABLE_S18": "true",
             "DRY_RUN": "true",
         },
     )
