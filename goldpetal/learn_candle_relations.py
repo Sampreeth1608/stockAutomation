@@ -3,8 +3,9 @@
 
 Research only. Does not paper or change S13/S16.
 
-Fits each family alone and combined (ohlc, wick, prev, vol, htf) on the same
-time split so you can see which mixes hold out of sample.
+Each non-empty mix of the five families is one candidate research strategy
+(31 candidates when a higher TF is attached). Same time split for all of them.
+Nothing is enabled.
 
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --lots 100 --session --fees
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --tf 1h --higher 1d
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -38,32 +40,19 @@ from candle_relations import (
 from charges import apply_charges_and_tax
 
 TF_MINUTES = {"30m": 30, "1h": 60, "1d": 1440}
+FAMILIES = ("ohlc", "wick", "prev", "vol", "htf")
 
-# Research mixes only. Each name is a set of families trained on the same split.
-FEATURE_COMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("ohlc", ("ohlc",)),
-    ("wick", ("wick",)),
-    ("prev", ("prev",)),
-    ("vol", ("vol",)),
-    ("htf", ("htf",)),
-    ("ohlc+wick", ("ohlc", "wick")),
-    ("ohlc+prev", ("ohlc", "prev")),
-    ("ohlc+vol", ("ohlc", "vol")),
-    ("ohlc+htf", ("ohlc", "htf")),
-    ("wick+vol", ("wick", "vol")),
-    ("wick+htf", ("wick", "htf")),
-    ("prev+vol", ("prev", "vol")),
-    ("prev+htf", ("prev", "htf")),
-    ("vol+htf", ("vol", "htf")),
-    ("ohlc+wick+prev", ("ohlc", "wick", "prev")),
-    ("ohlc+prev+htf", ("ohlc", "prev", "htf")),
-    ("ohlc+wick+vol", ("ohlc", "wick", "vol")),
-    ("ohlc+vol+htf", ("ohlc", "vol", "htf")),
-    ("prev+vol+htf", ("prev", "vol", "htf")),
-    ("price", ("ohlc", "wick", "prev", "htf")),
-    ("price+vol", ("ohlc", "wick", "prev", "vol")),
-    ("all", ("ohlc", "wick", "prev", "vol", "htf")),
-)
+
+def family_combos() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Every non-empty mix of families = one candidate research strategy."""
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for r in range(1, len(FAMILIES) + 1):
+        for g in combinations(FAMILIES, r):
+            out.append(("+".join(g), g))
+    return tuple(out)
+
+
+FEATURE_COMBOS = family_combos()
 
 
 def _matrix(
@@ -268,11 +257,11 @@ def run_tf(
         "bars": len(candles),
         "rows": len(labeled),
         "formula": (
-            "families ohlc / wick / prev / vol / htf, alone and combined; "
-            "label = next close up/down"
+            "each non-empty mix of ohlc/wick/prev/vol/htf is one candidate "
+            "research strategy; label = next close up/down"
         ),
         "paper": False,
-        "note": "research only — combos are not a paper book",
+        "note": "research only — candidates are not paper books",
     }
     if len(labeled) < 12:
         summary["error"] = "not enough labeled bars"
@@ -319,9 +308,12 @@ def run_tf(
             short_p=short_p,
         )
         rec["combo"] = name
+        rec["strategy"] = name
         rec["groups"] = list(groups)
+        rec["paper"] = False
         combos.append(rec)
     summary["combos"] = combos
+    summary["n_candidates"] = len(combos)
     return summary
 
 
@@ -348,7 +340,10 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     reports = []
-    print("Candle-relation learner (research, not paper). Families mixed: ohlc/wick/prev/vol/htf")
+    print(
+        "Candle-relation candidates (research, not paper). "
+        f"{len(FEATURE_COMBOS)} mixes of ohlc/wick/prev/vol/htf"
+    )
     print(f"ticks={len(rows)} db={db}")
     for tf, htf in zip(tfs, highers, strict=False):
         if tf not in TF_MINUTES:
@@ -370,7 +365,7 @@ def main() -> None:
         print(
             f"  {tf} higher={higher or '-'} rows={rep.get('rows')} "
             f"all train_auc={rep.get('train_auc')} test_auc={rep.get('test_auc')} "
-            f"oos={rep.get('oos_one_bar')}"
+            f"candidates={rep.get('n_candidates')} oos={rep.get('oos_one_bar')}"
         )
         if rep.get("train_corr"):
             top = ", ".join(
@@ -380,7 +375,11 @@ def main() -> None:
         combos = list(rep.get("combos") or [])
         if combos:
             print(
-                "    combo                  feats  train   test  oos_n   win%    after₹"
+                f"    {len(combos)} candidate strategies (research). "
+                "sorted by test AUC — none enabled"
+            )
+            print(
+                "    candidate               feats  train   test  oos_n   win%    after₹"
             )
             ranked = sorted(
                 combos,

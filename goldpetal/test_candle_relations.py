@@ -170,7 +170,9 @@ def test_learn_script_fits_toy_bars() -> None:
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
-    from learn_candle_relations import run_tf
+    from learn_candle_relations import FEATURE_COMBOS, run_tf
+
+    assert len(FEATURE_COMBOS) == 31
 
     ist = ZoneInfo("Asia/Kolkata")
     rows = []
@@ -207,7 +209,22 @@ def test_learn_script_fits_toy_bars() -> None:
     assert "vol" in names
     assert "ohlc+vol" in names
     assert "htf" not in names
+    assert len(names) == 15
     assert all(c.get("paper") is False for c in (rep.get("combos") or []))
+    with_htf = run_tf(
+        rows,
+        tf="1h",
+        higher="1d",
+        lots=1.0,
+        fees=False,
+        session=False,
+        train_frac=0.7,
+        long_p=0.55,
+        short_p=0.45,
+    )
+    if "error" not in with_htf:
+        assert with_htf.get("n_candidates") == 31
+        assert all(c.get("paper") is False for c in (with_htf.get("combos") or []))
 
 
 if __name__ == "__main__":

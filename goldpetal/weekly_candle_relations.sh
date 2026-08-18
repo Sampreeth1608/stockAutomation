@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Research: mix ohlc/wick/prev/vol/htf families. Not paper. Does not change S13/S16.
+# Research: every ohlc/wick/prev/vol/htf mix is a candidate. Not paper. Not S13/S16.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p data/learn/candle_relations
