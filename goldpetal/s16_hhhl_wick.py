@@ -26,6 +26,7 @@ No range skip. No bald-body. No open=high/low (that is S14).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from backtest_hhhl_candles import Candle, Trade, in_session, make_charge_cfg
@@ -53,6 +54,22 @@ def hhhl_side(prev: Candle, cur: Candle) -> str | None:
 
 def wick_raw_side(cur: Candle) -> str | None:
     return wick_measure(cur.open, cur.high, cur.low, cur.close).dominant
+
+
+def hhhl_bar_decision(
+    prev: Candle,
+    cur: Candle,
+    *,
+    min_wick_gap: float = 0.0,
+) -> tuple[str | None, str]:
+    """Old S13 / paper S4: HH+green LONG, LL+red SHORT. Ignore wicks and C vs prevC."""
+    del min_wick_gap
+    hh = hhhl_side(prev, cur)
+    if hh == "long":
+        return "long", "HH+green"
+    if hh == "short":
+        return "short", "LL+red"
+    return None, "no HH/LL"
 
 
 def s16_bar_decision(
@@ -88,17 +105,22 @@ def explain_bar(
     pos: str,
     *,
     min_wick_gap: float = 3.0,
+    decide: Any = None,
 ) -> dict[str, Any]:
     m = wick_measure(cur.open, cur.high, cur.low, cur.close)
     hh = hhhl_side(prev, cur)
     wk = wick_raw_side(cur)
-    side, why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
-    if cur.close > prev.close:
-        gate = "hhhl"
-    elif cur.close < prev.close:
-        gate = "wick"
+    if decide is None:
+        side, why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
+        if cur.close > prev.close:
+            gate = "hhhl"
+        elif cur.close < prev.close:
+            gate = "wick"
+        else:
+            gate = "equal"
     else:
-        gate = "equal"
+        side, why = decide(prev, cur)
+        gate = "hhhl"
     prev_pos = pos
     action = "skip"
     pos_after = pos
@@ -137,11 +159,18 @@ def walk_candles(
     candles: list[Candle],
     *,
     min_wick_gap: float = 3.0,
+    decide: Any = None,
 ) -> list[dict[str, Any]]:
     pos = "flat"
     out: list[dict[str, Any]] = []
     for i in range(1, len(candles)):
-        row = explain_bar(candles[i - 1], candles[i], pos, min_wick_gap=min_wick_gap)
+        row = explain_bar(
+            candles[i - 1],
+            candles[i],
+            pos,
+            min_wick_gap=min_wick_gap,
+            decide=decide,
+        )
         pos = str(row["pos_after"])
         out.append(row)
     return out
@@ -195,8 +224,18 @@ def simulate_s16(
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
     min_wick_gap: float = 3.0,
+    decide: Callable[[Candle, Candle], tuple[str | None, str]] | None = None,
 ) -> Any:
-    """Close-vs-prev gate with same-candle FLIP. Fill at signal-bar close."""
+    """Close-vs-prev gate with same-candle FLIP. Fill at signal-bar close.
+
+    Daily swing books must pass ``session_filter=False`` so 00:00 1d bars
+    are not treated as outside MCX hours. Pass ``decide=hhhl_bar_decision``
+    for S4 (HH/LL only). Default decide is S16 (S13 on 1d, S16 on 1h).
+    Leftover position is marked at the last bar close (accounting only).
+    """
+    decide_fn = decide or (
+        lambda a, b: s16_bar_decision(a, b, min_wick_gap=min_wick_gap)
+    )
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
     trades: list[Trade] = []
     side: str | None = None
@@ -229,7 +268,7 @@ def simulate_s16(
         if session_filter and not sess_ok:
             continue
 
-        want, _why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
+        want, _why = decide_fn(prev, cur)
         want_long = want == "long"
         want_short = want == "short"
 
