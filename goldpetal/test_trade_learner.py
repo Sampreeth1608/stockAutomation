@@ -120,13 +120,29 @@ def test_old_min_proba_cannot_undo_seventy() -> None:
             os.environ["EDGE_MIN_PROBA"] = prev_p
 
 
+def test_fifty_percent_book_sits_out() -> None:
+    """50% after-tax → no new BUY/SHORT, even on a 'lucky' hour."""
+    lr = TradeLearner()
+    trades = []
+    for i in range(20):
+        after = 120.0 if i < 10 else -40.0
+        hour = 15 if i < 10 else 10
+        trades.append(_t("S14_WICK30_STRICT", after, f"2026-08-12T{hour:02d}:{i:02d}:00"))
+    lr.fit(trades)
+    for hour in (10.0, 15.0):
+        feat = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": hour, "ltp": 15000.0}
+        ok, why = lr.allow("S14_WICK30_STRICT", feat)
+        assert ok is False, why
+        assert "ml_book" in why
+
+
 def test_skips_losing_hour_keeps_winning_hour() -> None:
-    """Lifetime 50% still allows the hour that actually wins — WR can climb."""
+    """A book already ≥70% still skips its proven-losing hour."""
     lr = TradeLearner()
     trades = [
-        _t("S12_HHHL30", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(12)
+        _t("S12_HHHL30", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(8)
     ] + [
-        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(12)
+        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(22)
     ]
     lr.fit(trades)
     bad = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
@@ -173,6 +189,7 @@ if __name__ == "__main__":
     test_allows_high_winrate_book()
     test_allows_positive_ev_book()
     test_old_min_proba_cannot_undo_seventy()
+    test_fifty_percent_book_sits_out()
     test_skips_losing_hour_keeps_winning_hour()
     test_ratchet_only_rises()
     test_on_close_exists()

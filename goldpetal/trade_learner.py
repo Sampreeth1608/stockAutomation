@@ -1,9 +1,10 @@
 """Self-learning P(win after tax) gate for every strategy book.
 
 Fits a recency-weighted logistic model on closed trades, plus win rate by
-(strategy, side, hour). New BUY/SHORT entries must beat a bar that starts
-at EDGE_TARGET_WINRATE (default 0.70) and only moves up as recent closes
-improve — so taken-trade win rate climbs over time.
+(strategy, side, hour). After warmup, a book whose after-tax win rate is
+below EDGE_TARGET_WINRATE (default 0.70) takes **no new BUY/SHORT** — a
+50% coin-flip tape sits out. Books already at 70%+ only take hour/side
+setups at or above that bar, and the bar only moves up.
 
 A short per-book warmup still allows probes on a brand-new book. CLOSE /
 flatten is never gated. Refits after each CLOSE and periodically on ticks.
@@ -491,10 +492,23 @@ class TradeLearner:
             },
         )
         n = int(stats.get("n") or 0)
+        floor = _target_winrate()
         need = self.need_p(strategy)
+        p_emp = float(stats.get("p_emp") or stats.get("p") or 0.5)
+        recent_p = float(stats.get("recent_p") or p_emp)
+        recent_n = int(stats.get("recent_n") or 0)
         p_setup, extra = self._setup_p(strategy, feat)
         if n == 0 or n < _warmup_max():
             return True, f"ml_warmup n={n} p={p_setup:.2f} need={need:.2f}"
+
+        # Book below 70% sits out completely. 50% coin-flip tapes do not
+        # get "one good hour" exceptions. The climbing bar (need) applies
+        # only after the book itself is already at the floor.
+        book_p = p_emp
+        if recent_n >= _warmup_max():
+            book_p = min(p_emp, recent_p)
+        if book_p < floor:
+            return False, f"ml_book p={book_p:.2f}<{floor:.2f} n={n}"
 
         b_n = int(extra.get("bucket_n") or 0)
         p_b = float(extra.get("bucket_p") or -1.0)

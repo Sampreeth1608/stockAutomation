@@ -151,9 +151,9 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
     )
     notes.append(
         "A desk-wide learner trains on every strategy and refits after each CLOSE. "
-        "It skips new BUY/SHORT unless this hour/side looks at least EDGE_TARGET_WINRATE "
-        "(default 70%) after a short warmup. The bar only moves up as recent closes "
-        "improve, so taken-trade win rate should climb over time. CLOSE is never gated."
+        "After a short warmup, a book under EDGE_TARGET_WINRATE (default 70%) takes "
+        "no new BUY/SHORT — 50% tapes sit out. Books already at 70%+ skip weak "
+        "hours/sides and the bar only moves up. CLOSE is never gated."
     )
     s14 = next((b for b in books if b["strategy"] == "S14_WICK30_STRICT"), None)
     if s14 and int(s14["closed"]) >= 8:
