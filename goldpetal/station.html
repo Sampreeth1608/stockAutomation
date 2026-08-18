@@ -28,7 +28,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 var(--font); letter-spacing: .01em;
   font-feature-settings: "ss01", "kern"; -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
-.station { display: grid; grid-template-rows: 62px minmax(0,1fr) 32px; height: 100%; }
+.station { display: grid; grid-template-rows: 62px auto minmax(0,1fr) 32px; height: 100%; }
+.you-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .45rem;
+  padding: .4rem 1.1rem; background: #fbf8f1; border-bottom: 1px solid #ead3a8;
+}
+.you-strip b { font: 600 12px/1 var(--serif); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+.tab[data-tab="you"] { color: var(--gold); }
 .top {
   display: grid; grid-template-columns: 230px 1fr auto;
   align-items: center; gap: 1rem; padding: 0 1.1rem;
@@ -129,8 +135,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 .kpi b { display: block; font: 600 11px/1 var(--font); color: var(--muted);
   text-transform: uppercase; letter-spacing: .12em; }
 .kpi span { font: 600 17px/1.5 var(--mono); font-variant-numeric: tabular-nums; }
-.center-head { display: flex; align-items: center; justify-content: space-between; gap: .55rem;
+.center-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem;
   padding: .15rem .65rem 0; background: var(--head); border-bottom: 1px solid var(--line); }
+#tabs { flex: 1 1 12rem; }
 @media (max-width: 1100px) {
   .work { grid-template-columns: 1fr; overflow: auto; }
   .col { border-right: 0; border-bottom: 1px solid var(--line); min-height: 22rem; }
@@ -155,6 +162,16 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div id="pills"></div>
     </div>
   </header>
+  <div class="you-strip" id="you-strip">
+    <b>You</b>
+    <span class="hint">Records what you would do. Does not place an order.</span>
+    <span class="mono" id="you-strip-ltp">LTP —</span>
+    <button class="btn ok" type="button" data-you="buy">BUY</button>
+    <button class="btn danger" type="button" data-you="short">SHORT</button>
+    <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
+    <button class="btn" type="button" id="btn-goto-you">Open You tab</button>
+    <span class="flash" id="flash-you-strip"></span>
+  </div>
 
   <div class="work">
     <section class="col">
@@ -195,7 +212,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="why">Edge</button>
           <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
-          <button class="tab" type="button" data-tab="you">You<span id="you-badge"></span></button>
+          <button class="tab" type="button" data-tab="you">You · capture<span id="you-badge"></span></button>
           <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
@@ -848,6 +865,8 @@ function renderYou() {
   const s = d.summary || {};
   const vs = s.vs_coded || {};
   $("you-ltp").textContent = d.ltp != null ? money(d.ltp) : "—";
+  const stripLtp = $("you-strip-ltp");
+  if (stripLtp) stripLtp.textContent = "LTP " + (d.ltp != null ? money(d.ltp) : "—");
   const n = s.n || 0;
   const el = $("you-badge");
   if (el) el.textContent = n ? " (" + n + ")" : "";
@@ -903,14 +922,16 @@ async function recordYou(action) {
     method: "POST",
     body: JSON.stringify({
       action,
-      confidence: Number($("you-conf").value || 3),
-      note: $("you-note").value || "",
+      confidence: Number(($("you-conf") && $("you-conf").value) || 3),
+      note: ($("you-note") && $("you-note").value) || "",
     }),
   });
   lastYou = res;
-  $("you-note").value = "";
+  if ($("you-note")) $("you-note").value = "";
   const rec = res.recorded || {};
-  flash("flash-you", "Recorded " + String(rec.action || action).toUpperCase() + " @ " + (rec.entry_px != null ? rec.entry_px : "—") + " — not an order");
+  const msg = "Recorded " + String(rec.action || action).toUpperCase() + " @ " + (rec.entry_px != null ? rec.entry_px : "—") + " — not an order";
+  flash("flash-you", msg);
+  flash("flash-you-strip", msg);
   renderYou();
 }
 async function decideLab(id, decision) {
@@ -1150,11 +1171,21 @@ $("ml-filter").onchange = () => { if (lastMl) renderMl(); };
 $("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 $("btn-lab-refresh").onclick = () => loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
 $("btn-you-refresh").onclick = () => loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
-$("you-panel").addEventListener("click", (ev) => {
+document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-you]");
   if (!btn) return;
-  recordYou(btn.dataset.you).catch((e) => flash("flash-you", String(e.message || e), true));
+  recordYou(btn.dataset.you).catch((e) => {
+    flash("flash-you", String(e.message || e), true);
+    flash("flash-you-strip", String(e.message || e), true);
+  });
 });
+$("btn-goto-you").onclick = () => {
+  watchTab = "you";
+  location.hash = "you";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "you"));
+  showMainTab();
+  loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
+};
 $("lab-panel").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-lab]");
   if (!btn) return;

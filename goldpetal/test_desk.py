@@ -22,6 +22,8 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="ml"' in html
     assert 'data-tab="lab"' in html
     assert 'data-tab="you"' in html
+    assert 'id="you-strip"' in html
+    assert "You · capture" in html
     assert "Human trade capture" in html
     assert "/api/capture" in html
     assert "NO TRADE" in html
