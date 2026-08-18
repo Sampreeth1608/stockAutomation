@@ -257,15 +257,20 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
   </section>
 <script>
 const $ = (id) => document.getElementById(id);
+const PAPER_BOOKS = [
+  "S4_OVERNIGHT", "S5_MINEDGE", "S8_NET_ZIGZAG",
+  "S11_DISCOVERED", "S13_HHHL_DAY", "S16_HHHL_WICK_1H",
+];
 const SHORT = {
   S4_OVERNIGHT: "S4 overnight",
   S5_MINEDGE: "S5 minedge",
   S8_NET_ZIGZAG: "S8 zigzag",
   S11_DISCOVERED: "S11 pack",
-  S12_HHHL30: "S12 HHHL 30m",
   S13_HHHL_DAY: "S13 HHHL day",
-  S14_WICK30_STRICT: "S14 wick",
   S16_HHHL_WICK_1H: "S16 HHHL+wick 1h",
+  S12_HHHL30: "S12 HHHL 30m",
+  S14_WICK30_STRICT: "S14 wick",
+  S15_WICK30_NOWICK: "S15 no-wick",
 };
 let last = null;
 let watchTab = "trades";
@@ -281,16 +286,31 @@ function pnlClass(n) {
   if (!Number.isFinite(x) || x === 0) return "";
   return x > 0 ? "ok" : "bad";
 }
+function paperBookNames() {
+  const fromDesk = ((last && last.live_desk) || {}).books || [];
+  const names = fromDesk.map((b) => b.strategy).filter(Boolean);
+  return names.length ? names : PAPER_BOOKS;
+}
 function fillStratSelect() {
-  if (histReady) return;
   const sel = $("hist-strat");
-  Object.keys(SHORT).forEach((k) => {
+  if (!sel) return;
+  const names = paperBookNames();
+  const current = sel.value;
+  const all = sel.querySelector('option[value=""]') || (() => {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = "All books";
+    return o;
+  })();
+  sel.innerHTML = "";
+  sel.appendChild(all);
+  names.forEach((k) => {
     const opt = document.createElement("option");
     opt.value = k;
-    opt.textContent = SHORT[k];
+    opt.textContent = SHORT[k] || k;
     sel.appendChild(opt);
   });
-  histReady = true;
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
 }
 function thead(cols) {
   $("hist-head").innerHTML = "<tr>" + cols.map((c) => `<th>${esc(c)}</th>`).join("") + "</tr>";
@@ -581,6 +601,7 @@ function money(n) {
 }
 function render(d) {
   last = d;
+  fillStratSelect();
   const live = d.live_desk || {};
   const bot = d.bot || {};
   const feed = d.feed || {};
