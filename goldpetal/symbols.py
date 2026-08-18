@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 SCRIP_MASTER_URL = (
     "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
@@ -86,6 +90,64 @@ def _list_goldpetal_futures(force_refresh: bool = False) -> list[tuple[datetime,
     return contracts
 
 
+def choose_goldpetal_contract(
+    upcoming: list[tuple[datetime, dict[str, Any]]],
+    *,
+    today: datetime,
+    rollover_days: int,
+) -> dict[str, Any]:
+    """Pick front vs next month. Switch when ``days_left <= rollover_days``."""
+    if not upcoming:
+        raise RuntimeError("No upcoming GOLDPETAL futures contracts found")
+    today0 = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    front_exp, front = upcoming[0]
+    nxt_exp, nxt = (upcoming[1] if len(upcoming) > 1 else (None, None))
+    front0 = front_exp.replace(hour=0, minute=0, second=0, microsecond=0)
+    days_left = (front0 - today0).days
+    should_roll = days_left <= int(rollover_days) and nxt is not None
+    if should_roll:
+        chosen_exp, chosen, rolled = nxt_exp, nxt, True
+    else:
+        chosen_exp, chosen, rolled = front_exp, front, False
+    assert chosen_exp is not None and chosen is not None
+    return _contract_payload(
+        chosen_exp,
+        chosen,
+        rolled=rolled,
+        rollover_days=int(rollover_days),
+        front_expiry=front.get("expiry", ""),
+        next_expiry=(nxt.get("expiry") if nxt else None),
+        days_to_front_expiry=days_left,
+    )
+
+
+def s13_roll_intent(
+    *,
+    held_symbol: str | None,
+    trade_symbol: str,
+    rolled: bool,
+    days_to_front_expiry: int,
+    rollover_days: int,
+    in_position: bool,
+) -> str:
+    """What S13 should do given the existing ROLLOVER_DAYS policy.
+
+    ``flatten_switch`` — feed already on next month; close the old-contract book.
+    ``reset_switch`` — same, but already flat (still drop old-day OHLC).
+    ``flatten_last_front`` — last session on the expiring front month; close it.
+    ``block_last_front`` — same session, stay out of the front month.
+    ``trade`` — ride the trend on the active contract.
+    """
+    held = str(held_symbol or "").strip()
+    trade = str(trade_symbol or "").strip()
+    if held and trade and held != trade:
+        return "flatten_switch" if in_position else "reset_switch"
+    last_front = (not bool(rolled)) and int(days_to_front_expiry) <= int(rollover_days) + 1
+    if last_front:
+        return "flatten_last_front" if in_position else "block_last_front"
+    return "trade"
+
+
 def _contract_payload(
     chosen_exp: datetime,
     chosen: dict[str, Any],
@@ -125,31 +187,10 @@ def find_goldpetal_futures(force_refresh: bool = False) -> dict[str, Any]:
     contracts = _list_goldpetal_futures(force_refresh=force_refresh)
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     upcoming = [(exp, row) for exp, row in contracts if exp >= today]
-    if not upcoming:
-        raise RuntimeError("No upcoming GOLDPETAL futures contracts found")
-
-    front_exp, front = upcoming[0]
-    next_exp, nxt = (upcoming[1] if len(upcoming) > 1 else (None, None))
-    days_left = (front_exp - today).days
-    rollover_days = _rollover_days()
-
-    # From N days before expiry (inclusive), use next month.
-    should_roll = days_left <= rollover_days and nxt is not None
-    if should_roll:
-        chosen_exp, chosen = next_exp, nxt
-        rolled = True
-    else:
-        chosen_exp, chosen = front_exp, front
-        rolled = False
-
-    return _contract_payload(
-        chosen_exp,
-        chosen,
-        rolled=rolled,
-        rollover_days=rollover_days,
-        front_expiry=front.get("expiry", ""),
-        next_expiry=(nxt.get("expiry") if nxt else None),
-        days_to_front_expiry=days_left,
+    return choose_goldpetal_contract(
+        upcoming,
+        today=today,
+        rollover_days=_rollover_days(),
     )
 
 

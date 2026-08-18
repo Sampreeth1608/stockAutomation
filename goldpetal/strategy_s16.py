@@ -13,6 +13,8 @@ on that **same** closed bar vs the previous closed bar:
 
 FLIP if already the other side. Fill at this bar's close.
 No range skip. No bald-body. No open=high/low (that is S14).
+Intraday only: first fill is the first finished 1h of the session;
+flatten at MARKET_CLOSE (and leftover at next MARKET_OPEN). Never overnight.
 Not live-unlocked. Paper 100 lots ≠ live.
 """
 
@@ -42,6 +44,8 @@ class S16Config:
     min_wick_gap: float = 0.0
     allow_long: bool = True
     allow_short: bool = True
+    market_open: str = "09:00"
+    market_close: str = "23:30"
 
 
 class S16HhhlWickStrategy:
@@ -53,6 +57,7 @@ class S16HhhlWickStrategy:
         self.cfg = cfg or S16Config()
         self.position: Position = "flat"
         self.entry_price: float | None = None
+        self.entry_date: str | None = None
         self.last_skip: str | None = None
         self._bar_key: datetime | None = None
         self._bar_o = self._bar_h = self._bar_l = self._bar_c = None
@@ -89,6 +94,7 @@ class S16HhhlWickStrategy:
         return (
             f"TF={c.bar_minutes}m gap={c.min_wick_gap:g} "
             f"C>prev→HH/LL C<prev→wick FLIP on 1h close "
+            f"intraday {c.market_open}-{c.market_close} flatten-at-close "
             f"{self.bar_debug} skip={self.last_skip or '-'} pos={self.position}"
         )
 
@@ -98,6 +104,75 @@ class S16HhhlWickStrategy:
         mins = int((ts - midnight).total_seconds() // 60)
         block = (mins // max(1, self.cfg.bar_minutes)) * max(1, self.cfg.bar_minutes)
         return midnight + timedelta(minutes=block)
+
+    def _hhmm(self, raw: str) -> tuple[int, int]:
+        h, m = raw.strip().split(":")
+        return int(h), int(m)
+
+    def _in_session(self, now: datetime) -> bool:
+        if now.weekday() >= 5:
+            return False
+        oh, om = self._hhmm(self.cfg.market_open)
+        ch, cm = self._hhmm(self.cfg.market_close)
+        t = now.hour * 60 + now.minute
+        return (oh * 60 + om) <= t <= (ch * 60 + cm)
+
+    def _bar_started_in_session(self, bar: Candle) -> bool:
+        try:
+            dt = datetime.strptime(bar.time[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False
+        oh, om = self._hhmm(self.cfg.market_open)
+        ch, cm = self._hhmm(self.cfg.market_close)
+        t = dt.hour * 60 + dt.minute
+        return (oh * 60 + om) <= t < (ch * 60 + cm)
+
+    def _session_flatten_why(self, now: datetime) -> str | None:
+        if self.position == "flat":
+            return None
+        if now.weekday() >= 5:
+            return "weekend flatten"
+        oh, om = self._hhmm(self.cfg.market_open)
+        ch, cm = self._hhmm(self.cfg.market_close)
+        t = now.hour * 60 + now.minute
+        if t >= ch * 60 + cm:
+            return f"session close {self.cfg.market_close}"
+        if t < oh * 60 + om:
+            return f"preopen leftover before {self.cfg.market_open}"
+        today = now.strftime("%Y-%m-%d")
+        if self.entry_date and self.entry_date < today:
+            return f"overnight leftover {self.entry_date} flatten at {self.cfg.market_open}"
+        return None
+
+    def _flatten(self, px: float, why: str) -> SignalResult:
+        prev = self.position
+        self.position = "flat"
+        self.entry_price = None
+        self.entry_date = None
+        self.last_skip = why
+        return SignalResult(
+            action="CLOSE",
+            position_after="flat",
+            price_delta=None,
+            net=None,
+            net_delta=None,
+            prev_net_delta=None,
+            reason=f"{self.name} CLOSE {prev}→flat {why}",
+        )
+
+    def _maybe_decide_closed(self, closed: Candle | None, now: datetime) -> SignalResult | None:
+        if closed is None:
+            return None
+        result = None
+        if (
+            self._in_session(now)
+            and closed.time[:10] == now.strftime("%Y-%m-%d")
+            and self._bar_started_in_session(closed)
+        ):
+            result = self._decide_closed(closed)
+        if self._bar_started_in_session(closed):
+            self._prev = closed
+        return result
 
     def release_decision_lock(self) -> None:
         """No intra-bar lock; kept so the runner's entry-gate retry path is a no-op."""
@@ -134,9 +209,12 @@ class S16HhhlWickStrategy:
                 self.position = pos  # type: ignore[assignment]
                 cmp = row["cmp"]
                 self.entry_price = float(cmp) if cmp is not None else None
+                tl = str(row["time_label"] or "")
+                self.entry_date = tl[:10] if tl else None
             elif action == "CLOSE" or pos == "flat":
                 self.position = "flat"
                 self.entry_price = None
+                self.entry_date = None
         except Exception:
             return
 
@@ -214,17 +292,23 @@ class S16HhhlWickStrategy:
         now = now.astimezone(IST)
         key = self._floor_bar(now)
         px = float(ltp)
+        flatten_why = self._session_flatten_why(now)
 
         if self._bar_key is None:
             self._reset_bar(key, px)
+            if flatten_why:
+                return self._flatten(px, flatten_why)
             self.last_skip = "waiting_1h_close"
             return None
 
         if key != self._bar_key:
             closed = self._closed_candle()
-            result = self._decide_closed(closed)
-            self._prev = closed
+            result = None if flatten_why else self._maybe_decide_closed(closed, now)
+            if flatten_why and closed is not None and self._bar_started_in_session(closed):
+                self._prev = closed
             self._reset_bar(key, px)
+            if flatten_why:
+                return self._flatten(px, flatten_why)
             return result
 
         assert self._bar_h is not None and self._bar_l is not None
@@ -232,6 +316,8 @@ class S16HhhlWickStrategy:
         self._bar_l = min(self._bar_l, px)
         self._bar_c = px
         self._bar_n += 1
+        if flatten_why:
+            return self._flatten(px, flatten_why)
         self.last_skip = "waiting_1h_close"
         return None
 
@@ -286,6 +372,7 @@ class S16HhhlWickStrategy:
             action = "SHORT"
             extra = f"U={m.upper:.1f}>L={m.lower:.1f}"
         self.entry_price = float(cur.close)
+        self.entry_date = (cur.time[:10] if cur.time else None)
         kind = "FLIP" if prev != "flat" else "enter"
         prev_c = f" prevC={self._prev.close:.1f}" if self._prev is not None else ""
         return SignalResult(
@@ -327,5 +414,7 @@ def s16_from_env() -> S16HhhlWickStrategy:
         min_wick_gap=float(os.getenv("S16_MIN_WICK_GAP", "0")),
         allow_long=_env_flag("S16_ALLOW_LONG", True),
         allow_short=_env_flag("S16_ALLOW_SHORT", True),
+        market_open=os.getenv("MARKET_OPEN", "09:00"),
+        market_close=os.getenv("MARKET_CLOSE", "23:30"),
     )
     return S16HhhlWickStrategy(cfg)

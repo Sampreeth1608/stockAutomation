@@ -57,16 +57,20 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S8", None)
     os.environ.pop("ENABLE_S9", None)
     os.environ.pop("ENABLE_S10", None)
+    os.environ.pop("ENABLE_S11", None)
+    os.environ.pop("ENABLE_S13", None)
+    os.environ.pop("ENABLE_S16", None)
     p = portfolio_from_env()
-    assert "S1_NETDELTA" in p.enabled
-    assert "S2_BALANCE" in p.enabled
-    assert "S3_ML" in p.enabled
-    assert "S4_OVERNIGHT" in p.enabled
+    assert "S1_NETDELTA" not in p.enabled
+    assert "S2_BALANCE" not in p.enabled
+    assert "S3_ML" not in p.enabled
+    assert "S4_OVERNIGHT" not in p.enabled
     assert "S5_MINEDGE" in p.enabled
-    assert "S6_MIN30" in p.enabled
-    assert "S8_NET_ZIGZAG" not in p.enabled  # OFF until hist EV confirmed
+    assert "S13_HHHL_DAY" in p.enabled
+    assert "S16_HHHL_WICK_1H" in p.enabled
+    assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
-    assert "S10_LEGACY30" in p.enabled  # legacy 30m always ON by default
+    assert "S10_LEGACY30" not in p.enabled
 
     os.environ["ENABLE_S8"] = "true"
     p8 = portfolio_from_env()

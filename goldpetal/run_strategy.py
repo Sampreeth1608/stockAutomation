@@ -302,6 +302,18 @@ def run_once(
     print(f"Symbol   : {symbol}", flush=True)
     print(f"Token    : {token}", flush=True)
     print(f"Expiry   : {contract['expiry']}", flush=True)
+    print(
+        f"Rollover : front={contract.get('front_month_expiry')} "
+        f"next={contract.get('next_month_expiry')} "
+        f"days_left={contract.get('days_to_front_expiry')} "
+        f"rolled={contract.get('rolled')} "
+        f"(switch {contract.get('rollover_days')}d before front expiry)",
+        flush=True,
+    )
+    if hasattr(strategy_s13, "set_contract"):
+        strategy_s13.set_contract(contract)
+    if hasattr(strategy_s4, "set_contract"):
+        strategy_s4.set_contract(contract)
     print(f"Interval : {interval} minutes", flush=True)
     print(
         f"Portfolio: enabled={sorted(portfolio.enabled)} "
@@ -375,13 +387,13 @@ def run_once(
         flush=True,
     )
     print(
-        f"S13      : daily S16 swing (hold until opposite) "
+        f"S13      : daily S16 swing (hold until opposite / flatten on rollover) "
         f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
         f"{strategy_s13.status_line}",
         flush=True,
     )
     print(
-        f"S16      : 1h HH/LL-or-wick on close "
+        f"S16      : 1h HH/LL-or-wick, intraday flatten at close "
         f"[{'ON' if portfolio.is_enabled(strategy_s16.name) else 'OFF'}] "
         f"{strategy_s16.status_line}",
         flush=True,
@@ -1410,8 +1422,32 @@ def run_once(
             # S10: legacy 30m always zigzag (+₹42k MTF paper path)
             emit_s10_if_changed(now, message)
             # S13: daily S16 close-vs-prev (last 15m of the signal day)
+            # Once a day, re-read the rollover rule so S13 flattens the front
+            # month before the feed switches to next month.
+            day_key = now.astimezone(IST).strftime("%Y-%m-%d")
+            if state.get("roll_day") != day_key:
+                state["roll_day"] = day_key
+                try:
+                    fresh = find_goldpetal_futures()
+                except Exception as exc:
+                    fresh = None
+                    print(f"Rollover check skip: {type(exc).__name__}: {exc}", flush=True)
+                if fresh is not None:
+                    if hasattr(strategy_s13, "set_contract"):
+                        strategy_s13.set_contract(fresh)
+                    if hasattr(strategy_s4, "set_contract"):
+                        strategy_s4.set_contract(fresh)
+                    if str(fresh.get("token")) != str(token):
+                        state["roll_reconnect"] = True
+                        print(
+                            f"ROLLOVER: {symbol} → {fresh.get('symbol')} "
+                            f"(front {fresh.get('front_month_expiry')} "
+                            f"days_left={fresh.get('days_to_front_expiry')}). "
+                            "Flatten S13, then reconnect the next-month feed.",
+                            flush=True,
+                        )
             emit_s13_if_changed(now, message)
-            # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close
+            # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close; flatten at EOD
             emit_s16_if_changed(now, message)
 
             # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
@@ -1431,6 +1467,8 @@ def run_once(
                     obj.position = "flat"
                     if hasattr(obj, "entry_price"):
                         obj.entry_price = None
+                    if hasattr(obj, "entry_date"):
+                        obj.entry_date = None
                     ts = now.isoformat(timespec="seconds")
                     _record_signal(
                         time_label=ts,
@@ -1464,6 +1502,12 @@ def run_once(
                             "runner": "run_strategy",
                         }
                     )
+
+            if state.pop("roll_reconnect", False):
+                try:
+                    sws.close()
+                except Exception as exc:
+                    print(f"Rollover reconnect close failed: {exc}", flush=True)
 
             # S1: 30-min bars
             if now >= state["next_bar_at"]:
@@ -1554,7 +1598,7 @@ def main() -> None:
     print(f"S16_HHHL_WICK_1H: {strategy_s16.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S4/S5/S8/S11/S13/S16 — set ENABLE_S* in .env)",
+        f"(slim default S5/S8/S11/S13/S16 — S4 off, set ENABLE_S* in .env)",
         flush=True,
     )
 

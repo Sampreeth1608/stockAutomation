@@ -77,54 +77,38 @@ git pull origin cursor/s14-wick-length-a4b2
 ./scripts/run_desk_vm.sh --restart
 ```
 
-## S4 daily HH/LL swing (paper after backtest)
+## S4 daily HH/LL swing (research only)
 
-Old S13 HH/LL on the **day** candle. Confirm only in the last 15 minutes
-before `MARKET_CLOSE`. **Hold the trend across days and weeks** until the
-opposite HH+green / LL+red. FLIP. Never flatten at next open. Never EOD flatten.
-
-S13 is the same clock with the **new** S16 close-vs-prev formula.
-
-Backtest both books at 100 lots + fees **before** leaving them on paper
-(fill analog = finished 1d close ≈ last-15m). Not `backtest_s4_hhhl_daily.py`
-(that still has min_range / next-open overnight).
+Angel + ticks daily backtest picked **S13**, not S4. Leave S4 off.
 
 ```bash
-cd ~/goldpetal-repo/goldpetal
-./venv/bin/python backtest_s4_s13_daily_swing.py --db data/ticks.db --lots 100 --fees
-# or: ./venv/bin/python backtest_s4_s13_daily_swing.py --from-angel --from 2026-08-02 --lots 100 --fees
-```
-
-Paste the compare table and day walk. Keep `DRY_RUN=true`. Do not paper until a row is picked.
-
-```bash
-ENABLE_S4=true
-S4_ENTRY_MINUTES_BEFORE_CLOSE=15
+ENABLE_S4=false
 ```
 
 Overnight ML (`weekly_s4.sh` / `strategy_overnight.py`) is research-only.
 
-## S13 daily S16 (paper after backtest)
+## S13 daily S16 (paper — the day-by-day book)
 
 S16 close-vs-prev on the **day** candle vs the previous day. Confirm only in the
 **last 15 minutes before MARKET_CLOSE** (never the next day's open).
-Fill at last-15m LTP. Overnight hold until the opposite signal.
+Fill at last-15m LTP. Hold the trend until the opposite S16 signal.
 
-- C > prevC → HH/LL only (HH+green LONG, LL+red SHORT). Wicks ignored.
-- C < prevC → wick only, gap 0 (lower>upper LONG, upper>lower SHORT). HH/LL ignored.
-- C = prevC → skip
-- FLIP if already the other side. No min_range, no fakeout close-beyond.
-
-S16 1h stays a separate book (`S16_HHHL_WICK_1H`).
+Monthly contract (existing `ROLLOVER_DAYS=5` rule in `symbols.py`):
+- Front month until 5 calendar days before expiry, then the feed is **next month**.
+- S13 **closes** the front-month book on the last front session (do not hold through the switch).
+- After the switch it trades the **next-month** contract as a new trend.
 
 ```bash
 # in .env
 ENABLE_S13=true
+ENABLE_S4=false
 S13_ENTRY_MINUTES_BEFORE_CLOSE=15
 S13_MIN_WICK_GAP=0
+ROLLOVER_DAYS=5
+DRY_RUN=true
 ```
 
-Restart supervise after pull. Look for `hold-until-opposite` on S4/S13 in `data/strategy_run.log`.
+Restart supervise after pull. Look for `hold-until-opposite` and `contract=` on S13, and `DRY_RUN=true`.
 
 ## Restart / orphan / EOD safety (intraday)
 
@@ -154,7 +138,7 @@ ENABLE_S15=false
 
 Research helpers (`backtest_s14_tick.py`, `explain_s14_candles.py`) still exist for old tape.
 
-## S16 1h HH/LL-or-wick (paper)
+## S16 1h HH/LL-or-wick (paper — intraday)
 
 Wait for the **1h** candle to finish. Same closed bar vs previous close:
 
@@ -162,7 +146,9 @@ Wait for the **1h** candle to finish. Same closed bar vs previous close:
   C < prevC → wick only, gap 0: lower>upper LONG, upper>lower SHORT
   C = prevC → skip
 
-FLIP at that bar's close. Fill at close. Session flatten at EOD. Keep `DRY_RUN=true`.
+FLIP at that bar's close. Fill at close. **Intraday only:** first fill is the
+first finished 1h of the session; flatten at `MARKET_CLOSE` (and leftover at
+next `MARKET_OPEN`). Never overnight. Keep `DRY_RUN=true`.
 
 ```bash
 ENABLE_S16=true
@@ -281,7 +267,7 @@ Slim `.env` (only these strategies load into RAM):
 ENABLE_S1=false
 ENABLE_S2=false
 ENABLE_S3=false
-ENABLE_S4=true
+ENABLE_S4=false
 ENABLE_S5=true
 ENABLE_S6=false
 ENABLE_S8=true
