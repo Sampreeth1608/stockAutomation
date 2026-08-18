@@ -1,4 +1,4 @@
-"""S14 / S15 — 30m wick (paper).
+"""S14 / S15 — 30m wick (retired from paper).
 
 S14 formula (nothing else):
 

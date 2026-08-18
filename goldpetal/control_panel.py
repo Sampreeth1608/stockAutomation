@@ -131,22 +131,7 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     closed_sorted = list(reversed(closed))[:trade_limit]
     trades = closed_sorted + open_t[: max(0, trade_limit - len(closed_sorted))]
 
-    strat_names = (
-        "S1_NETDELTA",
-        "S2_BALANCE",
-        "S3_ML",
-        "S4_OVERNIGHT",
-        "S5_MINEDGE",
-        "S6_MIN30",
-        "S8_NET_ZIGZAG",
-        "S9_STATE30",
-        "S10_LEGACY30",
-        "S11_DISCOVERED",
-        "S12_HHHL30",
-        "S13_HHHL_DAY",
-        "S14_WICK30_STRICT",
-        "S15_WICK30_NOWICK",
-    )
+    strat_names = SLIM_PAPER_STRATEGIES
     scoreboard = [summarize_trades(all_trades, s) for s in strat_names]
     scoreboard.append(summarize_trades(all_trades, None))
 

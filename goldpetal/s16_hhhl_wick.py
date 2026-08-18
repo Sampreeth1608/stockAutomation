@@ -1,6 +1,6 @@
 """S16 research formula: close vs previous close picks HH/LL or wick.
 
-Not paper. Not live. Backtest first.
+Paper book: ``S16_HHHL_WICK_1H`` (1h, min_wick_gap=0). Not live.
 
 Wait for the candle to **finish**. Same closed bar vs previous closed bar:
 

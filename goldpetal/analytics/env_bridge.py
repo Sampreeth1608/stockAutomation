@@ -26,6 +26,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "ENABLE_S13",
         "ENABLE_S14",
         "ENABLE_S15",
+        "ENABLE_S16",
         "DRY_RUN",
         "LIVE_MAX_LOTS",
         "LIVE_LOTS",
@@ -55,6 +56,10 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S15_NOWICK_EPS",
         "S15_ALLOW_LONG",
         "S15_ALLOW_SHORT",
+        "S16_BAR_MINUTES",
+        "S16_MIN_WICK_GAP",
+        "S16_ALLOW_LONG",
+        "S16_ALLOW_SHORT",
         "IGNORE_FEES",
         "FLATTEN_ON_BAD_REGIME",
     }
@@ -75,6 +80,7 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S13_HHHL_DAY": "ENABLE_S13",
     "S14_WICK30_STRICT": "ENABLE_S14",
     "S15_WICK30_NOWICK": "ENABLE_S15",
+    "S16_HHHL_WICK_1H": "ENABLE_S16",
 }
 
 SLIM_ENABLE_DEFAULTS: dict[str, str] = {
@@ -88,10 +94,11 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S9": "false",
     "ENABLE_S10": "false",
     "ENABLE_S11": "true",
-    "ENABLE_S12": "true",
+    "ENABLE_S12": "false",
     "ENABLE_S13": "true",
-    "ENABLE_S14": "true",
-    "ENABLE_S15": "true",
+    "ENABLE_S14": "false",
+    "ENABLE_S15": "false",
+    "ENABLE_S16": "true",
 }
 
 

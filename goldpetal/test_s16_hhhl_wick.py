@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backtest_hhhl_candles import Candle
-from control_state import ALL_STRATEGY_NAMES
+from control_state import ALL_STRATEGY_NAMES, SLIM_PAPER_STRATEGIES
 from s16_hhhl_wick import s16_bar_decision, simulate_s16, walk_candles
 
 
@@ -152,13 +152,19 @@ def test_walk_marks_flip() -> None:
     assert rows[1]["action"] == "FLIP"
 
 
-def test_not_wired_to_paper_or_station() -> None:
-    assert "S16_HHHL_WICK" not in ALL_STRATEGY_NAMES
+def test_paper_wired_1h_not_s17() -> None:
+    assert "S16_HHHL_WICK_1H" in ALL_STRATEGY_NAMES
+    assert "S16_HHHL_WICK_1H" in SLIM_PAPER_STRATEGIES
+    assert "S12_HHHL30" not in SLIM_PAPER_STRATEGIES
+    assert "S14_WICK30_STRICT" not in SLIM_PAPER_STRATEGIES
+    assert "S15_WICK30_NOWICK" not in SLIM_PAPER_STRATEGIES
     station = (Path(__file__).resolve().parent / "station.html").read_text(encoding="utf-8")
-    assert "S16_HHHL_WICK" not in station
+    assert "S16_HHHL_WICK_1H" in station
     runner = (Path(__file__).resolve().parent / "run_strategy.py").read_text(encoding="utf-8")
-    assert "s16_hhhl_wick" not in runner
-    assert "ENABLE_S16" not in runner
+    assert "ENABLE_S16" in runner or "S16_HHHL_WICK_1H" in runner
+    assert "s16_from_env" in runner
+    assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
+    assert "ENABLE_S17" not in runner
 
 
 def test_gap_compare_groups_every_tf_and_gap() -> None:
@@ -205,6 +211,6 @@ if __name__ == "__main__":
     test_enter_then_flip()
     test_skip_bar_holds_open_trade()
     test_walk_marks_flip()
-    test_not_wired_to_paper_or_station()
+    test_paper_wired_1h_not_s17()
     test_gap_compare_groups_every_tf_and_gap()
     print("ALL test_s16_hhhl_wick OK")

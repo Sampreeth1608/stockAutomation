@@ -33,10 +33,10 @@ def _t(
 
 def test_fee_killed_is_not_a_wrong_guess() -> None:
     trades = [
-        _t(strategy="S14_WICK30_STRICT", gross=50, charges=80, tax=0, after=-30),
-        _t(strategy="S14_WICK30_STRICT", gross=-40, charges=80, tax=0, after=-120),
+        _t(strategy="S16_HHHL_WICK_1H", gross=50, charges=80, tax=0, after=-30),
+        _t(strategy="S16_HHHL_WICK_1H", gross=-40, charges=80, tax=0, after=-120),
         _t(
-            strategy="S14_WICK30_STRICT",
+            strategy="S16_HHHL_WICK_1H",
             gross=200,
             charges=80,
             tax=36,

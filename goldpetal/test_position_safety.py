@@ -130,6 +130,25 @@ def test_s14_s15_not_eod_flattened() -> None:
     assert "S15_WICK30_NOWICK" not in names
 
 
+def test_s16_is_eod_flattened() -> None:
+    class _S16:
+        name = "S16_HHHL_WICK_1H"
+        position = "long"
+        entry_price = 15400.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    rows = intraday_open_for_flatten(
+        {"S16_HHHL_WICK_1H": _S16(), "S5_MINEDGE": _S5()}
+    )
+    names = {r["strategy"] for r in rows}
+    assert "S5_MINEDGE" in names
+    assert "S16_HHHL_WICK_1H" in names
+
+
 def test_eod_window() -> None:
     # MARKET_CLOSE 23:30, last 5 minutes → 23:25–23:30
     assert in_eod_flatten_window(
@@ -189,6 +208,8 @@ if __name__ == "__main__":
     print("ok s12 skip flatten")
     test_s14_s15_not_eod_flattened()
     print("ok s14/s15 skip flatten")
+    test_s16_is_eod_flattened()
+    print("ok s16 eod flatten")
     test_startup_reconcile_restore()
     print("ok reconcile")
     print("ALL test_position_safety OK")

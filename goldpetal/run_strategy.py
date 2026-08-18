@@ -41,9 +41,9 @@ from strategy_net_zigzag import (
     s10_legacy30_from_env,
 )
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
-from strategy_hhhl import HhhlCandleStrategy, hhhl_from_env
 from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env
-from strategy_wick import WickCandleStrategy, wick_nowick_from_env, wick_record_actions, wick_strict_from_env
+from strategy_s16 import S16HhhlWickStrategy, s16_from_env
+from strategy_wick import wick_record_actions
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
@@ -170,10 +170,8 @@ def run_once(
     s9_journal,
     strategy_s10: NetZigzagStrategy,
     strategy_s11: DiscoveredStrategy,
-    strategy_s12: HhhlCandleStrategy,
     strategy_s13: HhhlDayOvernightStrategy,
-    strategy_s14: WickCandleStrategy,
-    strategy_s15: WickCandleStrategy,
+    strategy_s16: S16HhhlWickStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -378,27 +376,15 @@ def run_once(
         flush=True,
     )
     print(
-        f"S12      : HH/LL candle breakout "
-        f"[{'ON' if portfolio.is_enabled(strategy_s12.name) else 'OFF'}] "
-        f"{strategy_s12.status_line}",
-        flush=True,
-    )
-    print(
         f"S13      : daily HH/LL same-candle "
         f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
         f"{strategy_s13.status_line}",
         flush=True,
     )
     print(
-        f"S14      : 30m same-candle open=high/low else wick on close "
-        f"[{'ON' if portfolio.is_enabled(strategy_s14.name) else 'OFF'}] "
-        f"{strategy_s14.status_line}",
-        flush=True,
-    )
-    print(
-        f"S15      : 30m wick nowick HOLD "
-        f"[{'ON' if portfolio.is_enabled(strategy_s15.name) else 'OFF'}] "
-        f"{strategy_s15.status_line}",
+        f"S16      : 1h HH/LL-or-wick on close "
+        f"[{'ON' if portfolio.is_enabled(strategy_s16.name) else 'OFF'}] "
+        f"{strategy_s16.status_line}",
         flush=True,
     )
     live_ok, live_why = is_live_mode_allowed()
@@ -426,10 +412,8 @@ def run_once(
     strat_map = {
         strategy_s5.name: strategy_s5,
         strategy_s8.name: strategy_s8,
-        strategy_s12.name: strategy_s12,
         strategy_s13.name: strategy_s13,
-        strategy_s14.name: strategy_s14,
-        strategy_s15.name: strategy_s15,
+        strategy_s16.name: strategy_s16,
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
         strategy_s6.name: strategy_s6,
@@ -505,8 +489,23 @@ def run_once(
             sp=float(latest["sp"]),
         )
 
-        # S1 stays on 30-minute bars only.
+        # S1 stays on 30-minute bars only. Disabled stub used to return None
+        # and crash the tick handler on every 30m boundary.
         result_s1 = strategy_s1.on_bar(bar)
+        if result_s1 is None:
+            save_bar(
+                time_label=bar.time_label,
+                symbol=symbol,
+                token=token,
+                cmp=bar.cmp,
+                bp=bar.bp,
+                sp=bar.sp,
+                net=float(bar.bp) - float(bar.sp),
+                price_delta=None,
+                net_delta=None,
+            )
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
         save_bar(
             time_label=bar.time_label,
             symbol=symbol,
@@ -518,6 +517,9 @@ def run_once(
             price_delta=result_s1.price_delta,
             net_delta=result_s1.net_delta,
         )
+        if not _strategy_active(strategy_s1.name):
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
         regime = regime_det.last.regime
         action = result_s1.action
         # Block new entries when regime unfit / emergency / capital; optionally flatten.
@@ -1172,86 +1174,6 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
-    def emit_s12_if_changed(now: datetime, message: dict) -> None:
-        """S12: same-candle HH/LL — enter/exit only in last minute of *that* bar."""
-        if not _strategy_active(strategy_s12.name):
-            return
-        if latest["cmp"] is None:
-            return
-        result = strategy_s12.on_tick(now, float(latest["cmp"]), message)
-        # Surface why S12 is quiet during confirm window / watch state
-        skip = getattr(strategy_s12, "last_skip", None)
-        watching = getattr(strategy_s12, "_watching", None)
-        if (
-            result is None
-            and state["tick_count"] % 50 == 0
-            and (watching or (skip and "watching" not in str(skip)))
-        ):
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] S12_HHHL30 idle "
-                f"pos={strategy_s12.position} watch={watching} skip={skip} "
-                f"prevH={strategy_s12.prev_h} prevL={strategy_s12.prev_l} "
-                f"barH={strategy_s12._bar_h} barL={strategy_s12._bar_l} "
-                f"barO={strategy_s12._bar_o} barC={strategy_s12._bar_c}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
-            return
-        if result.action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(
-                strategy_s12.name, regime_det.last.regime, side=result.action
-            )
-            if not ok_enter:
-                strategy_s12.position = "flat"
-                strategy_s12.entry_price = None
-                if hasattr(strategy_s12, "release_decision_lock"):
-                    strategy_s12.release_decision_lock()
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] S12_HHHL30 "
-                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                return
-        if (
-            strategy_s12.position != "flat"
-            and portfolio.should_flatten(strategy_s12.name, regime_det.last.regime)
-            and result.action != "CLOSE"
-        ):
-            from strategy import SignalResult as _SR
-
-            strategy_s12.position = "flat"
-            strategy_s12.entry_price = None
-            result = _SR(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                prev_net_delta=result.prev_net_delta,
-                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
-            )
-        _record_signal(
-            time_label=now.isoformat(timespec="seconds"),
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            strategy=strategy_s12.name,
-            cmp=float(latest["cmp"]),
-        )
-        line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy_s12.name} "
-            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
-            f"=> {result.action} (pos={strategy_s12.position}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
-
     def emit_s13_if_changed(now: datetime, message: dict) -> None:
         """S13: daily HH/LL — enter/exit in last 15m of the signal day (not next open)."""
         if not _strategy_active(strategy_s13.name):
@@ -1325,8 +1247,9 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
-    def emit_wick_if_changed(strategy: WickCandleStrategy, now: datetime, message: dict) -> None:
-        """S14/S15: 30m wick — S14 same-candle open=high/low else wick; S15 last-minute nowick."""
+    def emit_s16_if_changed(now: datetime, message: dict) -> None:
+        """S16: 1h close-vs-prev HH/LL or wick — FLIP at the finished hour close."""
+        strategy = strategy_s16
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
@@ -1357,7 +1280,7 @@ def run_once(
                 planned = [p for p in planned if p[0] == "CLOSE"]
                 line = (
                     f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
+                    f"ENTRY BLOCKED ({why}) — next 1h close | "
                     f"{result.reason}"
                 )
                 print(line, flush=True)
@@ -1383,6 +1306,11 @@ def run_once(
                 reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
             )
             planned = [("CLOSE", "flat")]
+        fill_px = (
+            float(strategy.entry_price)
+            if strategy.entry_price is not None
+            else float(latest["cmp"])
+        )
         for action, pos_after in planned:
             reason = result.reason
             if action == "CLOSE" and len(planned) > 1:
@@ -1396,11 +1324,11 @@ def run_once(
                 net=result.net,
                 net_delta=result.net_delta,
                 strategy=strategy.name,
-                cmp=float(latest["cmp"]),
+                cmp=fill_px,
             )
             line = (
                 f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+                f"regime={regime_det.last.regime} CMP={fill_px} "
                 f"=> {action} (pos={pos_after}) | {reason}"
             )
             print(line, flush=True)
@@ -1470,10 +1398,8 @@ def run_once(
                     f"/{strategy_s8.bias} s9={strategy_s9.position}"
                     f"/{strategy_s9.last_label} s10={strategy_s10.position}"
                     f"/{strategy_s10.bias} s11={strategy_s11.position} "
-                    f"s12={strategy_s12.position} "
                     f"s13={strategy_s13.position} "
-                    f"s14={strategy_s14.position} "
-                    f"s15={strategy_s15.position}{s3_extra}"
+                    f"s16={strategy_s16.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -1487,10 +1413,8 @@ def run_once(
                             "S4": strategy_s4.position,
                             "S5": strategy_s5.position,
                             "S8": strategy_s8.position,
-                            "S12": strategy_s12.position,
                             "S13": strategy_s13.position,
-                            "S14": strategy_s14.position,
-                            "S15": strategy_s15.position,
+                            "S16": strategy_s16.position,
                         },
                         "runner": "run_strategy",
                     }
@@ -1514,14 +1438,10 @@ def run_once(
             emit_s9_if_changed(now, message)
             # S10: legacy 30m always zigzag (+₹42k MTF paper path)
             emit_s10_if_changed(now, message)
-            # S12: HH/LL candle breakout
-            emit_s12_if_changed(now, message)
             # S13: daily HH/LL same-candle (last 15m of the signal day)
             emit_s13_if_changed(now, message)
-            # S14: same closed candle: open=high/low else wick FLIP
-            emit_wick_if_changed(strategy_s14, now, message)
-            # S15: 30m wick nowick HOLD
-            emit_wick_if_changed(strategy_s15, now, message)
+            # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close
+            emit_s16_if_changed(now, message)
 
             # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
@@ -1643,10 +1563,8 @@ def main() -> None:
     s9_journal = s9_journal_from_env()
     strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
     strategy_s11 = _load("S11_DISCOVERED", discovered_from_env)
-    strategy_s12 = _load("S12_HHHL30", hhhl_from_env)
     strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
-    strategy_s14 = _load("S14_WICK30_STRICT", wick_strict_from_env)
-    strategy_s15 = _load("S15_WICK30_NOWICK", wick_nowick_from_env)
+    strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
     regime_det = RegimeDetector(window=60)
     init_db()
     if portfolio.is_enabled("S1_NETDELTA"):
@@ -1661,13 +1579,11 @@ def main() -> None:
     print(f"S9 journal: {s9_journal.db_path} enabled={s9_journal.enabled}", flush=True)
     print(f"S10_LEGACY30: {strategy_s10.status_line}", flush=True)
     print(f"S11_DISCOVERED: {strategy_s11.status_line}", flush=True)
-    print(f"S12_HHHL30: {strategy_s12.status_line}", flush=True)
     print(f"S13_HHHL_DAY: {strategy_s13.status_line}", flush=True)
-    print(f"S14_WICK30_STRICT: {strategy_s14.status_line}", flush=True)
-    print(f"S15_WICK30_NOWICK: {strategy_s15.status_line}", flush=True)
+    print(f"S16_HHHL_WICK_1H: {strategy_s16.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S4/S5/S8/S11/S12/S13/S14/S15 — set ENABLE_S* in .env)",
+        f"(slim default S4/S5/S8/S11/S13/S16 — set ENABLE_S* in .env)",
         flush=True,
     )
 
@@ -1694,10 +1610,8 @@ def main() -> None:
                 s9_journal,
                 strategy_s10,
                 strategy_s11,
-                strategy_s12,
                 strategy_s13,
-                strategy_s14,
-                strategy_s15,
+                strategy_s16,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -1720,10 +1634,8 @@ def main() -> None:
             f"s9={strategy_s9.position}/{strategy_s9.last_label} "
             f"s10={strategy_s10.position}/{strategy_s10.bias} "
             f"s11={strategy_s11.position} "
-            f"s12={strategy_s12.position} "
             f"s13={strategy_s13.position} "
-            f"s14={strategy_s14.position} "
-            f"s15={strategy_s15.position} "
+            f"s16={strategy_s16.position} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )

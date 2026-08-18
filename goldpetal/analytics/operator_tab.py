@@ -12,10 +12,8 @@ SHORT = {
     "S5_MINEDGE": "S5 minedge",
     "S8_NET_ZIGZAG": "S8 zigzag",
     "S11_DISCOVERED": "S11 pack",
-    "S12_HHHL30": "S12 HHHL 30m",
     "S13_HHHL_DAY": "S13 HHHL day",
-    "S14_WICK30_STRICT": "S14 wick",
-    "S15_WICK30_NOWICK": "S15 no-wick",
+    "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
 }
 
 
@@ -166,4 +164,4 @@ def render_operator_desk(*, local: bool) -> None:
         plan.daily_loss_limit_inr = float(dd_rs)
         save_capital(plan)
         _set_flash({"ok": True, "note": "Capital saved"})
-    st.caption("Trades / S14 / downloads: sidebar Page. Restart after Save strategies or Save money.")
+    st.caption("Trades / downloads: sidebar Page. Restart after Save strategies or Save money.")

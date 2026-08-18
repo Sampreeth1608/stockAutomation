@@ -35,13 +35,14 @@ def test_learns_every_strategy_name() -> None:
         assert name in STRAT_INDEX
     assert "S1_NETDELTA" in STRAT_INDEX
     assert "S9_STATE30" in STRAT_INDEX
-    assert "S14_WICK30_STRICT" in STRAT_INDEX
+    assert "S13_HHHL_DAY" in STRAT_INDEX
+    assert "S16_HHHL_WICK_1H" in STRAT_INDEX
 
 
 def test_warmup_does_not_block() -> None:
     lr = TradeLearner()
-    feat = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
-    ok, why = lr.allow("S12_HHHL30", feat)
+    feat = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
+    ok, why = lr.allow("S16_HHHL_WICK_1H", feat)
     assert ok is True
     assert "warmup" in why or "edge_ml_off" in why
 
@@ -49,11 +50,11 @@ def test_warmup_does_not_block() -> None:
 def test_blocks_after_enough_losing_closes() -> None:
     lr = TradeLearner()
     trades = [
-        _t("S12_HHHL30", -80.0, f"2026-08-11T10:{i:02d}:00") for i in range(16)
+        _t("S16_HHHL_WICK_1H", -80.0, f"2026-08-11T10:{i:02d}:00") for i in range(16)
     ]
     lr.fit(trades)
-    feat = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
-    ok, why = lr.allow("S12_HHHL30", feat)
+    feat = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    ok, why = lr.allow("S16_HHHL_WICK_1H", feat)
     assert ok is False
     assert "ml_" in why
 
@@ -64,10 +65,10 @@ def test_blocks_low_winrate_hour() -> None:
     trades = []
     for i in range(20):
         after = 120.0 if i < 8 else -40.0
-        trades.append(_t("S14_WICK30_STRICT", after, f"2026-08-12T10:{i:02d}:00"))
+        trades.append(_t("S13_HHHL_DAY", after, f"2026-08-12T10:{i:02d}:00"))
     lr.fit(trades)
-    feat = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
-    ok, why = lr.allow("S14_WICK30_STRICT", feat)
+    feat = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    ok, why = lr.allow("S13_HHHL_DAY", feat)
     assert ok is False
     assert "ml_" in why
 
@@ -134,15 +135,15 @@ def test_good_hour_enters_even_if_book_is_fifty() -> None:
     """50% book: skip the 0% hour, enter the 100% hour (this trade looks good)."""
     lr = TradeLearner()
     trades = [
-        _t("S14_WICK30_STRICT", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(10)
+        _t("S13_HHHL_DAY", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(10)
     ] + [
-        _t("S14_WICK30_STRICT", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
+        _t("S13_HHHL_DAY", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
     ]
     lr.fit(trades)
-    bad = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
-    good = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
-    ok_bad, why_bad = lr.allow("S14_WICK30_STRICT", bad)
-    ok_good, why_good = lr.allow("S14_WICK30_STRICT", good)
+    bad = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S13_HHHL_DAY", bad)
+    ok_good, why_good = lr.allow("S13_HHHL_DAY", good)
     assert ok_bad is False, why_bad
     assert ok_good is True, why_good
     assert "ml_p=" in why_good
@@ -154,10 +155,10 @@ def test_fifty_percent_book_sits_out() -> None:
     trades = []
     for i in range(20):
         after = 120.0 if i % 2 == 0 else -40.0
-        trades.append(_t("S14_WICK30_STRICT", after, f"2026-08-12T11:{i:02d}:00"))
+        trades.append(_t("S13_HHHL_DAY", after, f"2026-08-12T11:{i:02d}:00"))
     lr.fit(trades)
-    feat = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
-    ok, why = lr.allow("S14_WICK30_STRICT", feat)
+    feat = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
+    ok, why = lr.allow("S13_HHHL_DAY", feat)
     assert ok is False, why
     assert "ml_" in why
 
@@ -166,34 +167,34 @@ def test_enters_when_this_trade_beats_base_without_seventy() -> None:
     """If 70% never shows up, still enter a 60% hour that beats a ~30% base."""
     lr = TradeLearner()
     trades = [
-        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(6)
+        _t("S16_HHHL_WICK_1H", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(6)
     ] + [
-        _t("S12_HHHL30", -40.0, f"2026-08-12T15:{i+6:02d}:00") for i in range(4)
+        _t("S16_HHHL_WICK_1H", -40.0, f"2026-08-12T15:{i+6:02d}:00") for i in range(4)
     ] + [
-        _t("S12_HHHL30", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
+        _t("S16_HHHL_WICK_1H", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
     ]
     lr.fit(trades)
-    bad = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
-    good = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
-    ok_bad, why_bad = lr.allow("S12_HHHL30", bad)
-    ok_good, why_good = lr.allow("S12_HHHL30", good)
+    bad = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S16_HHHL_WICK_1H", bad)
+    ok_good, why_good = lr.allow("S16_HHHL_WICK_1H", good)
     assert ok_bad is False, why_bad
     assert ok_good is True, why_good
-    assert lr.need_p("S12_HHHL30") < 0.70
+    assert lr.need_p("S16_HHHL_WICK_1H") < 0.70
 
 
 def test_skips_losing_hour_keeps_winning_hour() -> None:
     lr = TradeLearner()
     trades = [
-        _t("S12_HHHL30", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(8)
+        _t("S16_HHHL_WICK_1H", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(8)
     ] + [
-        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(22)
+        _t("S16_HHHL_WICK_1H", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(22)
     ]
     lr.fit(trades)
-    bad = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
-    good = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
-    ok_bad, why_bad = lr.allow("S12_HHHL30", bad)
-    ok_good, why_good = lr.allow("S12_HHHL30", good)
+    bad = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S16_HHHL_WICK_1H", bad)
+    ok_good, why_good = lr.allow("S16_HHHL_WICK_1H", good)
     assert ok_bad is False, why_bad
     assert ok_good is True, why_good
 
@@ -217,7 +218,7 @@ def test_ratchet_only_rises() -> None:
 
 def test_on_close_exists() -> None:
     lr = TradeLearner()
-    lr.on_close("S14_WICK30_STRICT")
+    lr.on_close("S13_HHHL_DAY")
     assert lr.note == "cold"
 
 

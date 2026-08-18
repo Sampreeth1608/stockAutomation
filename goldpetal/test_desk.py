@@ -34,6 +34,13 @@ def test_station_is_the_operator_page() -> None:
     assert 'href="/full"' in html
     assert 'href="/lite"' in html
     assert "minimumFractionDigits: 2" in html
+    assert "PAPER_BOOKS" in html
+    assert "S16_HHHL_WICK_1H" in html
+    paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
+    assert "S16_HHHL_WICK_1H" in paper
+    assert "S12_HHHL30" not in paper
+    assert "S14_WICK30_STRICT" not in paper
+    assert "S15_WICK30_NOWICK" not in paper
     assert "s14-chart" not in html
     assert "fonts.googleapis.com" in html
     assert "Source Sans 3" in html

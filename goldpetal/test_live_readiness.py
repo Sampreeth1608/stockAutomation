@@ -37,13 +37,15 @@ def test_readiness_paper_by_default() -> None:
     dry_step = next(s for s in r["steps"] if s["id"] == "dry_run")
     assert dry_step["ok"] is False
     names = [b["strategy"] for b in r["books"]]
-    assert "S14_WICK30_STRICT" in names
-    assert "S15_WICK30_NOWICK" in names
-    s14 = next(b for b in r["books"] if b["strategy"] == "S14_WICK30_STRICT")
-    assert s14["live_approved"] is False
-    assert s14["live_qty"] == 0
+    assert "S16_HHHL_WICK_1H" in names
+    assert "S14_WICK30_STRICT" not in names
+    assert "S15_WICK30_NOWICK" not in names
+    assert "S12_HHHL30" not in names
+    s16 = next(b for b in r["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
+    assert s16["live_approved"] is False
+    assert s16["live_qty"] == 0
     assert "enables" in r
-    assert "S14_WICK30_STRICT" in r["enables"]
+    assert "S16_HHHL_WICK_1H" in r["enables"]
 
 
 def test_apply_panel_live_env_paper_ok() -> None:
@@ -164,15 +166,15 @@ def test_apply_panel_enables_slim() -> None:
     try:
         env = Path(td.name) / ".env"
         env.write_text("ENABLE_S4=true\nENABLE_S9=true\nSECRET=keep\n", encoding="utf-8")
-        res = apply_panel_enables(["S4_OVERNIGHT", "S14_WICK30_STRICT"], path=env)
+        res = apply_panel_enables(["S4_OVERNIGHT", "S16_HHHL_WICK_1H"], path=env)
         assert res["ok"] is True
         text = env.read_text(encoding="utf-8")
         assert "ENABLE_S4=true" in text
-        assert "ENABLE_S14=true" in text
+        assert "ENABLE_S16=true" in text
         assert "ENABLE_S9=false" in text
         assert "ENABLE_S5=false" in text
         assert "SECRET=keep" in text
-        assert "S14_WICK30_STRICT" in res["enabled"]
+        assert "S16_HHHL_WICK_1H" in res["enabled"]
     finally:
         td.cleanup()
 
@@ -182,24 +184,24 @@ def test_apply_desk_books_live_requires_in_bot() -> None:
     try:
         env = Path(td.name) / ".env"
         env.write_text(
-            "ENABLE_S12=true\nENABLE_S14=true\nDRY_RUN=true\nSECRET=keep\n",
+            "ENABLE_S13=true\nENABLE_S16=true\nDRY_RUN=true\nSECRET=keep\n",
             encoding="utf-8",
         )
         state = Path(td.name) / "state.json"
         from live_readiness import apply_desk_books
 
         res = apply_desk_books(
-            ["S12_HHHL30"],
-            ["S12_HHHL30", "S14_WICK30_STRICT"],
+            ["S13_HHHL_DAY"],
+            ["S13_HHHL_DAY", "S16_HHHL_WICK_1H"],
             path=env,
             state_path=state,
         )
         assert res["ok"] is True
-        assert res["live_approved"] == ["S12_HHHL30"]
-        assert "S14_WICK30_STRICT" in res["skipped_live_not_in_bot"]
+        assert res["live_approved"] == ["S13_HHHL_DAY"]
+        assert "S16_HHHL_WICK_1H" in res["skipped_live_not_in_bot"]
         text = env.read_text(encoding="utf-8")
-        assert "ENABLE_S12=true" in text
-        assert "ENABLE_S14=false" in text
+        assert "ENABLE_S13=true" in text
+        assert "ENABLE_S16=false" in text
         assert "DRY_RUN=true" in text
         assert "SECRET=keep" in text
         assert res["restart_needed"] is True
@@ -211,8 +213,9 @@ def test_desk_snapshot_skips_checklist() -> None:
     os.environ["DRY_RUN"] = "true"
     snap = desk_snapshot()
     assert "steps" not in snap
-    assert "S14_WICK30_STRICT" in snap["enables"]
-    assert any(b["strategy"] == "S14_WICK30_STRICT" for b in snap["books"])
+    assert "S16_HHHL_WICK_1H" in snap["enables"]
+    assert any(b["strategy"] == "S16_HHHL_WICK_1H" for b in snap["books"])
+    assert "S14_WICK30_STRICT" not in snap["enables"]
     assert snap["would_place_real_orders"] is False
 
 
