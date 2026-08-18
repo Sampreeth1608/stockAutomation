@@ -174,6 +174,35 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <p class="flash" id="flash-hist"></p>
   </section>
 
+  <section class="card" id="why">
+    <h2>Why win rate is low</h2>
+    <p class="hint">Scoreboard win % is after Angel fees and 30% tax on winners. Gross (direction) win % is the actual guess rate. FLIP closes are not target hits.</p>
+    <p class="mono" id="why-meta">loading analysis…</p>
+    <ul id="why-notes" class="hint" style="margin:.5rem 0 .7rem; padding-left:1.15rem"></ul>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>book</th><th>closed</th><th>gross win %</th><th>after-tax win %</th>
+            <th>fee-killed</th><th>FLIPs</th><th>gross ₹</th><th>fees ₹</th><th>after-tax ₹</th>
+          </tr>
+        </thead>
+        <tbody id="why-books"></tbody>
+      </table>
+    </div>
+    <p class="hint" id="why-guess" style="margin-top:.7rem"></p>
+    <h2 style="margin-top:.85rem">Worst closes</h2>
+    <div class="scroll" style="max-height:12rem">
+      <table>
+        <thead>
+          <tr><th>book</th><th>side</th><th>exit</th><th>gross ₹</th><th>fees ₹</th><th>after-tax ₹</th><th>why</th></tr>
+        </thead>
+        <tbody id="why-worst"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-why"></p>
+  </section>
+
   <section class="card" id="s14-calc">
     <h2>S14 calculation</h2>
     <p class="hint" id="s14-formula">Wait for the 30m candle to finish. open=high SHORT, open=low LONG, else wick (L&gt;U LONG, U&gt;L SHORT). FLIP the other side. Fill at close. Forming bar is skipped.</p>
@@ -450,6 +479,48 @@ async function loadS14Calc() {
   renderS14Calc(d);
   if (d.error) flash("flash-s14", d.error, true);
   else flash("flash-s14", "");
+}
+function renderWhy(d) {
+  const o = d.overall || {};
+  $("why-meta").textContent = [
+    "gross win " + (o.win_rate_gross || 0) + "%",
+    "after-tax win " + (o.win_rate_after_tax || 0) + "%",
+    "closed " + (o.closed || 0),
+    "fee-killed " + (o.fee_killed || 0),
+    "FLIPs " + (o.flips || 0),
+    d.window || "",
+    d.db_path || "",
+  ].filter(Boolean).join(" · ");
+  $("why-notes").innerHTML = (d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")
+    || "<li>No notes</li>";
+  const rows = [o].concat(d.books || []).filter((b) => b && (b.strategy === "ALL" || (b.closed || 0) > 0 || (b.open || 0) > 0));
+  $("why-books").innerHTML = rows.map((b) => `<tr>
+    <td>${esc(b.label || b.strategy || "")}</td>
+    <td>${esc(b.closed ?? "")}</td>
+    <td>${esc(b.win_rate_gross ?? "")}</td>
+    <td class="${pnlClass((b.win_rate_after_tax || 0) - 50)}">${esc(b.win_rate_after_tax ?? "")}</td>
+    <td>${esc(b.fee_killed ?? "")}</td>
+    <td>${esc(b.flips ?? "")}</td>
+    <td class="${pnlClass(b.gross_pnl)}">${esc(b.gross_pnl ?? "")}</td>
+    <td>${esc(b.fees ?? "")}</td>
+    <td class="${pnlClass(b.pnl_after_tax)}">${esc(b.pnl_after_tax ?? "")}</td>
+  </tr>`).join("") || `<tr><td colspan="9">No closed trades yet</td></tr>`;
+  $("why-guess").textContent = (d.books || []).filter((b) => (b.closed || 0) > 0).map((b) => (b.label || "") + ": " + (b.guess || "")).join("  |  ");
+  $("why-worst").innerHTML = (d.worst || []).map((t) => `<tr>
+    <td>${esc(t.label || t.strategy || "")}</td>
+    <td>${esc(t.side || "")}</td>
+    <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+    <td class="${pnlClass(t.gross_pnl)}">${esc(t.gross_pnl ?? "")}</td>
+    <td>${esc(t.fees ?? "")}</td>
+    <td class="${pnlClass(t.pnl_after_tax)}">${esc(t.pnl_after_tax ?? "")}</td>
+    <td>${esc(t.why || "")}</td>
+  </tr>`).join("") || `<tr><td colspan="7">No losing closes in this window</td></tr>`;
+}
+async function loadWhy() {
+  const d = await api("/api/analysis");
+  renderWhy(d);
+  if (d.error) flash("flash-why", d.error, true);
+  else flash("flash-why", "");
 }
 
 function rangeQs() {
@@ -748,6 +819,7 @@ async function boot() {
   }
   loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
   loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true));
+  loadWhy().catch((e) => flash("flash-why", String(e.message || e), true));
 }
 
 boot().catch((e) => flash("flash-engine", String(e.message || e), true));
@@ -755,6 +827,7 @@ setInterval(() => load().catch(() => {}), 4000);
 setInterval(() => loadTape().catch((e) => flash("flash-hist", String(e.message || e), true)), 4000);
 setInterval(() => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true)), 12000);
 setInterval(() => loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true)), 15000);
+setInterval(() => loadWhy().catch((e) => flash("flash-why", String(e.message || e), true)), 15000);
 </script>
 </body>
 </html>

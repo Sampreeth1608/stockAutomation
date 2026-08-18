@@ -250,6 +250,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(cached_calc_payload(resolve_desk_db()))
                 self._send(status, body, ctype)
                 return
+            if path == "/api/analysis":
+                from trade_analysis import analysis_payload
+
+                status, body, ctype = _json_bytes(analysis_payload())
+                self._send(status, body, ctype)
+                return
             if path == "/api/s14/meta":
                 status, body, ctype = _json_bytes(load_sheet_meta(S14_SHEET_DIR))
                 self._send(status, body, ctype)

@@ -37,6 +37,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "/api/history" in html
     assert "S14 calculation" in html
     assert "/api/s14/calc" in html
+    assert "Why win rate is low" in html
+    assert "/api/analysis" in html
 
 
 def test_control_panel_serves_lite_on_8501() -> None:
@@ -46,6 +48,7 @@ def test_control_panel_serves_lite_on_8501() -> None:
     assert "/api/desk" in text
     assert "/api/tape" in text
     assert "/api/s14/calc" in text
+    assert "/api/analysis" in text
     assert "/api/desk/books" in text
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
