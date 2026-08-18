@@ -14,6 +14,7 @@ SHORT = {
     "S11_DISCOVERED": "S11 pack",
     "S13_HHHL_DAY": "S13 daily S16",
     "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
+    "S18_OHLC_VOL_HTF": "S18 OHLC+vol+day",
 }
 
 

@@ -17,6 +17,7 @@ SHORT = {
     "S14_WICK30_STRICT": "S14 wick",
     "S15_WICK30_NOWICK": "S15 no-wick",
     "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
+    "S18_OHLC_VOL_HTF": "S18 OHLC+vol+day",
 }
 
 WHAT_IT_GUESSES = {
@@ -29,6 +30,7 @@ WHAT_IT_GUESSES = {
     "S14_WICK30_STRICT": "Same-candle open=high SHORT / open=low LONG, else wick. Weak nearly-equal wicks are skipped (formula order unchanged).",
     "S15_WICK30_NOWICK": "Bald 30m body only, HOLD (no reverse). Fewer trades; still no real edge filter.",
     "S16_HHHL_WICK_1H": "Wait for the 1h candle to finish. Up close: HH+green LONG / LL+red SHORT. Down close: wick (gap 0). FLIP at that close. Intraday only: flatten at MARKET_CLOSE, leftover at next open. Never overnight.",
+    "S18_OHLC_VOL_HTF": "Wait for the 1h to finish. Base AND: green/red + close vs prev + HH/LL + volume up + close vs yesterday. Learner may change that pack from ticks (OHLC, volume, TBQ/TSQ, n_ticks). FLIP. Flatten at close. Paper only, not live.",
 }
 
 
