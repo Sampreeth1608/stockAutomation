@@ -8,6 +8,8 @@ from candle_relations import (
     RelBar,
     attach_completed_higher,
     build_rel_bars,
+    columns_for_groups,
+    feature_group,
     labeled_rows,
     pair_features,
 )
@@ -148,6 +150,22 @@ def test_rel_bars_from_price_only_tuples() -> None:
     assert bars[1].n_ticks == 1.0
 
 
+def test_every_feature_has_a_group() -> None:
+    groups = {feature_group(name) for name in FEATURE_COLUMNS}
+    assert groups <= {"ohlc", "wick", "prev", "vol", "htf"}
+    assert feature_group("o_h") == "ohlc"
+    assert feature_group("upper") == "wick"
+    assert feature_group("c_pc") == "prev"
+    assert feature_group("vol_ratio") == "vol"
+    assert feature_group("htf_c_c") == "htf"
+    assert feature_group("htf_vol") == "vol"
+    mix = columns_for_groups(("ohlc", "vol"))
+    assert "o_h" in mix
+    assert "vol_ratio" in mix
+    assert "htf_c_c" not in mix
+    assert "hh" not in mix
+
+
 def test_learn_script_fits_toy_bars() -> None:
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
@@ -184,6 +202,12 @@ def test_learn_script_fits_toy_bars() -> None:
     assert rep["rows"] >= 8
     assert "train_corr" in rep
     assert "error" not in rep or rep.get("test_n", 0) < 2
+    names = [str(c.get("combo")) for c in (rep.get("combos") or [])]
+    assert "ohlc" in names
+    assert "vol" in names
+    assert "ohlc+vol" in names
+    assert "htf" not in names
+    assert all(c.get("paper") is False for c in (rep.get("combos") or []))
 
 
 if __name__ == "__main__":
@@ -196,5 +220,6 @@ if __name__ == "__main__":
     test_volume_ratio_signed_and_hh_vol_up()
     test_rel_bars_volume_delta_and_session_reset()
     test_rel_bars_from_price_only_tuples()
+    test_every_feature_has_a_group()
     test_learn_script_fits_toy_bars()
     print("ALL test_candle_relations OK")

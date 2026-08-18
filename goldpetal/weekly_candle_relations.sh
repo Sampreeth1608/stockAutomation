@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Research: learn OHLC/wick/volume/prev-bar/higher-TF relations. Not paper.
-# Does not change S13/S16.
+# Research: mix ohlc/wick/prev/vol/htf families. Not paper. Does not change S13/S16.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p data/learn/candle_relations

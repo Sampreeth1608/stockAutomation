@@ -383,6 +383,66 @@ def feature_vector(feat: dict[str, float]) -> list[float]:
     return [float(feat.get(name) or 0.0) for name in FEATURE_COLUMNS]
 
 
+_OHLC_STEMS = {"o_h", "o_l", "o_c", "h_c", "h_l", "l_c"}
+_WICK_CUR = {
+    "upper",
+    "lower",
+    "body",
+    "range",
+    "wick_gap",
+    "body_frac",
+    "upper_frac",
+    "lower_frac",
+    "close_loc",
+    "green",
+}
+_WICK_PREV = {f"p_{name}" for name in _WICK_CUR}
+_STRUCT = {"hh", "ll", "hl", "lh", "inside", "outside"}
+_VS_PREV_EXTRA = {"upper_vs_p", "lower_vs_p", "body_vs_p", "range_vs_p"}
+_VOL_EXACT = {
+    "vol",
+    "p_vol",
+    "n_ticks",
+    "p_n_ticks",
+    "signed_vol",
+    "hh_vol_up",
+    "ll_vol_up",
+    "green_vol_up",
+    "red_vol_up",
+    "range_up_vol_down",
+    "body_up_vol_down",
+    "c_pc_x_vol_ratio",
+    "h_ph_x_vol_ratio",
+    "l_pl_x_vol_ratio",
+    "htf_vol",
+    "htf_signed_vol",
+    "vol_vs_htf",
+    "vol_htf_ratio",
+}
+FEATURE_GROUP_NAMES = ("ohlc", "wick", "prev", "vol", "htf")
+
+
+def feature_group(name: str) -> str:
+    """Map one feature to ohlc / wick / prev / vol / htf."""
+    if name in _VOL_EXACT or name.startswith("vol_"):
+        return "vol"
+    if name.startswith("htf_"):
+        return "htf"
+    stem = name[:-2] if name.endswith("_r") else name
+    if stem in _OHLC_STEMS:
+        return "ohlc"
+    if name in _WICK_CUR or name in _WICK_PREV:
+        return "wick"
+    if name in _STRUCT or name in _VS_PREV_EXTRA:
+        return "prev"
+    return "prev"
+
+
+def columns_for_groups(groups: tuple[str, ...] | set[str]) -> tuple[str, ...]:
+    wanted = set(groups)
+    return tuple(n for n in FEATURE_COLUMNS if feature_group(n) in wanted)
+
+
 def attach_completed_higher(
     bars: list[Candle],
     higher: list[Candle],

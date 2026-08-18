@@ -3,6 +3,9 @@
 
 Research only. Does not paper or change S13/S16.
 
+Fits each family alone and combined (ohlc, wick, prev, vol, htf) on the same
+time split so you can see which mixes hold out of sample.
+
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --lots 100 --session --fees
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --tf 1h --higher 1d
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --tf 30m --higher 1h
@@ -28,7 +31,7 @@ from candle_relations import (
     FEATURE_COLUMNS,
     RelBar,
     build_rel_bars,
-    feature_vector,
+    columns_for_groups,
     labeled_rows,
     load_tick_rows,
 )
@@ -36,20 +39,61 @@ from charges import apply_charges_and_tax
 
 TF_MINUTES = {"30m": 30, "1h": 60, "1d": 1440}
 
+# Research mixes only. Each name is a set of families trained on the same split.
+FEATURE_COMBOS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ohlc", ("ohlc",)),
+    ("wick", ("wick",)),
+    ("prev", ("prev",)),
+    ("vol", ("vol",)),
+    ("htf", ("htf",)),
+    ("ohlc+wick", ("ohlc", "wick")),
+    ("ohlc+prev", ("ohlc", "prev")),
+    ("ohlc+vol", ("ohlc", "vol")),
+    ("ohlc+htf", ("ohlc", "htf")),
+    ("wick+vol", ("wick", "vol")),
+    ("wick+htf", ("wick", "htf")),
+    ("prev+vol", ("prev", "vol")),
+    ("prev+htf", ("prev", "htf")),
+    ("vol+htf", ("vol", "htf")),
+    ("ohlc+wick+prev", ("ohlc", "wick", "prev")),
+    ("ohlc+prev+htf", ("ohlc", "prev", "htf")),
+    ("ohlc+wick+vol", ("ohlc", "wick", "vol")),
+    ("ohlc+vol+htf", ("ohlc", "vol", "htf")),
+    ("prev+vol+htf", ("prev", "vol", "htf")),
+    ("price", ("ohlc", "wick", "prev", "htf")),
+    ("price+vol", ("ohlc", "wick", "prev", "vol")),
+    ("all", ("ohlc", "wick", "prev", "vol", "htf")),
+)
 
-def _matrix(rows: list[dict[str, Any]]) -> tuple[np.ndarray, np.ndarray]:
-    x = np.array([feature_vector(r["feat"]) for r in rows], dtype=float)
+
+def _matrix(
+    rows: list[dict[str, Any]],
+    columns: tuple[str, ...] | list[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    cols = list(columns) if columns is not None else list(FEATURE_COLUMNS)
+    x = np.array(
+        [[float(r["feat"].get(name) or 0.0) for name in cols] for r in rows],
+        dtype=float,
+    )
     y = np.array([int(r["y_up"]) for r in rows], dtype=int)
     x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     return x, y
 
 
-def _corr_rank(x: np.ndarray, y: np.ndarray, k: int = 15) -> list[dict[str, Any]]:
+def _corr_rank(
+    x: np.ndarray,
+    y: np.ndarray,
+    columns: tuple[str, ...] | list[str] | None = None,
+    k: int = 8,
+) -> list[dict[str, Any]]:
+    cols = list(columns) if columns is not None else list(FEATURE_COLUMNS)
     if len(y) < 4:
         return []
     yc = y.astype(float) - float(y.mean())
     out: list[dict[str, Any]] = []
-    for i, name in enumerate(FEATURE_COLUMNS):
+    for i, name in enumerate(cols):
+        if i >= x.shape[1]:
+            break
         col = x[:, i]
         if float(np.std(col)) < 1e-12:
             continue
@@ -94,15 +138,58 @@ def _auc(clf: Any, x: np.ndarray, y: np.ndarray) -> float | None:
     return float(roc_auc_score(y, p))
 
 
-def _top_coef(clf: Any, k: int = 15) -> list[dict[str, Any]]:
+def _top_coef(
+    clf: Any,
+    columns: tuple[str, ...] | list[str] | None = None,
+    k: int = 8,
+) -> list[dict[str, Any]]:
+    cols = list(columns) if columns is not None else list(FEATURE_COLUMNS)
     lr = clf.named_steps["lr"]
     coef = np.asarray(lr.coef_).ravel()
     rows = [
-        {"feature": FEATURE_COLUMNS[i], "weight": round(float(coef[i]), 4)}
-        for i in range(min(len(FEATURE_COLUMNS), len(coef)))
+        {"feature": cols[i], "weight": round(float(coef[i]), 4)}
+        for i in range(min(len(cols), len(coef)))
     ]
     rows.sort(key=lambda r: abs(float(r["weight"])), reverse=True)
     return rows[:k]
+
+
+def _fmt_auc(v: Any) -> str:
+    if v is None:
+        return "   -  "
+    return f"{float(v):6.3f}"
+
+
+def _eval_split(
+    train: list[dict[str, Any]],
+    test: list[dict[str, Any]],
+    columns: tuple[str, ...],
+    *,
+    lots: float,
+    fees: bool,
+    long_p: float,
+    short_p: float,
+) -> dict[str, Any]:
+    x_tr, y_tr = _matrix(train, columns)
+    x_te, y_te = _matrix(test, columns)
+    out: dict[str, Any] = {
+        "n_feat": len(columns),
+        "paper": False,
+        "train_corr": _corr_rank(x_tr, y_tr, columns),
+    }
+    try:
+        clf = _fit(x_tr, y_tr)
+    except Exception as exc:
+        out["error"] = f"fit_failed:{type(exc).__name__}"
+        return out
+    out["train_auc"] = _auc(clf, x_tr, y_tr)
+    out["test_auc"] = _auc(clf, x_te, y_te)
+    out["top_weights"] = _top_coef(clf, columns)
+    p_te = clf.predict_proba(x_te)[:, 1]
+    out["oos_one_bar"] = _one_bar_sim(
+        test, p_te, lots=lots, fees=fees, long_p=long_p, short_p=short_p
+    )
+    return out
 
 
 def _one_bar_sim(
@@ -181,11 +268,11 @@ def run_tf(
         "bars": len(candles),
         "rows": len(labeled),
         "formula": (
-            "same-bar OHLC + body/wicks + volume vs prev/HTF + "
-            "prev-bar O/H/L/C + HH/LL/inside + last completed higher TF"
+            "families ohlc / wick / prev / vol / htf, alone and combined; "
+            "label = next close up/down"
         ),
         "paper": False,
-        "note": "research only — do not paper until an OOS row is picked",
+        "note": "research only — combos are not a paper book",
     }
     if len(labeled) < 12:
         summary["error"] = "not enough labeled bars"
@@ -194,23 +281,47 @@ def run_tf(
     if cut >= len(labeled):
         cut = len(labeled) - 1
     train, test = labeled[:cut], labeled[cut:]
-    x_tr, y_tr = _matrix(train)
-    x_te, y_te = _matrix(test)
     summary["train_n"] = int(len(train))
     summary["test_n"] = int(len(test))
-    summary["train_corr"] = _corr_rank(x_tr, y_tr)
-    try:
-        clf = _fit(x_tr, y_tr)
-    except Exception as exc:
-        summary["error"] = f"fit_failed:{type(exc).__name__}"
-        return summary
-    summary["train_auc"] = _auc(clf, x_tr, y_tr)
-    summary["test_auc"] = _auc(clf, x_te, y_te)
-    summary["top_weights"] = _top_coef(clf)
-    p_te = clf.predict_proba(x_te)[:, 1]
-    summary["oos_one_bar"] = _one_bar_sim(
-        test, p_te, lots=lots, fees=fees, long_p=long_p, short_p=short_p
+    all_cols = tuple(FEATURE_COLUMNS)
+    all_fit = _eval_split(
+        train,
+        test,
+        all_cols,
+        lots=lots,
+        fees=fees,
+        long_p=long_p,
+        short_p=short_p,
     )
+    summary.update(
+        {
+            "n_feat": all_fit.get("n_feat"),
+            "train_corr": all_fit.get("train_corr"),
+            "train_auc": all_fit.get("train_auc"),
+            "test_auc": all_fit.get("test_auc"),
+            "top_weights": all_fit.get("top_weights"),
+            "oos_one_bar": all_fit.get("oos_one_bar"),
+        }
+    )
+    if all_fit.get("error"):
+        summary["error"] = all_fit["error"]
+    combos: list[dict[str, Any]] = []
+    for name, groups in FEATURE_COMBOS:
+        if higher is None and "htf" in groups:
+            continue
+        rec = _eval_split(
+            train,
+            test,
+            columns_for_groups(groups),
+            lots=lots,
+            fees=fees,
+            long_p=long_p,
+            short_p=short_p,
+        )
+        rec["combo"] = name
+        rec["groups"] = list(groups)
+        combos.append(rec)
+    summary["combos"] = combos
     return summary
 
 
@@ -237,7 +348,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     reports = []
-    print("Candle-relation learner (research, not paper S13/S16; includes volume)")
+    print("Candle-relation learner (research, not paper). Families mixed: ohlc/wick/prev/vol/htf")
     print(f"ticks={len(rows)} db={db}")
     for tf, htf in zip(tfs, highers, strict=False):
         if tf not in TF_MINUTES:
@@ -258,14 +369,35 @@ def main() -> None:
         reports.append(rep)
         print(
             f"  {tf} higher={higher or '-'} rows={rep.get('rows')} "
-            f"train_auc={rep.get('train_auc')} test_auc={rep.get('test_auc')} "
+            f"all train_auc={rep.get('train_auc')} test_auc={rep.get('test_auc')} "
             f"oos={rep.get('oos_one_bar')}"
         )
         if rep.get("train_corr"):
             top = ", ".join(
                 f"{r['feature']}={r['corr']}" for r in rep["train_corr"][:8]
             )
-            print(f"    corr {top}")
+            print(f"    all-corr {top}")
+        combos = list(rep.get("combos") or [])
+        if combos:
+            print(
+                "    combo                  feats  train   test  oos_n   win%    after₹"
+            )
+            ranked = sorted(
+                combos,
+                key=lambda r: (
+                    r.get("test_auc") is None,
+                    -(float(r["test_auc"]) if r.get("test_auc") is not None else 0.0),
+                ),
+            )
+            for c in ranked:
+                oos = c.get("oos_one_bar") or {}
+                print(
+                    f"    {str(c.get('combo')):<22} {int(c.get('n_feat') or 0):5d}  "
+                    f"{_fmt_auc(c.get('train_auc'))} {_fmt_auc(c.get('test_auc'))}  "
+                    f"{int(oos.get('n_trades') or 0):5d}  "
+                    f"{float(oos.get('win_rate') or 0):5.1f}  "
+                    f"{float(oos.get('after_tax_inr') or 0):8.1f}"
+                )
     latest = out_dir / "latest.json"
     latest.write_text(json.dumps(reports, indent=2), encoding="utf-8")
     print(f"wrote {latest}")
