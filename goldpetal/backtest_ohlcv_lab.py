@@ -291,7 +291,7 @@ def _verdict(lab_rows: list[LabMetrics], s16: LabMetrics, s18: LabMetrics | None
     s18_ac = s18.after_charges if s18 is not None else None
     beat: list[LabMetrics] = []
     for m in lab_rows:
-        if m.n_trades < MIN_TRADES:
+        if m.n_trades < MIN_TRADES or m.after_charges <= 0:
             continue
         if m.after_charges <= s16_ac:
             continue
@@ -430,6 +430,10 @@ def main() -> None:
             lab_30 + [s16_30],
         )
         print(_verdict(lab_30, s16_30, None))
+        print(
+            "30m S16 is a research baseline on 30m bars, not the paper 1h S16 book. "
+            "Paper rank is the 1h table vs S16 and S18."
+        )
         all_rows.extend(lab_30)
         all_rows.append(s16_30)
 
