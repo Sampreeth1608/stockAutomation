@@ -489,8 +489,23 @@ def run_once(
             sp=float(latest["sp"]),
         )
 
-        # S1 stays on 30-minute bars only.
+        # S1 stays on 30-minute bars only. Disabled stub used to return None
+        # and crash the tick handler on every 30m boundary.
         result_s1 = strategy_s1.on_bar(bar)
+        if result_s1 is None:
+            save_bar(
+                time_label=bar.time_label,
+                symbol=symbol,
+                token=token,
+                cmp=bar.cmp,
+                bp=bar.bp,
+                sp=bar.sp,
+                net=float(bar.bp) - float(bar.sp),
+                price_delta=None,
+                net_delta=None,
+            )
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
         save_bar(
             time_label=bar.time_label,
             symbol=symbol,
@@ -502,6 +517,9 @@ def run_once(
             price_delta=result_s1.price_delta,
             net_delta=result_s1.net_delta,
         )
+        if not _strategy_active(strategy_s1.name):
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
         regime = regime_det.last.regime
         action = result_s1.action
         # Block new entries when regime unfit / emergency / capital; optionally flatten.

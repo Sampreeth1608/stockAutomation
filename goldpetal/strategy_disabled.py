@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from strategy import SignalResult
+
 
 class DisabledStrategy:
     """Lightweight stand-in so the runner can skip loading unused strategy code."""
@@ -37,8 +39,16 @@ class DisabledStrategy:
     def maybe_signal(self, *args: Any, **kwargs: Any) -> None:
         return None
 
-    def on_bar(self, *args: Any, **kwargs: Any) -> None:
-        return None
+    def on_bar(self, *args: Any, **kwargs: Any) -> SignalResult:
+        return SignalResult(
+            action="HOLD",
+            position_after="flat",
+            price_delta=None,
+            net=0.0,
+            net_delta=None,
+            prev_net_delta=None,
+            reason="disabled",
+        )
 
     def on_bar_row(self, *args: Any, **kwargs: Any) -> None:
         return None
