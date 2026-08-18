@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Improve S18 from stored ticks. Promotes a better pack for paper (not live).
+"""Score S18 packs from stored ticks. Writes an ML proposal (not live).
 
 Uses 1h OHLC, previous 1h OHLC, volume, yesterday, wick, n_ticks, and TBQ/TSQ
-net from ticks.db. Time-split OOS after-tax. Writes data/learn/s18/active.json
-only if the winner beats the current pack on later bars after fees.
-Paper S18 loads that pack on RESTART. Never live. Never changes S13/S16.
+net from ticks.db. Time-split OOS. Ranked on profit after Angel charges,
+tax excluded. If a pack beats the current one and is profitable after
+charges, writes a pending ML proposal. Approve → paper on the station
+copies it to data/learn/s18/active.json. Does not change the live paper
+pack by itself. Never live. Never changes S13/S16.
 
   ./venv/bin/python learn_s18.py --db data/ticks.db --lots 100 --session --fees
 """
@@ -128,11 +130,21 @@ def candidate_packs() -> list[S18Pack]:
     return uniq
 
 
+def _after_charges(result: Any) -> float:
+    """Gross minus Angel charges. Tax is not subtracted."""
+    gross = float(getattr(result, "gross_pnl_inr", 0) or 0)
+    fees = float(getattr(result, "fees_inr", 0) or 0)
+    return round(gross - fees, 1)
+
+
 def _score(result: Any) -> dict[str, Any]:
     return {
         "n_trades": int(getattr(result, "n_trades", 0) or 0),
         "win_rate": round(100.0 * float(getattr(result, "win_rate", 0) or 0), 1),
+        "after_charges_inr": _after_charges(result),
         "after_tax_inr": round(float(getattr(result, "after_tax_pnl_inr", 0) or 0), 1),
+        "fees_inr": round(float(getattr(result, "fees_inr", 0) or 0), 1),
+        "gross_pnl_inr": round(float(getattr(result, "gross_pnl_inr", 0) or 0), 1),
         "gross_pts": round(float(getattr(result, "gross_pts", 0) or 0), 1),
         "max_dd_inr": round(float(getattr(result, "max_dd_inr", 0) or 0), 1),
     }
@@ -173,6 +185,8 @@ def learn(
     min_test_trades: int,
     out_dir: Path,
     pack_path: Path | None = None,
+    propose: bool = True,
+    proposals_path: Path | None = None,
 ) -> dict[str, Any]:
     dest = pack_path or (out_dir / "active.json")
     rows = load_vol_rows(db)
@@ -201,12 +215,15 @@ def learn(
         )
     ranked.sort(
         key=lambda r: (
-            -float(r["test"]["after_tax_inr"]),
+            -float(r["test"]["after_charges_inr"]),
             -int(r["test"]["n_trades"]),
         )
     )
     eligible = [
-        r for r in ranked if int(r["test"]["n_trades"]) >= min_test_trades
+        r
+        for r in ranked
+        if int(r["test"]["n_trades"]) >= min_test_trades
+        and float(r["test"]["after_charges_inr"]) > 0
     ]
     winner = eligible[0] if eligible else None
     cur_te = next((r for r in ranked if r["pack"]["name"] == current.name), None)
@@ -221,52 +238,89 @@ def learn(
             session=session,
         )
         ranked.append(cur_te)
-    promoted = False
+    proposed = False
+    proposal_id = ""
     active = current.as_dict()
-    note = "kept current pack"
+    note = "kept current pack (Approve on ML to change paper S18)"
     if winner is not None:
-        win_pnl = float(winner["test"]["after_tax_inr"])
-        cur_pnl = float(cur_te["test"]["after_tax_inr"])
-        if win_pnl > cur_pnl:
-            active = winner["pack"]
-            promoted = winner["pack"]["name"] != current.name
+        win_pnl = float(winner["test"]["after_charges_inr"])
+        cur_pnl = float(cur_te["test"]["after_charges_inr"])
+        if win_pnl > cur_pnl and winner["pack"]["name"] != current.name:
+            proposed = True
             note = (
-                f"promoted {winner['pack']['name']} "
-                f"test_pnl={winner['test']['after_tax_inr']} "
-                f"(was {current.name} {cur_pnl})"
+                f"proposed {winner['pack']['name']} "
+                f"after_charges={win_pnl} (was {current.name} {cur_pnl}). "
+                "Approve on ML tab. Did not change active.json."
             )
     payload = {
         "paper": True,
         "live": False,
+        "metric": "after_charges_ex_tax",
         "ticks": len(rows),
         "hours": len(hours),
         "days": len(days),
         "train_bars": len(train_h),
         "test_bars": len(test_h),
         "pack": active,
-        "promoted": promoted,
+        "proposed_pack": (winner or {}).get("pack") if proposed else None,
+        "promoted": False,
+        "proposed": proposed,
         "note": note,
         "updated_at": datetime.now(IST).isoformat(timespec="seconds"),
         "ranked": ranked[:16],
+        "proposal_id": "",
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     latest = out_dir / "latest.json"
+    wrote = [str(latest)]
+    proposed_path = out_dir / "proposed.json"
+    if proposed and winner is not None:
+        proposed_path.write_text(
+            json.dumps(
+                {
+                    "paper": True,
+                    "live": False,
+                    "metric": "after_charges_ex_tax",
+                    "pack": winner["pack"],
+                    "current": current.as_dict(),
+                    "test": winner["test"],
+                    "note": note,
+                    "updated_at": payload["updated_at"],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        wrote.append(str(proposed_path))
+        if propose:
+            from proposals import add_proposal, proposal_from_weekly_s18
+
+            week_id = datetime.now(IST).strftime("%G-W%V")
+            n = int(winner["test"]["n_trades"])
+            reasons = [
+                "ranked on after-charges PnL (tax excluded)",
+                f"test_n={n}",
+            ]
+            if n < 5:
+                reasons.append("small out-of-sample tape")
+            prop = proposal_from_weekly_s18(
+                week_id=week_id,
+                winner=winner,
+                current=cur_te,
+                model_path="data/learn/s18/proposed.json",
+                safety_ok=True,
+                safety_reasons=reasons,
+            )
+            kwargs: dict[str, Any] = {}
+            if proposals_path is not None:
+                kwargs["path"] = proposals_path
+            saved = add_proposal(prop, **kwargs)
+            proposal_id = saved.id
+    elif proposed_path.exists():
+        proposed_path.unlink()
+    payload["proposal_id"] = proposal_id
+    payload["wrote"] = wrote
     latest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(
-        json.dumps(
-            {
-                "paper": True,
-                "live": False,
-                "pack": active,
-                "note": note,
-                "updated_at": payload["updated_at"],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    payload["wrote"] = [str(latest), str(dest)]
     return payload
 
 
@@ -280,7 +334,7 @@ def main() -> None:
     ap.add_argument("--min-test-trades", type=int, default=2)
     ap.add_argument("--out-dir", default="data/learn/s18")
     args = ap.parse_args()
-    print("S18 learner (paper packs only, not live)")
+    print("S18 learner (ML proposal, after charges exclude tax, not live)")
     out_dir = Path(args.out_dir)
     rep = learn(
         Path(args.db),
@@ -294,17 +348,20 @@ def main() -> None:
     )
     print(
         f"ticks={rep.get('ticks')} hours={rep.get('hours')} "
-        f"promoted={rep.get('promoted')} pack={rep.get('pack', {}).get('name')} "
-        f"note={rep.get('note')}"
+        f"proposed={rep.get('proposed')} pack={rep.get('pack', {}).get('name')} "
+        f"proposal={rep.get('proposal_id') or '-'} note={rep.get('note')}"
     )
     for row in (rep.get("ranked") or [])[:8]:
         te = row["test"]
         print(
             f"  {row['pack']['name']:<18} test_n={te['n_trades']:<3} "
-            f"win={te['win_rate']:<5} after₹={te['after_tax_inr']}"
+            f"win={te['win_rate']:<5} after_charges₹={te['after_charges_inr']}"
         )
     print("wrote", ", ".join(rep.get("wrote") or []))
-    print("Type RESTART on the station to load a promoted pack. Keep DRY_RUN=true.")
+    print(
+        "If proposed=True, Approve → paper on the ML tab, then type RESTART. "
+        "Keep DRY_RUN=true."
+    )
 
 
 if __name__ == "__main__":

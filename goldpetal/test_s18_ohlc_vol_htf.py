@@ -108,6 +108,8 @@ def test_paper_wired_not_live() -> None:
     station = (root / "station.html").read_text(encoding="utf-8")
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert S18_NAME in station
+    assert "After charges ₹" in station
+    assert "weekly_s18.sh" in station
     assert "s18_from_env" in runner
     assert "ENABLE_S18" in runner
 

@@ -21,6 +21,10 @@ def test_station_is_the_operator_page() -> None:
     assert "Downloads" in html
     assert 'data-tab="ml"' in html
     assert "Approve → paper" in html
+    assert "S18_OHLC_VOL_HTF" in html
+    assert "After charges ₹" in html
+    assert "weekly_s18.sh" in html
+    assert 'value="S18_OHLC_VOL_HTF"' in html
     assert "/api/ml" in html
     assert "/api/s11/activate" in html
     assert "/api/proposals/" in html
@@ -63,7 +67,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Start bot" in html
     assert "Save strategies" in html
     assert "Trading station" in html
-    assert "ML / S11" in html
+    assert "ML / S11 + S18" in html
+    assert "after charges" in html
+    assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html

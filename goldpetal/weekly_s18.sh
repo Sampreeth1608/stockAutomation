@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Paper S18 pack learner. Not live. Type RESTART after a promote.
+# Score S18 packs from ticks. Writes an ML proposal (after charges, no tax).
+# Approve → paper on the station, then type RESTART. Not live.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p data/learn/s18

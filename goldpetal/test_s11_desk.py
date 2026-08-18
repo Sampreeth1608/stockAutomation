@@ -236,6 +236,8 @@ def test_activate_pack_and_ml_payload(tmp_path: Path) -> None:
     # none.json missing → proposals_snapshot creates empty store
     assert payload["s11"]["enable_s11"] is True
     assert payload["s11"]["pack"]["id"] == "loadme"
+    assert "s18" in payload
+    assert payload["s18"]["metric"] == "after_charges_ex_tax"
     assert payload["live_blocked"] is True
     assert LIVE_BLOCKED_REASON in payload["live_blocked_reason"]
     assert any(p["is_loaded"] for p in payload["packs"])

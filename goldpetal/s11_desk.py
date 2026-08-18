@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from proposals import decide_proposal, get_proposal, proposals_snapshot
 from position_safety import read_bot_health
+from s18_desk import apply_s18_proposal, s18_status
 
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
@@ -376,11 +377,31 @@ def _annotate_proposal(
     *,
     loaded_key: str,
     root: Path,
+    s18_pack_name: str = "",
 ) -> dict[str, Any]:
     out = dict(row)
     paper = out.get("paper") if isinstance(out.get("paper"), dict) else {}
     extra = paper.get("extra") if isinstance(paper.get("extra"), dict) else {}
     patch = out.get("env_patch") if isinstance(out.get("env_patch"), dict) else {}
+    if str(out.get("strategy") or "") == "S18_OHLC_VOL_HTF":
+        pack = extra.get("pack") if isinstance(extra.get("pack"), dict) else {}
+        name = str(pack.get("name") or "")
+        after_ch = extra.get("after_charges_inr")
+        if after_ch is None:
+            after_ch = paper.get("after_tax_pnl_inr")
+        out["proposed_pack"] = {
+            "path": str(out.get("model_path") or "data/learn/s18/proposed.json"),
+            "exists": True,
+            "error": "",
+            "rationale": f"pack={name or '—'}",
+            "behavior_summary": "S18 AND overlay. Ranked on after charges, tax excluded.",
+        }
+        out["same_as_loaded"] = bool(name and s18_pack_name and name == s18_pack_name)
+        out["would_disable_s11"] = False
+        out["extra"] = extra
+        out["pnl_label"] = "After charges ₹"
+        out["pnl_value"] = after_ch
+        return out
     pack_raw = _json_pack_path(
         str(patch.get("S11_PACK_PATH") or "").strip()
         or str(out.get("model_path") or "").strip()
@@ -396,6 +417,8 @@ def _annotate_proposal(
         "n",
     }
     out["extra"] = extra
+    out["pnl_label"] = "After-tax ₹"
+    out["pnl_value"] = paper.get("after_tax_pnl_inr")
     return out
 
 
@@ -418,7 +441,22 @@ def ml_desk_payload(
             "bot_health_ts": "",
             "s11_position": None,
         }
+    try:
+        s18 = s18_status(root=root, env_path=env_path)
+    except Exception as exc:
+        s18 = {
+            "enable_s18": False,
+            "pack_name": "base",
+            "pack": {},
+            "pack_path": "",
+            "dry_run": True,
+            "load_hint": f"status failed: {exc}",
+            "metric": "after_charges_ex_tax",
+            "paper": True,
+            "live": False,
+        }
     loaded_key = str(s11.get("pack_key") or "")
+    s18_name = str(s18.get("pack_name") or "")
     try:
         snap = (
             proposals_snapshot(path=proposals_path)
@@ -432,11 +470,15 @@ def ml_desk_payload(
             "counts": {"pending": 0, "total": 0},
         }
     pending = [
-        _annotate_proposal(p, loaded_key=loaded_key, root=root)
+        _annotate_proposal(
+            p, loaded_key=loaded_key, root=root, s18_pack_name=s18_name
+        )
         for p in (snap.get("pending") or [])
     ]
     decided = [
-        _annotate_proposal(p, loaded_key=loaded_key, root=root)
+        _annotate_proposal(
+            p, loaded_key=loaded_key, root=root, s18_pack_name=s18_name
+        )
         for p in (snap.get("decided") or [])
     ]
     snap = dict(snap)
@@ -453,14 +495,15 @@ def ml_desk_payload(
         "ts_ist": _now_iso(),
         "proposals": snap,
         "s11": s11,
+        "s18": s18,
         "packs": packs,
         "discover": discover_status(root=root),
         "live_blocked": True,
         "live_blocked_reason": LIVE_BLOCKED_REASON,
         "note": (
-            "Approve → paper writes whitelist .env (S11_PACK_PATH + ENABLE_S11) and "
-            "keeps DRY_RUN=true. Type RESTART on Engine to load the pack into RAM. "
-            "Live stays on Live money — this tab never arms Angel."
+            "Approve → paper writes S11_PACK_PATH / ENABLE_S11, or S18 active.json "
+            "+ ENABLE_S18, and keeps DRY_RUN=true. S18 ranks after charges (tax excluded). "
+            "Type RESTART on Engine to load RAM. This tab never arms Angel."
         ),
     }
 
@@ -476,6 +519,7 @@ def decide_proposal_for_desk(
     state_path: Path | None = None,
     env_path: Path | None = None,
     root: Path = ROOT,
+    s18_pack_path: Path | None = None,
 ) -> dict[str, Any]:
     """Approve → paper / reject from the station. Never approved_live."""
     if decision == "approved_live":
@@ -504,11 +548,31 @@ def decide_proposal_for_desk(
             "safety_ok": False,
             "proposal": found.to_dict(),
         }
+    pack_applied: dict[str, Any] | None = None
+    if (
+        apply_env
+        and decision == "approved_paper"
+        and found.strategy == "S18_OHLC_VOL_HTF"
+    ):
+        pack_applied = apply_s18_proposal(
+            found, pack_path=s18_pack_path, root=root
+        )
+        if not pack_applied.get("ok"):
+            return {
+                "ok": False,
+                "error": pack_applied.get("error") or "S18 pack write failed",
+                "proposal": found.to_dict(),
+            }
+    # Rejecting an S18 pack must not force-disable paper S18 — keep the loaded pack.
+    if found.strategy == "S18_OHLC_VOL_HTF" and decision == "rejected":
+        kwargs["touch_control"] = False
     p = decide_proposal(proposal_id, decision, note=note, **kwargs)
     env_result = None
     if apply_env and decision == "approved_paper" and p.env_patch:
         env_result = apply_paper_env_patch(p.env_patch, env_path=env_path)
     restart_needed = bool(env_result and env_result.get("ok"))
+    if pack_applied and pack_applied.get("ok"):
+        restart_needed = True
     reminder = ""
     if env_result and not env_result.get("ok"):
         reminder = (
@@ -529,6 +593,7 @@ def decide_proposal_for_desk(
         "safety_ok": p.safety_ok,
         "env_patch": p.env_patch,
         "env_applied": env_result,
+        "s18_applied": pack_applied,
         "title": p.title,
         "proposal": p.to_dict(),
         "restart_needed": restart_needed,

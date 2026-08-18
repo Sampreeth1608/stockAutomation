@@ -1,4 +1,4 @@
-"""S18 learner promotes a pack from tick OHLC/volume/net. Paper only."""
+"""S18 learner scores packs and writes an ML proposal. Does not auto-promote."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def test_candidates_include_base_and_tick_extras() -> None:
     assert BASE_PACK.require_beyond_prev_hl is False
 
 
-def test_learn_writes_pack() -> None:
+def test_learn_writes_latest_not_active() -> None:
     ist = ZoneInfo("Asia/Kolkata")
     with tempfile.TemporaryDirectory() as raw:
         td = Path(raw)
@@ -60,25 +60,38 @@ def test_learn_writes_pack() -> None:
         con.commit()
         con.close()
         out = td / "learn"
+        props = td / "proposals.json"
         rep = learn(
             db,
             lots=1.0,
-            fees=False,
+            fees=True,
             session=False,
             train_frac=0.6,
             min_test_trades=1,
             out_dir=out,
             pack_path=out / "active.json",
+            proposals_path=props,
         )
         assert "pack" in rep
         assert rep["live"] is False
+        assert rep["promoted"] is False
+        assert rep["metric"] == "after_charges_ex_tax"
         assert (out / "latest.json").exists()
-        assert (out / "active.json").exists()
+        assert not (out / "active.json").exists()
         assert rep["pack"]["name"]
         assert "ranked" in rep
+        for row in rep["ranked"]:
+            assert "after_charges_inr" in row["test"]
+            assert "after_tax_inr" in row["test"]
+        if rep["proposed"]:
+            assert (out / "proposed.json").exists()
+            assert rep["proposal_id"]
+            assert props.exists()
+        else:
+            assert not (out / "proposed.json").exists()
 
 
 if __name__ == "__main__":
     test_candidates_include_base_and_tick_extras()
-    test_learn_writes_pack()
+    test_learn_writes_latest_not_active()
     print("ALL test_learn_s18 OK")
