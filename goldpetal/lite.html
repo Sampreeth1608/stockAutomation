@@ -104,6 +104,19 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
+    <h2>You — capture</h2>
+    <p class="hint">Records what you would do, only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Does not trade. Full tape: <a href="/#you">station You tab</a>.</p>
+    <p class="hint" id="you-ltp-line">LTP …</p>
+    <div class="row">
+      <button class="btn ok" type="button" data-you="buy">BUY</button>
+      <button class="btn danger" type="button" data-you="short">SHORT</button>
+      <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
+    </div>
+    <p class="hint" id="you-sum">No captures yet.</p>
+    <p class="flash" id="flash-you"></p>
+  </section>
+
+  <section class="card">
     <h2>Live money</h2>
     <p class="armed" id="money-line"></p>
     <div class="row" style="margin-top:.5rem">
@@ -277,6 +290,32 @@ $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
 load().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 loadLab().catch(() => {});
+async function loadYou() {
+  const d = await api("/api/capture");
+  const s = (d && d.summary) || {};
+  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—") +
+    ((d.session && d.session.open) ? " · session open" : " · market closed");
+  $("you-sum").textContent = "captured " + (s.n || 0) +
+    " · BUY " + (s.n_buy || 0) +
+    " · SHORT " + (s.n_short || 0) +
+    " · NO TRADE " + (s.n_no_trade || 0);
+  const open = !!(d.session && d.session.open);
+  document.querySelectorAll("button[data-you]").forEach((b) => { b.disabled = !open; });
+  if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
+}
+document.querySelectorAll("button[data-you]").forEach((btn) => {
+  btn.onclick = () => {
+    api("/api/capture", {
+      method: "POST",
+      body: JSON.stringify({ action: btn.dataset.you, confidence: 3 }),
+    }).then((res) => {
+      const rec = res.recorded || {};
+      flash("flash-you", "Recorded " + String(rec.action || btn.dataset.you).toUpperCase() + " — not an order");
+      return loadYou();
+    }).catch((e) => flash("flash-you", String(e.message || e), true));
+  };
+});
+loadYou().catch(() => {});
 $("ml-pending").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-ml]");
   if (!btn) return;
