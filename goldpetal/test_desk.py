@@ -28,6 +28,11 @@ def test_station_is_the_operator_page() -> None:
     assert 'href="/lite"' in html
     assert "minimumFractionDigits: 2" in html
     assert "s14-chart" not in html
+    assert "fonts.googleapis.com" in html
+    assert "Source Sans 3" in html
+    assert "Fraunces" in html
+    assert "IBM Plex Mono" in html
+    assert "font: 14px/1.45" in html
 
 
 def test_lite_html_is_compact_controls() -> None:
