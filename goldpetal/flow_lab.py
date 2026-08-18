@@ -1353,14 +1353,21 @@ def simulate_flow(
     params: FlowParams | None = None,
     entry_days: set[str] | None = None,
     charge_cfg: ChargeConfig | None = None,
+    decide_fn: Callable[..., tuple[str | None, str]] | None = None,
 ) -> Any:
-    if strategy not in DECIDERS:
-        raise ValueError(f"unknown factory recipe {strategy!r}")
+    """Event-driven bar simulator. The caller proposes ``strategy`` / ``decide_fn``;
+    this function is what actually happened. Not a live path.
+    """
+    if decide_fn is None:
+        if strategy not in DECIDERS:
+            raise ValueError(f"unknown factory recipe {strategy!r}")
+        decide = DECIDERS[strategy]
+    else:
+        decide = decide_fn
     if exit_mode not in {EXIT_FLIP, EXIT_ATR}:
         raise ValueError(f"unknown exit_mode {exit_mode!r}")
     p = params or FlowParams()
     feats = build_flow_features(bars, p)
-    decide = DECIDERS[strategy]
     st: dict[str, Any] = {}
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
     book = tf or f"{strategy}:{exit_mode}"

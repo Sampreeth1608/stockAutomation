@@ -67,6 +67,7 @@ from s11_desk import (
     ml_desk_payload,
     pack_summary,
 )
+from research_desk import decide_research, research_desk_payload
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 from s14_exchange_sheet import (
     HTML_NAME,
@@ -358,6 +359,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/ml":
                 status, body, ctype = _json_bytes(ml_desk_payload())
+                self._send(status, body, ctype)
+                return
+            if path == "/api/research":
+                status, body, ctype = _json_bytes(research_desk_payload())
                 self._send(status, body, ctype)
                 return
             if path == "/api/s11/pack":
@@ -653,6 +658,20 @@ class ControlHandler(BaseHTTPRequestHandler):
                         apply_env=apply_env,
                         accept_unsafe=accept_unsafe,
                     )
+                except KeyError as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 404))
+                    return
+                except (ValueError, RuntimeError) as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
+            if path.startswith("/api/research/") and path.endswith("/decide"):
+                proposal_id = path[len("/api/research/") : -len("/decide")]
+                decision = str(data.get("decision") or "")
+                note = str(data.get("note") or "")
+                try:
+                    res = decide_research(proposal_id, decision, note=note)
                 except KeyError as exc:
                     self._send(*_json_bytes({"error": str(exc)}, 404))
                     return
