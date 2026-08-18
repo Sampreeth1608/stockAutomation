@@ -143,6 +143,35 @@ def apply_paper_env_patch(
     return out
 
 
+def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str]:
+    """Load a JSON object. Never raise on joblib/pickle (starts with 0x80)."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(8)
+            if head.startswith(b"\x80"):
+                return None, "binary pickle/joblib, not pack JSON"
+            blob = head + fh.read()
+        text = blob.decode("utf-8")
+        data = json.loads(text)
+    except UnicodeDecodeError:
+        return None, "not utf-8 (binary file)"
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"read failed: {exc}"
+    if not isinstance(data, dict):
+        return None, "pack is not an object"
+    return data, ""
+
+
+def _json_pack_path(raw: str) -> str:
+    """Prefer a .json pack path; skip joblib model_path fallbacks."""
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value.lower().endswith((".joblib", ".pkl", ".pickle", ".bin")):
+        return ""
+    return value
+
+
 def pack_summary(raw: str | Path | None, *, root: Path = ROOT) -> dict[str, Any]:
     """Read a discovery pack JSON without loading the joblib model."""
     value = str(raw or "").strip()
@@ -174,13 +203,20 @@ def pack_summary(raw: str | Path | None, *, root: Path = ROOT) -> dict[str, Any]
             "exists": False,
             "error": "missing",
         }
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+    if path.suffix.lower() in {".joblib", ".pkl", ".pickle", ".bin"}:
         return {
             "path": env_path,
             "exists": True,
-            "error": f"read failed: {exc}",
+            "error": "model file, not pack JSON",
+            "model_path": env_path,
+            "model_exists": True,
+        }
+    data, err = _read_json_object(path)
+    if err:
+        return {
+            "path": env_path,
+            "exists": True,
+            "error": err,
         }
     if not isinstance(data, dict):
         return {"path": env_path, "exists": True, "error": "pack is not an object"}
@@ -296,10 +332,10 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
     summary = ""
     week_id = ""
     if report_path.is_file():
-        try:
-            raw = json.loads(report_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            raw = {}
+        raw_obj, err = _read_json_object(report_path)
+        raw = raw_obj or {}
+        if err and not raw:
+            summary = err
         if isinstance(raw, dict):
             summary = str(raw.get("behavior_summary") or raw.get("summary") or "")[:500]
             week_id = str(raw.get("week_id") or "")
@@ -308,7 +344,7 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
                 for row in rows[:8]:
                     if not isinstance(row, dict):
                         continue
-                    pack_path = str(row.get("pack_path") or "")
+                    pack_path = _json_pack_path(str(row.get("pack_path") or ""))
                     item = {
                         "model": row.get("model") or row.get("model_name"),
                         "template": row.get("template"),
@@ -345,7 +381,10 @@ def _annotate_proposal(
     paper = out.get("paper") if isinstance(out.get("paper"), dict) else {}
     extra = paper.get("extra") if isinstance(paper.get("extra"), dict) else {}
     patch = out.get("env_patch") if isinstance(out.get("env_patch"), dict) else {}
-    pack_raw = str(patch.get("S11_PACK_PATH") or out.get("model_path") or "").strip()
+    pack_raw = _json_pack_path(
+        str(patch.get("S11_PACK_PATH") or "").strip()
+        or str(out.get("model_path") or "").strip()
+    )
     proposed = pack_summary(pack_raw, root=root) if pack_raw else pack_summary("", root=root)
     proposed_key = str(proposed.get("path") or "")
     out["proposed_pack"] = proposed
@@ -366,13 +405,32 @@ def ml_desk_payload(
     env_path: Path | None = None,
     proposals_path: Path | None = None,
 ) -> dict[str, Any]:
-    s11 = s11_status(root=root, env_path=env_path)
+    try:
+        s11 = s11_status(root=root, env_path=env_path)
+    except Exception as exc:
+        s11 = {
+            "enable_s11": False,
+            "pack_path": "",
+            "pack_key": "",
+            "pack": {"exists": False, "error": str(exc)},
+            "dry_run": True,
+            "load_hint": f"status failed: {exc}",
+            "bot_health_ts": "",
+            "s11_position": None,
+        }
     loaded_key = str(s11.get("pack_key") or "")
-    snap = (
-        proposals_snapshot(path=proposals_path)
-        if proposals_path is not None
-        else proposals_snapshot()
-    )
+    try:
+        snap = (
+            proposals_snapshot(path=proposals_path)
+            if proposals_path is not None
+            else proposals_snapshot()
+        )
+    except Exception:
+        snap = {
+            "pending": [],
+            "decided": [],
+            "counts": {"pending": 0, "total": 0},
+        }
     pending = [
         _annotate_proposal(p, loaded_key=loaded_key, root=root)
         for p in (snap.get("pending") or [])
@@ -384,7 +442,10 @@ def ml_desk_payload(
     snap = dict(snap)
     snap["pending"] = pending
     snap["decided"] = decided
-    packs = list_s11_packs(root=root)
+    try:
+        packs = list_s11_packs(root=root)
+    except Exception:
+        packs = []
     for row in packs:
         row["is_loaded"] = bool(loaded_key and row.get("path") == loaded_key)
     return {

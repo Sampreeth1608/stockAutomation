@@ -286,6 +286,48 @@ def test_reject_does_not_write_env(tmp_path: Path) -> None:
     assert "S11_DISCOVERED" in st.force_disabled
 
 
+def test_joblib_model_path_does_not_crash_ml_tab(tmp_path: Path) -> None:
+    """Weekend proposals store the .joblib on model_path; pickle starts with 0x80."""
+    models = tmp_path / "data" / "discover" / "models"
+    models.mkdir(parents=True)
+    joblib = models / "logreg_book.joblib"
+    joblib.write_bytes(b"\x80\x04\x95joblib")
+    row = pack_summary(str(joblib), root=tmp_path)
+    assert row["error"]
+    assert "utf-8" not in row["error"]
+    fake_json = tmp_path / "data" / "discover" / "packs" / "notjson.json"
+    fake_json.parent.mkdir(parents=True, exist_ok=True)
+    fake_json.write_bytes(b"\x80\x04\x95joblib")
+    row_json = pack_summary(fake_json, root=tmp_path)
+    assert row_json["exists"] is True
+    assert "utf-8" not in (row_json.get("error") or "")
+    assert "pickle" in (row_json.get("error") or "") or "binary" in (row_json.get("error") or "")
+
+    env = tmp_path / ".env"
+    env.write_text("DRY_RUN=true\nENABLE_S11=true\nS11_PACK_PATH=\n", encoding="utf-8")
+    props = tmp_path / "control" / "proposals.json"
+    add_proposal(
+        StrategyProposal(
+            id="s11job",
+            week_id="2026-W33",
+            kind="new",
+            strategy="S11_DISCOVERED",
+            title="S11 joblib fallback",
+            summary="safety failed so pack path empty",
+            paper=PaperResult(),
+            safety_ok=False,
+            model_path=str(joblib),
+            env_patch={"ENABLE_S11": "false", "S11_PACK_PATH": "", "DRY_RUN": "true"},
+        ),
+        path=props,
+    )
+    payload = ml_desk_payload(root=tmp_path, env_path=env, proposals_path=props)
+    assert payload["ok"] is True
+    pending = payload["proposals"]["pending"]
+    assert len(pending) == 1
+    assert pending[0]["proposed_pack"].get("error") == "empty"
+
+
 if __name__ == "__main__":
     import tempfile
 
@@ -305,4 +347,6 @@ if __name__ == "__main__":
         test_activate_unsafe_pack_requires_accept(Path(td))
     with tempfile.TemporaryDirectory() as td:
         test_reject_does_not_write_env(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        test_joblib_model_path_does_not_crash_ml_tab(Path(td))
     print("all s11 desk tests passed")
