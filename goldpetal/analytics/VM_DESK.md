@@ -77,10 +77,25 @@ git pull origin cursor/s14-wick-length-a4b2
 ./scripts/run_desk_vm.sh --restart
 ```
 
+## S4 daily HH/LL swing (paper)
+
+Old S13 HH/LL on the **day** candle. Confirm only in the last 15 minutes
+before `MARKET_CLOSE`. **Hold the trend across days and weeks** until the
+opposite HH+green / LL+red. FLIP. Never flatten at next open. Never EOD flatten.
+
+S13 is the same clock with the **new** S16 close-vs-prev formula.
+
+```bash
+ENABLE_S4=true
+S4_ENTRY_MINUTES_BEFORE_CLOSE=15
+```
+
+Overnight ML (`weekly_s4.sh` / `strategy_overnight.py`) is research-only.
+
 ## S13 daily S16 (paper)
 
 S16 close-vs-prev on the **day** candle vs the previous day. Confirm only in the
-**last 15 minutes before MARKET_CLOSE** (never the next day's open — that is S4).
+**last 15 minutes before MARKET_CLOSE** (never the next day's open).
 Fill at last-15m LTP. Overnight hold until the opposite signal.
 
 - C > prevC → HH/LL only (HH+green LONG, LL+red SHORT). Wicks ignored.
@@ -97,7 +112,7 @@ S13_ENTRY_MINUTES_BEFORE_CLOSE=15
 S13_MIN_WICK_GAP=0
 ```
 
-Restart supervise after pull. Look for `S13_HHHL_DAY` / `daily S16` in `data/strategy_run.log`.
+Restart supervise after pull. Look for `hold-until-opposite` on S4/S13 in `data/strategy_run.log`.
 
 ## Restart / orphan / EOD safety (intraday)
 

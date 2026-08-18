@@ -33,7 +33,6 @@ from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
 from strategy_discovered import DiscoveredStrategy, discovered_from_env
-from strategy_overnight import OvernightStrategy, overnight_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
 from strategy_net_zigzag import (
     NetZigzagStrategy,
@@ -41,7 +40,7 @@ from strategy_net_zigzag import (
     s10_legacy30_from_env,
 )
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
-from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env
+from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env, s4_swing_from_env
 from strategy_s16 import S16HhhlWickStrategy, s16_from_env
 from strategy_wick import wick_record_actions
 from zigzag_recorder import recorder_from_env
@@ -161,7 +160,7 @@ def run_once(
     strategy_s1: PressureStrategy,
     strategy_s2: BalanceStrategy,
     strategy_s3: MLStrategy,
-    strategy_s4: OvernightStrategy,
+    strategy_s4: HhhlDayOvernightStrategy,
     strategy_s5: MinEdgeStrategy,
     strategy_s6: MinEdgeStrategy,
     strategy_s8: NetZigzagStrategy,
@@ -325,7 +324,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S4       : overnight next-open "
+        f"S4       : daily HH/LL swing (hold until opposite) "
         f"[{'ON' if portfolio.is_enabled(strategy_s4.name) else 'OFF'}] "
         f"{strategy_s4.status_line}",
         flush=True,
@@ -376,7 +375,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S13      : daily S16 close-vs-prev last-15m "
+        f"S13      : daily S16 swing (hold until opposite) "
         f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
         f"{strategy_s13.status_line}",
         flush=True,
@@ -410,6 +409,7 @@ def run_once(
 
     # --- Restart safety: restore RAM from DB or auto-CLOSE orphans ---
     strat_map = {
+        strategy_s4.name: strategy_s4,
         strategy_s5.name: strategy_s5,
         strategy_s8.name: strategy_s8,
         strategy_s13.name: strategy_s13,
@@ -767,58 +767,102 @@ def run_once(
         logger.info(line)
 
 
-    def emit_s4_if_changed(now: datetime, message: dict) -> None:
-        """S4 overnight: enter near close, exit after next open. Ignores tick regime."""
-        if not _strategy_active(strategy_s4.name):
-            return
-        if not strategy_s4.enabled:
+    def emit_daily_swing_if_changed(strategy, now: datetime, message: dict) -> None:
+        """S4/S13 daily swing: last 15m of this day, FLIP, hold until opposite."""
+        if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
             return
-        # Skip new overnight entries if book is abnormally wide at decision time
         if (
             regime_det.last.regime == "WIDE_SPREAD"
-            and strategy_s4.position == "flat"
+            and strategy.position == "flat"
         ):
             return
-        # feed tick row for day feature build
-        from export_full_ticks import row_from_tick
-        import json as _json
-        row = row_from_tick(
-            now.isoformat(timespec="seconds"),
-            message.get("exchange_timestamp"),
-            _json.dumps(message, default=str),
-        )
-        if row.get("ltp") is not None:
-            strategy_s4.push_tick_row(row)
-        result = strategy_s4.maybe_signal(now, float(latest["cmp"]))
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        prev_pos = strategy.position
+        prev_entry = getattr(strategy, "entry_price", None)
+        prev_date = getattr(strategy, "entry_date", None)
+        result = strategy.on_tick(now, float(latest["cmp"]), message)
+        skip = getattr(strategy, "last_skip", None)
+        day = getattr(strategy, "_day", None)
+        prev = getattr(strategy, "prev_day", None)
+        if result is None and state["tick_count"] % 50 == 0:
+            prev_s = (
+                f"prev={prev.date} prevH={prev.high} prevL={prev.low} prevC={prev.close}"
+                if prev is not None
+                else "prev=none"
+            )
+            day_s = (
+                f"dayH={day.high} dayL={day.low} dayO={day.open} dayC={day.close}"
+                if day is not None
+                else "day=none"
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
+                f"pos={strategy.position} skip={skip} {prev_s} {day_s}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+        planned = wick_record_actions(prev_pos, result)
+        if not planned:
             return
-        if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = allow_new_entry(
-                strategy_s4.name, features=_entry_features(strategy_s4.name, result.action)
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = allow_new_entry(
+                strategy.name,
+                features=_entry_features(strategy.name, enter_action),
             )
             if not ok_enter:
-                strategy_s4.position = "flat"
+                strategy.position = prev_pos
+                strategy.entry_price = prev_entry
+                if hasattr(strategy, "entry_date"):
+                    strategy.entry_date = prev_date
+                if hasattr(strategy, "release_action_lock"):
+                    strategy.release_action_lock()
+                if hasattr(strategy, "_save_state"):
+                    strategy._save_state()
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
                 return
-        _record_signal(
-            time_label=now.isoformat(timespec="seconds"),
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            strategy=strategy_s4.name,
-            cmp=float(latest["cmp"]),
+        fill_px = (
+            float(strategy.entry_price)
+            if getattr(strategy, "entry_price", None) is not None
+            else float(latest["cmp"])
         )
-        line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy_s4.name} "
-            f"CMP={latest['cmp']} prob_gap_up={strategy_s4.last_prob} "
-            f"=> {result.action} (pos={strategy_s4.position}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev_pos} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy.name,
+                cmp=fill_px,
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                f"CMP={fill_px} => {action} "
+                f"(pos={pos_after}) | {reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+
+    def emit_s4_if_changed(now: datetime, message: dict) -> None:
+        """S4: old S13 HH/LL daily swing — last 15m, hold until opposite (not next open)."""
+        emit_daily_swing_if_changed(strategy_s4, now, message)
+
+    def emit_s13_if_changed(now: datetime, message: dict) -> None:
+        """S13: daily S16 close-vs-prev — last 15m, hold until opposite (not next open)."""
+        emit_daily_swing_if_changed(strategy_s13, now, message)
 
 
     def emit_s5_if_changed(now: datetime, message: dict) -> None:
@@ -1174,95 +1218,6 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
-    def emit_s13_if_changed(now: datetime, message: dict) -> None:
-        """S13: daily S16 close-vs-prev — last 15m of the signal day (not next open)."""
-        if not _strategy_active(strategy_s13.name):
-            return
-        if latest["cmp"] is None:
-            return
-        # Skip new overnight entries if book is abnormally wide at decision time
-        if (
-            regime_det.last.regime == "WIDE_SPREAD"
-            and strategy_s13.position == "flat"
-        ):
-            return
-        prev_pos = strategy_s13.position
-        prev_entry = strategy_s13.entry_price
-        prev_date = strategy_s13.entry_date
-        result = strategy_s13.on_tick(now, float(latest["cmp"]), message)
-        skip = getattr(strategy_s13, "last_skip", None)
-        day = getattr(strategy_s13, "_day", None)
-        prev = getattr(strategy_s13, "prev_day", None)
-        if result is None and state["tick_count"] % 50 == 0:
-            prev_s = (
-                f"prev={prev.date} prevH={prev.high} prevL={prev.low} prevC={prev.close}"
-                if prev is not None
-                else "prev=none"
-            )
-            day_s = (
-                f"dayH={day.high} dayL={day.low} dayO={day.open} dayC={day.close}"
-                if day is not None
-                else "day=none"
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] S13_HHHL_DAY idle "
-                f"pos={strategy_s13.position} skip={skip} {prev_s} {day_s}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        planned = wick_record_actions(prev_pos, result)
-        if not planned:
-            return
-        enter_action = planned[-1][0]
-        if enter_action in {"BUY", "SHORT"}:
-            ok_enter, why = allow_new_entry(
-                strategy_s13.name,
-                features=_entry_features(strategy_s13.name, enter_action),
-            )
-            if not ok_enter:
-                strategy_s13.position = prev_pos
-                strategy_s13.entry_price = prev_entry
-                strategy_s13.entry_date = prev_date
-                if hasattr(strategy_s13, "release_action_lock"):
-                    strategy_s13.release_action_lock()
-                if hasattr(strategy_s13, "_save_state"):
-                    strategy_s13._save_state()
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] S13_HHHL_DAY "
-                    f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                return
-        fill_px = (
-            float(strategy_s13.entry_price)
-            if strategy_s13.entry_price is not None
-            else float(latest["cmp"])
-        )
-        for action, pos_after in planned:
-            reason = result.reason
-            if action == "CLOSE" and len(planned) > 1:
-                reason = f"FLIP close {prev_pos} | {result.reason}"
-            _record_signal(
-                time_label=now.isoformat(timespec="seconds"),
-                action=action,
-                position_after=pos_after,
-                reason=reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                strategy=strategy_s13.name,
-                cmp=fill_px,
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy_s13.name} "
-                f"CMP={fill_px} => {action} "
-                f"(pos={pos_after}) | {reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-
     def emit_s16_if_changed(now: datetime, message: dict) -> None:
         """S16: 1h close-vs-prev HH/LL or wick — FLIP at the finished hour close."""
         strategy = strategy_s16
@@ -1442,7 +1397,7 @@ def run_once(
             emit_s3_if_changed(now, message)
             # S11: multi-model discovered pack
             emit_s11_if_changed(now, message)
-            # S4: overnight next-open
+            # S4: daily HH/LL swing (last 15m, hold until opposite)
             emit_s4_if_changed(now, message)
             # S5: min-edge (fee-aware)
             emit_s5_if_changed(now, message)
@@ -1568,7 +1523,7 @@ def main() -> None:
     strategy_s1 = _load("S1_NETDELTA", PressureStrategy)
     strategy_s2 = _load("S2_BALANCE", balance_from_env)
     strategy_s3 = _load("S3_ML", ml_strategy_from_env)
-    strategy_s4 = _load("S4_OVERNIGHT", overnight_from_env)
+    strategy_s4 = _load("S4_OVERNIGHT", s4_swing_from_env)
     strategy_s5 = _load("S5_MINEDGE", minedge_from_env)
     strategy_s6 = _load("S6_MIN30", min30_from_env)
     strategy_s8 = _load("S8_NET_ZIGZAG", net_zigzag_from_env)

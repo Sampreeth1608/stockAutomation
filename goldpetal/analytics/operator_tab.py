@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 SHORT = {
-    "S4_OVERNIGHT": "S4 overnight",
+    "S4_OVERNIGHT": "S4 HHHL swing",
     "S5_MINEDGE": "S5 minedge",
     "S8_NET_ZIGZAG": "S8 zigzag",
     "S11_DISCOVERED": "S11 pack",

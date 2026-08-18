@@ -1,4 +1,9 @@
-"""S4: overnight next-open strategy — enter near close, exit after next open."""
+"""S4 overnight ML — research / weekly_s4 only.
+
+Paper S4 is the daily HH/LL swing in strategy_hhhl_day.s4_swing_from_env
+(last 15m, hold until opposite, no next-open kill). This module stays for
+train_overnight / evolve_s4_ml / tests.
+"""
 
 from __future__ import annotations
 
