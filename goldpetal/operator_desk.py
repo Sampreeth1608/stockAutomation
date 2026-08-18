@@ -17,7 +17,7 @@ def streamlit_write_blocked(action: str) -> dict[str, Any]:
         "ok": False,
         "error": (
             f"{action} is disabled on Streamlit. "
-            "Use the lite desk at http://127.0.0.1:8501/ "
+            "Use the trading station at http://127.0.0.1:8501/ "
             "(8787 is the same desk if that tunnel is running). "
             "Streamlit stays read-only so it cannot overwrite the HTML desk."
         ),
@@ -42,6 +42,6 @@ def streamlit_control_allowed(kwargs: dict[str, Any]) -> tuple[bool, str]:
 
 def operator_readonly_markdown() -> str:
     return (
-        f"**Writes live on the lite desk** ({OPERATOR_URL}). "
+        f"**Writes live on the trading station** ({OPERATOR_URL}). "
         "This Streamlit page is read-only."
     )

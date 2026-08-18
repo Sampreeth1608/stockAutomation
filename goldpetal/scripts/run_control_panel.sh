@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Same lite HTML desk as run_desk_vm.sh (port 8501).
+# Same trading station as run_desk_vm.sh (port 8501).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR/.."
@@ -43,11 +43,11 @@ fi
 code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 3 "http://127.0.0.1:${PORT}/" || true)"
 echo "local GET / → HTTP ${code:-down}"
 if [[ "${code:-}" != "200" ]] || ! grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
-  echo "FAILED — expected the lite desk HTML (Start bot / Save strategies)."
+  echo "FAILED — expected the station HTML (Gold Petal Station / Save strategies)."
   tail -n 20 "$LOG" || true
   exit 1
 fi
 
-echo "lite desk is UP from $ROOT  (pid $pid)"
+echo "station is UP from $ROOT  (pid $pid)"
 echo "If this shell prints 'Terminated', that was the OLD panel. Ignore it."
 print_open_on_mac

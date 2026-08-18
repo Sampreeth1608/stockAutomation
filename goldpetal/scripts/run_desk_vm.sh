@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lightweight HTML operator desk on 8501 (not Streamlit).
+# Lightweight HTML trading station on 8501 (not Streamlit).
 #
 #   ./scripts/run_desk_vm.sh --restart
 #   ./scripts/run_desk_vm.sh --fg
@@ -35,19 +35,19 @@ wait_up() {
   for i in 1 2 3 4 5 6; do
     code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" || true)"
     if [[ "${code:-}" == "200" ]] && grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
-      echo "lite desk UP  pid=$(pgrep -f 'control_panel.py' | head -n1)  $PWD  http://127.0.0.1:${PORT}/"
+      echo "station UP  pid=$(pgrep -f 'control_panel.py' | head -n1)  $PWD  http://127.0.0.1:${PORT}/"
       return 0
     fi
     sleep 1
   done
-  echo "FAILED — expected lite HTML (Start bot / Save strategies). HTTP ${code:-down}"
+  echo "FAILED — expected station HTML (Gold Petal Station / Save strategies). HTTP ${code:-down}"
   tail -n 25 "$LOG" || true
   return 1
 }
 
 if [[ "${1:-}" == "--fg" ]]; then
   stop_old
-  echo "→ lite desk foreground :${PORT}"
+  echo "→ station foreground :${PORT}"
   print_open_on_mac
   exec "${CMD[@]}"
 fi

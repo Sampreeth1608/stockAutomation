@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Gold Petal operator desk — lightweight HTML on 8501.
+"""Gold Petal trading station — HTML workspace on 8501.
 
   ./scripts/run_desk_vm.sh --restart
   python3 control_panel.py --host 127.0.0.1 --port 8501
-  then http://127.0.0.1:8501/
+  then http://127.0.0.1:8501/          station
+       http://127.0.0.1:8501/lite      compact controls
+       http://127.0.0.1:8501/full      archive / downloads
 """
 
 from __future__ import annotations
@@ -95,10 +97,18 @@ S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 
 DESK_HTML_PATH = ROOT / "desk.html"
 LITE_HTML_PATH = ROOT / "lite.html"
+STATION_HTML_PATH = ROOT / "station.html"
 
 
 def load_desk_html() -> bytes:
+    if STATION_HTML_PATH.is_file():
+        return STATION_HTML_PATH.read_bytes()
     path = LITE_HTML_PATH if LITE_HTML_PATH.is_file() else DESK_HTML_PATH
+    return path.read_bytes()
+
+
+def load_lite_html() -> bytes:
+    path = LITE_HTML_PATH if LITE_HTML_PATH.is_file() else STATION_HTML_PATH
     return path.read_bytes()
 
 
@@ -224,11 +234,14 @@ class ControlHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parse_qs(parsed.query)
-            if path in {"/", "/index.html"}:
-                if not LITE_HTML_PATH.is_file() and not DESK_HTML_PATH.is_file():
-                    self._send(500, b"lite.html missing", "text/plain; charset=utf-8")
+            if path in {"/", "/index.html", "/station", "/station.html"}:
+                if not STATION_HTML_PATH.is_file() and not LITE_HTML_PATH.is_file() and not DESK_HTML_PATH.is_file():
+                    self._send(500, b"station.html missing", "text/plain; charset=utf-8")
                     return
                 self._send(200, load_desk_html(), "text/html; charset=utf-8")
+                return
+            if path in {"/lite", "/lite.html", "/controls"}:
+                self._send(200, load_lite_html(), "text/html; charset=utf-8")
                 return
             if path in {"/full", "/full.html"}:
                 self._send(200, load_full_desk_html(), "text/html; charset=utf-8")
@@ -647,7 +660,7 @@ def main() -> None:
     load_state()
     load_capital()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
-    print(f"cwd {ROOT}  Gold Petal lite desk → http://{args.host}:{args.port}/", flush=True)
+    print(f"cwd {ROOT}  Gold Petal station → http://{args.host}:{args.port}/", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

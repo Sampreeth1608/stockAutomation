@@ -8,7 +8,7 @@ from operator_desk import streamlit_control_allowed, streamlit_write_blocked
 def test_streamlit_write_blocked() -> None:
     res = streamlit_write_blocked("Capital")
     assert res["ok"] is False
-    assert "lite desk" in res["error"]
+    assert "trading station" in res["error"]
     assert "8501" in res["error"]
     assert "8787" in res["error"]
     assert res["use"].endswith(":8501/")
