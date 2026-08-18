@@ -173,6 +173,7 @@ def test_learn_script_fits_toy_bars() -> None:
     from learn_candle_relations import FEATURE_COMBOS, run_tf
 
     assert len(FEATURE_COMBOS) == 31
+    assert FEATURE_COMBOS[0][0] == "CR_OHLC"
 
     ist = ZoneInfo("Asia/Kolkata")
     rows = []
@@ -204,13 +205,14 @@ def test_learn_script_fits_toy_bars() -> None:
     assert rep["rows"] >= 8
     assert "train_corr" in rep
     assert "error" not in rep or rep.get("test_n", 0) < 2
-    names = [str(c.get("combo")) for c in (rep.get("combos") or [])]
-    assert "ohlc" in names
-    assert "vol" in names
-    assert "ohlc+vol" in names
-    assert "htf" not in names
+    names = [str(c.get("strategy") or c.get("combo")) for c in (rep.get("combos") or [])]
+    assert "CR_OHLC" in names
+    assert "CR_VOL" in names
+    assert "CR_OHLC_VOL" in names
+    assert "CR_HTF" not in names
     assert len(names) == 15
     assert all(c.get("paper") is False for c in (rep.get("combos") or []))
+    assert all(c.get("enabled") is False for c in (rep.get("combos") or []))
     with_htf = run_tf(
         rows,
         tf="1h",
@@ -224,7 +226,10 @@ def test_learn_script_fits_toy_bars() -> None:
     )
     if "error" not in with_htf:
         assert with_htf.get("n_candidates") == 31
-        assert all(c.get("paper") is False for c in (with_htf.get("combos") or []))
+        htf_names = [str(c.get("strategy")) for c in (with_htf.get("strategies") or [])]
+        assert "CR_HTF" in htf_names
+        assert "CR_OHLC_WICK_PREV_VOL_HTF" in htf_names
+        assert all(c.get("paper") is False for c in (with_htf.get("strategies") or []))
 
 
 if __name__ == "__main__":

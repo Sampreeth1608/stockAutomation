@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Research: every ohlc/wick/prev/vol/htf mix is a candidate. Not paper. Not S13/S16.
+# Research: 31 CR_* strategies (ohlc/wick/prev/vol/htf mixes). All off. Not paper.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p data/learn/candle_relations
