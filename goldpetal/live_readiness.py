@@ -23,6 +23,9 @@ PANEL_LIVE_MAX_LOTS = 10
 LIVE_CONFIRM_WORD = "LIVE"
 RESTART_CONFIRM_WORD = "RESTART"
 
+# S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
+DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
+
 
 def _truthy(raw: str | None, default: str = "true") -> bool:
     v = (raw if raw is not None else default).strip().lower()
@@ -157,7 +160,11 @@ def apply_panel_enables(
     from analytics.env_bridge import STRATEGY_ENABLE, apply_strategy_enables
 
     known = list(STRATEGY_ENABLE.keys())
-    want = [str(n).strip() for n in enabled_names if str(n).strip() in STRATEGY_ENABLE]
+    want = [
+        str(n).strip()
+        for n in enabled_names
+        if str(n).strip() in STRATEGY_ENABLE and str(n).strip() not in DESK_FORCE_OFF
+    ]
     res = apply_strategy_enables(want, known=known, path=path)
     res["enabled"] = want
     res["restart_needed"] = True

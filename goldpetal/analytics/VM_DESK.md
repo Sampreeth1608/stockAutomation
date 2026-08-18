@@ -110,15 +110,17 @@ git pull origin cursor/s14-wick-length-a4b2
 ./scripts/run_desk_vm.sh --restart
 ```
 
-## S4 daily HH/LL swing (research only)
+## S4 daily HH/LL swing (off — not on the desk)
 
-Angel + ticks daily backtest picked **S13**, not S4. Leave S4 off.
+Angel + ticks daily backtest picked **S13**, not S4. S4 is off and **not on
+the station book list**. Save strategies cannot turn it on.
 
 ```bash
 ENABLE_S4=false
 ```
 
 Overnight ML (`weekly_s4.sh` / `strategy_overnight.py`) is research-only.
+The swing module stays in the repo for backtests only.
 
 ## S13 daily S16 (paper — the day-by-day book)
 
@@ -270,7 +272,7 @@ Prints a day table (`prevH` / `prevL` / HH / LL / signal) and writes
 
 ## Paper allowlist (stop S9 etc.)
 
-On **8787 Live money**, Save ENABLE_* with only the slim books checked (S4/S5/S8/S11/S13/S16). That writes `ENABLE_S9=false` (and S1/S2/S3/S6/S10/S12/S14/S15) then Restart supervise on 8787.
+On **8501 Live money**, Save ENABLE_* with only the slim books checked (S5/S8/S11/S13/S16). That writes `ENABLE_S4=false` and `ENABLE_S9=false` (and S1/S2/S3/S6/S10/S12/S14/S15) then Restart the bot.
 
 Trades tab may still show **old** S9 history — filter to slim strategies.
 
