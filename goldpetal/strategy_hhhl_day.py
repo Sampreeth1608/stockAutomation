@@ -288,6 +288,9 @@ class HhhlDayOvernightStrategy:
                     elif self.prev_day.date == prev_date:
                         self.prev_day.high = max(self.prev_day.high, prev_bar.high)
                         self.prev_day.low = min(self.prev_day.low, prev_bar.low)
+                        # State json only saves when H/L move, so close can be
+                        # an old print. Last tick of that day is the real close.
+                        self.prev_day.close = prev_bar.close
             current = self._ohlc_from_sql(db, today)
             if current is not None:
                 self._merge_forming_day(current)
@@ -339,10 +342,20 @@ class HhhlDayOvernightStrategy:
         """Back-compat alias — confirm window is used for both entry and exit."""
         return self._in_confirm_window(now)
 
+    def _seal_prev_day(self, bar: DayOhlc) -> None:
+        """Move a finished day into prev. Same-date JSON must not clobber SQL close."""
+        if self.prev_day is None or self.prev_day.date < bar.date:
+            self.prev_day = bar
+            return
+        if self.prev_day.date != bar.date:
+            return
+        self.prev_day.high = max(self.prev_day.high, bar.high)
+        self.prev_day.low = min(self.prev_day.low, bar.low)
+
     def _roll_day(self, today: str, px: float) -> None:
         """On calendar day change, seal yesterday as prev_day and start new bar."""
         if self._day is not None and self._day.date != today:
-            self.prev_day = self._day
+            self._seal_prev_day(self._day)
             self._day = DayOhlc(date=today, open=px, high=px, low=px, close=px)
             self._acted_today = False
             self._save_state()
@@ -457,8 +470,8 @@ class HhhlDayOvernightStrategy:
         return self._flip_to(side, px, today, why, _as_candle(day))
 
     def _watch_skip(self) -> None:
-        if not (self._day and self.prev_day):
-            self.last_skip = "outside_confirm_window"
+        if self._day is None or self.prev_day is None:
+            self.last_skip = "need_prev_day"
             return
         if self._formula() == "hhhl":
             if self._day.high > self.prev_day.high:
