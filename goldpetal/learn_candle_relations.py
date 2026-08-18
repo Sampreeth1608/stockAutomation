@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Learn which OHLC / wick / prev-bar / higher-TF relations predict the next close.
+"""Learn which OHLC / wick / volume / prev-bar / higher-TF relations predict the next close.
 
 Research only. Does not paper or change S13/S16.
 
@@ -8,8 +8,10 @@ Research only. Does not paper or change S13/S16.
   ./venv/bin/python learn_candle_relations.py --db data/ticks.db --tf 30m --higher 1h
 
 Train on earlier bars, test on later bars (time split). Label = next bar close
-up vs down. Report top relations, OOS AUC, and a fee-aware one-bar paper sim.
-Nothing is enabled until you pick a row and we wire a separate paper book.
+up vs down. Volume is the bar delta of Angel session-cumulative
+volume_trade_for_the_day. Report top relations, OOS AUC, and a fee-aware
+one-bar paper sim. Nothing is enabled until you pick a row and we wire a
+separate paper book.
 """
 
 from __future__ import annotations
@@ -22,8 +24,14 @@ from typing import Any
 import numpy as np
 
 from backtest_hhhl_candles import in_session, make_charge_cfg
-from backtest_wick_candles import build_ohlc_candles, load_ltp_rows
-from candle_relations import FEATURE_COLUMNS, feature_vector, labeled_rows
+from candle_relations import (
+    FEATURE_COLUMNS,
+    RelBar,
+    build_rel_bars,
+    feature_vector,
+    labeled_rows,
+    load_tick_rows,
+)
 from charges import apply_charges_and_tax
 
 TF_MINUTES = {"30m": 30, "1h": 60, "1d": 1440}
@@ -143,7 +151,7 @@ def _one_bar_sim(
 
 
 def run_tf(
-    rows_ltp: list[tuple[str, float]],
+    rows_ltp: list[tuple],
     *,
     tf: str,
     higher: str | None,
@@ -155,12 +163,12 @@ def run_tf(
     short_p: float,
 ) -> dict[str, Any]:
     minutes = TF_MINUTES[tf]
-    candles = build_ohlc_candles(rows_ltp, minutes)
-    h_bars: list[Candle] = []
+    candles = build_rel_bars(rows_ltp, minutes)
+    h_bars: list[RelBar] = []
     h_min = 1440
     if higher:
         h_min = TF_MINUTES[higher]
-        h_bars = build_ohlc_candles(rows_ltp, h_min)
+        h_bars = build_rel_bars(rows_ltp, h_min)
     sess = None
     if session and tf != "1d":
         sess = lambda c: in_session(c)
@@ -173,8 +181,8 @@ def run_tf(
         "bars": len(candles),
         "rows": len(labeled),
         "formula": (
-            "same-bar OHLC + body/wicks + prev-bar O/H/L/C + "
-            "HH/LL/inside + last completed higher TF"
+            "same-bar OHLC + body/wicks + volume vs prev/HTF + "
+            "prev-bar O/H/L/C + HH/LL/inside + last completed higher TF"
         ),
         "paper": False,
         "note": "research only — do not paper until an OOS row is picked",
@@ -225,11 +233,11 @@ def main() -> None:
     while len(highers) < len(tfs):
         highers.append("")
     db = Path(args.db)
-    rows = load_ltp_rows(db)
+    rows = load_tick_rows(db)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     reports = []
-    print("Candle-relation learner (research, not paper S13/S16)")
+    print("Candle-relation learner (research, not paper S13/S16; includes volume)")
     print(f"ticks={len(rows)} db={db}")
     for tf, htf in zip(tfs, highers, strict=False):
         if tf not in TF_MINUTES:

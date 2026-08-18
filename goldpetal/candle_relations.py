@@ -1,21 +1,143 @@
-"""OHLC / wick / body / prev-bar / higher-TF relations.
+"""OHLC / wick / body / volume / prev-bar / higher-TF relations.
 
 Research only. Does not change paper S13 or S16.
 
 Same-bar: open↔high↔low↔close, body, upper/lower wick, close location in range.
+Volume: bar volume (session cumulative delta), ticks, vol vs range/body/wicks,
+up-bar vs down-bar volume, expansion/contraction vs prev.
 Vs previous bar (this TF): close/high/low/open vs prev O/H/L/C, HH/LL/inside,
-current high vs prev low, current low vs prev high, gap, wick vs prev wick.
-Vs last *completed* higher TF (1h vs 1d, 30m vs 1h, …): same geometry on that
-bar, plus this close vs that O/H/L/C.
+current high vs prev low, current low vs prev high, gap, wick vs prev wick,
+volume vs prev volume (HH/LL with vol up, range-up/vol-down).
+Vs last *completed* higher TF (1h vs 1d, 30m vs 1h, …): same geometry plus
+this close vs that O/H/L/C and this volume vs that volume.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from backtest_hhhl_candles import Candle
+from mtf_bars import floor_bar, parse_ts
 from wick_candles import wick_measure
+
+
+@dataclass
+class RelBar(Candle):
+    """OHLC plus this-bar volume (session-volume delta) and tick count."""
+
+    volume: float = 0.0
+    n_ticks: float = 0.0
+
+
+def _tick_vol(row: tuple) -> float | None:
+    if len(row) < 3 or row[2] is None:
+        return None
+    try:
+        return float(row[2])
+    except (TypeError, ValueError):
+        return None
+
+
+def bar_volume_delta(last_vol: float | None, prev_close_vol: float | None) -> float:
+    """Bar volume from Angel session-cumulative `volume_trade_for_the_day`.
+
+    First bar of a series is 0 (do not dump the session total). A drop vs the
+    previous bar's close volume is a session reset: use last_vol as this bar.
+    """
+    if last_vol is None:
+        return 0.0
+    if prev_close_vol is None:
+        return 0.0
+    if last_vol + 1e-9 < prev_close_vol:
+        return max(0.0, last_vol)
+    return max(0.0, last_vol - prev_close_vol)
+
+
+def load_tick_rows(db: Path) -> list[tuple[str, float, float | None]]:
+    """`(received_at, ltp, volume)` — volume is session-cumulative, may be None."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        cols = {row[1] for row in con.execute("PRAGMA table_info(ticks)")}
+        sql = (
+            "SELECT received_at, ltp, volume FROM ticks "
+            "WHERE ltp IS NOT NULL ORDER BY received_at ASC, id ASC"
+            if "volume" in cols
+            else "SELECT received_at, ltp, NULL FROM ticks "
+            "WHERE ltp IS NOT NULL ORDER BY received_at ASC, id ASC"
+        )
+        out: list[tuple[str, float, float | None]] = []
+        for r in con.execute(sql):
+            vol = None
+            if r[2] is not None:
+                try:
+                    vol = float(r[2])
+                except (TypeError, ValueError):
+                    vol = None
+            out.append((str(r[0]), float(r[1]), vol))
+        return out
+    finally:
+        con.close()
+
+
+def build_rel_bars(rows: list[tuple], minutes: int) -> list[RelBar]:
+    """OHLC + bar volume + tick count. 2-tuples `(t, ltp)` get volume=0."""
+    bars: list[RelBar] = []
+    cur_key = None
+    o = h = l = c = None
+    n_ticks = 0
+    last_vol: float | None = None
+    prev_close_vol: float | None = None
+
+    def flush(key) -> None:
+        nonlocal o, h, l, c, n_ticks, last_vol, prev_close_vol
+        if o is None or h is None or l is None or c is None:
+            return
+        bars.append(
+            RelBar(
+                key.strftime("%Y-%m-%d %H:%M:%S"),
+                float(o),
+                float(h),
+                float(l),
+                float(c),
+                bar_volume_delta(last_vol, prev_close_vol),
+                float(n_ticks),
+            )
+        )
+        if last_vol is not None:
+            prev_close_vol = last_vol
+        o = h = l = c = None
+        n_ticks = 0
+        last_vol = None
+
+    for row in rows:
+        ts = parse_ts(row[0])
+        key = floor_bar(ts, minutes)
+        px = float(row[1])
+        tv = _tick_vol(row)
+        if cur_key is None:
+            cur_key = key
+        if key != cur_key:
+            flush(cur_key)
+            cur_key = key
+        if o is None:
+            o = h = l = c = px
+            n_ticks = 0
+            last_vol = None
+        else:
+            h = max(h, px)
+            l = min(l, px)
+            c = px
+        n_ticks += 1
+        if tv is not None:
+            last_vol = tv
+    if cur_key is not None:
+        flush(cur_key)
+    return bars
+
 
 _EPS = 1e-9
 
@@ -57,6 +179,77 @@ def _wick_pack(c: Candle, prefix: str) -> dict[str, float]:
 
 def _delta(name: str, pts: float, rng: float) -> dict[str, float]:
     return {name: float(pts), f"{name}_r": float(pts) / rng}
+
+
+def _bar_vol(c: Candle) -> float:
+    return max(0.0, float(getattr(c, "volume", 0.0) or 0.0))
+
+
+def _bar_ticks(c: Candle) -> float:
+    return max(0.0, float(getattr(c, "n_ticks", 0.0) or 0.0))
+
+
+def _vol_features(
+    prev: Candle,
+    cur: Candle,
+    *,
+    higher: Candle | None,
+    rng: float,
+    m: Any,
+    pm: Any,
+) -> dict[str, float]:
+    v = _bar_vol(cur)
+    pv = _bar_vol(prev)
+    nt = max(_bar_ticks(cur), 1.0)
+    if cur.close > cur.open:
+        signed = v
+    elif cur.close < cur.open:
+        signed = -v
+    else:
+        signed = 0.0
+    out = {
+        "vol": v,
+        "p_vol": pv,
+        "n_ticks": _bar_ticks(cur),
+        "p_n_ticks": _bar_ticks(prev),
+        "vol_vs_p": v - pv,
+        "vol_ratio": v / max(pv, 1.0),
+        "vol_up": 1.0 if v > pv else 0.0,
+        "vol_down": 1.0 if v < pv else 0.0,
+        "signed_vol": signed,
+        "vol_per_range": v / rng,
+        "vol_per_body": v / max(float(m.body), _EPS),
+        "vol_per_tick": v / nt,
+        "vol_x_upper": v * (float(m.upper) / rng),
+        "vol_x_lower": v * (float(m.lower) / rng),
+        "vol_x_close_loc": v * ((float(cur.close) - float(cur.low)) / rng),
+        "hh_vol_up": 1.0 if cur.high > prev.high and v > pv else 0.0,
+        "ll_vol_up": 1.0 if cur.low < prev.low and v > pv else 0.0,
+        "green_vol_up": 1.0 if cur.close > cur.open and v > pv else 0.0,
+        "red_vol_up": 1.0 if cur.close < cur.open and v > pv else 0.0,
+        "range_up_vol_down": 1.0 if m.range_pts > pm.range_pts and v < pv else 0.0,
+        "body_up_vol_down": 1.0 if m.body > pm.body and v < pv else 0.0,
+        "c_pc_x_vol_ratio": (cur.close - prev.close) * (v / max(pv, 1.0)),
+        "h_ph_x_vol_ratio": (cur.high - prev.high) * (v / max(pv, 1.0)),
+        "l_pl_x_vol_ratio": (cur.low - prev.low) * (v / max(pv, 1.0)),
+        "htf_vol": 0.0,
+        "vol_vs_htf": 0.0,
+        "vol_htf_ratio": 0.0,
+        "htf_signed_vol": 0.0,
+    }
+    if higher is not None:
+        hv = _bar_vol(higher)
+        if higher.close > higher.open:
+            h_signed = hv
+        elif higher.close < higher.open:
+            h_signed = -hv
+        else:
+            h_signed = 0.0
+        out["htf_vol"] = hv
+        out["vol_vs_htf"] = v - hv
+        out["vol_htf_ratio"] = v / max(hv, 1.0)
+        out["htf_signed_vol"] = h_signed
+    return out
 
 
 def pair_features(
@@ -117,6 +310,7 @@ def pair_features(
     out["outside"] = (
         1.0 if cur.high > prev.high and cur.low < prev.low else 0.0
     )
+    out.update(_vol_features(prev, cur, higher=higher, rng=rng, m=m, pm=pm))
 
     htf: dict[str, float] = {
         "htf_present": 0.0,
@@ -177,9 +371,9 @@ def pair_features(
 FEATURE_COLUMNS: tuple[str, ...] = tuple(
     sorted(
         pair_features(
-            Candle("2026-08-17 10:00:00", 100.0, 105.0, 99.0, 104.0),
-            Candle("2026-08-17 11:00:00", 104.0, 110.0, 103.0, 108.0),
-            higher=Candle("2026-08-16 00:00:00", 90.0, 120.0, 80.0, 100.0),
+            RelBar("2026-08-17 10:00:00", 100.0, 105.0, 99.0, 104.0, 1000.0, 10.0),
+            RelBar("2026-08-17 11:00:00", 104.0, 110.0, 103.0, 108.0, 1500.0, 12.0),
+            higher=RelBar("2026-08-16 00:00:00", 90.0, 120.0, 80.0, 100.0, 8000.0, 80.0),
         ).keys()
     )
 )

@@ -5,7 +5,9 @@ from __future__ import annotations
 from backtest_hhhl_candles import Candle
 from candle_relations import (
     FEATURE_COLUMNS,
+    RelBar,
     attach_completed_higher,
+    build_rel_bars,
     labeled_rows,
     pair_features,
 )
@@ -49,6 +51,8 @@ def test_vs_prev_includes_requested_crosses() -> None:
     assert "o_h" in FEATURE_COLUMNS
     assert "l_ph" in FEATURE_COLUMNS
     assert "htf_c_c" in FEATURE_COLUMNS
+    assert "vol_ratio" in FEATURE_COLUMNS
+    assert "hh_vol_up" in FEATURE_COLUMNS
 
 
 def test_higher_tf_close_vs_yesterday() -> None:
@@ -82,6 +86,66 @@ def test_label_is_next_close() -> None:
     assert len(rows) == 1
     assert rows[0]["y_up"] == 0
     assert rows[0]["next_pts"] == -2.0
+
+
+def test_plain_candle_volume_is_zero() -> None:
+    f = pair_features(PREV, CUR)
+    assert f["vol"] == 0.0
+    assert f["p_vol"] == 0.0
+    assert f["signed_vol"] == 0.0
+    assert f["hh_vol_up"] == 0.0
+
+
+def test_volume_ratio_signed_and_hh_vol_up() -> None:
+    prev = RelBar("2026-08-17 10:00:00", 100.0, 105.0, 99.0, 104.0, 1000.0, 10.0)
+    cur = RelBar("2026-08-17 11:00:00", 104.0, 120.0, 100.0, 110.0, 2500.0, 20.0)
+    f = pair_features(prev, cur)
+    assert f["vol"] == 2500.0
+    assert f["p_vol"] == 1000.0
+    assert f["vol_ratio"] == 2.5
+    assert f["signed_vol"] == 2500.0
+    assert f["hh_vol_up"] == 1.0
+    assert f["vol_up"] == 1.0
+    assert f["green_vol_up"] == 1.0
+    red = RelBar("2026-08-17 12:00:00", 110.0, 111.0, 100.0, 101.0, 800.0, 8.0)
+    f2 = pair_features(cur, red)
+    assert f2["signed_vol"] == -800.0
+    assert f2["vol_down"] == 1.0
+    day = RelBar("2026-08-16 00:00:00", 90.0, 130.0, 80.0, 95.0, 10000.0, 80.0)
+    f3 = pair_features(prev, cur, higher=day)
+    assert f3["htf_vol"] == 10000.0
+    assert f3["vol_htf_ratio"] == 0.25
+
+
+def test_rel_bars_volume_delta_and_session_reset() -> None:
+    rows = [
+        ("2026-08-17 10:00:00", 100.0, 5000.0),
+        ("2026-08-17 10:30:00", 101.0, 5300.0),
+        ("2026-08-17 11:00:00", 102.0, 5800.0),
+        ("2026-08-17 11:30:00", 103.0, 6000.0),
+        ("2026-08-18 10:00:00", 100.0, 100.0),
+        ("2026-08-18 10:30:00", 101.0, 250.0),
+    ]
+    bars = build_rel_bars(rows, 60)
+    assert len(bars) == 3
+    assert bars[0].volume == 0.0
+    assert bars[0].n_ticks == 2.0
+    assert bars[1].volume == 700.0
+    assert bars[2].volume == 250.0
+
+
+def test_rel_bars_from_price_only_tuples() -> None:
+    rows = [
+        ("2026-08-17 10:00:00", 100.0),
+        ("2026-08-17 10:10:00", 101.0),
+        ("2026-08-17 11:00:00", 102.0),
+    ]
+    bars = build_rel_bars(rows, 60)
+    assert len(bars) == 2
+    assert bars[0].volume == 0.0
+    assert bars[0].n_ticks == 2.0
+    assert bars[0].open == 100.0
+    assert bars[1].n_ticks == 1.0
 
 
 def test_learn_script_fits_toy_bars() -> None:
@@ -128,5 +192,9 @@ if __name__ == "__main__":
     test_higher_tf_close_vs_yesterday()
     test_attach_uses_completed_higher_only()
     test_label_is_next_close()
+    test_plain_candle_volume_is_zero()
+    test_volume_ratio_signed_and_hh_vol_up()
+    test_rel_bars_volume_delta_and_session_reset()
+    test_rel_bars_from_price_only_tuples()
     test_learn_script_fits_toy_bars()
     print("ALL test_candle_relations OK")
