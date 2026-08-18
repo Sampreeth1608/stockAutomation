@@ -56,8 +56,6 @@ button, input, select { font: inherit; }
   border-right: 1px solid var(--line); background: var(--panel); }
 .col:last-child { border-right: 0; }
 .pane { padding: .7rem .85rem; border-bottom: 1px solid var(--line); }
-.pane h2, #dl-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
-  text-transform: uppercase; color: var(--gold); }
 .grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .scroll { overflow: auto; flex: 1; min-height: 0; }
 .row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
@@ -86,8 +84,32 @@ input[type=number], input[type=text], input[type=date], select {
   padding: .38rem .5rem; font: 13px var(--mono); }
 input[type=number], input[type=text] { width: 6.4rem; }
 input[type=date] { width: 11.2rem; }
-#dl-panel { padding: .85rem 1rem 1.1rem; }
-#dl-panel[hidden], #grid-wrap[hidden] { display: none !important; }
+#dl-panel, #ml-panel { padding: .85rem 1rem 1.1rem; }
+#dl-panel[hidden], #ml-panel[hidden], #grid-wrap[hidden] { display: none !important; }
+.pane h2, #dl-panel h2, #ml-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--gold); }
+textarea { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: .4rem .5rem; font: 13px var(--font); width: 100%; min-height: 2.5rem; resize: vertical; }
+.ml-banner { margin: 0 0 .7rem; padding: .55rem .7rem; border: 1px solid #ead3a8; border-radius: 8px;
+  background: #fbf8f1; color: var(--warn); font: 600 13px/1.4 var(--font); }
+.ml-banner.ok { border-color: #b7dcc8; background: #f4faf6; color: var(--ok); }
+.ml-card { border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  padding: .75rem .85rem; margin: 0 0 .7rem; box-shadow: 0 8px 18px rgba(48, 36, 12, .04); }
+.ml-card h3 { margin: 0 0 .28rem; font: 600 16px/1.3 var(--serif); }
+.ml-meta { font: 12px/1.45 var(--mono); color: var(--muted); }
+.ml-stats { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: .4rem; margin: .55rem 0; }
+.ml-stat { background: var(--head); border: 1px solid var(--line); border-radius: 8px; padding: .4rem .5rem; }
+.ml-stat b { display: block; font: 600 10px/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.ml-stat span { font: 600 14px/1.45 var(--mono); font-variant-numeric: tabular-nums; }
+.ml-compare { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; margin: .45rem 0 .2rem; }
+.ml-box { border: 1px dashed var(--line); border-radius: 8px; padding: .45rem .55rem; background: var(--head); }
+.ml-box b { display: block; font: 600 10px/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .2rem; }
+pre.env { margin: .4rem 0 0; padding: .45rem .55rem; background: var(--head); border: 1px solid var(--line);
+  border-radius: 8px; font: 11px/1.4 var(--mono); overflow: auto; max-height: 8rem; white-space: pre-wrap; }
+#ml-badge { font: 600 11px/1 var(--mono); color: var(--gold); margin-left: .15rem; }
+@media (max-width: 900px) {
+  .ml-stats, .ml-compare { grid-template-columns: 1fr 1fr; }
+}
 label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted); font-size: 13px; }
 .flash { min-height: 1rem; color: var(--gold); font-size: 13px; margin: .3rem 0 0; }
 .flash.bad { color: var(--bad); }
@@ -171,6 +193,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="signals">Signals</button>
           <button class="tab" type="button" data-tab="score">P&amp;L</button>
           <button class="tab" type="button" data-tab="why">Edge</button>
+          <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
@@ -202,6 +225,32 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
         </div>
         <p class="flash" id="flash-dl"></p>
+      </div>
+      <div class="scroll" id="ml-panel" hidden>
+        <h2>ML approvals — S11 packs</h2>
+        <p class="hint">Weekend discovery writes a proposal. Approve → paper writes <span class="mono">S11_PACK_PATH</span> + <span class="mono">ENABLE_S11</span> and keeps <span class="mono">DRY_RUN=true</span>. Type RESTART on Engine to load RAM. Live stays on Live money — this tab never arms Angel.</p>
+        <div class="ml-banner" id="ml-restart" hidden>Type RESTART on Engine to load the pack into RAM. Desk restart is not enough.</div>
+        <p class="flash" id="flash-ml"></p>
+        <div class="row" style="margin-top:.45rem">
+          <select id="ml-filter">
+            <option value="">All proposals</option>
+            <option value="S11_DISCOVERED">S11 pack</option>
+            <option value="S8_NET_ZIGZAG">S8 zigzag</option>
+            <option value="S5_MINEDGE">S5 minedge</option>
+            <option value="S4_OVERNIGHT">S4 (research)</option>
+          </select>
+          <button class="btn" type="button" id="btn-ml-refresh">Refresh</button>
+        </div>
+        <div id="ml-loaded"></div>
+        <h2 style="margin-top:1rem">Pending</h2>
+        <div id="ml-pending"></div>
+        <h2 style="margin-top:1rem">Packs on disk</h2>
+        <p class="hint">Newest first under <span class="mono">data/discover/packs</span>. Load writes the same paper env as Approve → paper.</p>
+        <div id="ml-packs"></div>
+        <h2 style="margin-top:1rem">Last discovery</h2>
+        <div id="ml-discover"></div>
+        <h2 style="margin-top:1rem">Recent decisions</h2>
+        <div id="ml-decided"></div>
       </div>
       <div class="pane">
         <p class="mono" id="grid-meta">loading market…</p>
@@ -270,7 +319,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div id="foot-left">station · 8501</div>
     <div id="foot-ml">learner …</div>
     <div>
-      Downloads tab · <a href="/lite">phone layout</a>
+      ML tab · Downloads · <a href="/lite">phone layout</a>
       · <a href="/full">old archive</a>
     </div>
   </footer>
@@ -293,6 +342,8 @@ let lastDesk = {};
 let lastTape = { ticks: [], signals: [], live_orders: [], tick_count: 0, ltp: null };
 let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0 };
 let lastWhy = null;
+let lastMl = null;
+let mlRestartNeeded = false;
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -403,12 +454,39 @@ function renderKpis() {
   pnlEl.className = pnlClass(pnl);
   $("kpi-wr").textContent = wr == null || wr === "" ? "—" : pct(wr);
 }
+function wrFrac(n) {
+  const x = Number(n);
+  if (n == null || n === "" || !Number.isFinite(x)) return "—";
+  if (Math.abs(x) <= 1.5) return (x * 100).toFixed(0) + "%";
+  return x.toFixed(0) + "%";
+}
+function aucStr(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return "—";
+  return x.toFixed(3);
+}
+function packLine(p) {
+  if (!p || !(p.path || p.id)) return "no pack";
+  if (p.exists === false) return esc(p.path || "") + " (missing)";
+  const bits = [
+    p.model_name || p.id,
+    p.family,
+    p.auc != null ? "AUC " + aucStr(p.auc) : "",
+    p.safety_ok ? "safety ok" : (p.safety_ok === false ? "safety fail" : ""),
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+function mlStat(label, value, cls) {
+  return `<div class="ml-stat"><b>${esc(label)}</b><span class="${cls || ""}">${value}</span></div>`;
+}
 function showMainTab() {
-  const dl = watchTab === "dl";
-  $("grid-wrap").hidden = dl;
-  $("dl-panel").hidden = !dl;
-  $("hist-strat").style.visibility = dl ? "hidden" : "visible";
-  if (dl) $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
+  const extra = watchTab === "dl" || watchTab === "ml";
+  $("grid-wrap").hidden = extra;
+  $("dl-panel").hidden = watchTab !== "dl";
+  $("ml-panel").hidden = watchTab !== "ml";
+  $("hist-strat").style.visibility = extra ? "hidden" : "visible";
+  if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
+  if (watchTab === "ml") $("grid-meta").textContent = "S11 ML packs — Approve → paper, then type RESTART";
 }
 function rangeQs() {
   const from = $("exp-from").value;
@@ -444,8 +522,161 @@ async function bootExports() {
     await refreshExportMeta();
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
 }
+function setMlBadge(n) {
+  const el = $("ml-badge");
+  if (!el) return;
+  el.textContent = n ? " (" + n + ")" : "";
+}
+function renderMl() {
+  const d = lastMl || {};
+  const s11 = d.s11 || {};
+  const pack = s11.pack || {};
+  const props = d.proposals || {};
+  const pendingAll = props.pending || [];
+  const decided = props.decided || [];
+  const packs = d.packs || [];
+  const disc = d.discover || {};
+  const sc = scoreFor("S11_DISCOVERED");
+  const filter = ($("ml-filter") && $("ml-filter").value) || "";
+  const pending = filter ? pendingAll.filter((p) => p.strategy === filter) : pendingAll;
+  setMlBadge(pendingAll.length);
+  const restart = $("ml-restart");
+  if (restart) restart.hidden = !mlRestartNeeded;
+  $("ml-loaded").innerHTML = `<div class="ml-card">
+    <h3>Loaded S11 pack</h3>
+    <p class="ml-meta">${esc(s11.load_hint || "—")}</p>
+    <div class="ml-stats">
+      ${mlStat("In .env", s11.enable_s11 ? "ENABLE_S11" : "off", s11.enable_s11 ? "ok" : "warn")}
+      ${mlStat("DRY_RUN", s11.dry_run === false ? "false" : "true", s11.dry_run === false ? "bad" : "ok")}
+      ${mlStat("Tape WR%", sc.win_rate != null ? pct(sc.win_rate) : "—")}
+      ${mlStat("Tape ₹", sc.pnl_after_tax != null ? money(sc.pnl_after_tax) : "—", pnlClass(sc.pnl_after_tax))}
+      ${mlStat("Closed", sc.closed != null ? fmt(sc.closed, 0) : "—")}
+    </div>
+    <p class="mono">${esc(s11.pack_path || "(S11_PACK_PATH empty)")}</p>
+    <p class="ml-meta">${packLine(pack)} · buy≥${esc(pack.buy_prob ?? "—")} short≤${esc(pack.short_prob ?? "—")} hold ${esc(pack.min_hold_sec ?? "—")}s every ${esc(pack.every_n_ticks ?? "—")}</p>
+    ${pack.rationale ? `<p class="hint">${esc(pack.rationale)}</p>` : ""}
+    ${pack.behavior_summary ? `<p class="hint">${esc(pack.behavior_summary)}</p>` : ""}
+  </div>`;
+  $("ml-pending").innerHTML = pending.map((p) => {
+    const paper = p.paper || {};
+    const proposed = p.proposed_pack || {};
+    const loaded = s11.pack || {};
+    const extra = p.extra || (paper.extra || {});
+    const delta = paper.delta_vs_baseline_inr;
+    const safety = p.safety_ok ? pill("safety ok", "ok") : pill("safety fail", "bad");
+    const kind = pill(p.kind || "new", p.kind === "new" ? "ok" : "warn");
+    const same = p.same_as_loaded ? pill("same as loaded", "ok") : "";
+    const disable = p.would_disable_s11 ? pill("would disable S11", "warn") : "";
+    const reasons = (p.safety_reasons || []).join(", ");
+    const env = p.env_patch ? JSON.stringify(p.env_patch, null, 2) : "";
+    return `<div class="ml-card" data-prop="${esc(p.id)}">
+      <h3>${esc(p.title || p.strategy)}</h3>
+      <p class="ml-meta">${esc(p.id)} · ${esc(p.strategy)} · week ${esc(p.week_id || "—")} · ${kind} ${safety} ${same} ${disable}</p>
+      <p>${esc(p.summary || "")}</p>
+      ${reasons ? `<p class="hint">Safety: ${esc(reasons)}</p>` : ""}
+      <div class="ml-stats">
+        ${mlStat("Trades", paper.n_trades != null ? fmt(paper.n_trades, 0) : "—")}
+        ${mlStat("Win", wrFrac(paper.win_rate))}
+        ${mlStat("Gross ₹", money(paper.gross_pnl_inr), pnlClass(paper.gross_pnl_inr))}
+        ${mlStat("After-tax ₹", money(paper.after_tax_pnl_inr), pnlClass(paper.after_tax_pnl_inr))}
+        ${mlStat("Δ vs base", delta != null ? money(delta) : "—", pnlClass(delta))}
+      </div>
+      <div class="ml-compare">
+        <div class="ml-box"><b>Loaded now</b><span class="mono">${esc(loaded.path || s11.pack_path || "—")}</span><div class="ml-meta">${packLine(loaded)}</div></div>
+        <div class="ml-box"><b>This proposal</b><span class="mono">${esc(proposed.path || p.model_path || "—")}</span><div class="ml-meta">${packLine(proposed)}${extra.auc != null ? " · extra AUC " + aucStr(extra.auc) : ""}</div></div>
+      </div>
+      ${env ? `<pre class="env">${esc(env)}</pre>` : ""}
+      <textarea data-note="${esc(p.id)}" placeholder="Decision note"></textarea>
+      ${p.safety_ok === false ? `<label class="chk" style="margin-top:.4rem"><input type="checkbox" data-unsafe="${esc(p.id)}"/> Accept risk (safety_ok=false)</label>` : ""}
+      <div class="row" style="margin-top:.5rem">
+        <button class="btn ok" type="button" data-ml="approve" data-id="${esc(p.id)}">Approve → paper</button>
+        <button class="btn" type="button" data-ml="live" data-id="${esc(p.id)}">Approve → live</button>
+        <button class="btn danger" type="button" data-ml="reject" data-id="${esc(p.id)}">Reject</button>
+      </div>
+    </div>`;
+  }).join("") || `<p class="hint">${pendingAll.length ? "No pending rows for this filter." : "No pending proposals. Run weekly_discover.sh on the VM (Sunday job)."}</p>`;
+  $("ml-packs").innerHTML = packs.length ? `<table>
+    <thead><tr><th>Pack</th><th>Model</th><th class="num">AUC</th><th>Safety</th><th class="num">Paper ₹</th><th></th></tr></thead>
+    <tbody>${packs.map((row) => `<tr>
+      <td>${row.is_loaded ? pill("loaded", "ok") + " " : ""}<span class="mono">${esc((row.path || "").replace("data/discover/packs/", ""))}</span></td>
+      <td>${esc(row.model_name || "—")} ${esc(row.family || "")}</td>
+      <td class="num">${aucStr(row.auc)}</td>
+      <td>${row.safety_ok ? pill("ok", "ok") : pill("fail", "bad")}</td>
+      <td class="num ${pnlClass((row.paper || {}).after_tax_pnl)}">${money((row.paper || {}).after_tax_pnl)}</td>
+      <td><button class="btn ok" type="button" data-ml="load" data-path="${esc(row.path)}" data-safe="${row.safety_ok ? "1" : "0"}">${row.is_loaded ? "Reload" : "Load"}</button></td>
+    </tr>`).join("")}</tbody>
+  </table>` : `<p class="hint">No packs yet under data/discover/packs.</p>`;
+  const cands = disc.candidates || [];
+  $("ml-discover").innerHTML = `<div class="ml-card">
+    <p class="ml-meta">${esc(disc.report_path || "no latest_report.json")} ${disc.report_mtime_ist ? "· " + esc(disc.report_mtime_ist) : ""}</p>
+    ${disc.behavior_summary ? `<p>${esc(disc.behavior_summary)}</p>` : `<p class="hint">No discovery report yet. Cron: Sunday 19:00 IST weekly_discover.sh</p>`}
+    ${cands.length ? `<table style="margin-top:.45rem"><thead><tr><th>Model</th><th>Template</th><th class="num">AUC</th><th class="num">Trades</th><th class="num">After-tax</th><th>Safety</th><th></th></tr></thead><tbody>
+      ${cands.map((c) => `<tr>
+        <td>${esc(c.model || "")}</td>
+        <td>${esc(c.template || "")} ${esc(c.family || "")}</td>
+        <td class="num">${aucStr(c.auc)}</td>
+        <td class="num">${fmt(c.n_trades, 0)}</td>
+        <td class="num ${pnlClass(c.after_tax_pnl)}">${money(c.after_tax_pnl)}</td>
+        <td>${c.safety_ok ? pill("ok", "ok") : pill("fail", "bad")}</td>
+        <td>${c.pack_path ? `<button class="btn ok" type="button" data-ml="load" data-path="${esc(c.pack_path)}" data-safe="${c.safety_ok ? "1" : "0"}">Load</button>` : ""}</td>
+      </tr>`).join("")}
+    </tbody></table>` : ""}
+    ${disc.cron_tail ? `<pre class="env">${esc(disc.cron_tail)}</pre>` : ""}
+  </div>`;
+  $("ml-decided").innerHTML = decided.length ? `<table>
+    <thead><tr><th>When</th><th>Book</th><th>Decision</th><th>Title</th><th>Note</th></tr></thead>
+    <tbody>${decided.slice(0, 20).map((p) => `<tr>
+      <td>${esc(String(p.decided_at_ist || "").slice(0, 19))}</td>
+      <td>${esc(SHORT[p.strategy] || p.strategy || "")}</td>
+      <td>${esc(p.status || "")}</td>
+      <td>${esc(p.title || "")}</td>
+      <td>${esc(p.decision_note || "")}</td>
+    </tr>`).join("")}</tbody>
+  </table>` : `<p class="hint">No decisions yet.</p>`;
+}
+async function loadMl() {
+  lastMl = await api("/api/ml");
+  setMlBadge(((lastMl.proposals || {}).pending || []).length);
+  if (watchTab === "ml") renderMl();
+  const n = ((lastMl.proposals || {}).pending || []).length;
+  const lr = (lastWhy && lastWhy.learner) || {};
+  $("foot-ml").textContent = (n ? ("ML pending " + n + " · ") : "") + (lr.line || lr.note || "learner cold");
+}
+async function decideMl(id, decision) {
+  const noteEl = document.querySelector(`[data-note="${id}"]`);
+  const unsafeEl = document.querySelector(`[data-unsafe="${id}"]`);
+  const body = {
+    decision,
+    note: noteEl ? noteEl.value : "",
+    accept_unsafe: !!(unsafeEl && unsafeEl.checked),
+  };
+  const res = await api("/api/proposals/" + encodeURIComponent(id) + "/decide", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (res.ml) lastMl = res.ml;
+  if (res.restart_needed) mlRestartNeeded = true;
+  flash("flash-ml", res.reminder || res.note || (decision === "rejected" ? "Rejected" : "Approved → paper"));
+  renderMl();
+  await loadDesk();
+}
+async function loadPack(path, alreadySafe) {
+  const unsafe = alreadySafe === false;
+  if (unsafe) {
+    const ok = window.confirm("This pack failed safety gates. Load it into paper anyway? DRY_RUN stays true.");
+    if (!ok) return;
+  }
+  const res = await api("/api/s11/activate", {
+    method: "POST",
+    body: JSON.stringify({ pack_path: path, accept_unsafe: unsafe }),
+  });
+  if (res.restart_needed) mlRestartNeeded = true;
+  flash("flash-ml", res.reminder || "Pack written to .env");
+  await loadMl();
+  await loadDesk();
+}
 function renderGrid() {
-  if (watchTab === "dl") return;
+  if (watchTab === "dl" || watchTab === "ml") return;
   const h = Object.assign({}, lastTape, lastHist);
   const tab = watchTab;
   const strat = $("hist-strat").value;
@@ -629,7 +860,30 @@ document.querySelectorAll("#tabs .tab").forEach((btn) => {
     showMainTab();
     renderGrid();
     if (watchTab === "why" && !lastWhy) loadWhy().catch(() => {});
+    if (watchTab === "ml") loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
   };
+});
+$("ml-filter").onchange = () => { if (lastMl) renderMl(); };
+$("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
+$("ml-panel").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-ml]");
+  if (!btn) return;
+  const kind = btn.dataset.ml;
+  if (kind === "approve") {
+    decideMl(btn.dataset.id, "approved_paper").catch((e) => flash("flash-ml", String(e.message || e), true));
+    return;
+  }
+  if (kind === "reject") {
+    decideMl(btn.dataset.id, "rejected").catch((e) => flash("flash-ml", String(e.message || e), true));
+    return;
+  }
+  if (kind === "live") {
+    flash("flash-ml", (lastMl && lastMl.live_blocked_reason) || "Live approval is not on this tab. Paper first, then Unlock live on Live money.", true);
+    return;
+  }
+  if (kind === "load") {
+    loadPack(btn.dataset.path, btn.dataset.safe !== "0").catch((e) => flash("flash-ml", String(e.message || e), true));
+  }
 });
 $("exp-from").onchange = () => refreshExportMeta().catch(() => {});
 $("exp-to").onchange = () => refreshExportMeta().catch(() => {});
@@ -679,6 +933,9 @@ $("btn-bot-restart").onclick = () => {
   const word = $("restart-word").value.trim();
   if (word !== "RESTART") { flash("flash-engine", "Type RESTART", true); return; }
   $("restart-word").value = "";
+  mlRestartNeeded = false;
+  const banner = $("ml-restart");
+  if (banner) banner.hidden = true;
   act("flash-engine", "/api/bot/restart", { confirm: word }, "Bot restarted");
 };
 $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
@@ -706,15 +963,22 @@ $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
 
 tickClock();
 setInterval(tickClock, 1000);
+if (location.hash === "#ml") {
+  watchTab = "ml";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "ml"));
+  showMainTab();
+}
 bootExports().catch((e) => flash("flash-dl", String(e.message || e), true));
 loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadTape().catch(() => {});
 loadHistory().catch(() => {});
 setTimeout(() => loadWhy().catch(() => {}), 400);
+loadMl().catch(() => {});
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 12000);
 setInterval(() => { if (!typing()) loadWhy().catch(() => {}); }, 20000);
+setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 </script>
 </body>
 </html>

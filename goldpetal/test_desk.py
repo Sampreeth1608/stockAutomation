@@ -19,6 +19,12 @@ def test_station_is_the_operator_page() -> None:
     assert "Positions" in html
     assert "Blotter" in html
     assert "Downloads" in html
+    assert 'data-tab="ml"' in html
+    assert "Approve → paper" in html
+    assert "/api/ml" in html
+    assert "/api/s11/activate" in html
+    assert "/api/proposals/" in html
+    assert "S11_PACK_PATH" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -54,6 +60,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Start bot" in html
     assert "Save strategies" in html
     assert "Trading station" in html
+    assert "ML / S11" in html
+    assert "/api/ml" in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html
     assert "/api/history" not in html
@@ -86,6 +94,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "LITE_HTML_PATH" in text
     assert "/lite" in text
     assert "/api/desk" in text
+    assert "/api/ml" in text
+    assert "/api/s11/activate" in text
+    assert "decide_proposal_for_desk" in text
     assert "/api/tape" in text
     assert "/api/s14/calc" in text
     assert "/api/analysis" in text

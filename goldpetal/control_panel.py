@@ -60,7 +60,13 @@ from live_readiness import (
 )
 from position_safety import read_bot_health
 from paper_report import summarize_trades
-from proposals import decide_proposal, proposals_snapshot
+from proposals import proposals_snapshot
+from s11_desk import (
+    activate_s11_pack,
+    decide_proposal_for_desk,
+    ml_desk_payload,
+    pack_summary,
+)
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 from s14_exchange_sheet import (
     HTML_NAME,
@@ -350,6 +356,15 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(proposals_snapshot())
                 self._send(status, body, ctype)
                 return
+            if path == "/api/ml":
+                status, body, ctype = _json_bytes(ml_desk_payload())
+                self._send(status, body, ctype)
+                return
+            if path == "/api/s11/pack":
+                raw = ((qs.get("path") or [""])[0] or "").strip()
+                status, body, ctype = _json_bytes(pack_summary(raw))
+                self._send(status, body, ctype)
+                return
             if path == "/api/capital":
                 status, body, ctype = _json_bytes(capital_snapshot())
                 self._send(status, body, ctype)
@@ -628,8 +643,36 @@ class ControlHandler(BaseHTTPRequestHandler):
                 proposal_id = path[len("/api/proposals/") : -len("/decide")]
                 decision = str(data.get("decision") or "")
                 note = str(data.get("note") or "")
-                prop = decide_proposal(proposal_id, decision, note=note)
-                self._send(*_json_bytes({"ok": True, "proposal": prop.to_dict()}))
+                accept_unsafe = bool(data.get("accept_unsafe"))
+                apply_env = bool(data.get("apply_env", True))
+                try:
+                    res = decide_proposal_for_desk(
+                        proposal_id,
+                        decision,
+                        note=note,
+                        apply_env=apply_env,
+                        accept_unsafe=accept_unsafe,
+                    )
+                except KeyError as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 404))
+                    return
+                except (ValueError, RuntimeError) as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
+            if path == "/api/s11/activate":
+                pack_path = str(data.get("pack_path") or data.get("path") or "")
+                accept_unsafe = bool(data.get("accept_unsafe"))
+                try:
+                    res = activate_s11_pack(pack_path, accept_unsafe=accept_unsafe)
+                except FileNotFoundError as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 404))
+                    return
+                except ValueError as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
 
             self._send(*_json_bytes({"error": "not found"}, 404))

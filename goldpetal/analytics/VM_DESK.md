@@ -19,6 +19,39 @@ cannot overwrite start/stop, feed, live picks, DRY_RUN, or capital.
 Keep `DRY_RUN=true` until you intend Angel fills. LIVE_MAX_LOTS cap is 10.
 Paper 100 lots is not live size. Restart the **bot** (type RESTART) after Save strategies / Save money.
 
+## ML / S11 approvals (station 8501)
+
+The **ML** tab on http://127.0.0.1:8501/ is the operator approval desk (what
+Streamlit **Proposals** used to be), plus pack inspector extras:
+
+- Pending cards: paper trades / win / gross / after-tax / Δ vs baseline, env patch, note
+- Loaded pack vs proposed pack (model, family, AUC, thresholds)
+- Packs on disk under `data/discover/packs` — **Load** writes the same paper env
+- Last `weekly_discover.sh` report (`data/discover/latest_report.json`)
+- Approve → paper writes `ENABLE_S11` + `S11_PACK_PATH` and **keeps DRY_RUN=true**
+- Approve → live is blocked here (Unlock live stays on Live money)
+- `safety_ok=false` needs **Accept risk**; S4/S12/S14/S15 cannot be turned on from this tab
+- Type **RESTART** on Engine to load the pack into RAM (desk restart is not enough)
+
+Phone layout `/lite` has a compact pending list. Open `/#ml` for the full inspector.
+
+```bash
+# after Approve → paper, .env looks like:
+ENABLE_S11=true
+S11_PACK_PATH=data/discover/packs/<pack>.json
+DRY_RUN=true
+```
+
+Weekly job (Sunday 19:00 IST):
+
+```bash
+cd ~/goldpetal-repo/goldpetal
+./weekly_discover.sh
+```
+
+Then on the Mac tunnel, Chrome **http://127.0.0.1:8501/** → **ML**.
+Restart the desk after pull: `./scripts/run_desk_vm.sh --restart` (does not restart the bot).
+
 ## Gold Petal chart (Streamlit 8501 — this is the one that opens)
 
 Do **not** use 8787 for the candle chart. Use the desk you already tunnel:
@@ -49,7 +82,7 @@ On the VM desk you can:
 
 - **S14 chart** — Angel/MCX Gold Petal candlesticks (this is the exchange chart)
 - **Overview / Trades / Ticks** — research
-- **Proposals** — Approve → paper (whitelist env). Restart on **8787**. Approve → live is on 8787.
+- **Proposals** — prefer Station **ML** tab on 8501 (`/#ml`). This tab still works if you are on the VM.
 - **Deploy / Ops, Live Deploy, Capital** — read-only snapshots
 - **Control** — stop only (emergency / pause / lock live)
 - **Login** — set `DESK_PASSWORD` (and optional `DESK_TOTP_SECRET` for dangerous actions)
