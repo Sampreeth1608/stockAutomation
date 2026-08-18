@@ -259,6 +259,7 @@ def pack_summary(raw: str | Path | None, *, root: Path = ROOT) -> dict[str, Any]
             "n_trades": paper.get("n_trades"),
             "win_rate": paper.get("win_rate"),
             "gross_pnl": paper.get("gross_pnl"),
+            "after_charges_pnl": paper.get("after_charges_pnl"),
             "after_tax_pnl": paper.get("after_tax_pnl"),
         },
         "behavior_summary": str(data.get("behavior_summary") or "")[:400],
@@ -332,6 +333,8 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     summary = ""
     week_id = ""
+    current_pack: dict[str, Any] | None = None
+    metric = ""
     if report_path.is_file():
         raw_obj, err = _read_json_object(report_path)
         raw = raw_obj or {}
@@ -340,6 +343,10 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
         if isinstance(raw, dict):
             summary = str(raw.get("behavior_summary") or raw.get("summary") or "")[:500]
             week_id = str(raw.get("week_id") or "")
+            metric = str(raw.get("metric") or "")
+            cur = raw.get("current_pack")
+            if isinstance(cur, dict):
+                current_pack = cur
             rows = raw.get("candidates") or []
             if isinstance(rows, list):
                 for row in rows[:8]:
@@ -354,6 +361,7 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
                         "n_trades": row.get("n_trades"),
                         "win_rate": row.get("win_rate"),
                         "gross_pnl": row.get("gross_pnl"),
+                        "after_charges_pnl": row.get("after_charges_pnl"),
                         "after_tax_pnl": row.get("after_tax_pnl"),
                         "safety_ok": row.get("safety_ok"),
                         "pack_path": pack_path,
@@ -366,6 +374,8 @@ def discover_status(*, root: Path = ROOT) -> dict[str, Any]:
         "report_mtime_ist": _mtime_ist(report_path),
         "week_id": week_id,
         "behavior_summary": summary,
+        "metric": metric,
+        "current_pack": current_pack,
         "candidates": candidates,
         "cron_tail": _tail_file(cron_path, 10),
         "packs_dir": "data/discover/packs",
@@ -417,6 +427,16 @@ def _annotate_proposal(
         "n",
     }
     out["extra"] = extra
+    if str(out.get("strategy") or "") == "S11_DISCOVERED":
+        after_ch = extra.get("after_charges_inr")
+        if after_ch is None:
+            paper_pack = proposed.get("paper") if isinstance(proposed.get("paper"), dict) else {}
+            after_ch = paper_pack.get("after_charges_pnl")
+        if after_ch is None:
+            after_ch = paper.get("after_tax_pnl_inr")
+        out["pnl_label"] = "After charges ₹"
+        out["pnl_value"] = after_ch
+        return out
     out["pnl_label"] = "After-tax ₹"
     out["pnl_value"] = paper.get("after_tax_pnl_inr")
     return out
@@ -502,8 +522,10 @@ def ml_desk_payload(
         "live_blocked_reason": LIVE_BLOCKED_REASON,
         "note": (
             "Approve → paper writes S11_PACK_PATH / ENABLE_S11, or S18 active.json "
-            "+ ENABLE_S18, and keeps DRY_RUN=true. S18 ranks after charges (tax excluded). "
-            "Type RESTART on Engine to load RAM. This tab never arms Angel."
+            "+ ENABLE_S18, and keeps DRY_RUN=true. S11 and S18 rank after charges "
+            "(tax excluded). After the first S11 pack is approved, a new row appears "
+            "only when it beats that pack. Type RESTART on Engine to load RAM. "
+            "This tab never arms Angel."
         ),
     }
 
