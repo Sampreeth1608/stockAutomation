@@ -120,6 +120,44 @@ def test_old_min_proba_cannot_undo_seventy() -> None:
             os.environ["EDGE_MIN_PROBA"] = prev_p
 
 
+def test_skips_losing_hour_keeps_winning_hour() -> None:
+    """Lifetime 50% still allows the hour that actually wins — WR can climb."""
+    lr = TradeLearner()
+    trades = [
+        _t("S12_HHHL30", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(12)
+    ] + [
+        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(12)
+    ]
+    lr.fit(trades)
+    bad = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S12_HHHL30", bad)
+    ok_good, why_good = lr.allow("S12_HHHL30", good)
+    assert ok_bad is False, why_bad
+    assert ok_good is True, why_good
+    assert "ml_" in why_good
+
+
+def test_ratchet_only_rises() -> None:
+    lr = TradeLearner()
+    wins = [_t("S5_MINEDGE", 120.0, f"2026-08-12T11:{i:02d}:00") for i in range(20)]
+    lr.fit(wins)
+    need_hi = lr.need_p("S5_MINEDGE")
+    assert need_hi >= 0.70
+    mixed = []
+    for i in range(20):
+        mixed.append(_t("S5_MINEDGE", 120.0 if i < 10 else -40.0, f"2026-08-13T11:{i:02d}:00"))
+    lr.fit(mixed)
+    need_after = lr.need_p("S5_MINEDGE")
+    assert need_after >= need_hi
+
+
+def test_on_close_exists() -> None:
+    lr = TradeLearner()
+    lr.on_close("S14_WICK30_STRICT")
+    assert lr.note == "cold"
+
+
 def test_reset_clears_singleton() -> None:
     lr = reset_learner()
     assert lr.n == 0
@@ -135,5 +173,8 @@ if __name__ == "__main__":
     test_allows_high_winrate_book()
     test_allows_positive_ev_book()
     test_old_min_proba_cannot_undo_seventy()
+    test_skips_losing_hour_keeps_winning_hour()
+    test_ratchet_only_rises()
+    test_on_close_exists()
     test_reset_clears_singleton()
     print("ALL test_trade_learner OK")

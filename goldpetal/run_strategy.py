@@ -278,6 +278,13 @@ def run_once(
             strategy=strategy,
             cmp=cmp,
         )
+        if str(action).upper() in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
+            try:
+                from trade_learner import get_learner
+
+                get_learner().on_close(strategy)
+            except Exception:
+                pass
         if action in {"BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
             res = broker.place_signal(
                 strategy=strategy,
@@ -1435,7 +1442,7 @@ def run_once(
 
             state["tick_count"] += 1
             tick_count = state["tick_count"]
-            if tick_count == 1 or tick_count % 2500 == 0:
+            if tick_count == 1 or tick_count % 200 == 0:
                 try:
                     from trade_learner import get_learner
 

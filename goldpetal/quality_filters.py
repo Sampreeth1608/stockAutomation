@@ -158,6 +158,7 @@ def tick_features(
     return {
         "strategy": str(strategy or ""),
         "side": side_val,
+        "hour": float(hour_frac) % 24.0,
         "hour_sin": s,
         "hour_cos": c,
         "weekday": float(int(weekday) % 7),
