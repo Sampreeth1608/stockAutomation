@@ -1,0 +1,612 @@
+"""Human trade capture — record what YOU see. Does not trade.
+
+Manual entries use timing, context, and a skip filter that coded rules
+do not have. Press BUY / SHORT / NO TRADE; we store the tape around the
+click (recent 1m candles, 30s ticks, book, OI, VWAP) and fill 5s–5m
+outcomes from ticks. No ENABLE. No Angel. Learning ≠ deploy.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from desk_data import resolve_desk_db
+from export_full_ticks import _depth_side
+from mtf_bars import build_rich_bars, tick_metrics
+from storage import connect, init_db, latest_ltp
+
+IST = ZoneInfo("Asia/Kolkata")
+ROOT = Path(__file__).resolve().parent
+CAPTURE_DIR = ROOT / "data" / "human_capture"
+EXAMPLES_PATH = CAPTURE_DIR / "examples.json"
+HORIZONS_SEC: tuple[int, ...] = (5, 10, 30, 60, 300)
+HORIZON_LABEL = {5: "5s", 10: "10s", 30: "30s", 60: "1m", 300: "5m"}
+LOOKBACK_1M = 50
+LOOKBACK_TICK_SEC = 30
+RECENT_TICK_LIMIT = 12000
+ACTIONS = frozenset({"buy", "short", "no_trade"})
+
+_lock = threading.Lock()
+
+
+def _now() -> datetime:
+    return datetime.now(IST)
+
+
+def _now_iso() -> str:
+    return _now().isoformat(timespec="seconds")
+
+
+def _parse_ts(raw: str) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
+def _empty_store() -> dict[str, Any]:
+    return {"updated_at_ist": _now_iso(), "examples": []}
+
+
+def load_examples(path: Path = EXAMPLES_PATH) -> list[dict[str, Any]]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(json.dumps(_empty_store(), indent=2), encoding="utf-8")
+        return []
+    with _lock:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        return list(raw)
+    return list(raw.get("examples") or [])
+
+
+def save_examples(items: list[dict[str, Any]], path: Path = EXAMPLES_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"updated_at_ist": _now_iso(), "examples": items}
+    with _lock:
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def signed_imb(buy: float, sell: float) -> float:
+    tot = float(buy) + float(sell)
+    if tot <= 1e-12:
+        return 0.0
+    return (float(buy) - float(sell)) / tot
+
+
+def _bar_vol(b: Any) -> float:
+    v = getattr(b, "bar_volume", None)
+    if v is None:
+        v = getattr(b, "volume", None)
+    return float(v or 0.0)
+
+
+def _bar_oi(b: Any) -> float:
+    v = getattr(b, "oi_close", None)
+    if v is None:
+        v = getattr(b, "oi", None)
+    return float(v or 0.0)
+
+
+def _bar_tbq(b: Any) -> float:
+    v = getattr(b, "tbq_close", None)
+    if v is None:
+        v = getattr(b, "tbq", None)
+    return float(v or 0.0)
+
+
+def _bar_tsq(b: Any) -> float:
+    v = getattr(b, "tsq_close", None)
+    if v is None:
+        v = getattr(b, "tsq", None)
+    return float(v or 0.0)
+
+
+def _book_side(msg: dict[str, Any], side: str) -> list[dict[str, float | None]]:
+    out: list[dict[str, float | None]] = []
+    for px, qty in _depth_side(msg, side):
+        out.append(
+            {
+                "price": round(float(px), 2) if px is not None else None,
+                "qty": round(float(qty), 2) if qty is not None else None,
+            }
+        )
+    return out
+
+
+def recent_tick_rows(db: Path, *, limit: int = RECENT_TICK_LIMIT) -> list[Any]:
+    init_db(db)
+    with connect(db) as conn:
+        rows = list(
+            conn.execute(
+                """
+                SELECT received_at, ltp, volume, bp, sp, raw_json
+                FROM ticks
+                WHERE ltp IS NOT NULL
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+        )
+    rows.reverse()
+    return rows
+
+
+def ltp_at_or_after(db: Path, when_iso: str) -> float | None:
+    init_db(db)
+    with connect(db) as conn:
+        row = conn.execute(
+            """
+            SELECT ltp FROM ticks
+            WHERE received_at >= ? AND ltp IS NOT NULL
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (when_iso,),
+        ).fetchone()
+    if row is None or row["ltp"] is None:
+        return None
+    return float(row["ltp"])
+
+
+def _bar_row(b: Any, prev: Any | None) -> dict[str, Any]:
+    rng = float(b.high) - float(b.low)
+    body = abs(float(b.close) - float(b.open))
+    upper = float(b.high) - max(float(b.open), float(b.close))
+    lower = min(float(b.open), float(b.close)) - float(b.low)
+    vol = _bar_vol(b)
+    prev_vol = _bar_vol(prev) if prev is not None else 0.0
+    oi = _bar_oi(b)
+    prev_oi = _bar_oi(prev) if prev is not None else 0.0
+    return {
+        "time": b.time,
+        "open": round(float(b.open), 2),
+        "high": round(float(b.high), 2),
+        "low": round(float(b.low), 2),
+        "close": round(float(b.close), 2),
+        "volume": round(vol, 2),
+        "oi": round(oi, 2),
+        "tbq": round(_bar_tbq(b), 2),
+        "tsq": round(_bar_tsq(b), 2),
+        "n_ticks": int(getattr(b, "n_ticks", 0) or 0),
+        "bull": bool(b.close > b.open),
+        "bear": bool(b.close < b.open),
+        "hh": bool(prev is not None and b.high > prev.high),
+        "hl": bool(prev is not None and b.low > prev.low),
+        "hc": bool(prev is not None and b.close > prev.close),
+        "lh": bool(prev is not None and b.high < prev.high),
+        "ll": bool(prev is not None and b.low < prev.low),
+        "lc": bool(prev is not None and b.close < prev.close),
+        "vol_up": bool(prev is not None and vol > prev_vol > 0),
+        "oi_up": bool(prev is not None and oi > prev_oi > 0),
+        "body_frac": round(body / rng, 3) if rng > 1e-12 else 0.0,
+        "upper_wick_frac": round(upper / rng, 3) if rng > 1e-12 else 0.0,
+        "lower_wick_frac": round(lower / rng, 3) if rng > 1e-12 else 0.0,
+    }
+
+
+def _naive_long(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return bool(row.get("bull") and row.get("hh") and row.get("hc") and row.get("vol_up"))
+
+
+def _naive_short(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return bool(row.get("bear") and row.get("ll") and row.get("lc") and row.get("vol_up"))
+
+
+def snapshot_market(
+    db: Path | None = None,
+    *,
+    tick_limit: int = RECENT_TICK_LIMIT,
+) -> dict[str, Any]:
+    """Market state at click time. Not an order."""
+    path = db or resolve_desk_db()
+    rows = recent_tick_rows(path, limit=tick_limit)
+    now = _now()
+    last = rows[-1] if rows else None
+    last_m = tick_metrics(last) if last is not None else {}
+    ltp = float(last_m["ltp"]) if last_m.get("ltp") is not None else latest_ltp(path)
+    last_ts = _parse_ts(str(last["received_at"] or "")) if last is not None else None
+    clock = last_ts or now
+
+    cutoff_30 = clock - timedelta(seconds=LOOKBACK_TICK_SEC)
+    ticks_30: list[dict[str, Any]] = []
+    ltp_then: float | None = None
+    for row in rows:
+        ts = _parse_ts(str(row["received_at"] or ""))
+        if ts is None or ts < cutoff_30:
+            continue
+        m = tick_metrics(row)
+        px = m.get("ltp")
+        if px is None:
+            continue
+        if ltp_then is None:
+            ltp_then = float(px)
+        ticks_30.append(
+            {
+                "time": m.get("time"),
+                "ltp": round(float(px), 2),
+                "tbq": round(float(m.get("tbq") or 0), 2),
+                "tsq": round(float(m.get("tsq") or 0), 2),
+                "oi": round(float(m.get("oi") or 0), 2) if m.get("oi") is not None else None,
+            }
+        )
+    vel = None
+    if ltp is not None and ltp_then is not None and LOOKBACK_TICK_SEC:
+        vel = (float(ltp) - float(ltp_then)) / float(LOOKBACK_TICK_SEC)
+
+    bars_1m = build_rich_bars(rows, "1m", 1) if rows else []
+    bars_5m = build_rich_bars(rows, "5m", 5) if rows else []
+    bars_1h = build_rich_bars(rows, "1h", 60) if rows else []
+    use_1m = bars_1m[-LOOKBACK_1M:]
+    packed_1m = [
+        _bar_row(b, use_1m[i - 1] if i else (bars_1m[-LOOKBACK_1M - 1] if len(bars_1m) > LOOKBACK_1M else None))
+        for i, b in enumerate(use_1m)
+    ]
+    last_1m = packed_1m[-1] if packed_1m else None
+    last_1h = None
+    prev_1h = None
+    if bars_1h:
+        prev = bars_1h[-2] if len(bars_1h) >= 2 else None
+        last_1h = _bar_row(bars_1h[-1], prev)
+        if prev is not None and len(bars_1h) >= 3:
+            prev_1h = _bar_row(prev, bars_1h[-3])
+        elif prev is not None:
+            prev_1h = _bar_row(prev, None)
+
+    session_vwap = None
+    if use_1m:
+        tpv = 0.0
+        vol = 0.0
+        day = use_1m[-1].time[:10]
+        for b in use_1m:
+            if b.time[:10] != day:
+                continue
+            typical = (float(b.high) + float(b.low) + float(b.close)) / 3.0
+            bar_vol = _bar_vol(b)
+            tpv += typical * bar_vol
+            vol += bar_vol
+        if vol > 1e-12:
+            session_vwap = tpv / vol
+
+    tbq = float(last_m.get("tbq") or 0.0)
+    tsq = float(last_m.get("tsq") or 0.0)
+    buy5 = float(last_m.get("buy5_sum") or 0.0)
+    sell5 = float(last_m.get("sell5_sum") or 0.0)
+    coded_1h_long = _naive_long(last_1h)
+    coded_1h_short = _naive_short(last_1h)
+    coded_1m_long = _naive_long(last_1m)
+    coded_1m_short = _naive_short(last_1m)
+
+    last_msg: dict[str, Any] = {}
+    if last is not None and last["raw_json"]:
+        try:
+            parsed = json.loads(last["raw_json"])
+            if isinstance(parsed, dict):
+                last_msg = parsed
+        except (TypeError, json.JSONDecodeError):
+            last_msg = {}
+    bids = _book_side(last_msg, "buy")
+    asks = _book_side(last_msg, "sell")
+    bid1 = bids[0]["price"] if bids else None
+    ask1 = asks[0]["price"] if asks else None
+    spread = (
+        round(float(ask1) - float(bid1), 2)
+        if bid1 is not None and ask1 is not None
+        else None
+    )
+
+    return {
+        "captured_at_ist": _now_iso(),
+        "db_path": str(path),
+        "n_ticks_loaded": len(rows),
+        "ltp": round(float(ltp), 2) if ltp is not None else None,
+        "last_tick_at": str(last["received_at"]) if last is not None else "",
+        "tbq": tbq,
+        "tsq": tsq,
+        "imb": round(signed_imb(tbq, tsq), 4),
+        "buy5": buy5,
+        "sell5": sell5,
+        "bids": bids,
+        "asks": asks,
+        "bid1": bid1,
+        "ask1": ask1,
+        "spread": spread,
+        "depth_imb": round(signed_imb(buy5, sell5), 4),
+        "oi": last_m.get("oi"),
+        "session_volume": last_m.get("volume"),
+        "ltp_velocity_30s": round(float(vel), 6) if vel is not None else None,
+        "vwap": round(float(session_vwap), 2) if session_vwap is not None else None,
+        "vwap_gap": (
+            round(float(ltp) - float(session_vwap), 2)
+            if ltp is not None and session_vwap is not None
+            else None
+        ),
+        "ticks_30s": ticks_30[-80:],
+        "n_ticks_30s": len(ticks_30),
+        "bars_1m": packed_1m,
+        "last_1m": last_1m,
+        "last_5m": _bar_row(bars_5m[-1], bars_5m[-2] if len(bars_5m) >= 2 else None) if bars_5m else None,
+        "last_1h": last_1h,
+        "prev_1h": prev_1h,
+        "coded": {
+            "rule": "bull + higher high + higher close + volume up (naive; not S16 wick, not S18 day)",
+            "h1_long": coded_1h_long,
+            "h1_short": coded_1h_short,
+            "m1_long": coded_1m_long,
+            "m1_short": coded_1m_short,
+        },
+        "weekday": clock.strftime("%A"),
+        "hhmm": clock.strftime("%H:%M"),
+    }
+
+
+def _vs_coded(action: str, coded: dict[str, Any]) -> str:
+    if action == "buy":
+        if coded.get("h1_long"):
+            return "you_buy_rule_also"
+        return "you_buy_rule_missed"
+    if action == "short":
+        if coded.get("h1_short"):
+            return "you_short_rule_also"
+        return "you_short_rule_missed"
+    if coded.get("h1_long") or coded.get("h1_short"):
+        return "you_skipped_rule_would_take"
+    return "you_skipped_rule_quiet"
+
+
+def record_human(
+    action: str,
+    *,
+    confidence: int = 3,
+    note: str = "",
+    db: Path | None = None,
+    path: Path = EXAMPLES_PATH,
+    snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    act = str(action or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if act in {"long", "buy_long"}:
+        act = "buy"
+    if act in {"sell", "short_sell"}:
+        act = "short"
+    if act in {"skip", "pass", "hold", "no"}:
+        act = "no_trade"
+    if act not in ACTIONS:
+        raise ValueError("action must be buy, short, or no_trade")
+    conf = max(1, min(5, int(confidence or 3)))
+    snap = snapshot if snapshot is not None else snapshot_market(db)
+    ltp = snap.get("ltp")
+    if ltp is None:
+        raise RuntimeError("no LTP on the tape — start the feed first")
+    coded = snap.get("coded") or {}
+    example = {
+        "id": uuid.uuid4().hex[:10],
+        "created_at_ist": _now_iso(),
+        "action": act,
+        "confidence": conf,
+        "note": str(note or "")[:400],
+        "entry_px": float(ltp),
+        "entry_at": snap.get("last_tick_at") or _now_iso(),
+        "vs_coded": _vs_coded(act, coded),
+        "coded": coded,
+        "snapshot": snap,
+        "outcomes": {},
+        "settled": False,
+        "places_order": False,
+        "paper": False,
+        "live": False,
+    }
+    items = load_examples(path)
+    items.insert(0, example)
+    save_examples(items[:2000], path=path)
+    return example
+
+
+def _horizon_iso(entry_at: str, sec: int) -> str | None:
+    ts = _parse_ts(entry_at)
+    if ts is None:
+        return None
+    return (ts + timedelta(seconds=int(sec))).isoformat(timespec="seconds")
+
+
+def _signed_pts(action: str, entry: float, px: float) -> dict[str, float]:
+    long_pts = float(px) - float(entry)
+    short_pts = float(entry) - float(px)
+    if action == "buy":
+        taken = long_pts
+    elif action == "short":
+        taken = short_pts
+    else:
+        taken = 0.0
+    return {
+        "ltp": round(float(px), 2),
+        "long_pts": round(long_pts, 2),
+        "short_pts": round(short_pts, 2),
+        "taken_pts": round(taken, 2),
+        "taken_inr_100lots": round(taken * 100.0, 2),
+    }
+
+
+def settle_open(
+    db: Path | None = None,
+    *,
+    path: Path = EXAMPLES_PATH,
+    now: datetime | None = None,
+) -> int:
+    """Fill 5s/10s/30s/1m/5m marks from later ticks. Not a fill. Not a trade."""
+    db_path = db or resolve_desk_db()
+    items = load_examples(path)
+    clock = now or _now()
+    changed = 0
+    for ex in items:
+        if ex.get("settled"):
+            continue
+        entry_at = str(ex.get("entry_at") or "")
+        entry_px = float(ex.get("entry_px") or 0)
+        action = str(ex.get("action") or "")
+        outcomes = dict(ex.get("outcomes") or {})
+        start = _parse_ts(entry_at)
+        if start is None or entry_px <= 0:
+            continue
+        dirty = False
+        all_done = True
+        for sec in HORIZONS_SEC:
+            label = HORIZON_LABEL[sec]
+            if label in outcomes:
+                continue
+            due = start + timedelta(seconds=sec)
+            if clock < due:
+                all_done = False
+                continue
+            when = _horizon_iso(entry_at, sec)
+            px = ltp_at_or_after(db_path, when) if when else None
+            if px is None:
+                all_done = False
+                continue
+            outcomes[label] = _signed_pts(action, entry_px, px)
+            dirty = True
+        if dirty:
+            ex["outcomes"] = outcomes
+            changed += 1
+        if all_done and len(outcomes) >= len(HORIZONS_SEC):
+            ex["settled"] = True
+            changed += 1
+    if changed:
+        save_examples(items, path=path)
+    return changed
+
+
+def _win(ex: dict[str, Any], horizon: str = "1m") -> bool | None:
+    if ex.get("action") == "no_trade":
+        return None
+    mark = (ex.get("outcomes") or {}).get(horizon) or {}
+    pts = mark.get("taken_pts")
+    if pts is None:
+        return None
+    return float(pts) > 0
+
+
+def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    rows = items if items is not None else load_examples()
+    n = len(rows)
+    buys = [r for r in rows if r.get("action") == "buy"]
+    shorts = [r for r in rows if r.get("action") == "short"]
+    skips = [r for r in rows if r.get("action") == "no_trade"]
+    taken = buys + shorts
+
+    def wr(group: list[dict[str, Any]], horizon: str) -> float | None:
+        marks = [_win(r, horizon) for r in group]
+        known = [x for x in marks if x is not None]
+        if not known:
+            return None
+        return sum(1 for x in known if x) / float(len(known))
+
+    vs = {
+        "you_buy_rule_also": 0,
+        "you_buy_rule_missed": 0,
+        "you_short_rule_also": 0,
+        "you_short_rule_missed": 0,
+        "you_skipped_rule_would_take": 0,
+        "you_skipped_rule_quiet": 0,
+    }
+    for r in rows:
+        key = str(r.get("vs_coded") or "")
+        if key in vs:
+            vs[key] += 1
+    return {
+        "n": n,
+        "n_buy": len(buys),
+        "n_short": len(shorts),
+        "n_no_trade": len(skips),
+        "n_taken": len(taken),
+        "win_rate_1m": wr(taken, "1m"),
+        "win_rate_5m": wr(taken, "5m"),
+        "win_rate_30s": wr(taken, "30s"),
+        "vs_coded": vs,
+        "note": (
+            "NO TRADE is the selection filter. Coded 1h rule is naive "
+            "HH+HC+volume-up — the thing your brain is usually stricter than. "
+            "This store does not ENABLE a book and does not send Angel orders."
+        ),
+    }
+
+
+def example_public(ex: dict[str, Any]) -> dict[str, Any]:
+    snap = ex.get("snapshot") or {}
+    last_1m = snap.get("last_1m") or {}
+    last_1h = snap.get("last_1h") or {}
+    return {
+        "id": ex.get("id"),
+        "created_at_ist": ex.get("created_at_ist"),
+        "action": ex.get("action"),
+        "confidence": ex.get("confidence"),
+        "note": ex.get("note"),
+        "entry_px": ex.get("entry_px"),
+        "vs_coded": ex.get("vs_coded"),
+        "hhmm": snap.get("hhmm"),
+        "ltp": snap.get("ltp"),
+        "imb": snap.get("imb"),
+        "bid1": snap.get("bid1"),
+        "ask1": snap.get("ask1"),
+        "spread": snap.get("spread"),
+        "oi": snap.get("oi"),
+        "vwap_gap": snap.get("vwap_gap"),
+        "ltp_velocity_30s": snap.get("ltp_velocity_30s"),
+        "last_1m": last_1m,
+        "last_1h": last_1h,
+        "coded": ex.get("coded"),
+        "outcomes": ex.get("outcomes") or {},
+        "settled": bool(ex.get("settled")),
+        "n_bars_1m": len(snap.get("bars_1m") or []),
+        "n_ticks_30s": snap.get("n_ticks_30s") or 0,
+    }
+
+
+def capture_desk_payload(
+    *,
+    db: Path | None = None,
+    path: Path = EXAMPLES_PATH,
+    settle: bool = True,
+) -> dict[str, Any]:
+    db_path = db or resolve_desk_db()
+    if settle:
+        try:
+            settle_open(db_path, path=path)
+        except Exception:
+            pass
+    items = load_examples(path)
+    ltp = latest_ltp(db_path)
+    return {
+        "ok": True,
+        "ts_ist": _now_iso(),
+        "places_order": False,
+        "live_blocked": True,
+        "ltp": ltp,
+        "db_path": str(db_path),
+        "summary": capture_summary(items),
+        "recent": [example_public(x) for x in items[:40]],
+        "note": (
+            "Press BUY / SHORT / NO TRADE when you would (or would not) take it. "
+            "We store candles, book, OI, and 30s of LTP — not a one-line rule. "
+            "Does not paper. Does not live. Keep DRY_RUN=true."
+        ),
+    }

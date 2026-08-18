@@ -21,6 +21,12 @@ def test_station_is_the_operator_page() -> None:
     assert "Downloads" in html
     assert 'data-tab="ml"' in html
     assert 'data-tab="lab"' in html
+    assert 'data-tab="you"' in html
+    assert "Human trade capture" in html
+    assert "/api/capture" in html
+    assert "NO TRADE" in html
+    assert "Does not place an order" in html
+    assert "you_skipped_rule_would_take" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
@@ -77,6 +83,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Trading station" in html
     assert "ML / S11 + S18" in html
     assert "Research Lab" in html
+    assert "You — capture" in html
+    assert "/#you" in html
+    assert "/#lab" in html
     assert "/#lab" in html
     assert "after charges" in html
     assert "weekly_s18.sh" in html
@@ -115,6 +124,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/desk" in text
     assert "/api/ml" in text
     assert "/api/research" in text
+    assert "/api/capture" in text
+    assert "record_human" in text
     assert "decide_research" in text
     assert "/api/s11/activate" in text
     assert "decide_proposal_for_desk" in text

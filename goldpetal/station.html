@@ -84,9 +84,9 @@ input[type=number], input[type=text], input[type=date], select {
   padding: .38rem .5rem; font: 13px var(--mono); }
 input[type=number], input[type=text] { width: 6.4rem; }
 input[type=date] { width: 11.2rem; }
-#dl-panel, #ml-panel, #lab-panel { padding: .85rem 1rem 1.1rem; }
-#dl-panel[hidden], #ml-panel[hidden], #lab-panel[hidden], #grid-wrap[hidden] { display: none !important; }
-.pane h2, #dl-panel h2, #ml-panel h2, #lab-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
+#dl-panel, #ml-panel, #lab-panel, #you-panel { padding: .85rem 1rem 1.1rem; }
+#dl-panel[hidden], #ml-panel[hidden], #lab-panel[hidden], #you-panel[hidden], #grid-wrap[hidden] { display: none !important; }
+.pane h2, #dl-panel h2, #ml-panel h2, #lab-panel h2, #you-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
   text-transform: uppercase; color: var(--gold); }
 textarea { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: .4rem .5rem; font: 13px var(--font); width: 100%; min-height: 2.5rem; resize: vertical; }
@@ -106,7 +106,7 @@ textarea { background: #fff; color: var(--text); border: 1px solid var(--line); 
 .ml-box b { display: block; font: 600 10px/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .2rem; }
 pre.env { margin: .4rem 0 0; padding: .45rem .55rem; background: var(--head); border: 1px solid var(--line);
   border-radius: 8px; font: 11px/1.4 var(--mono); overflow: auto; max-height: 8rem; white-space: pre-wrap; }
-#ml-badge, #lab-badge { font: 600 11px/1 var(--mono); color: var(--gold); margin-left: .15rem; }
+#ml-badge, #lab-badge, #you-badge { font: 600 11px/1 var(--mono); color: var(--gold); margin-left: .15rem; }
 @media (max-width: 900px) {
   .ml-stats, .ml-compare { grid-template-columns: 1fr 1fr; }
 }
@@ -195,6 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="why">Edge</button>
           <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
+          <button class="tab" type="button" data-tab="you">You<span id="you-badge"></span></button>
           <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
@@ -272,6 +273,39 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <h2 style="margin-top:1rem">Recent lab decisions</h2>
         <div id="lab-decided"></div>
       </div>
+      <div class="scroll" id="you-panel" hidden>
+        <h2>Human trade capture</h2>
+        <p class="hint">Your manual trades use timing and a skip filter that coded rules do not have. Press what you would do <b>now</b>. We store 50×1m candles, 30s of LTP, book, OI, VWAP — then mark 5s / 10s / 30s / 1m / 5m from the tape. <b>Does not place an order.</b> NO TRADE is as important as BUY.</p>
+        <div class="ml-banner ok">This tab never ENABLES a book and never arms Angel. Keep DRY_RUN=true.</div>
+        <p class="flash" id="flash-you"></p>
+        <div class="ml-card">
+          <h3>Record this market</h3>
+          <p class="ml-meta">LTP <span id="you-ltp">—</span> · optional reason below</p>
+          <div class="row" style="margin-top:.45rem">
+            <span class="hint">Confidence</span>
+            <select id="you-conf">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <textarea id="you-note" placeholder="optional: what you saw (wick, depth gone, too late…)"></textarea>
+          <div class="row" style="margin-top:.55rem">
+            <button class="btn ok" type="button" data-you="buy">BUY</button>
+            <button class="btn danger" type="button" data-you="short">SHORT</button>
+            <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
+            <button class="btn" type="button" id="btn-you-refresh">Refresh marks</button>
+          </div>
+        </div>
+        <div id="you-kpis"></div>
+        <h2 style="margin-top:1rem">You vs coded 1h rule</h2>
+        <p class="hint">Coded rule here is naive: green + higher high + higher close + volume up on the last 1h. That is the thin rule. Your NO TRADEs are the missing filter.</p>
+        <div id="you-vs"></div>
+        <h2 style="margin-top:1rem">Recent captures</h2>
+        <div id="you-recent"></div>
+      </div>
       <div class="pane">
         <p class="mono" id="grid-meta">loading market…</p>
         <p class="flash" id="flash-grid"></p>
@@ -339,7 +373,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div id="foot-left">station · 8501</div>
     <div id="foot-ml">learner …</div>
     <div>
-      ML tab · Lab tab · Downloads · <a href="/lite">phone layout</a>
+      ML tab · Lab · You · Downloads · <a href="/lite">phone layout</a>
       · <a href="/full">old archive</a>
     </div>
   </footer>
@@ -367,6 +401,7 @@ let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_clos
 let lastWhy = null;
 let lastMl = null;
 let lastLab = null;
+let lastYou = null;
 let mlRestartNeeded = false;
 
 function esc(s) {
@@ -510,15 +545,17 @@ function mlStat(label, value, cls) {
   return `<div class="ml-stat"><b>${esc(label)}</b><span class="${cls || ""}">${value}</span></div>`;
 }
 function showMainTab() {
-  const extra = watchTab === "dl" || watchTab === "ml" || watchTab === "lab";
+  const extra = watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "you";
   $("grid-wrap").hidden = extra;
   $("dl-panel").hidden = watchTab !== "dl";
   $("ml-panel").hidden = watchTab !== "ml";
   $("lab-panel").hidden = watchTab !== "lab";
+  $("you-panel").hidden = watchTab !== "you";
   $("hist-strat").style.visibility = extra ? "hidden" : "visible";
   if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
   if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — AI proposes, you decide. Never ENABLE from this tab";
+  if (watchTab === "you") $("grid-meta").textContent = "Human capture — records what you see. Does not trade";
 }
 function rangeQs() {
   const from = $("exp-from").value;
@@ -796,6 +833,86 @@ async function loadLab() {
   setLabBadge(((lastLab.pending || []).length) || 0);
   if (watchTab === "lab") renderLab();
 }
+function vsLabel(k) {
+  return ({
+    you_buy_rule_also: "BUY you took, naive 1h rule also fired",
+    you_buy_rule_missed: "BUY you took, naive 1h rule missed",
+    you_short_rule_also: "SHORT you took, naive 1h rule also fired",
+    you_short_rule_missed: "SHORT you took, naive 1h rule missed",
+    you_skipped_rule_would_take: "NO TRADE — rule would have bought/shorted",
+    you_skipped_rule_quiet: "NO TRADE — rule also quiet",
+  })[k] || k;
+}
+function renderYou() {
+  const d = lastYou || {};
+  const s = d.summary || {};
+  const vs = s.vs_coded || {};
+  $("you-ltp").textContent = d.ltp != null ? money(d.ltp) : "—";
+  const n = s.n || 0;
+  const el = $("you-badge");
+  if (el) el.textContent = n ? " (" + n + ")" : "";
+  $("you-kpis").innerHTML = `<div class="ml-card">
+    <h3>Your dataset</h3>
+    <div class="ml-stats">
+      ${mlStat("Captured", String(s.n || 0))}
+      ${mlStat("BUY", String(s.n_buy || 0))}
+      ${mlStat("SHORT", String(s.n_short || 0))}
+      ${mlStat("NO TRADE", String(s.n_no_trade || 0), "warn")}
+      ${mlStat("1m win%", s.win_rate_1m == null ? "—" : pct(s.win_rate_1m), "")}
+    </div>
+    <p class="hint">${esc(s.note || d.note || "")}</p>
+  </div>`;
+  $("you-vs").innerHTML = `<div class="ml-card"><div class="ml-stats">
+    ${mlStat("You BUY, rule missed", String(vs.you_buy_rule_missed || 0), vs.you_buy_rule_missed ? "ok" : "")}
+    ${mlStat("You BUY, rule also", String(vs.you_buy_rule_also || 0))}
+    ${mlStat("You skipped, rule would take", String(vs.you_skipped_rule_would_take || 0), vs.you_skipped_rule_would_take ? "warn" : "")}
+    ${mlStat("You SHORT, rule missed", String(vs.you_short_rule_missed || 0))}
+    ${mlStat("Quiet skips", String(vs.you_skipped_rule_quiet || 0))}
+  </div></div>`;
+  const recent = d.recent || [];
+  $("you-recent").innerHTML = recent.length ? recent.map((r) => {
+    const o = r.outcomes || {};
+    const m1 = o["1m"] || {};
+    const m5 = o["5m"] || {};
+    const act = String(r.action || "").toUpperCase();
+    return `<div class="ml-card">
+      <h3>${esc(act)} @ ${r.entry_px != null ? money(r.entry_px) : "—"} · conf ${esc(r.confidence)}</h3>
+      <p class="ml-meta">${esc(String(r.created_at_ist || "").slice(0, 19))} · ${esc(vsLabel(r.vs_coded))} · 1m bars ${esc(r.n_bars_1m)} · 30s ticks ${esc(r.n_ticks_30s)} · bid ${r.bid1 != null ? r.bid1 : "—"} / ask ${r.ask1 != null ? r.ask1 : "—"}</p>
+      <div class="ml-stats">
+        ${mlStat("30s", m1 && o["30s"] && o["30s"].taken_pts != null ? (o["30s"].taken_pts + " pts") : "…")}
+        ${mlStat("1m", m1.taken_pts != null ? (m1.taken_pts + " pts") : "…", pnlClass(m1.taken_pts))}
+        ${mlStat("5m", m5.taken_pts != null ? (m5.taken_pts + " pts") : "…", pnlClass(m5.taken_pts))}
+        ${mlStat("VWAP gap", r.vwap_gap != null ? String(r.vwap_gap) : "—")}
+        ${mlStat("Imb", r.imb != null ? String(r.imb) : "—")}
+      </div>
+      ${r.note ? `<p class="hint">${esc(r.note)}</p>` : ""}
+    </div>`;
+  }).join("") : `<p class="hint">No captures yet. When you would take (or skip) a trade, press it here — not after you already forgot why.</p>`;
+}
+async function loadYou() {
+  lastYou = await api("/api/capture");
+  if (watchTab === "you") renderYou();
+  else {
+    const n = ((lastYou.summary || {}).n) || 0;
+    const el = $("you-badge");
+    if (el) el.textContent = n ? " (" + n + ")" : "";
+  }
+}
+async function recordYou(action) {
+  const res = await api("/api/capture", {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      confidence: Number($("you-conf").value || 3),
+      note: $("you-note").value || "",
+    }),
+  });
+  lastYou = res;
+  $("you-note").value = "";
+  const rec = res.recorded || {};
+  flash("flash-you", "Recorded " + String(rec.action || action).toUpperCase() + " @ " + (rec.entry_px != null ? rec.entry_px : "—") + " — not an order");
+  renderYou();
+}
 async function decideLab(id, decision) {
   const noteEl = document.querySelector(`[data-lab-note="${id}"]`);
   const res = await api("/api/research/" + encodeURIComponent(id) + "/decide", {
@@ -840,7 +957,7 @@ async function loadPack(path, alreadySafe) {
   await loadDesk();
 }
 function renderGrid() {
-  if (watchTab === "dl" || watchTab === "ml" || watchTab === "lab") return;
+  if (watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "you") return;
   const h = Object.assign({}, lastTape, lastHist);
   const tab = watchTab;
   const strat = $("hist-strat").value;
@@ -1026,11 +1143,18 @@ document.querySelectorAll("#tabs .tab").forEach((btn) => {
     if (watchTab === "why" && !lastWhy) loadWhy().catch(() => {});
     if (watchTab === "ml") loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
     if (watchTab === "lab") loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
+    if (watchTab === "you") loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
   };
 });
 $("ml-filter").onchange = () => { if (lastMl) renderMl(); };
 $("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 $("btn-lab-refresh").onclick = () => loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
+$("btn-you-refresh").onclick = () => loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
+$("you-panel").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-you]");
+  if (!btn) return;
+  recordYou(btn.dataset.you).catch((e) => flash("flash-you", String(e.message || e), true));
+});
 $("lab-panel").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-lab]");
   if (!btn) return;
@@ -1151,6 +1275,11 @@ if (location.hash === "#lab") {
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "lab"));
   showMainTab();
 }
+if (location.hash === "#you") {
+  watchTab = "you";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "you"));
+  showMainTab();
+}
 bootExports().catch((e) => flash("flash-dl", String(e.message || e), true));
 loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadTape().catch(() => {});
@@ -1158,12 +1287,14 @@ loadHistory().catch(() => {});
 setTimeout(() => loadWhy().catch(() => {}), 400);
 loadMl().catch(() => {});
 loadLab().catch(() => {});
+loadYou().catch(() => {});
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 12000);
 setInterval(() => { if (!typing()) loadWhy().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 20000);
+setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 8000);
 </script>
 </body>
 </html>

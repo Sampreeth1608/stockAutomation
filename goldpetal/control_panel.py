@@ -365,6 +365,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(research_desk_payload())
                 self._send(status, body, ctype)
                 return
+            if path == "/api/capture":
+                from human_capture import capture_desk_payload
+
+                status, body, ctype = _json_bytes(capture_desk_payload())
+                self._send(status, body, ctype)
+                return
             if path == "/api/s11/pack":
                 raw = ((qs.get("path") or [""])[0] or "").strip()
                 status, body, ctype = _json_bytes(pack_summary(raw))
@@ -679,6 +685,30 @@ class ControlHandler(BaseHTTPRequestHandler):
                     self._send(*_json_bytes({"error": str(exc)}, 400))
                     return
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
+            if path == "/api/capture":
+                from human_capture import capture_desk_payload, record_human
+
+                action = str(data.get("action") or "")
+                try:
+                    rec = record_human(
+                        action,
+                        confidence=int(data.get("confidence") or 3),
+                        note=str(data.get("note") or ""),
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
+                payload = capture_desk_payload(settle=False)
+                payload["recorded"] = {
+                    "id": rec.get("id"),
+                    "action": rec.get("action"),
+                    "entry_px": rec.get("entry_px"),
+                    "vs_coded": rec.get("vs_coded"),
+                    "places_order": False,
+                }
+                payload["ok"] = True
+                self._send(*_json_bytes(payload))
                 return
             if path == "/api/s11/activate":
                 pack_path = str(data.get("pack_path") or data.get("path") or "")
