@@ -123,6 +123,32 @@ def test_on_bar_row_uses_prev() -> None:
     assert s.entry_price == 110.0
 
 
+def test_flatten_at_market_close() -> None:
+    s = _s16()
+    s.on_tick(_t(9, 0), 100.0)
+    s.on_tick(_t(9, 59), 104.0)
+    s.on_tick(_t(10, 0), 100.0)
+    s.on_tick(_t(10, 10), 120.0)
+    s.on_tick(_t(10, 59), 110.0)
+    buy = s.on_tick(_t(11, 0), 110.0)
+    assert buy is not None and buy.action == "BUY"
+    close = s.on_tick(_t(23, 30), 111.0)
+    assert close is not None and close.action == "CLOSE"
+    assert s.position == "flat"
+    assert "session close" in (close.reason or "")
+
+
+def test_overnight_leftover_closes_at_next_open() -> None:
+    s = _s16()
+    s.position = "long"
+    s.entry_price = 110.0
+    s.entry_date = "2026-08-16"
+    close = s.on_tick(_t(9, 0), 112.0)
+    assert close is not None and close.action == "CLOSE"
+    assert s.position == "flat"
+    assert "overnight leftover" in (close.reason or "")
+
+
 if __name__ == "__main__":
     test_forming_hour_does_not_trade()
     test_first_closed_hour_needs_prev()
@@ -131,4 +157,6 @@ if __name__ == "__main__":
     test_down_close_wick_flips()
     test_equal_close_skips()
     test_on_bar_row_uses_prev()
+    test_flatten_at_market_close()
+    test_overnight_leftover_closes_at_next_open()
     print("ALL test_strategy_s16 OK")

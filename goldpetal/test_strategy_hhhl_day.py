@@ -273,6 +273,59 @@ def test_sql_seed_hydrates_today_from_ticks_db() -> None:
         db.unlink()
 
 
+def _front_contract(*, days_left: int, rolled: bool = False, symbol: str = "GOLDPETAL31AUG26FUT") -> dict:
+    return {
+        "symbol": symbol,
+        "token": "1",
+        "rolled": rolled,
+        "rollover_days": 5,
+        "days_to_front_expiry": days_left,
+        "front_month_expiry": "31AUG2026",
+        "next_month_expiry": "30SEP2026",
+    }
+
+
+def test_last_front_session_closes_and_blocks() -> None:
+    s = _fresh("/tmp/s13_roll_last_front.json")
+    s.prev_day = DayOhlc("2026-08-24", 15000, 15100, 14900, 15050)
+    s._day = DayOhlc("2026-08-25", 15080, 15200, 15040, 15180)
+    s.position = "long"
+    s.entry_price = 15180.0
+    s.entry_date = "2026-08-11"
+    s.contract_symbol = "GOLDPETAL31AUG26FUT"
+    s.set_contract(_front_contract(days_left=6, rolled=False))
+    close = s.on_tick(_ts("2026-08-25", "10:00"), 15190)
+    assert close is not None and close.action == "CLOSE"
+    assert s.position == "flat"
+    assert "last front-month" in (close.reason or "")
+    blocked = s.on_tick(_ts("2026-08-25", "23:20"), 15200)
+    assert blocked is None
+    assert s.last_skip == "avoid_front_roll"
+    Path("/tmp/s13_roll_last_front.json").unlink(missing_ok=True)
+
+
+def test_contract_switch_closes_and_resets_book() -> None:
+    s = _fresh("/tmp/s13_roll_switch.json")
+    s.prev_day = DayOhlc("2026-08-25", 15000, 15100, 14900, 15050)
+    s._day = DayOhlc("2026-08-26", 15080, 15200, 15040, 15180)
+    s.position = "long"
+    s.entry_price = 15180.0
+    s.contract_symbol = "GOLDPETAL31AUG26FUT"
+    s.set_contract(
+        _front_contract(
+            days_left=5,
+            rolled=True,
+            symbol="GOLDPETAL30SEP26FUT",
+        )
+    )
+    close = s.on_tick(_ts("2026-08-26", "09:05"), 16010)
+    assert close is not None and close.action == "CLOSE"
+    assert s.position == "flat"
+    assert s.prev_day is None
+    assert s.contract_symbol == "GOLDPETAL30SEP26FUT"
+    Path("/tmp/s13_roll_switch.json").unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     test_up_close_hh_green_buys_last_15m_holds_next_open()
     print("ok long_last_15m_hold_open")
@@ -298,4 +351,8 @@ if __name__ == "__main__":
     print("ok persist")
     test_sql_seed_hydrates_today_from_ticks_db()
     print("ok sql seed")
+    test_last_front_session_closes_and_blocks()
+    print("ok last front flatten")
+    test_contract_switch_closes_and_resets_book()
+    print("ok contract switch")
     print("ALL test_strategy_hhhl_day OK")

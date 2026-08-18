@@ -3,13 +3,18 @@
 Confirm only in the last 15 minutes of *this* day (`MARKET_CLOSE` 23:30 →
 23:15–23:30). Never the next day's open. Fill at last-15m LTP. FLIP if
 already the other side. Stay in until the opposite signal (no next-open
-kill, no EOD flatten).
+kill, no EOD flatten), **or** until the Gold Petal monthly rollover.
+
+Rollover (same `ROLLOVER_DAYS=5` policy as `symbols.find_goldpetal_futures`):
+the feed switches to next month from 5 days before front expiry. S13
+closes the front-month book on the last front session (and on a token
+switch), then trades the next-month contract as a new trend.
 
 Two paper books share this engine:
 
-  S4_OVERNIGHT  — old S13 HH/LL only (HH+green LONG, LL+red SHORT).
-  S13_HHHL_DAY  — S16 close-vs-prev on the day candle:
-                    C>prevC → HH/LL; C<prevC → wick g0; C=prevC skip.
+  S4_OVERNIGHT  — old S13 HH/LL only (research; paper default off).
+  S13_HHHL_DAY  — S16 close-vs-prev on the day candle (the day-by-day book).
+
 
 No min_range. No fakeout close-beyond. S16 1h stays its own book.
 Overnight ML (strategy_overnight) is research-only — not the paper S4.
@@ -29,6 +34,7 @@ from zoneinfo import ZoneInfo
 from backtest_hhhl_candles import Candle
 from s16_hhhl_wick import hhhl_side, s16_bar_decision
 from strategy import Position, SignalResult
+from symbols import s13_roll_intent
 from wick_candles import wick_measure
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -115,6 +121,8 @@ class HhhlDayOvernightStrategy:
         self._acted_date: str | None = None
         self.market_open = self._parse_hhmm(self.cfg.market_open)
         self.market_close = self._parse_hhmm(self.cfg.market_close)
+        self._contract: dict[str, Any] | None = None
+        self.contract_symbol: str | None = None
         self._load_state()
         # Always re-read ticks so a restart does not freeze today's H/L
         # at the first print of the day (s13_state.json is only a snapshot).
@@ -153,7 +161,8 @@ class HhhlDayOvernightStrategy:
         return (
             f"{rule} confirm={c.entry_minutes_before_close}m_before_close FLIP "
             f"L={c.allow_long} S={c.allow_short} "
-            f"{prev} {today} pos={self.position}"
+            f"{prev} {today} pos={self.position} "
+            f"contract={self.contract_symbol or '-'}"
         )
 
     def _load_state(self) -> None:
@@ -166,6 +175,7 @@ class HhhlDayOvernightStrategy:
         self.position = raw.get("side", "flat")  # type: ignore[assignment]
         self.entry_price = raw.get("entry_price")
         self.entry_date = raw.get("entry_date")
+        self.contract_symbol = raw.get("contract_symbol") or None
         acted = raw.get("acted_date")
         if isinstance(acted, str) and acted:
             self._acted_date = acted
@@ -292,6 +302,7 @@ class HhhlDayOvernightStrategy:
             "entry_price": self.entry_price,
             "entry_date": self.entry_date,
             "acted_date": self._acted_date,
+            "contract_symbol": self.contract_symbol,
             "prev_day": None,
             "today": None,
         }
@@ -464,6 +475,85 @@ class HhhlDayOvernightStrategy:
         else:
             self.last_skip = "watching_equal_close"
 
+    def set_contract(self, contract: dict[str, Any] | None) -> None:
+        """Bind the live Gold Petal contract (front vs next per ROLLOVER_DAYS)."""
+        self._contract = dict(contract) if contract else None
+
+    def _reset_book_for_new_contract(self) -> None:
+        self.prev_day = None
+        self._day = None
+        self._acted_today = False
+        self._acted_date = None
+
+    def _flatten(self, px: float, why: str) -> SignalResult | None:
+        if self.position == "flat":
+            return None
+        prev = self.position
+        self.position = "flat"
+        self.entry_price = None
+        self.entry_date = None
+        self.last_signal = "CLOSE"
+        self._save_state()
+        return SignalResult(
+            action="CLOSE",
+            position_after="flat",
+            price_delta=None,
+            net=None,
+            net_delta=None,
+            prev_net_delta=None,
+            reason=f"{self._reason_tag()} CLOSE {prev}→flat {why}",
+        )
+
+    def _roll_on_tick(self, now: datetime, px: float) -> SignalResult | None:
+        c = self._contract
+        if not c:
+            return None
+        symbol = str(c.get("symbol") or "")
+        intent = s13_roll_intent(
+            held_symbol=self.contract_symbol,
+            trade_symbol=symbol,
+            rolled=bool(c.get("rolled")),
+            days_to_front_expiry=int(c.get("days_to_front_expiry") or 0),
+            rollover_days=int(c.get("rollover_days") or 5),
+            in_position=self.position in {"long", "short"},
+        )
+        today = now.strftime("%Y-%m-%d")
+        if intent in {"flatten_switch", "reset_switch"}:
+            sig = self._flatten(
+                px,
+                f"contract switch {self.contract_symbol}→{symbol} "
+                f"ROLLOVER_DAYS={c.get('rollover_days')}",
+            )
+            self._reset_book_for_new_contract()
+            self.contract_symbol = symbol or None
+            self._mark_acted(today)
+            self.last_skip = "rolled_new_contract"
+            self._save_state()
+            return sig
+        if intent == "flatten_last_front":
+            sig = self._flatten(
+                px,
+                f"last front-month session "
+                f"days_to_front={c.get('days_to_front_expiry')} "
+                f"ROLLOVER_DAYS={c.get('rollover_days')} — avoid near expiry",
+            )
+            self._mark_acted(today)
+            self.last_skip = "avoid_front_roll"
+            self._save_state()
+            return sig
+        if intent == "block_last_front":
+            self.last_skip = "avoid_front_roll"
+            if symbol and self.contract_symbol != symbol:
+                self.contract_symbol = symbol
+                self._save_state()
+            return None
+        if symbol and self.contract_symbol != symbol:
+            self.contract_symbol = symbol
+            self._save_state()
+        if self.last_skip in {"avoid_front_roll", "rolled_new_contract"}:
+            self.last_skip = None
+        return None
+
     def on_tick(
         self, now: datetime, ltp: float, message: dict[str, Any] | None = None
     ) -> SignalResult | None:
@@ -471,6 +561,11 @@ class HhhlDayOvernightStrategy:
         now = now.astimezone(IST)
         today = now.strftime("%Y-%m-%d")
         px = float(ltp)
+        rolled = self._roll_on_tick(now, px)
+        if rolled is not None:
+            return rolled
+        if self.last_skip == "avoid_front_roll":
+            return None
         self._update_day_bar(today, px)
 
         if self._acted_date == today:

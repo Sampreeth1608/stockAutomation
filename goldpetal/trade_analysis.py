@@ -25,10 +25,10 @@ WHAT_IT_GUESSES = {
     "S8_NET_ZIGZAG": "Order-book NET zigzags. Needs a strong rising imbalance (default 14%) and a target that can cover fees.",
     "S11_DISCOVERED": "Auto-discovered rules. They are paper hypotheses, not proven edge.",
     "S12_HHHL30": "30m higher-high / lower-low, last-minute confirm. Skips wick-only fakeouts (close must finish beyond the prior high/low).",
-    "S13_HHHL_DAY": "S16 close-vs-prev on the day candle, last 15m. Holds across days/weeks until the opposite S16 signal. FLIP. Never next-open.",
+    "S13_HHHL_DAY": "S16 close-vs-prev on the day candle, last 15m. Holds the trend across days until the opposite S16 signal or Gold Petal monthly rollover (flatten last front session, then trade next month). FLIP. Never next-open.",
     "S14_WICK30_STRICT": "Same-candle open=high SHORT / open=low LONG, else wick. Weak nearly-equal wicks are skipped (formula order unchanged).",
     "S15_WICK30_NOWICK": "Bald 30m body only, HOLD (no reverse). Fewer trades; still no real edge filter.",
-    "S16_HHHL_WICK_1H": "Wait for the 1h candle to finish. Up close: HH+green LONG / LL+red SHORT. Down close: wick (gap 0). FLIP at that close.",
+    "S16_HHHL_WICK_1H": "Wait for the 1h candle to finish. Up close: HH+green LONG / LL+red SHORT. Down close: wick (gap 0). FLIP at that close. Intraday only: flatten at MARKET_CLOSE, leftover at next open. Never overnight.",
 }
 
 

@@ -40,6 +40,9 @@ INTRADAY_RESTORE = (
     "S11_DISCOVERED",
 )
 
+# S16 is a same-session book: do not restore yesterday's position overnight.
+SESSION_CLOSE_OVERNIGHT = frozenset({"S16_HHHL_WICK_1H"})
+
 # S4/S13 are multi-day/week holds. Retired S12/S14/S15 last-minute confirm overlapped EOD.
 EOD_FLATTEN_SKIP = frozenset(
     {
@@ -141,7 +144,7 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
     strategy_obj.position = open_pos.side  # type: ignore[assignment]
     if hasattr(strategy_obj, "entry_price"):
         strategy_obj.entry_price = open_pos.entry_price
-    if name in {"S4_OVERNIGHT", "S13_HHHL_DAY"} and open_pos.time_label:
+    if name in {"S4_OVERNIGHT", "S13_HHHL_DAY", "S16_HHHL_WICK_1H"} and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
     if hasattr(strategy_obj, "_save_state"):
@@ -176,7 +179,8 @@ def startup_reconcile(
         "messages": [str, ...],
       }
     """
-    del now  # reserved for future stale-age rules
+    now_ist = (now or datetime.now(IST)).astimezone(IST)
+    today = now_ist.strftime("%Y-%m-%d")
     mode = (mode or restart_mode()).lower()
     restored: list[dict[str, Any]] = []
     closes: list[dict[str, Any]] = []
@@ -192,6 +196,23 @@ def startup_reconcile(
         if open_pos is None:
             continue
         obj = strategies.get(name)
+
+        if name in SESSION_CLOSE_OVERNIGHT and str(open_pos.time_label)[:10] != today:
+            closes.append(
+                {
+                    "strategy": name,
+                    "side": open_pos.side,
+                    "entry_price": open_pos.entry_price,
+                    "time_label": open_pos.time_label,
+                    "cmp": open_pos.cmp,
+                    "reason": "S16 session leftover auto-CLOSE (intraday — flatten overnight)",
+                }
+            )
+            messages.append(
+                f"SESSION CLOSE {name} was_{open_pos.side} since {open_pos.time_label} "
+                f"(not restoring overnight)"
+            )
+            continue
 
         if mode == "close":
             closes.append(

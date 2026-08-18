@@ -233,6 +233,32 @@ def test_startup_reconcile_restore(monkeypatch_signals=None) -> None:
     del calls
 
 
+def test_s16_overnight_is_closed_not_restored() -> None:
+    import position_safety as ps
+
+    def fake_last(name: str):
+        if name == "S16_HHHL_WICK_1H":
+            return OpenPosition(
+                name, "long", 15400.0, "2026-08-17T22:00:00", "BUY", 15400.0
+            )
+        return None
+
+    orig = ps.last_open_position
+    ps.last_open_position = fake_last  # type: ignore[assignment]
+    try:
+        s16 = _Fake("S16_HHHL_WICK_1H")
+        res = startup_reconcile(
+            {"S16_HHHL_WICK_1H": s16},
+            mode="restore",
+            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+        )
+        assert s16.position == "flat"
+        assert len(res["closes"]) == 1
+        assert res["restored"] == []
+    finally:
+        ps.last_open_position = orig  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     test_apply_restore_s5()
     print("ok apply")
@@ -254,4 +280,6 @@ if __name__ == "__main__":
     print("ok s4 skip flatten")
     test_startup_reconcile_restore()
     print("ok reconcile")
+    test_s16_overnight_is_closed_not_restored()
+    print("ok s16 overnight close")
     print("ALL test_position_safety OK")
