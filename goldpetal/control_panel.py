@@ -27,6 +27,7 @@ from capital import (
     update_strategy_budget,
 )
 from storage import build_trades, count_ticks, latest_ltp, latest_signals, latest_ticks
+from charges import paper_lots
 from desk_data import (
     history_payload,
     json_safe,
@@ -114,7 +115,7 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     state = load_state()
     ticks = [_row_to_dict(r) for r in latest_ticks(limit=tick_limit)]
     # One DB trade rebuild for the whole dashboard (was 10× before — timed out over tunnel).
-    all_trades = build_trades(strategy=None)
+    all_trades = build_trades(strategy=None, lot_size=paper_lots())
     closed = [t for t in all_trades if str(t.get("status", "")).startswith("CLOSED")]
     open_t = [t for t in all_trades if t.get("status") == "OPEN"]
     closed_sorted = list(reversed(closed))[:trade_limit]

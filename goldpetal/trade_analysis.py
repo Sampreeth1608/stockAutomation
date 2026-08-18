@@ -146,8 +146,8 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
             "The tape still bills brokerage, MCX, GST and 30% tax."
         )
     notes.append(
-        "Paper 100 lots is not live size (LIVE_MAX_LOTS cap 10). Fees scale with lots, "
-        "so a 100-lot paper tape looks much worse than 1–10 live lots on the same points."
+        "Paper 100 lots is not live size (LIVE_MAX_LOTS cap 10). "
+        "This desk tape is at PAPER_LOTS (default 100), not 1 lot. "
     )
     notes.append(
         "A desk-wide learner estimates P(win after tax) from closed trades (logistic + "
@@ -205,6 +205,12 @@ def analysis_payload(*, db_path: Any = None) -> dict[str, Any]:
     payload["error"] = err
     payload["db_path"] = str(db)
     payload["window"] = "slim books, last 1500 signals each"
+    try:
+        from charges import paper_lots
+
+        payload["lots"] = paper_lots()
+    except Exception:
+        payload["lots"] = 100.0
     try:
         from trade_learner import get_learner
 

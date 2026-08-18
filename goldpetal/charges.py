@@ -45,6 +45,26 @@ def ignore_fees_enabled() -> bool:
     return _env_flag("IGNORE_FEES", True)
 
 
+def paper_lots() -> float:
+    """How many lots the paper tape / learner / fee gates use.
+
+    LOT_SIZE=1 is the 1g Gold Petal contract (₹1 per point per lot).
+    PAPER_LOTS=100 is the paper size on the desk. Live stays LIVE_MAX_LOTS.
+    """
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+    raw = os.getenv("PAPER_LOTS", "100")
+    try:
+        n = float(raw)
+    except (TypeError, ValueError):
+        n = 100.0
+    return max(1.0, n)
+
+
 @dataclass(frozen=True)
 class ChargeConfig:
     brokerage_per_order: float = 20.0

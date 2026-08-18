@@ -203,13 +203,21 @@ class TradeLearner:
         self.fitted_at = time.time()
 
     def fit_from_db(self, db_path: Path | None = None) -> None:
+        from charges import paper_lots
         from storage import DB_PATH, build_trades
 
         db = db_path or DB_PATH
         rows: list[dict[str, Any]] = []
         try:
             for name in SLIM_PAPER_STRATEGIES:
-                rows.extend(build_trades(strategy=name, db_path=db, signal_limit=1200))
+                rows.extend(
+                    build_trades(
+                        strategy=name,
+                        db_path=db,
+                        signal_limit=1200,
+                        lot_size=paper_lots(),
+                    )
+                )
         except Exception:
             rows = []
         self.fit(rows)

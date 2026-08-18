@@ -107,6 +107,10 @@ def test_history_payload_has_closed_trade_and_ticks() -> None:
         assert hist["total_closed"] >= 1
         assert hist["trades"]
         assert hist["trades"][0]["strategy"] == "S14_WICK30_STRICT"
+        assert hist["lots"] == 100
+        # 15 points at 100 lots → ₹1500 gross (1g contract, ₹1/point/lot)
+        closed = hist["trades"][0]
+        assert float(closed.get("gross_pnl") or 0) == 1500.0
         assert hist["scoreboard"]
 
 

@@ -40,7 +40,7 @@ class MinEdgeStrategy:
         cover_fees: bool | None = None,
         require_reasoning: bool = False,
         reasoning_min_score: float = 0.45,
-        reasoning_lots: float = 1.0,
+        reasoning_lots: float = 100.0,
         ml_model_path: str | None = None,
         require_ml: bool = False,
         min_ml_proba: float = 0.55,
@@ -260,7 +260,7 @@ def minedge_from_env() -> MinEdgeStrategy:
         "y",
     }
     min_score = float(os.getenv("S5_REASONING_MIN_SCORE", "0.45"))
-    lots = float(os.getenv("S5_REASONING_LOTS", "1"))
+    lots = float(os.getenv("S5_REASONING_LOTS", "100"))
     ml_path = os.getenv("S5_ML_MODEL_PATH", "").strip() or None
     require_ml = os.getenv("S5_REQUIRE_ML", "false").strip().lower() in {
         "1",

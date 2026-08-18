@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from charges import paper_lots
 from storage import (
     TRADE_CSV_FIELDS,
     DB_PATH,
@@ -71,7 +72,7 @@ def trades_in_range(
     d1 = (date_to or "").strip()[:10]
     if not d0 or not d1:
         raise ValueError("date_from and date_to required (YYYY-MM-DD)")
-    trades = build_trades(strategy=strategy, db_path=db_path)
+    trades = build_trades(strategy=strategy, db_path=db_path, lot_size=paper_lots())
     out: list[dict[str, Any]] = []
     for t in trades:
         entry = str(t.get("entry_ts") or "")

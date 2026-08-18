@@ -24,13 +24,23 @@ class EdgeThresholds:
         return self.min_edge_points
 
 
-def fee_break_even_points(price: float = 14380.0, *, force_fees: bool = False) -> float:
+def fee_break_even_points(
+    price: float = 14380.0,
+    *,
+    force_fees: bool = False,
+    lots: float | None = None,
+) -> float:
     """Points needed so gross ₹ PnL covers a typical round-trip fee."""
-    from charges import angel_charges_from_env, charges_from_env, ignore_fees_enabled
+    from charges import angel_charges_from_env, charges_from_env, ignore_fees_enabled, paper_lots
 
+    n = float(paper_lots() if lots is None else lots)
     if ignore_fees_enabled() and not force_fees:
         return 0.0
-    cfg = angel_charges_from_env() if force_fees else charges_from_env()
+    cfg = (
+        angel_charges_from_env(lot_size=n)
+        if force_fees
+        else charges_from_env()
+    )
     fee = round_trip_charges(
         side="BUY", entry_price=price, exit_price=price + 1.0, cfg=cfg
     )["charges"]

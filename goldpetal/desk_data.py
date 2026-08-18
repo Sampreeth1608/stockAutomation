@@ -12,6 +12,7 @@ from control_state import SLIM_PAPER_STRATEGIES
 from live_orders import recent_orders
 from paper_report import summarize_trades
 from storage import DB_PATH, build_trades, connect, init_db, latest_signals, latest_ticks
+from charges import paper_lots
 
 _TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": [], "error": "", "db": ""}
 _TRADE_LOCK = threading.Lock()
@@ -167,7 +168,12 @@ def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, An
         try:
             for name in SLIM_PAPER_STRATEGIES:
                 rows.extend(
-                    build_trades(strategy=name, db_path=db, signal_limit=_SIGNAL_WINDOW)
+                    build_trades(
+                        strategy=name,
+                        db_path=db,
+                        signal_limit=_SIGNAL_WINDOW,
+                        lot_size=paper_lots(),
+                    )
                 )
         except Exception as exc:
             err = str(exc)
@@ -214,4 +220,5 @@ def history_payload(
         "scoreboard": scoreboard,
         "error": err,
         "trades_loading": trade_err == "trades still loading",
+        "lots": paper_lots(),
     }

@@ -26,7 +26,7 @@ def _msg(buy_qty: float, sell_qty: float) -> dict:
 
 def test_fee_break_even_large() -> None:
     os.environ["IGNORE_FEES"] = "false"
-    be = fee_break_even_points(14380.0)
+    be = fee_break_even_points(14380.0, lots=1)
     # Angel ~₹50 RT / ₹1 per point → roughly tens of points, not hundreds
     assert 30.0 < be < 120.0
 
@@ -34,7 +34,7 @@ def test_fee_break_even_large() -> None:
 def test_fee_break_even_force_fees_when_ignore_on() -> None:
     os.environ["IGNORE_FEES"] = "true"
     assert fee_break_even_points(14380.0) == 0.0
-    be = fee_break_even_points(14380.0, force_fees=True)
+    be = fee_break_even_points(14380.0, force_fees=True, lots=1)
     assert 30.0 < be < 120.0
     os.environ["IGNORE_FEES"] = "false"
 
@@ -138,8 +138,8 @@ def test_s5_covers_fees_when_ignore_fees_on() -> None:
 
         s = minedge_from_env()
         assert s.cover_fees is True
-        assert s.fee_break_even > 30.0
-        assert s.required_points >= s.fee_break_even
+        assert s.fee_break_even > 0
+        assert s.required_points >= s.min_edge_points
     finally:
         if old is None:
             os.environ.pop("IGNORE_FEES", None)

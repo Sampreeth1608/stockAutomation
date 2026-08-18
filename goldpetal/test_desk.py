@@ -40,6 +40,7 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "Why win rate is low" in html
     assert "/api/analysis" in html
     assert "why-ml" in html
+    assert "h.lots" in html
 
 
 def test_control_panel_serves_lite_on_8501() -> None:

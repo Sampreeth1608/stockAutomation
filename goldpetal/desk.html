@@ -304,6 +304,7 @@ function renderWatch(h) {
     "ticks " + (h.tick_count || 0),
   ];
   if (h.ltp != null && h.ltp !== "") bits.push("ltp " + h.ltp);
+  if (h.lots) bits.push(h.lots + " lots");
   if (h.db_path) bits.push(h.db_path);
   if (h.trades_loading) bits.push("trades loading");
   if (!(h.tick_count || 0) && !(h.ticks || []).length) bits.push("empty db or wrong folder");
@@ -490,6 +491,7 @@ function renderWhy(d) {
     "fee-killed " + (o.fee_killed || 0),
     "FLIPs " + (o.flips || 0),
     d.window || "",
+    (d.lots ? d.lots + " lots" : ""),
     d.db_path || "",
   ].filter(Boolean).join(" · ");
   $("why-notes").innerHTML = (d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")
