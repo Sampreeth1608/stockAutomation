@@ -354,7 +354,11 @@ def test_not_wired_to_paper_or_live() -> None:
     assert "ENABLE_RESEARCH" not in runner
     assert "research_factory" not in runner
     assert "ENABLE_RESEARCH" not in portfolio
-    assert "research_factory" not in (root / "run_strategy.py").read_text(encoding="utf-8")
+    desk = (root / "research_desk.py").read_text(encoding="utf-8")
+    assert "from research_factory" not in desk
+    assert "import research_factory" not in desk
+    genome_head = (root / "strategy_genome.py").read_text(encoding="utf-8").split("def params_from_genome")[0]
+    assert "from flow_lab import" not in genome_head
 
 
 if __name__ == "__main__":

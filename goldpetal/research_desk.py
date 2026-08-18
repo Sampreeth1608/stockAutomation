@@ -8,13 +8,14 @@ and never sets DRY_RUN=false.
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from proposals import decide_proposal, get_proposal, load_proposals, save_proposals
-from research_factory import LAST_RUN_PATH, LIBRARY_PATH, load_library
 from strategy_genome import (
     LAB_NAME,
     RESEARCH_KIND,
@@ -25,6 +26,9 @@ from strategy_genome import (
 
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
+RESEARCH_DIR = ROOT / "data" / "research"
+LIBRARY_PATH = RESEARCH_DIR / "library.json"
+LAST_RUN_PATH = RESEARCH_DIR / "last_run.json"
 
 LIVE_BLOCKED_REASON = (
     "Live approval is not on the Lab tab. The research factory cannot deploy. "
@@ -43,14 +47,37 @@ def _now_iso() -> str:
     return datetime.now(IST).isoformat(timespec="seconds")
 
 
-def _library_payload() -> dict[str, Any]:
-    lib = load_library(LIBRARY_PATH)
-    if lib:
-        return lib
-    if LAST_RUN_PATH.exists():
-        import json
+def _research_dirs() -> list[Path]:
+    """Desk may run from ~/goldpetal while the factory wrote into a worktree."""
+    out: list[Path] = []
+    env_dir = (os.getenv("GP_DATA_DIR") or "").strip()
+    if env_dir:
+        out.append(Path(env_dir) / "research")
+    out.append(RESEARCH_DIR)
+    home_lab = Path.home() / "goldpetal" / "data" / "research"
+    if home_lab not in out:
+        out.append(home_lab)
+    return out
 
-        return json.loads(LAST_RUN_PATH.read_text(encoding="utf-8"))
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _library_payload() -> dict[str, Any]:
+    for folder in _research_dirs():
+        lib = _read_json(folder / "library.json")
+        if lib:
+            return lib
+        last = _read_json(folder / "last_run.json")
+        if last:
+            return last
     return {}
 
 

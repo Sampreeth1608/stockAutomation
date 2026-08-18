@@ -12,7 +12,9 @@ import json
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any
 
-from flow_lab import EXIT_ATR, EXIT_FLIP, FlowParams
+# Keep these as strings so the Lab tab can import this module without flow_lab.
+EXIT_FLIP = "flip_eod"
+EXIT_ATR = "atr"
 
 LAB_NAME = "RESEARCH_FACTORY"
 RESEARCH_KIND = "research"
@@ -139,7 +141,9 @@ def is_research_proposal(row: Any) -> bool:
     return kind == RESEARCH_KIND or strategy == RESEARCH_STRATEGY
 
 
-def params_from_genome(g: StrategyGenome, base: FlowParams | None = None) -> FlowParams:
+def params_from_genome(g: StrategyGenome, base: Any | None = None) -> Any:
+    from flow_lab import FlowParams
+
     p = base or FlowParams()
     raw = g.params or {}
     kwargs: dict[str, Any] = {}
@@ -165,6 +169,8 @@ def mutate_genome(g: StrategyGenome, *, scale: float = 0.10) -> StrategyGenome:
         if key in params and abs(float(params[key])) > 1e-12:
             params[key] = float(params[key]) * (1.0 + float(scale))
         elif key not in params and abs(scale) > 1e-12:
+            from flow_lab import FlowParams
+
             base = getattr(FlowParams(), key, None)
             if isinstance(base, (int, float)) and not isinstance(base, bool):
                 params[key] = float(base) * (1.0 + float(scale))
