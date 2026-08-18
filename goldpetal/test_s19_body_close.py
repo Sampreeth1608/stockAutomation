@@ -94,12 +94,36 @@ def test_paper_wired_not_live() -> None:
     root = Path(__file__).resolve().parent
     station = (root / "station.html").read_text(encoding="utf-8")
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
+    portfolio = (root / "portfolio.py").read_text(encoding="utf-8")
+    env_bridge = (root / "analytics" / "env_bridge.py").read_text(encoding="utf-8")
     assert S19_NAME in station
     paper = station.split("const PAPER_BOOKS")[1].split("];")[0]
     assert S19_NAME in paper
     assert "s19_from_env" in runner
     assert "ENABLE_S19" in runner
     assert "ENABLE_S17" not in runner
+    assert 'on("ENABLE_S19", "false")' in portfolio
+    assert '"ENABLE_S19": "false"' in env_bridge
+
+
+def test_hours_from_ohlc_keeps_volume() -> None:
+    from s19_body_close import hours_from_ohlc
+
+    bars = hours_from_ohlc(
+        [
+            {
+                "time": "2026-08-17T11:00:00+05:30",
+                "open": 104,
+                "high": 120,
+                "low": 103,
+                "close": 110,
+                "volume": 2000,
+            }
+        ]
+    )
+    assert bars[0].time == "2026-08-17 11:00:00"
+    assert bars[0].close == 110.0
+    assert bars[0].volume == 2000.0
 
 
 if __name__ == "__main__":
@@ -109,4 +133,5 @@ if __name__ == "__main__":
     test_hold_through_mixed_then_flip()
     test_after_charges_excludes_tax()
     test_paper_wired_not_live()
+    test_hours_from_ohlc_keeps_volume()
     print("ALL test_s19_body_close OK")

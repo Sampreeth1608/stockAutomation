@@ -17,7 +17,11 @@ Flatten at session end.
 
 This is the coverage vs fee tradeoff: it trades both directions, but it
 does **not** reverse every mixed hour (that path is close-follow research
-only — round-trip charges eat 100-lot paper). Not S16/S17/S18. Not live.
+only — round-trip charges eat 100-lot paper).
+
+100-lot + Angel-fees 1h backtest (GOLDPETAL Aug-26 contract, 2026-05-18→2026-08-18
+session hours) lost after charges vs S16 and vs S18. ENABLE_S19 stays false.
+Not S16/S17/S18. Not live.
 """
 
 from __future__ import annotations
@@ -173,3 +177,27 @@ def simulate_close_follow(
 def after_charges_inr(result: Any) -> float:
     """Gross minus Angel charges. Tax excluded (same rank as S11/S18)."""
     return float(result.gross_pnl_inr) - float(result.fees_inr)
+
+
+def hours_from_ohlc(rows: list[dict[str, Any]]) -> list[VolBar]:
+    """OHLC (+ optional volume) dicts → VolBars. Times as ``YYYY-MM-DD HH:MM:SS``."""
+    out: list[VolBar] = []
+    for r in rows:
+        t = str(r["time"]).replace("T", " ")[:19]
+        raw_vol = r.get("volume", r.get("vol", 0.0))
+        try:
+            volume = float(raw_vol or 0.0)
+        except (TypeError, ValueError):
+            volume = 0.0
+        out.append(
+            VolBar(
+                t,
+                float(r["open"]),
+                float(r["high"]),
+                float(r["low"]),
+                float(r["close"]),
+                volume,
+            )
+        )
+    out.sort(key=lambda b: b.time)
+    return out

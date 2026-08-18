@@ -1802,7 +1802,7 @@ def main() -> None:
     print(f"S19_BODY_CLOSE_1H: {strategy_s19.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S11/S13/S16/S18/S19 — S4 off, S18/S19 paper only)",
+        f"(slim default S5/S8/S11/S13/S16/S18 — S4 off, S18 paper only, S19 off)",
         flush=True,
     )
 
