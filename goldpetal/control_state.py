@@ -211,6 +211,7 @@ ALL_STRATEGY_NAMES: tuple[str, ...] = (
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
+    "S20_FADE_HL",
 )
 
 SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
@@ -221,6 +222,7 @@ SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
+    "S20_FADE_HL",
 )
 
 

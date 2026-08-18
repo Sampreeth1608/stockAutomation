@@ -225,6 +225,25 @@ def test_s19_is_eod_flattened() -> None:
     assert "S19_BODY_CLOSE_1H" in names
 
 
+def test_s20_is_eod_flattened() -> None:
+    class _S20:
+        name = "S20_FADE_HL"
+        position = "long"
+        entry_price = 15400.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    rows = intraday_open_for_flatten(
+        {"S20_FADE_HL": _S20(), "S5_MINEDGE": _S5()}
+    )
+    names = {r["strategy"] for r in rows}
+    assert "S5_MINEDGE" in names
+    assert "S20_FADE_HL" in names
+
+
 def test_eod_window() -> None:
     # MARKET_CLOSE 23:30, last 5 minutes → 23:25–23:30
     assert in_eod_flatten_window(
@@ -349,6 +368,32 @@ def test_s19_overnight_is_closed_not_restored() -> None:
         ps.last_open_position = orig  # type: ignore[assignment]
 
 
+def test_s20_overnight_is_closed_not_restored() -> None:
+    import position_safety as ps
+
+    def fake_last(name: str):
+        if name == "S20_FADE_HL":
+            return OpenPosition(
+                name, "long", 15400.0, "2026-08-17T22:00:00", "BUY", 15400.0
+            )
+        return None
+
+    orig = ps.last_open_position
+    ps.last_open_position = fake_last  # type: ignore[assignment]
+    try:
+        s20 = _Fake("S20_FADE_HL")
+        res = startup_reconcile(
+            {"S20_FADE_HL": s20},
+            mode="restore",
+            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+        )
+        assert s20.position == "flat"
+        assert len(res["closes"]) == 1
+        assert res["restored"] == []
+    finally:
+        ps.last_open_position = orig  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     test_apply_restore_s5()
     print("ok apply")
@@ -370,6 +415,8 @@ if __name__ == "__main__":
     print("ok s18 eod flatten")
     test_s19_is_eod_flattened()
     print("ok s19 eod flatten")
+    test_s20_is_eod_flattened()
+    print("ok s20 eod flatten")
     test_s4_not_eod_flattened()
     print("ok s4 skip flatten")
     test_startup_reconcile_restore()
@@ -380,4 +427,6 @@ if __name__ == "__main__":
     print("ok s18 overnight close")
     test_s19_overnight_is_closed_not_restored()
     print("ok s19 overnight close")
+    test_s20_overnight_is_closed_not_restored()
+    print("ok s20 overnight close")
     print("ALL test_position_safety OK")

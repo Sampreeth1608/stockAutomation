@@ -16,6 +16,7 @@ SHORT = {
     "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
     "S18_OHLC_VOL_HTF": "S18 OHLC+vol+day",
     "S19_BODY_CLOSE_1H": "S19 body+close 1h",
+    "S20_FADE_HL": "S20 fade low/high",
 }
 
 
