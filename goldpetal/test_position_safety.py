@@ -79,6 +79,25 @@ def test_apply_restore_s13_sets_entry_date() -> None:
     assert s.saved is True
 
 
+def test_apply_restore_s4_sets_entry_date() -> None:
+    s = _Fake("S4_OVERNIGHT")
+    ok = apply_position_to_strategy(
+        s,
+        OpenPosition(
+            "S4_OVERNIGHT",
+            "short",
+            15400.0,
+            "2026-08-14T23:20:00+05:30",
+            "SHORT",
+            15400.0,
+        ),
+    )
+    assert ok
+    assert s.position == "short"
+    assert s.entry_date == "2026-08-14"
+    assert s.saved is True
+
+
 def test_disabled_not_restorable() -> None:
     s = _Disabled()
     ok = apply_position_to_strategy(
@@ -128,6 +147,25 @@ def test_s14_s15_not_eod_flattened() -> None:
     assert "S5_MINEDGE" in names
     assert "S14_WICK30_STRICT" not in names
     assert "S15_WICK30_NOWICK" not in names
+
+
+def test_s4_not_eod_flattened() -> None:
+    class _S4:
+        name = "S4_OVERNIGHT"
+        position = "long"
+        entry_price = 15400.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    rows = intraday_open_for_flatten(
+        {"S4_OVERNIGHT": _S4(), "S5_MINEDGE": _S5()}
+    )
+    names = {r["strategy"] for r in rows}
+    assert "S5_MINEDGE" in names
+    assert "S4_OVERNIGHT" not in names
 
 
 def test_s16_is_eod_flattened() -> None:
@@ -200,6 +238,8 @@ if __name__ == "__main__":
     print("ok apply")
     test_apply_restore_s13_sets_entry_date()
     print("ok s13 restore")
+    test_apply_restore_s4_sets_entry_date()
+    print("ok s4 restore")
     test_disabled_not_restorable()
     print("ok disabled")
     test_eod_window()
@@ -210,6 +250,8 @@ if __name__ == "__main__":
     print("ok s14/s15 skip flatten")
     test_s16_is_eod_flattened()
     print("ok s16 eod flatten")
+    test_s4_not_eod_flattened()
+    print("ok s4 skip flatten")
     test_startup_reconcile_restore()
     print("ok reconcile")
     print("ALL test_position_safety OK")

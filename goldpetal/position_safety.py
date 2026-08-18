@@ -4,7 +4,7 @@ Institutional minimum:
   - Restore RAM position from last DB signal after restart (so exits can fire)
   - Or auto-CLOSE orphans when restore is impossible / mode=close
   - Flatten intraday books in the last N minutes before MARKET_CLOSE
-    (S12/S13/S14/S15 skipped — last-minute confirm overlaps EOD flatten)
+    (S12/S13/S14/S15/S4 skipped — multi-day holds / last-minute confirm overlaps EOD flatten)
   - Write data/control/bot_health.json for the desk
 """
 
@@ -24,6 +24,7 @@ HEALTH_PATH = ROOT / "data" / "control" / "bot_health.json"
 
 # Intraday strategies that lose RAM state on restart.
 INTRADAY_RESTORE = (
+    "S4_OVERNIGHT",
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
@@ -39,9 +40,15 @@ INTRADAY_RESTORE = (
     "S11_DISCOVERED",
 )
 
-# S13 is a multi-day hold. Retired S12/S14/S15 last-minute confirm overlapped EOD.
+# S4/S13 are multi-day/week holds. Retired S12/S14/S15 last-minute confirm overlapped EOD.
 EOD_FLATTEN_SKIP = frozenset(
-    {"S12_HHHL30", "S13_HHHL_DAY", "S14_WICK30_STRICT", "S15_WICK30_NOWICK"}
+    {
+        "S4_OVERNIGHT",
+        "S12_HHHL30",
+        "S13_HHHL_DAY",
+        "S14_WICK30_STRICT",
+        "S15_WICK30_NOWICK",
+    }
 )
 
 
@@ -134,7 +141,7 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
     strategy_obj.position = open_pos.side  # type: ignore[assignment]
     if hasattr(strategy_obj, "entry_price"):
         strategy_obj.entry_price = open_pos.entry_price
-    if name == "S13_HHHL_DAY" and open_pos.time_label:
+    if name in {"S4_OVERNIGHT", "S13_HHHL_DAY"} and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
     if hasattr(strategy_obj, "_save_state"):

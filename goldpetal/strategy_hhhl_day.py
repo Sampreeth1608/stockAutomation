@@ -1,23 +1,18 @@
-"""S13_HHHL_DAY — daily S16 close-vs-prev, last-15m same-day fill (paper).
+"""Daily last-15m swing books — hold the trend across days/weeks.
 
-S16 formula on the **trading day** vs **previous day**. Confirm only in the
-last 15 minutes of *this* day (`MARKET_CLOSE` 23:30 → 23:15–23:30). Never
-the next day's open (that is S4). Fill at last-15m LTP.
+Confirm only in the last 15 minutes of *this* day (`MARKET_CLOSE` 23:30 →
+23:15–23:30). Never the next day's open. Fill at last-15m LTP. FLIP if
+already the other side. Stay in until the opposite signal (no next-open
+kill, no EOD flatten).
 
-  C > prevC → HH/LL only (wicks ignored):
-    LONG  = higher high AND green
-    SHORT = lower low  AND red
-  C < prevC → wick only, min_wick_gap=0 (HH/LL ignored):
-    LONG  = lower > upper
-    SHORT = upper > lower
-  C = prevC → skip
+Two paper books share this engine:
 
-FLIP if already the other side. Stay in until the opposite signal (or
-emergency / live flatten). No min_range. No fakeout close-beyond. No
-bald-body. No open=high/low (that is S14).
+  S4_OVERNIGHT  — old S13 HH/LL only (HH+green LONG, LL+red SHORT).
+  S13_HHHL_DAY  — S16 close-vs-prev on the day candle:
+                    C>prevC → HH/LL; C<prevC → wick g0; C=prevC skip.
 
-Does not replace S4 ML overnight — separate paper strategy. S16 1h stays
-its own book.
+No min_range. No fakeout close-beyond. S16 1h stays its own book.
+Overnight ML (strategy_overnight) is research-only — not the paper S4.
 """
 
 from __future__ import annotations
@@ -32,12 +27,16 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backtest_hhhl_candles import Candle
-from s16_hhhl_wick import s16_bar_decision
+from s16_hhhl_wick import hhhl_side, s16_bar_decision
 from strategy import Position, SignalResult
 from wick_candles import wick_measure
 
 IST = ZoneInfo("Asia/Kolkata")
-DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "data" / "s13_state.json"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+DEFAULT_STATE_PATH = DATA_DIR / "s13_state.json"
+S4_STATE_PATH = DATA_DIR / "s4_state.json"
+S4_NAME = "S4_OVERNIGHT"
+S13_NAME = "S13_HHHL_DAY"
 
 
 @dataclass
@@ -84,19 +83,27 @@ class HhhlDayConfig:
     min_close_beyond: float = 0.0
     max_break_wick_frac: float = 0.6
     min_wick_gap: float = 0.0
+    # "s16" = close-vs-prev (S13). "hhhl" = old S13 HH/LL only (S4).
+    formula: str = "s16"
 
 
 class HhhlDayOvernightStrategy:
-    name = "S13_HHHL_DAY"
+    name = S13_NAME
 
     def __init__(
         self,
         cfg: HhhlDayConfig | None = None,
         *,
-        state_path: Path = DEFAULT_STATE_PATH,
+        state_path: Path | None = None,
+        name: str | None = None,
     ) -> None:
         self.cfg = cfg or HhhlDayConfig()
-        self.state_path = state_path
+        if name:
+            self.name = name
+        self.enabled = True
+        self.state_path = state_path or (
+            S4_STATE_PATH if self.name == S4_NAME else DEFAULT_STATE_PATH
+        )
         self.position: Position = "flat"
         self.entry_price: float | None = None
         self.entry_date: str | None = None
@@ -135,9 +142,16 @@ class HhhlDayOvernightStrategy:
             if self._day
             else "today=none"
         )
+        formula = self._formula()
+        if formula == "hhhl":
+            rule = "daily HH/LL swing hold-until-opposite"
+        else:
+            rule = (
+                f"daily S16 C>prev→HH/LL C<prev→wick gap={c.min_wick_gap:g} "
+                "hold-until-opposite"
+            )
         return (
-            f"daily S16 C>prev→HH/LL C<prev→wick gap={c.min_wick_gap:g} "
-            f"confirm={c.entry_minutes_before_close}m_before_close FLIP "
+            f"{rule} confirm={c.entry_minutes_before_close}m_before_close FLIP "
             f"L={c.allow_long} S={c.allow_short} "
             f"{prev} {today} pos={self.position}"
         )
@@ -338,6 +352,33 @@ class HhhlDayOvernightStrategy:
         if self._day.high != old_h or self._day.low != old_l:
             self._save_state()
 
+    def _formula(self) -> str:
+        raw = str(getattr(self.cfg, "formula", "s16") or "s16").strip().lower()
+        if raw in {"hhhl", "hhll", "s12", "old"}:
+            return "hhhl"
+        return "s16"
+
+    def _reason_tag(self) -> str:
+        return "s4" if self.name == S4_NAME else "s13"
+
+    def _wanted_side(self) -> tuple[str | None, str]:
+        day = self._day
+        prev = self.prev_day
+        if day is None or prev is None:
+            return None, "need_prev_day"
+        if self._formula() == "hhhl":
+            side = hhhl_side(_as_candle(prev), _as_candle(day))
+            if side == "long":
+                return "long", "HH+green"
+            if side == "short":
+                return "short", "LL+red"
+            return None, "no HH/LL"
+        return s16_bar_decision(
+            _as_candle(prev),
+            _as_candle(day),
+            min_wick_gap=float(self.cfg.min_wick_gap),
+        )
+
     def release_action_lock(self) -> None:
         """Allow another confirm-window attempt (e.g. after entry gate reject)."""
         self._acted_today = False
@@ -388,37 +429,40 @@ class HhhlDayOvernightStrategy:
             net_delta=None,
             prev_net_delta=None,
             reason=(
-                f"s13 {kind} {prev}→{self.position} {why} {extra} "
+                f"{self._reason_tag()} {kind} {prev}→{self.position} {why} {extra} "
                 f"O={cur.open:.1f} H={cur.high:.1f} L={cur.low:.1f} "
-                f"C={cur.close:.1f}{prev_c} last-15m"
+                f"C={cur.close:.1f}{prev_c} last-15m hold-until-opposite"
             ),
         )
 
     def _decide(self, px: float, today: str) -> SignalResult | None:
-        """S16 close-vs-prev on the forming day vs previous day — confirm window only."""
-        day = self._day
-        prev = self.prev_day
-        if day is None or prev is None:
-            self.last_skip = "need_prev_day"
-            return None
-        side, why = s16_bar_decision(
-            _as_candle(prev), _as_candle(day), min_wick_gap=float(self.cfg.min_wick_gap)
-        )
+        """Daily formula vs previous day — confirm window only. Hold until opposite."""
+        side, why = self._wanted_side()
         if side is None:
             self.last_skip = why
             return None
+        day = self._day
+        assert day is not None
         return self._flip_to(side, px, today, why, _as_candle(day))
 
     def _watch_skip(self) -> None:
-        if self._day and self.prev_day:
-            if self._day.close > self.prev_day.close:
-                self.last_skip = "watching_up_close_hhll"
-            elif self._day.close < self.prev_day.close:
-                self.last_skip = "watching_down_close_wick"
-            else:
-                self.last_skip = "watching_equal_close"
-        else:
+        if not (self._day and self.prev_day):
             self.last_skip = "outside_confirm_window"
+            return
+        if self._formula() == "hhhl":
+            if self._day.high > self.prev_day.high:
+                self.last_skip = "watching_hh"
+            elif self._day.low < self.prev_day.low:
+                self.last_skip = "watching_ll"
+            else:
+                self.last_skip = "outside_confirm_window"
+            return
+        if self._day.close > self.prev_day.close:
+            self.last_skip = "watching_up_close_hhll"
+        elif self._day.close < self.prev_day.close:
+            self.last_skip = "watching_down_close_wick"
+        else:
+            self.last_skip = "watching_equal_close"
 
     def on_tick(
         self, now: datetime, ltp: float, message: dict[str, Any] | None = None
@@ -467,5 +511,27 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         min_close_beyond=float(os.getenv("S13_MIN_CLOSE_BEYOND", "0")),
         max_break_wick_frac=float(os.getenv("S13_MAX_BREAK_WICK_FRAC", "0.6")),
         min_wick_gap=float(os.getenv("S13_MIN_WICK_GAP", "0")),
+        formula="s16",
     )
-    return HhhlDayOvernightStrategy(cfg)
+    return HhhlDayOvernightStrategy(cfg, name=S13_NAME)
+
+
+def s4_swing_from_env() -> HhhlDayOvernightStrategy:
+    """S4 paper — old S13 HH/LL daily swing, last 15m, hold until opposite."""
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    except Exception:
+        pass
+    cfg = HhhlDayConfig(
+        entry_minutes_before_close=int(os.getenv("S4_ENTRY_MINUTES_BEFORE_CLOSE", "15")),
+        exit_minutes_after_open=int(os.getenv("S4_EXIT_MINUTES_AFTER_OPEN", "5")),
+        market_open=os.getenv("MARKET_OPEN", "09:00"),
+        market_close=os.getenv("MARKET_CLOSE", "23:30"),
+        allow_long=_env_flag("S4_ALLOW_LONG", True),
+        allow_short=_env_flag("S4_ALLOW_SHORT", True),
+        formula="hhhl",
+        min_wick_gap=0.0,
+    )
+    return HhhlDayOvernightStrategy(cfg, name=S4_NAME)
