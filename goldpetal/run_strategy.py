@@ -43,6 +43,7 @@ from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env, s4_swing_from_env
 from strategy_s16 import S16HhhlWickStrategy, s16_from_env
 from strategy_s18 import S18OhlcVolHtfStrategy, s18_from_env
+from strategy_s19 import S19BodyCloseStrategy, s19_from_env
 from strategy_wick import wick_record_actions
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
@@ -173,6 +174,7 @@ def run_once(
     strategy_s13: HhhlDayOvernightStrategy,
     strategy_s16: S16HhhlWickStrategy,
     strategy_s18: S18OhlcVolHtfStrategy,
+    strategy_s19: S19BodyCloseStrategy,
     portfolio,
     regime_det: RegimeDetector,
     stop_flag: dict,
@@ -406,6 +408,12 @@ def run_once(
         f"{strategy_s18.status_line}",
         flush=True,
     )
+    print(
+        f"S19      : ENABLE_S19 paper 1h aligned body+close FLIP "
+        f"[{'ON' if portfolio.is_enabled(strategy_s19.name) else 'OFF'}] "
+        f"{strategy_s19.status_line}",
+        flush=True,
+    )
     live_ok, live_why = is_live_mode_allowed()
     print(
         f"Mode     : {'PAPER (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
@@ -435,6 +443,7 @@ def run_once(
         strategy_s13.name: strategy_s13,
         strategy_s16.name: strategy_s16,
         strategy_s18.name: strategy_s18,
+        strategy_s19.name: strategy_s19,
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
         strategy_s6.name: strategy_s6,
@@ -1413,6 +1422,93 @@ def run_once(
             print(line, flush=True)
             logger.info(line)
 
+    def emit_s19_if_changed(now: datetime, message: dict) -> None:
+        """S19: 1h aligned body+close — FLIP at the finished hour close. Paper only."""
+        strategy = strategy_s19
+        if not _strategy_active(strategy.name):
+            return
+        if latest["cmp"] is None:
+            return
+        prev = strategy.position
+        result = strategy.on_tick(now, float(latest["cmp"]), message)
+        skip = getattr(strategy, "last_skip", None)
+        if result is None and state["tick_count"] % 50 == 0:
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
+                f"pos={strategy.position} skip={skip} {strategy.bar_debug}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+        planned = wick_record_actions(prev, result)
+        if not planned:
+            return
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = _may_enter(
+                strategy.name, regime_det.last.regime, side=enter_action
+            )
+            if not ok_enter:
+                strategy.position = "flat"
+                strategy.entry_price = None
+                if hasattr(strategy, "release_decision_lock"):
+                    strategy.release_decision_lock()
+                planned = [p for p in planned if p[0] == "CLOSE"]
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                    f"ENTRY BLOCKED ({why}) — next 1h close | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                if not planned:
+                    return
+        if (
+            strategy.position != "flat"
+            and portfolio.should_flatten(strategy.name, regime_det.last.regime)
+            and enter_action != "CLOSE"
+        ):
+            from strategy import SignalResult as _SR
+
+            strategy.position = "flat"
+            strategy.entry_price = None
+            result = _SR(
+                action="CLOSE",
+                position_after="flat",
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                prev_net_delta=result.prev_net_delta,
+                reason=f"regime_flatten {regime_det.last.regime}: {result.reason}",
+            )
+            planned = [("CLOSE", "flat")]
+        fill_px = (
+            float(strategy.entry_price)
+            if strategy.entry_price is not None
+            else float(latest["cmp"])
+        )
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy.name,
+                cmp=fill_px,
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                f"regime={regime_det.last.regime} CMP={fill_px} "
+                f"=> {action} (pos={pos_after}) | {reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
             return
@@ -1479,7 +1575,8 @@ def run_once(
                     f"/{strategy_s10.bias} s11={strategy_s11.position} "
                     f"s13={strategy_s13.position} "
                     f"s16={strategy_s16.position} "
-                    f"s18={strategy_s18.position}{s3_extra}"
+                    f"s18={strategy_s18.position} "
+                    f"s19={strategy_s19.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -1496,6 +1593,7 @@ def run_once(
                             "S13": strategy_s13.position,
                             "S16": strategy_s16.position,
                             "S18": strategy_s18.position,
+                            "S19": strategy_s19.position,
                         },
                         "runner": "run_strategy",
                     }
@@ -1549,6 +1647,8 @@ def run_once(
             emit_s16_if_changed(now, message)
             # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; paper only
             emit_s18_if_changed(now, message)
+            # S19: 1h aligned body+close, FLIP at bar close; paper only
+            emit_s19_if_changed(now, message)
 
             # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
@@ -1681,6 +1781,7 @@ def main() -> None:
     strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
     strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
     strategy_s18 = _load("S18_OHLC_VOL_HTF", s18_from_env)
+    strategy_s19 = _load("S19_BODY_CLOSE_1H", s19_from_env)
     regime_det = RegimeDetector(window=60)
     init_db()
     if portfolio.is_enabled("S1_NETDELTA"):
@@ -1698,9 +1799,10 @@ def main() -> None:
     print(f"S13_HHHL_DAY: {strategy_s13.status_line}", flush=True)
     print(f"S16_HHHL_WICK_1H: {strategy_s16.status_line}", flush=True)
     print(f"S18_OHLC_VOL_HTF: {strategy_s18.status_line}", flush=True)
+    print(f"S19_BODY_CLOSE_1H: {strategy_s19.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S11/S13/S16/S18 — S4 off, ENABLE_S18 paper only)",
+        f"(slim default S5/S8/S11/S13/S16/S18/S19 — S4 off, S18/S19 paper only)",
         flush=True,
     )
 
@@ -1730,6 +1832,7 @@ def main() -> None:
                 strategy_s13,
                 strategy_s16,
                 strategy_s18,
+                strategy_s19,
                 portfolio,
                 regime_det,
                 stop_flag,
@@ -1755,6 +1858,7 @@ def main() -> None:
             f"s13={strategy_s13.position} "
             f"s16={strategy_s16.position} "
             f"s18={strategy_s18.position} "
+            f"s19={strategy_s19.position} "
             f"regime={regime_det.last.regime})...",
             flush=True,
         )

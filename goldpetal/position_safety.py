@@ -33,6 +33,7 @@ INTRADAY_RESTORE = (
     "S15_WICK30_NOWICK",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
+    "S19_BODY_CLOSE_1H",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -42,7 +43,9 @@ INTRADAY_RESTORE = (
 )
 
 # S16 is a same-session book: do not restore yesterday's position overnight.
-SESSION_CLOSE_OVERNIGHT = frozenset({"S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF"})
+SESSION_CLOSE_OVERNIGHT = frozenset(
+    {"S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H"}
+)
 
 # S4/S13 are multi-day/week holds. Retired S12/S14/S15 last-minute confirm overlapped EOD.
 EOD_FLATTEN_SKIP = frozenset(
@@ -145,7 +148,13 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
     strategy_obj.position = open_pos.side  # type: ignore[assignment]
     if hasattr(strategy_obj, "entry_price"):
         strategy_obj.entry_price = open_pos.entry_price
-    if name in {"S4_OVERNIGHT", "S13_HHHL_DAY", "S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF"} and open_pos.time_label:
+    if name in {
+        "S4_OVERNIGHT",
+        "S13_HHHL_DAY",
+        "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+    } and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
     if hasattr(strategy_obj, "_save_state"):

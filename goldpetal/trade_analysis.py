@@ -18,6 +18,7 @@ SHORT = {
     "S15_WICK30_NOWICK": "S15 no-wick",
     "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
     "S18_OHLC_VOL_HTF": "S18 OHLC+vol+day",
+    "S19_BODY_CLOSE_1H": "S19 body+close 1h",
 }
 
 WHAT_IT_GUESSES = {
@@ -31,6 +32,7 @@ WHAT_IT_GUESSES = {
     "S15_WICK30_NOWICK": "Bald 30m body only, HOLD (no reverse). Fewer trades; still no real edge filter.",
     "S16_HHHL_WICK_1H": "Wait for the 1h candle to finish. Up close: HH+green LONG / LL+red SHORT. Down close: wick (gap 0). FLIP at that close. Intraday only: flatten at MARKET_CLOSE, leftover at next open. Never overnight.",
     "S18_OHLC_VOL_HTF": "Wait for the 1h to finish. Base AND: green/red + close vs prev + HH/LL + volume up + close vs yesterday. Learner may change that pack from ticks (OHLC, volume, TBQ/TSQ, n_ticks). FLIP. Flatten at close. Paper only, not live.",
+    "S19_BODY_CLOSE_1H": "Wait for the 1h to finish. LONG = green and C>prevC. SHORT = red and C<prevC. Mixed / doji / equal close: hold. FLIP only on the opposite aligned hour. Flatten at close. Paper only, not live. Does not flip every mixed hour (that is fee death at 100 lots).",
 }
 
 

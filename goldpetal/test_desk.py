@@ -22,6 +22,7 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="ml"' in html
     assert "Approve → paper" in html
     assert "S18_OHLC_VOL_HTF" in html
+    assert "S19_BODY_CLOSE_1H" in html
     assert "After charges ₹" in html
     assert "weekly_s18.sh" in html
     assert 'value="S18_OHLC_VOL_HTF"' in html
@@ -49,6 +50,7 @@ def test_station_is_the_operator_page() -> None:
     paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S16_HHHL_WICK_1H" in paper
     assert "S18_OHLC_VOL_HTF" in paper
+    assert "S19_BODY_CLOSE_1H" in paper
     assert "S13_HHHL_DAY" in paper
     assert "S4_OVERNIGHT" not in paper
     assert "S12_HHHL30" not in paper
