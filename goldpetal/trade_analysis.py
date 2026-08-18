@@ -150,9 +150,10 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
         "This desk tape is at PAPER_LOTS (default 100), not 1 lot. "
     )
     notes.append(
-        "A desk-wide learner estimates P(win after tax) from closed trades (logistic + "
-        "Wilson/Kelly). After ~15 closes per book it skips entries with p below "
-        "EDGE_MIN_PROBA or expected value ≤ 0. Cold start does not block."
+        "A desk-wide learner estimates P(win after tax) from closed trades on every "
+        "strategy (logistic + book win rate). After EDGE_WARMUP_MAX probes (default 8) "
+        "it skips new BUY/SHORT unless p ≥ EDGE_TARGET_WINRATE (default 70%) and "
+        "expected value > 0. Books that already have a long weak tape are blocked now."
     )
     s14 = next((b for b in books if b["strategy"] == "S14_WICK30_STRICT"), None)
     if s14 and int(s14["closed"]) >= 8:

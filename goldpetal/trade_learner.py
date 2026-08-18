@@ -1,8 +1,14 @@
-"""Self-learning P(win after tax) gate for every book.
+"""Self-learning P(win after tax) gate for every strategy book.
 
-Fits a small logistic model on closed trades in ticks.db. Until there are
-enough samples it uses Laplace-smoothed win rate and does not block.
-Retrain as new closes land so the books get stricter on their own worst hours/sides.
+Fits a logistic model on closed trades in ticks.db, then refuses new
+BUY/SHORT entries unless conservative P(win) is at least
+EDGE_TARGET_WINRATE (default 0.70), EV after fees is positive, and Kelly
+is positive.
+
+A short per-book warmup (EDGE_WARMUP_MAX, default 8) still allows probes
+so a brand-new book can collect labels. After that — including books that
+already have a long losing tape — the 70% bar applies immediately.
+CLOSE / flatten is never gated.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from control_state import SLIM_PAPER_STRATEGIES
+from control_state import ALL_STRATEGY_NAMES
 from quality_filters import (
     expected_value,
     hour_cycle,
@@ -28,7 +34,8 @@ MODEL_PATH = ROOT / "data" / "models" / "trade_edge.joblib"
 _LOCK = threading.Lock()
 _LEARNER: "TradeLearner | None" = None
 
-STRAT_INDEX = {name: i for i, name in enumerate(SLIM_PAPER_STRATEGIES)}
+LEARN_STRATEGIES: tuple[str, ...] = ALL_STRATEGY_NAMES
+STRAT_INDEX = {name: i for i, name in enumerate(LEARN_STRATEGIES)}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -53,6 +60,38 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw is None or str(raw).strip() == "":
         return default
     return str(raw).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _target_winrate() -> float:
+    """70% after-tax win odds, unless EDGE_TARGET_WINRATE is set.
+
+    An old .env with EDGE_MIN_PROBA=0.52 must not undo that bar. Raise the
+    alias only when it is already at least 70%. To trade looser, set
+    EDGE_TARGET_WINRATE explicitly.
+    """
+    raw_target = os.getenv("EDGE_TARGET_WINRATE")
+    if raw_target is not None and str(raw_target).strip() != "":
+        try:
+            return max(0.50, min(0.95, float(raw_target)))
+        except ValueError:
+            return 0.70
+    alias = os.getenv("EDGE_MIN_PROBA")
+    if alias is not None and str(alias).strip() != "":
+        try:
+            a = float(alias)
+            if a >= 0.70:
+                return max(0.50, min(0.95, a))
+        except ValueError:
+            pass
+    return 0.70
+
+
+def _min_samples() -> int:
+    return max(8, _env_int("EDGE_MIN_SAMPLES", 20))
+
+
+def _warmup_max() -> int:
+    return max(0, _env_int("EDGE_WARMUP_MAX", 8))
 
 
 def _num(row: dict[str, Any], key: str) -> float:
@@ -94,7 +133,7 @@ def _weekday_from_ts(raw: str) -> int:
 
 def vectorize(feat: dict[str, Any]) -> list[float]:
     name = str(feat.get("strategy") or "")
-    onehot = [0.0] * len(SLIM_PAPER_STRATEGIES)
+    onehot = [0.0] * len(LEARN_STRATEGIES)
     if name in STRAT_INDEX:
         onehot[STRAT_INDEX[name]] = 1.0
     hour = float(feat.get("hour", 12.0) or 12.0)
@@ -123,7 +162,12 @@ class TradeLearner:
 
     def _book_stats(self, trades: list[dict[str, Any]]) -> None:
         self.by_book = {}
-        for name in SLIM_PAPER_STRATEGIES:
+        names = list(LEARN_STRATEGIES)
+        for t in trades:
+            name = str(t.get("strategy") or "")
+            if name and name not in names:
+                names.append(name)
+        for name in names:
             closed = [
                 t
                 for t in trades
@@ -132,9 +176,10 @@ class TradeLearner:
             wins = [t for t in closed if _num(t, "pnl_after_tax") > 0]
             losses = [t for t in closed if _num(t, "pnl_after_tax") < 0]
             n = len(closed)
-            p_laplace = (len(wins) + 2.0) / (n + 4.0) if n else 0.5
-            p_wilson = wilson_lower(len(wins), n, z=1.0) if n else 0.5
-            p = min(p_laplace, p_wilson) if n else 0.5
+            n_wins = len(wins)
+            p_emp = (n_wins / n) if n else 0.5
+            p_laplace = (n_wins + 2.0) / (n + 4.0) if n else 0.5
+            p_wilson = wilson_lower(n_wins, n, z=1.0) if n else 0.5
             avg_win = (
                 sum(_num(t, "pnl_after_tax") for t in wins) / len(wins) if wins else 0.0
             )
@@ -153,11 +198,14 @@ class TradeLearner:
                     break
             self.by_book[name] = {
                 "n": float(n),
-                "p": float(p),
+                "wins": float(n_wins),
+                "p": float(p_emp),
+                "p_emp": float(p_emp),
+                "laplace": float(p_laplace),
                 "wilson": float(p_wilson),
                 "avg_win": float(avg_win),
                 "avg_loss": float(avg_loss),
-                "kelly": float(kelly_fraction(p, avg_win, avg_loss)),
+                "kelly": float(kelly_fraction(p_emp, avg_win, avg_loss)),
                 "loss_streak": float(streak),
             }
 
@@ -179,7 +227,7 @@ class TradeLearner:
             y.append(1 if _num(t, "pnl_after_tax") > 0 else 0)
         self.model = None
         self.note = f"empirical n={self.n}"
-        if len(X) >= _env_int("EDGE_MIN_SAMPLES", 15) and len(set(y)) >= 2:
+        if len(X) >= _min_samples() and len(set(y)) >= 2:
             try:
                 import numpy as np
                 from sklearn.linear_model import LogisticRegression
@@ -191,7 +239,9 @@ class TradeLearner:
                         ("sc", StandardScaler()),
                         (
                             "lr",
-                            LogisticRegression(max_iter=400, class_weight="balanced"),
+                            # Unweighted so predicted p tracks real win rate,
+                            # not a 50/50 rebalance.
+                            LogisticRegression(max_iter=400),
                         ),
                     ]
                 )
@@ -209,7 +259,7 @@ class TradeLearner:
         db = db_path or DB_PATH
         rows: list[dict[str, Any]] = []
         try:
-            for name in SLIM_PAPER_STRATEGIES:
+            for name in LEARN_STRATEGIES:
                 rows.extend(
                     build_trades(
                         strategy=name,
@@ -229,7 +279,7 @@ class TradeLearner:
 
     def predict_p(self, feat: dict[str, Any]) -> float:
         name = str(feat.get("strategy") or "")
-        prior = float(self.by_book.get(name, {}).get("p", 0.5))
+        prior = float(self.by_book.get(name, {}).get("p_emp", self.by_book.get(name, {}).get("p", 0.5)))
         if self.model is None:
             return prior
         try:
@@ -252,7 +302,9 @@ class TradeLearner:
             strategy,
             {
                 "n": 0.0,
+                "wins": 0.0,
                 "p": 0.5,
+                "p_emp": 0.5,
                 "wilson": 0.5,
                 "avg_win": 0.0,
                 "avg_loss": 0.0,
@@ -261,52 +313,65 @@ class TradeLearner:
             },
         )
         n = int(stats.get("n") or 0)
-        p = self.predict_p(feat)
-        min_p = _env_float("EDGE_MIN_PROBA", 0.52)
-        min_n = _env_int("EDGE_MIN_SAMPLES", 15)
-        if n < min_n:
-            return True, f"ml_warmup n={n} p={p:.2f}"
+        p_emp = float(stats.get("p_emp") or stats.get("p") or 0.5)
+        p_blend = self.predict_p(feat)
+        target = _target_winrate()
+        # Book win rate is the 70% bar. The model can only pull p_gate
+        # toward its own estimate once it has enough mixed labels.
+        if self.model is None or n < _min_samples():
+            p_gate = p_emp if n else 0.50
+        else:
+            p_gate = 0.5 * p_emp + 0.5 * p_blend
+        if n == 0 or n < _warmup_max():
+            return True, f"ml_warmup n={n} p={p_gate:.2f}"
+
+        if p_gate < target:
+            return False, f"ml_p={p_gate:.2f}<{target:.2f} n={n}"
+        avg_win = float(stats.get("avg_win") or 0.0)
+        avg_loss = float(stats.get("avg_loss") or 0.0)
+        if abs(avg_loss) > 1e-9:
+            ev = expected_value(p_gate, avg_win, avg_loss)
+            if ev <= 0:
+                return False, f"ml_ev={ev:.1f} p={p_gate:.2f} n={n}"
+            kel = kelly_fraction(p_gate, avg_win, avg_loss)
+            if kel <= 0:
+                return False, f"ml_kelly={kel:.2f} p={p_gate:.2f} n={n}"
+        else:
+            ev = p_gate * avg_win
+            kel = 1.0
         streak = int(stats.get("loss_streak") or 0)
-        need_p = min_p + (0.08 if streak >= 4 else 0.0)
-        wilson = float(stats.get("wilson") or stats.get("p") or 0.5)
-        if wilson < (min_p - 0.08) and p < need_p + 0.08:
-            return False, f"ml_wilson={wilson:.2f} p={p:.2f}<{need_p + 0.08:.2f} n={n}"
-        if p < need_p:
-            return False, f"ml_p={p:.2f}<{need_p:.2f} n={n}"
-        ev = expected_value(
-            p, float(stats.get("avg_win") or 0.0), float(stats.get("avg_loss") or 0.0)
-        )
-        if ev <= 0:
-            return False, f"ml_ev={ev:.1f} p={p:.2f} n={n}"
-        kel = kelly_fraction(
-            p, float(stats.get("avg_win") or 0.0), float(stats.get("avg_loss") or 0.0)
-        )
-        if kel <= 0:
-            return False, f"ml_kelly={kel:.2f} p={p:.2f} n={n}"
-        return True, f"ml_p={p:.2f} ev={ev:.1f} k={kel:.2f} n={n}"
+        if streak >= 4 and p_gate < max(target, 0.75):
+            return False, f"ml_streak={streak} p={p_gate:.2f} n={n}"
+        return True, f"ml_p={p_gate:.2f} ev={ev:.1f} k={kel:.2f} n={n}"
 
     def snapshot(self) -> dict[str, Any]:
         books = {
             k: {ik: round(float(iv), 4) for ik, iv in v.items()}
             for k, v in self.by_book.items()
         }
-        bits = [self.note, f"min_p={_env_float('EDGE_MIN_PROBA', 0.52):.2f}"]
+        target = _target_winrate()
+        bits = [self.note, f"target={target:.0%}", f"warmup={_warmup_max()}"]
         for name, st in books.items():
             if float(st.get("n") or 0) <= 0:
                 continue
             short = name.split("_")[0]
-            bits.append(f"{short} p={st.get('p', 0):.2f} n={int(st.get('n') or 0)}")
+            bits.append(f"{short} p={st.get('p_emp', st.get('p', 0)):.2f} n={int(st.get('n') or 0)}")
         return {
             "note": self.note,
             "n": self.n,
             "books": books,
-            "min_proba": _env_float("EDGE_MIN_PROBA", 0.52),
+            "min_proba": target,
+            "target_winrate": target,
+            "warmup_max": _warmup_max(),
             "enabled": _env_flag("EDGE_ML", True),
             "line": " · ".join(bits),
         }
 
     def status_line(self) -> str:
-        return f"trade_learner {self.note} books={len(self.by_book)}"
+        return (
+            f"trade_learner {self.note} books={len(self.by_book)} "
+            f"target={_target_winrate():.0%}"
+        )
 
 
 def get_learner() -> TradeLearner:
