@@ -20,7 +20,11 @@ def test_station_is_the_operator_page() -> None:
     assert "Blotter" in html
     assert "Downloads" in html
     assert 'data-tab="ml"' in html
+    assert 'data-tab="lab"' in html
     assert "Approve → paper" in html
+    assert "AI Research Lab" in html
+    assert "/api/research" in html
+    assert "RESEARCH_FACTORY" not in html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S18_OHLC_VOL_HTF" in html
     assert "S19_BODY_CLOSE_1H" in html
     assert "S20_FADE_HL" in html
@@ -72,6 +76,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Save strategies" in html
     assert "Trading station" in html
     assert "ML / S11 + S18" in html
+    assert "Research Lab" in html
+    assert "/#lab" in html
     assert "after charges" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
@@ -108,6 +114,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/lite" in text
     assert "/api/desk" in text
     assert "/api/ml" in text
+    assert "/api/research" in text
+    assert "decide_research" in text
     assert "/api/s11/activate" in text
     assert "decide_proposal_for_desk" in text
     assert "/api/tape" in text

@@ -98,6 +98,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
+    <h2>Research Lab</h2>
+    <p class="hint" id="lab-line">Loading lab…</p>
+    <p class="hint">AI can propose. You decide on the <a href="/#lab">station Lab tab</a>. This phone page does not approve, ENABLE, or arm live.</p>
+  </section>
+
+  <section class="card">
     <h2>Live money</h2>
     <p class="armed" id="money-line"></p>
     <div class="row" style="margin-top:.5rem">
@@ -210,6 +216,20 @@ function renderMl(d) {
 async function loadMl() {
   renderMl(await api("/api/ml"));
 }
+async function loadLab() {
+  try {
+    const d = await api("/api/research");
+    const c = (d && d.counts) || {};
+    const n = (d.pending || []).length;
+    $("lab-line").textContent = (d.last_run_at || "no lab run yet") +
+      " · found " + (c.found || 0) +
+      " · passed " + (c.passed_validation || 0) +
+      " · awaiting " + n +
+      " · rejected " + (c.rejected || 0);
+  } catch (e) {
+    $("lab-line").textContent = String(e.message || e);
+  }
+}
 async function load() {
   render(await api("/api/desk"));
 }
@@ -256,6 +276,7 @@ $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
 }, "Capital saved");
 load().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
+loadLab().catch(() => {});
 $("ml-pending").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-ml]");
   if (!btn) return;

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from proposals import decide_proposal, get_proposal, proposals_snapshot
 from position_safety import read_bot_health
 from s18_desk import apply_s18_proposal, s18_status
+from strategy_genome import is_research_proposal
 
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
@@ -494,12 +495,14 @@ def ml_desk_payload(
             p, loaded_key=loaded_key, root=root, s18_pack_name=s18_name
         )
         for p in (snap.get("pending") or [])
+        if not is_research_proposal(p)
     ]
     decided = [
         _annotate_proposal(
             p, loaded_key=loaded_key, root=root, s18_pack_name=s18_name
         )
         for p in (snap.get("decided") or [])
+        if not is_research_proposal(p)
     ]
     snap = dict(snap)
     snap["pending"] = pending
@@ -560,6 +563,15 @@ def decide_proposal_for_desk(
     )
     if found is None:
         raise KeyError(f"proposal not found: {proposal_id}")
+    if is_research_proposal(found):
+        return {
+            "ok": False,
+            "error": (
+                "Research Lab proposals are decided on the Lab tab, not ML. "
+                "ML Approve would not ENABLE them either — use Lab."
+            ),
+            "lab": True,
+        }
     if decision == "approved_paper" and found.safety_ok is False and not accept_unsafe:
         return {
             "ok": False,
