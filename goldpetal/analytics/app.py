@@ -68,7 +68,7 @@ LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "ye
     DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
 )
 
-# Slim paper set (S5/S8/S11/S13/S16/S18/S19). S4 stayed off after the daily backtest.
+# Slim paper set (S5/S8/S11/S13/S16/S18/S19/S20). S4 stayed off after the daily backtest.
 STRATEGIES = [
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
@@ -77,6 +77,7 @@ STRATEGIES = [
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
+    "S20_FADE_HL",
 ]
 
 # One page at a time — st.tabs runs every tab on every load (that is why the desk felt late).

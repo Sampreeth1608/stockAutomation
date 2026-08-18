@@ -26,6 +26,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
@@ -39,6 +40,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
     },
     "QUIET": {
         "S1_NETDELTA",
@@ -54,6 +56,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -71,6 +74,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
     },
 }
 
@@ -108,8 +112,8 @@ def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
     Slim paper default: S5, S8, S11, S13, S16, S18 (S4 off — Angel/ticks daily
-    swing pick was S13). S18 stays paper-only. S19 is wired but ENABLE_S19
-    defaults off — 1h aligned body+close lost after charges vs S16/S18.
+    swing pick was S13). S18 stays paper-only. S19/S20 are wired but ENABLE
+    defaults off until an after-charges tape beats S16/S18 (1h) or S13 (1d).
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -143,6 +147,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S18_OHLC_VOL_HTF")
     if on("ENABLE_S19", "false"):
         enabled.add("S19_BODY_CLOSE_1H")
+    if on("ENABLE_S20", "false"):
+        enabled.add("S20_FADE_HL")
 
     if not enabled:
         enabled = {

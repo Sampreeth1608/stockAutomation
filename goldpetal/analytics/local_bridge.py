@@ -14,6 +14,7 @@ SLIM_STRATEGIES = (
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
+    "S20_FADE_HL",
 )
 
 

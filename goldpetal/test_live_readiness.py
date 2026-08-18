@@ -40,6 +40,7 @@ def test_readiness_paper_by_default() -> None:
     assert "S16_HHHL_WICK_1H" in names
     assert "S18_OHLC_VOL_HTF" in names
     assert "S19_BODY_CLOSE_1H" in names
+    assert "S20_FADE_HL" in names
     assert "S14_WICK30_STRICT" not in names
     assert "S15_WICK30_NOWICK" not in names
     assert "S12_HHHL30" not in names
@@ -50,6 +51,7 @@ def test_readiness_paper_by_default() -> None:
     assert "S16_HHHL_WICK_1H" in r["enables"]
     assert "S18_OHLC_VOL_HTF" in r["enables"]
     assert "S19_BODY_CLOSE_1H" in r["enables"]
+    assert "S20_FADE_HL" in r["enables"]
 
 
 def test_apply_panel_live_env_paper_ok() -> None:
@@ -276,6 +278,36 @@ def test_apply_desk_books_s19_stays_paper_only() -> None:
         td.cleanup()
 
 
+def test_apply_desk_books_s20_stays_paper_only() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S13=true\nENABLE_S20=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S13_HHHL_DAY", "S20_FADE_HL"],
+            ["S13_HHHL_DAY", "S20_FADE_HL"],
+            path=env,
+            state_path=state,
+        )
+        assert res["ok"] is True
+        assert "S20_FADE_HL" in res["enabled"]
+        assert "S20_FADE_HL" not in res["live_approved"]
+        assert "S13_HHHL_DAY" in res["live_approved"]
+        assert "S20_FADE_HL" in res["skipped_live_not_in_bot"]
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_S20=true" in text
+        assert "DRY_RUN=true" in text
+        assert "SECRET=keep" in text
+    finally:
+        td.cleanup()
+
+
 def test_desk_snapshot_skips_checklist() -> None:
     os.environ["DRY_RUN"] = "true"
     snap = desk_snapshot()
@@ -283,9 +315,11 @@ def test_desk_snapshot_skips_checklist() -> None:
     assert "S16_HHHL_WICK_1H" in snap["enables"]
     assert "S18_OHLC_VOL_HTF" in snap["enables"]
     assert "S19_BODY_CLOSE_1H" in snap["enables"]
+    assert "S20_FADE_HL" in snap["enables"]
     assert any(b["strategy"] == "S16_HHHL_WICK_1H" for b in snap["books"])
     assert any(b["strategy"] == "S18_OHLC_VOL_HTF" for b in snap["books"])
     assert any(b["strategy"] == "S19_BODY_CLOSE_1H" for b in snap["books"])
+    assert any(b["strategy"] == "S20_FADE_HL" for b in snap["books"])
     assert "S4_OVERNIGHT" not in snap["enables"]
     assert not any(b["strategy"] == "S4_OVERNIGHT" for b in snap["books"])
     assert "S14_WICK30_STRICT" not in snap["enables"]
@@ -315,6 +349,8 @@ if __name__ == "__main__":
     print("ok s18 paper only")
     test_apply_desk_books_s19_stays_paper_only()
     print("ok s19 paper only")
+    test_apply_desk_books_s20_stays_paper_only()
+    print("ok s20 paper only")
     test_desk_snapshot_skips_checklist()
     print("ok desk snapshot")
     print("ALL test_live_readiness OK")
