@@ -68,7 +68,7 @@ LOCAL_DESK = os.getenv("GP_DESK_LOCAL", "").strip().lower() in {"1", "true", "ye
     DEFAULT_DATA.resolve() == (ROOT / "data").resolve()
 )
 
-# Slim paper set (S5/S8/S11/S13/S16/S18). S4 stayed off after the daily backtest.
+# Slim paper set (S5/S8/S11/S13/S16/S18/S19). S4 stayed off after the daily backtest.
 STRATEGIES = [
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
@@ -76,6 +76,7 @@ STRATEGIES = [
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
+    "S19_BODY_CLOSE_1H",
 ]
 
 # One page at a time — st.tabs runs every tab on every load (that is why the desk felt late).
@@ -427,7 +428,7 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
                 orphan = int(r.get("orphan_open") or 0)
                 st.caption(
                     f"Slim open positions: **{open_n}** "
-                    f"(S5/S8/S11/S13/S16/S18 only)."
+                    f"(S5/S8/S11/S13/S16/S18/S19 only)."
                     + (
                         f" Also {orphan} leftover OPEN from disabled strategies "
                         f"(S9/S10/…) — not active now; see expander below."
