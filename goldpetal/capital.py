@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from control_state import CONTROL_DIR, ensure_control_dir
+from control_state import CONTROL_DIR, SLIM_PAPER_STRATEGIES, ensure_control_dir
 
 IST = ZoneInfo("Asia/Kolkata")
 CAPITAL_PATH = CONTROL_DIR / "capital.json"
@@ -37,12 +37,7 @@ DEFAULT_STRATEGIES = (
     "S15_WICK30_NOWICK",
 )
 
-_HUNDRED_LOT = {
-    "S12_HHHL30",
-    "S13_HHHL_DAY",
-    "S14_WICK30_STRICT",
-    "S15_WICK30_NOWICK",
-}
+_HUNDRED_LOT = set(SLIM_PAPER_STRATEGIES)
 
 
 @dataclass
@@ -99,7 +94,7 @@ def default_plan() -> CapitalPlan:
     each = round(deployable / len(DEFAULT_STRATEGIES), 2)
     strats = {}
     for name in DEFAULT_STRATEGIES:
-        # S12 hist paper path sized at 100 lots; S13 daily same-candle HH/LL similar; others stay conservative.
+        # Slim paper books (S4/S5/S8/S11/S12–S15) sized at PAPER_LOTS (100).
         lots = 100 if name in _HUNDRED_LOT else 10
         strats[name] = StrategyBudget(
             strategy=name, budget_inr=each, max_lots=lots
@@ -108,7 +103,7 @@ def default_plan() -> CapitalPlan:
         total_capital_inr=total,
         cash_reserve_pct=20.0,
         daily_loss_limit_inr=10_000.0,
-        max_lots_total=150,
+        max_lots_total=1000,
         strategies=strats,
         updated_at_ist=_now_iso(),
     )
@@ -133,15 +128,19 @@ def load_capital(path: Path | None = None) -> CapitalPlan:
             enabled=bool(row.get("enabled", True)),
         )
     # Ensure defaults exist for any new strategy names.
+    from charges import paper_lots
+
+    paper_n = int(paper_lots())
     for name in DEFAULT_STRATEGIES:
         if name not in strategies:
-            lots = 100 if name in _HUNDRED_LOT else 10
+            lots = paper_n if name in _HUNDRED_LOT else 10
             strategies[name] = StrategyBudget(strategy=name, max_lots=lots)
+    need_total = paper_n * len(_HUNDRED_LOT)
     return CapitalPlan(
         total_capital_inr=float(raw.get("total_capital_inr", 500_000)),
         cash_reserve_pct=float(raw.get("cash_reserve_pct", 20)),
         daily_loss_limit_inr=float(raw.get("daily_loss_limit_inr", 10_000)),
-        max_lots_total=max(150, int(raw.get("max_lots_total", 150))),
+        max_lots_total=max(need_total, int(raw.get("max_lots_total", need_total))),
         strategies=strategies,
         day_pnl_inr={str(k): float(v) for k, v in (raw.get("day_pnl_inr") or {}).items()},
         open_lots={str(k): int(v) for k, v in (raw.get("open_lots") or {}).items()},

@@ -120,6 +120,8 @@ class AlignS8Config:
     require_reasoning: bool = False
     reasoning_min_score: float = 0.45
     reasoning_lots: float = 100.0
+    use_fee_gate: bool = False
+    fee_be_points: float = 50.0
 
 
 class AlignS8Strategy:
@@ -911,6 +913,13 @@ class AlignS8Strategy:
         if self.cfg.require_rising_imb and not self.imb_rising:
             skip(f"imb_not_rising {self.prev_imb:.1f}->{self.last_imb:.1f}")
             return None
+        if self.cfg.use_fee_gate:
+            tp_now, _sl_now = self._tp_sl()
+            if tp_now < float(self.cfg.fee_be_points):
+                skip(
+                    f"fee_gate tp={tp_now:.0f}<BE={self.cfg.fee_be_points:.0f}"
+                )
+                return None
 
         mode = (self.cfg.entry_mode or "net_sign").strip().lower()
 
@@ -1334,7 +1343,7 @@ def align_s8_from_env() -> AlignS8Strategy:
     model = os.getenv("S8_MODEL", "fat_tp_flip").strip().lower()
 
     cfg = AlignS8Config(
-        min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
+        min_imb_pct=_f("S8_MIN_IMB_PCT", 14.0),
         book_frac_of_net=_f("S8_BOOK_FRAC_OF_NET", 0.10),
         pullback_points=_f("S8_PULLBACK_POINTS", 8.0),
         resume_points=_f("S8_RESUME_POINTS", 5.0),
@@ -1386,6 +1395,8 @@ def align_s8_from_env() -> AlignS8Strategy:
         require_reasoning=_b("S8_REASONING", False),
         reasoning_min_score=_f("S8_REASONING_MIN_SCORE", 0.45),
         reasoning_lots=_f("S8_REASONING_LOTS", 100.0),
+        use_fee_gate=_b("S8_USE_FEE_GATE", True),
+        fee_be_points=_f("S8_FEE_BE_POINTS", 50.0),
     )
     cfg = _apply_model_preset(model, cfg)
 
@@ -1412,10 +1423,16 @@ def align_s8_from_env() -> AlignS8Strategy:
             cfg.bar_minutes = 0
     # Knobs that must win over S8_MODEL=learned JSON
     if os.getenv("S8_MIN_IMB_PCT") is not None:
-        cfg.min_imb_pct = _f("S8_MIN_IMB_PCT", 10.0)
+        cfg.min_imb_pct = _f("S8_MIN_IMB_PCT", 14.0)
     else:
-        # Never keep overnight-learned soft 3% floor — default 10%
-        cfg.min_imb_pct = max(float(cfg.min_imb_pct), 10.0)
+        # Never keep overnight-learned soft 3% floor — default 14% (stronger book).
+        cfg.min_imb_pct = max(float(cfg.min_imb_pct), 14.0)
+    cfg.use_fee_gate = _b("S8_USE_FEE_GATE", True)
+    if os.getenv("S8_FEE_BE_POINTS") is not None:
+        cfg.fee_be_points = _f("S8_FEE_BE_POINTS", 50.0)
+    if cfg.use_fee_gate:
+        cfg.tp_points = max(float(cfg.tp_points), float(cfg.fee_be_points))
+        cfg.tp_min = max(float(cfg.tp_min), float(cfg.fee_be_points))
     if os.getenv("S8_REQUIRE_RISING_IMB") is not None:
         cfg.require_rising_imb = _b("S8_REQUIRE_RISING_IMB", True)
     if os.getenv("S8_REQUIRE_RISING_BOOK") is not None:

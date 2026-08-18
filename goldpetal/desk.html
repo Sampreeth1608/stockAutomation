@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Gold Petal</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --card: #ffffff;
+  --line: #d0d0d0;
+  --text: #111111;
+  --muted: #555555;
+  --ok: #0d7a45;
+  --warn: #a15c00;
+  --bad: #c4281c;
+  --gold: #8a5a12;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; }
+body { max-width: 1080px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: .02em; }
+h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--gold); margin: 0 0 .7rem; }
+a { color: var(--gold); }
+.sub { color: var(--muted); margin: 0 0 1rem; font-size: .9rem; }
+.bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+  justify-content: space-between; margin-bottom: 1rem; }
+.pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pill { font: 12px/1 ui-monospace, monospace; padding: .28rem .5rem;
+  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); background: #fff; }
+.pill.ok { color: var(--ok); border-color: #8fceb0; }
+.pill.bad { color: var(--bad); border-color: #f0b4ae; }
+.pill.warn { color: var(--warn); border-color: #e6c48a; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  padding: 1rem 1.05rem; margin: 0 0 .85rem; }
+.row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+.btn { appearance: none; border: 1px solid var(--line); background: #f4f4f4;
+  color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .55rem .85rem;
+  border-radius: 4px; cursor: pointer; }
+.btn:hover { border-color: var(--gold); color: var(--gold); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.ok { background: #e8f6ee; border-color: #8fceb0; color: #0d7a45; }
+.btn.warn { background: #fff4e0; border-color: #e6c48a; color: #a15c00; }
+.btn.danger { background: #fdecea; border-color: #f0b4ae; color: #c4281c; }
+.btn.danger.on { background: var(--bad); color: #fff; }
+input[type=number], input[type=text], input[type=date], select {
+  background: #fff; color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: .4rem .5rem; font: 13px ui-monospace, monospace; }
+input[type=number], input[type=text] { width: 7rem; }
+input[type=date] { width: 10.8rem; }
+.scroll { overflow: auto; max-height: 22rem; border: 1px solid var(--line); border-radius: 4px; }
+.tab { appearance: none; border: 1px solid var(--line); background: #fff;
+  color: var(--muted); font: 650 12px/1 ui-sans-serif, system-ui; padding: .4rem .7rem;
+  border-radius: 4px; cursor: pointer; }
+.tab.on { background: #f4f4f4; color: var(--text); border-color: var(--gold); }
+td.ok { color: var(--ok); }
+td.bad { color: var(--bad); }
+label.chk { display: flex; gap: .4rem; align-items: center; color: var(--muted); font-size: .9rem; }
+table { width: 100%; border-collapse: collapse; font: 13px/1.35 ui-monospace, monospace; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; padding: .35rem .4rem; border-bottom: 1px solid var(--line); }
+td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.flash { min-height: 1.2rem; color: var(--gold); font-size: .88rem; margin: .45rem 0 0; }
+.flash.bad { color: var(--bad); }
+.armed { color: var(--bad); font-weight: 700; }
+.hint { color: var(--muted); font-size: .82rem; margin: .45rem 0 0; }
+.mono { font-family: ui-monospace, monospace; }
+.tape { font: 12px/1.4 ui-monospace, monospace; color: var(--muted);
+  max-height: 9rem; overflow: auto; white-space: pre; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div>
+      <h1>Gold Petal</h1>
+      <p class="sub">Archive desk (exports). Live workspace is the <a href="/">trading station</a>.</p>
+    </div>
+    <div class="pills" id="pills"></div>
+  </div>
+
+  <section class="card">
+    <h2>Stop / go</h2>
+    <div class="row">
+      <button class="btn danger" id="btn-kill" type="button">Emergency off</button>
+      <button class="btn" id="btn-clear" type="button">Clear emergency</button>
+      <button class="btn ok" id="btn-trade-on" type="button">Trading on</button>
+      <button class="btn" id="btn-trade-off" type="button">Trading off</button>
+    </div>
+    <p class="hint">Emergency blocks every new entry. Trading off holds strategies but keeps the feed if the bot is up.</p>
+    <p class="flash" id="flash-stop"></p>
+  </section>
+
+  <section class="card">
+    <h2>Engine + feed</h2>
+    <p class="mono" id="engine-line">…</p>
+    <div class="row" style="margin-top:.7rem">
+      <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
+      <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
+      <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn" id="btn-feed-start" type="button">Start feed only</button>
+      <button class="btn" id="btn-feed-stop" type="button">Stop feed only</button>
+    </div>
+    <p class="hint">Bot = strategies + Angel feed (one socket). Feed only = ticks, no strategies. Do not run both.</p>
+    <p class="flash" id="flash-engine"></p>
+  </section>
+
+  <section class="card">
+    <h2>Strategies</h2>
+    <p class="hint">In bot = loaded after Restart (paper). Live pick = allowed to send Angel when money is LIVE + unlocked. One save. Live pick without In bot is ignored.</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th></tr>
+        </thead>
+        <tbody id="books"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:.75rem">
+      <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
+    </div>
+    <p class="flash" id="flash-books"></p>
+  </section>
+
+  <section class="card">
+    <h2>Live money</h2>
+    <p class="mono" id="money-line">…</p>
+    <div class="row" style="margin-top:.7rem">
+      <label class="chk"><input type="checkbox" id="paper-only" checked/> Paper only (DRY_RUN)</label>
+      <label class="chk">LIVE_MAX_LOTS
+        <input type="number" id="live-max" min="1" max="10" step="1" value="1"/>
+      </label>
+      <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
+      <button class="btn" id="btn-save-money" type="button">Save money</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn warn" id="btn-unlock" type="button">Unlock live</button>
+      <button class="btn" id="btn-lock" type="button">Lock live</button>
+    </div>
+    <div class="row" style="margin-top:.7rem">
+      <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
+      <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
+      <button class="btn" id="btn-save-cap" type="button">Save capital</button>
+    </div>
+    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–10.</p>
+    <p class="flash" id="flash-money"></p>
+  </section>
+
+  <section class="card">
+    <h2>Watch</h2>
+    <p class="hint">Tape from ticks.db. Ticks and signals load first; trades follow. The db path is on the line below — if ticks stay 0, the desk is reading the wrong file.</p>
+    <div class="row">
+      <button class="tab on" type="button" data-watch="trades">Trades</button>
+      <button class="tab" type="button" data-watch="open">Open</button>
+      <button class="tab" type="button" data-watch="ticks">Ticks</button>
+      <button class="tab" type="button" data-watch="orders">Live orders</button>
+      <button class="tab" type="button" data-watch="signals">Signals</button>
+      <button class="tab" type="button" data-watch="score">Scoreboard</button>
+      <select id="hist-strat">
+        <option value="">All books</option>
+      </select>
+    </div>
+    <p class="mono" id="hist-meta" style="margin:.55rem 0 .4rem">loading…</p>
+    <div class="scroll">
+      <table>
+        <thead id="hist-head"></thead>
+        <tbody id="hist-body"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-hist"></p>
+  </section>
+
+  <section class="card" id="why">
+    <h2>Why win rate is low</h2>
+    <p class="hint">Scoreboard win % is after Angel fees and 30% tax on winners. Gross (direction) win % is the actual guess rate. FLIP closes are not target hits. ML enters when this trade looks better than the book’s usual win rate (70% only if some hour actually hits it).</p>
+    <p class="mono" id="why-meta">loading analysis…</p>
+    <p class="mono" id="why-ml">ML gate: loading…</p>
+    <ul id="why-notes" class="hint" style="margin:.5rem 0 .7rem; padding-left:1.15rem"></ul>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>book</th><th>closed</th><th>gross win %</th><th>after-tax win %</th>
+            <th>fee-killed</th><th>FLIPs</th><th>gross ₹</th><th>fees ₹</th><th>after-tax ₹</th>
+          </tr>
+        </thead>
+        <tbody id="why-books"></tbody>
+      </table>
+    </div>
+    <p class="hint" id="why-guess" style="margin-top:.7rem"></p>
+    <h2 style="margin-top:.85rem">Worst closes</h2>
+    <div class="scroll" style="max-height:12rem">
+      <table>
+        <thead>
+          <tr><th>book</th><th>side</th><th>exit</th><th>gross ₹</th><th>fees ₹</th><th>after-tax ₹</th><th>why</th></tr>
+        </thead>
+        <tbody id="why-worst"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-why"></p>
+  </section>
+
+  <section class="card" id="s14-calc">
+    <h2>S14 calculation</h2>
+    <p class="hint" id="s14-formula">Wait for the 30m candle to finish. open=high SHORT, open=low LONG, else wick (L&gt;U LONG, U&gt;L SHORT). FLIP the other side. Fill at close. Forming bar is skipped.</p>
+    <p class="mono" id="s14-meta">loading S14…</p>
+    <h2 style="margin-top:.85rem">Opened / closed (from this formula)</h2>
+    <div class="scroll" style="max-height:12rem">
+      <table>
+        <thead>
+          <tr><th>side</th><th>status</th><th>entry</th><th>in</th><th>exit</th><th>out</th><th>pts</th><th>why</th></tr>
+        </thead>
+        <tbody id="s14-book"></tbody>
+      </table>
+    </div>
+    <h2 style="margin-top:.85rem">Each finished 30m candle</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>time</th><th>O</th><th>H</th><th>L</th><th>C</th>
+            <th>U</th><th>Lwick</th><th>O=H</th><th>O=L</th>
+            <th>rule</th><th>side</th><th>action</th><th>pos</th>
+          </tr>
+        </thead>
+        <tbody id="s14-bars"></tbody>
+      </table>
+    </div>
+    <p class="flash" id="flash-s14"></p>
+  </section>
+
+  <section class="card">
+    <h2>Downloads</h2>
+    <p class="hint">CSV / ZIP for laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV.</p>
+    <div class="row">
+      <label class="chk">From <input type="date" id="exp-from"/></label>
+      <label class="chk">To <input type="date" id="exp-to"/></label>
+      <span class="mono" id="exp-meta"></span>
+    </div>
+    <div class="row" style="margin-top:.7rem">
+      <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
+      <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
+      <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+      <button class="btn warn" type="button" id="btn-copy-trades">Copy trades → Sheets</button>
+      <button class="btn warn" type="button" id="btn-copy-ticks">Copy ticks → Sheets</button>
+    </div>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn" type="button" id="btn-sheets-pack">Download Sheets pack</button>
+      <button class="btn warn" type="button" id="btn-copy-score">Copy scoreboard → Sheets</button>
+      <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
+    </div>
+    <p class="flash" id="flash-dl"></p>
+  </section>
+<script>
+const $ = (id) => document.getElementById(id);
+const SHORT = {
+  S4_OVERNIGHT: "S4 overnight",
+  S5_MINEDGE: "S5 minedge",
+  S8_NET_ZIGZAG: "S8 zigzag",
+  S11_DISCOVERED: "S11 pack",
+  S12_HHHL30: "S12 HHHL 30m",
+  S13_HHHL_DAY: "S13 HHHL day",
+  S14_WICK30_STRICT: "S14 wick",
+  S15_WICK30_NOWICK: "S15 no-wick",
+};
+let last = null;
+let watchTab = "trades";
+let histReady = false;
+let lastTape = { ticks: [], signals: [], live_orders: [], tick_count: 0, ltp: null, db_path: "" };
+let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0, trades_loading: true };
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function pnlClass(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x === 0) return "";
+  return x > 0 ? "ok" : "bad";
+}
+function fillStratSelect() {
+  if (histReady) return;
+  const sel = $("hist-strat");
+  Object.keys(SHORT).forEach((k) => {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = SHORT[k];
+    sel.appendChild(opt);
+  });
+  histReady = true;
+}
+function thead(cols) {
+  $("hist-head").innerHTML = "<tr>" + cols.map((c) => `<th>${esc(c)}</th>`).join("") + "</tr>";
+}
+function renderWatch(h) {
+  const tab = watchTab;
+  const strat = $("hist-strat").value;
+  const bits = [
+    "open " + (h.total_open || 0),
+    "closed " + (h.total_closed || 0),
+    "ticks " + (h.tick_count || 0),
+  ];
+  if (h.ltp != null && h.ltp !== "") bits.push("ltp " + h.ltp);
+  if (h.lots) bits.push(h.lots + " lots");
+  if (h.db_path) bits.push(h.db_path);
+  if (h.trades_loading) bits.push("trades loading");
+  if (!(h.tick_count || 0) && !(h.ticks || []).length) bits.push("empty db or wrong folder");
+  if (strat) bits.push(SHORT[strat] || strat);
+  else bits.push("all books");
+  $("hist-meta").textContent = bits.join(" · ");
+  if (tab === "trades" || tab === "open") {
+    const rows = tab === "open" ? (h.open || []) : (h.trades || []);
+    thead(["book", "side", "status", "entry", "in", "exit", "out", "after-tax ₹", "why"]);
+    $("hist-body").innerHTML = rows.map((t) => {
+      const pnl = t.pnl_after_tax != null && t.pnl_after_tax !== "" ? t.pnl_after_tax : t.net_pnl;
+      const why = t.exit_reason || t.entry_reason || "";
+      return `<tr>
+        <td>${esc(SHORT[t.strategy] || t.strategy || "")}</td>
+        <td>${esc(t.side || "")}</td>
+        <td>${esc(t.status || "")}</td>
+        <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
+        <td>${esc(t.entry_price ?? "")}</td>
+        <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+        <td>${esc(t.exit_price ?? "")}</td>
+        <td class="${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
+        <td>${esc(why)}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="9">${h.trades_loading ? "Loading trades…" : "No trades yet"}</td></tr>`;
+    return;
+  }
+  if (tab === "ticks") {
+    thead(["time", "ltp", "bid", "ask", "vol"]);
+    $("hist-body").innerHTML = (h.ticks || []).map((t) => `<tr>
+      <td>${esc(t.received_at || "")}</td>
+      <td>${esc(t.ltp ?? "")}</td>
+      <td>${esc(t.bp ?? "")}</td>
+      <td>${esc(t.sp ?? "")}</td>
+      <td>${esc(t.volume ?? "")}</td>
+    </tr>`).join("") || `<tr><td colspan="5">No ticks yet</td></tr>`;
+    return;
+  }
+  if (tab === "orders") {
+    thead(["time", "book", "side", "ok", "id", "reason"]);
+    $("hist-body").innerHTML = (h.live_orders || []).map((o) => `<tr>
+      <td>${esc(o.ts || o.time || "")}</td>
+      <td>${esc(o.strategy || "")}</td>
+      <td>${esc(o.side || "")}</td>
+      <td>${o.ok ? "Y" : (o.skipped ? "skip" : "N")}</td>
+      <td>${esc(o.order_id || "")}</td>
+      <td>${esc(o.reason || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6">No live orders (normal in paper)</td></tr>`;
+    return;
+  }
+  if (tab === "signals") {
+    thead(["time", "book", "action", "pos", "cmp", "reason"]);
+    $("hist-body").innerHTML = (h.signals || []).map((s) => `<tr>
+      <td>${esc(s.time_label || "")}</td>
+      <td>${esc(SHORT[s.strategy] || s.strategy || "")}</td>
+      <td>${esc(s.action || "")}</td>
+      <td>${esc(s.position_after || "")}</td>
+      <td>${esc(s.cmp ?? "")}</td>
+      <td>${esc(s.reason || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6">No signals yet</td></tr>`;
+    return;
+  }
+  thead(["book", "closed", "open", "win %", "gross ₹", "fees ₹", "after-tax ₹"]);
+  $("hist-body").innerHTML = (h.scoreboard || []).map((r) => {
+    const pnl = r.pnl_after_tax;
+    const closedN = (Number(r.wins) || 0) + (Number(r.losses) || 0);
+    const win = r.win_rate != null ? Number(r.win_rate).toFixed(1) : "";
+    return `<tr>
+      <td>${esc(SHORT[r.strategy] || r.strategy || "")}</td>
+      <td>${closedN}</td>
+      <td>${esc(r.open ?? "")}</td>
+      <td>${esc(win)}</td>
+      <td>${esc(r.gross_pnl ?? "")}</td>
+      <td>${esc(r.charges ?? "")}</td>
+      <td class="${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7">No scoreboard yet</td></tr>`;
+}
+
+async function loadTape() {
+  const t = await api("/api/tape");
+  lastTape = t;
+  renderWatch(Object.assign({}, lastTape, lastHist));
+  if (t.error) flash("flash-hist", t.error, true);
+}
+async function loadHistory() {
+  fillStratSelect();
+  const strat = $("hist-strat").value;
+  const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
+  const h = await api(q);
+  lastHist = h;
+  lastTape = Object.assign({}, lastTape, {
+    ticks: h.ticks || lastTape.ticks,
+    signals: h.signals || lastTape.signals,
+    live_orders: h.live_orders || lastTape.live_orders,
+    tick_count: h.tick_count != null ? h.tick_count : lastTape.tick_count,
+    ltp: h.ltp != null ? h.ltp : lastTape.ltp,
+    db_path: h.db_path || lastTape.db_path,
+    last_tick_at: h.last_tick_at || lastTape.last_tick_at,
+  });
+  renderWatch(h);
+  if (h.error) flash("flash-hist", h.error, true);
+  else flash("flash-hist", "");
+}
+function yn(v) { return v ? "Y" : "N"; }
+function s14TradeRow(t) {
+  const why = t.exit_reason || t.entry_reason || t.rule || "";
+  const pts = t.pnl_pts === "" || t.pnl_pts == null ? "" : t.pnl_pts;
+  return `<tr>
+    <td>${esc(t.side || "")}</td>
+    <td>${esc(t.status || "")}</td>
+    <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
+    <td>${esc(t.entry_price ?? "")}</td>
+    <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+    <td>${esc(t.exit_price ?? "")}</td>
+    <td class="${pnlClass(pts)}">${esc(pts)}</td>
+    <td>${esc(why)}</td>
+  </tr>`;
+}
+function renderS14Calc(d) {
+  if (d.formula) $("s14-formula").textContent = d.formula;
+  const bits = [
+    (d.tf || "30m"),
+    "finished " + (d.n_finished || 0),
+    "open " + (d.total_open || 0),
+    "closed " + (d.total_closed || 0),
+  ];
+  if (d.db_path) bits.push(d.db_path);
+  if (d.error) bits.push(d.error);
+  $("s14-meta").textContent = bits.join(" · ");
+  const book = [];
+  if (d.open) book.push(d.open);
+  (d.closed || []).forEach((t) => book.push(t));
+  $("s14-book").innerHTML = book.map(s14TradeRow).join("")
+    || `<tr><td colspan="8">No S14 enter/FLIP on these finished 30m candles</td></tr>`;
+  const bars = [];
+  if (d.forming) bars.push(d.forming);
+  (d.bars || []).forEach((b) => bars.push(b));
+  $("s14-bars").innerHTML = bars.map((b) => {
+    const act = b.action || "";
+    const cls = act === "enter" || act === "FLIP" ? "ok" : (act === "skip" || act === "forming" ? "" : "");
+    return `<tr>
+      <td>${esc(String(b.time || "").slice(0, 19))}</td>
+      <td>${esc(b.open ?? "")}</td>
+      <td>${esc(b.high ?? "")}</td>
+      <td>${esc(b.low ?? "")}</td>
+      <td>${esc(b.close ?? "")}</td>
+      <td>${esc(b.upper ?? "")}</td>
+      <td>${esc(b.lower ?? "")}</td>
+      <td>${yn(b.open_eq_high)}</td>
+      <td>${yn(b.open_eq_low)}</td>
+      <td>${esc(b.rule || "")}</td>
+      <td>${esc(b.side || "")}</td>
+      <td class="${cls}">${esc(act)}</td>
+      <td>${esc((b.pos_before || "") + "→" + (b.pos_after || ""))}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="13">No 30m candles yet</td></tr>`;
+  const botN = (lastHist.total_open || 0) + (lastHist.total_closed || 0);
+  if ($("hist-strat").value === "S14_WICK30_STRICT" && (lastHist.from_formula || botN === 0)) {
+    const open = d.open ? [d.open] : [];
+    const closed = d.closed || [];
+    lastHist = Object.assign({}, lastHist, {
+      trades: open.concat(closed),
+      open,
+      total_open: open.length,
+      total_closed: closed.length,
+      trades_loading: false,
+      from_formula: true,
+    });
+    renderWatch(Object.assign({}, lastTape, lastHist));
+  }
+}
+async function loadS14Calc() {
+  const d = await api("/api/s14/calc");
+  renderS14Calc(d);
+  if (d.error) flash("flash-s14", d.error, true);
+  else flash("flash-s14", "");
+}
+function renderWhy(d) {
+  const o = d.overall || {};
+  $("why-meta").textContent = [
+    "gross win " + (o.win_rate_gross || 0) + "%",
+    "after-tax win " + (o.win_rate_after_tax || 0) + "%",
+    "closed " + (o.closed || 0),
+    "fee-killed " + (o.fee_killed || 0),
+    "FLIPs " + (o.flips || 0),
+    d.window || "",
+    (d.lots ? d.lots + " lots" : ""),
+    d.db_path || "",
+  ].filter(Boolean).join(" · ");
+  $("why-notes").innerHTML = (d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("")
+    || "<li>No notes</li>";
+  const rows = [o].concat(d.books || []).filter((b) => b && (b.strategy === "ALL" || (b.closed || 0) > 0 || (b.open || 0) > 0));
+  $("why-books").innerHTML = rows.map((b) => `<tr>
+    <td>${esc(b.label || b.strategy || "")}</td>
+    <td>${esc(b.closed ?? "")}</td>
+    <td>${esc(b.win_rate_gross ?? "")}</td>
+    <td class="${pnlClass((b.win_rate_after_tax || 0) - 50)}">${esc(b.win_rate_after_tax ?? "")}</td>
+    <td>${esc(b.fee_killed ?? "")}</td>
+    <td>${esc(b.flips ?? "")}</td>
+    <td class="${pnlClass(b.gross_pnl)}">${esc(b.gross_pnl ?? "")}</td>
+    <td>${esc(b.fees ?? "")}</td>
+    <td class="${pnlClass(b.pnl_after_tax)}">${esc(b.pnl_after_tax ?? "")}</td>
+  </tr>`).join("") || `<tr><td colspan="9">No closed trades yet</td></tr>`;
+  $("why-guess").textContent = (d.books || []).filter((b) => (b.closed || 0) > 0).map((b) => (b.label || "") + ": " + (b.guess || "")).join("  |  ");
+  const lr = d.learner || {};
+  $("why-ml").textContent = lr.enabled === false
+    ? ("ML gate off" + (lr.note ? " · " + lr.note : ""))
+    : ("Self-learn " + (lr.line || lr.note || "cold"));
+  $("why-worst").innerHTML = (d.worst || []).map((t) => `<tr>
+    <td>${esc(t.label || t.strategy || "")}</td>
+    <td>${esc(t.side || "")}</td>
+    <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
+    <td class="${pnlClass(t.gross_pnl)}">${esc(t.gross_pnl ?? "")}</td>
+    <td>${esc(t.fees ?? "")}</td>
+    <td class="${pnlClass(t.pnl_after_tax)}">${esc(t.pnl_after_tax ?? "")}</td>
+    <td>${esc(t.why || "")}</td>
+  </tr>`).join("") || `<tr><td colspan="7">No losing closes in this window</td></tr>`;
+}
+async function loadWhy() {
+  const d = await api("/api/analysis");
+  renderWhy(d);
+  if (d.error) flash("flash-why", d.error, true);
+  else flash("flash-why", "");
+}
+
+function rangeQs() {
+  const from = $("exp-from").value;
+  const to = $("exp-to").value;
+  if (!from || !to) throw new Error("Pick From and To dates");
+  return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+}
+function downloadUrl(path) {
+  const a = document.createElement("a");
+  a.href = path;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+async function refreshExportMeta() {
+  try {
+    const s = await api("/api/export/summary?" + rangeQs());
+    $("exp-meta").textContent = `${s.tick_count || 0} ticks · ${s.trade_count || 0} trades`;
+  } catch (e) {
+    $("exp-meta").textContent = String(e.message || e);
+  }
+}
+async function copyExport(kind) {
+  const data = await api(`/api/export/tsv?kind=${encodeURIComponent(kind)}&` + rangeQs());
+  await navigator.clipboard.writeText(data.tsv || "");
+  flash("flash-dl", `Copied ${data.rows || 0} ${kind} rows — paste into Google Sheets`);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error("bad JSON from " + path); }
+  if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  return data;
+}
+function flash(id, msg, bad) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "flash" + (bad ? " bad" : "");
+}
+function pill(text, kind) {
+  return `<span class="pill ${kind || ""}">${text}</span>`;
+}
+function money(n) {
+  if (n == null || n === "") return "—";
+  const x = Number(n);
+  if (!Number.isFinite(x)) return String(n);
+  return x.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
+function render(d) {
+  last = d;
+  const live = d.live_desk || {};
+  const bot = d.bot || {};
+  const feed = d.feed || {};
+  const st = d.state || {};
+  const mode = live.would_place_real_orders ? "ARMED LIVE" : (live.dry_run === false ? "LIVE env / still gated" : "PAPER");
+  const modeKind = live.would_place_real_orders ? "bad" : (live.dry_run === false ? "warn" : "ok");
+  $("pills").innerHTML = [
+    pill(mode, modeKind),
+    pill("LTP " + ((lastTape.ltp != null ? lastTape.ltp : d.ltp) ?? "—"), ""),
+    pill((lastTape.tick_count || d.tick_count || 0) + " ticks", (lastTape.tick_count || 0) > 0 ? "ok" : "warn"),
+    pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
+    pill(st.emergency_off ? "EMERGENCY" : "entries ok", st.emergency_off ? "bad" : "ok"),
+    pill(st.trading_enabled ? "trading on" : "trading off", st.trading_enabled ? "ok" : "warn"),
+    pill(st.live_unlocked ? "live unlocked" : "live locked", st.live_unlocked ? "warn" : "ok"),
+  ].join("");
+  $("btn-kill").classList.toggle("on", !!st.emergency_off);
+  const src = feed.source === "bot" ? "feed via bot" : (feed.source === "collector" ? "feed-only collector" : "feed off");
+  $("engine-line").textContent =
+    (bot.running ? "Bot running" : "Bot stopped") + " · " + src +
+    (live.bot_health && live.bot_health.ts_ist ? " · heartbeat " + live.bot_health.ts_ist : "");
+  $("btn-feed-start").disabled = !!bot.running;
+  $("btn-feed-stop").disabled = !!bot.running || feed.source !== "collector";
+  const books = live.books || [];
+  const enables = live.enables || {};
+  $("books").innerHTML = books.map((b) => {
+    const name = b.strategy;
+    const inBot = !!enables[name];
+    const livePick = !!b.live_approved;
+    return `<tr>
+      <td>${SHORT[name] || name}</td>
+      <td><input type="checkbox" data-in="${name}" ${inBot ? "checked" : ""}/></td>
+      <td><input type="checkbox" data-live="${name}" ${livePick ? "checked" : ""}/></td>
+      <td>${b.ram || "—"}</td>
+      <td>${b.live_approved ? b.live_qty : 0}${b.warn_100 && b.live_approved ? " · paper 100≠live" : ""}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5">no books</td></tr>`;
+  const armed = live.would_place_real_orders
+    ? "ARMED — next signal on a live-picked book hits Angel."
+    : "Paper. Nothing hits Angel until Paper only is off, live is unlocked, a book is live-picked, and the bot is restarted.";
+  $("money-line").className = "mono" + (live.would_place_real_orders ? " armed" : "");
+  $("money-line").textContent = armed + "  DRY_RUN=" + live.dry_run + "  LIVE_MAX_LOTS=" + live.live_max_lots;
+  $("paper-only").checked = live.dry_run !== false;
+  $("live-max").value = live.live_max_lots || 1;
+  const cap = d.capital || {};
+  if (document.activeElement !== $("cap-total")) $("cap-total").value = cap.total_capital_inr || "";
+  if (document.activeElement !== $("cap-dd")) $("cap-dd").value = cap.daily_loss_limit_inr || "";
+}
+
+async function load() {
+  const d = await api("/api/desk");
+  render(d);
+}
+
+$("btn-kill").onclick = async () => {
+  try {
+    await api("/api/emergency", { method: "POST", body: JSON.stringify({ off: true }) });
+    flash("flash-stop", "Emergency off — no new entries");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-clear").onclick = async () => {
+  try {
+    await api("/api/emergency", { method: "POST", body: JSON.stringify({ off: false }) });
+    flash("flash-stop", "Emergency cleared");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-trade-on").onclick = async () => {
+  try {
+    await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled: true }) });
+    flash("flash-stop", "Trading on");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-trade-off").onclick = async () => {
+  try {
+    await api("/api/trading", { method: "POST", body: JSON.stringify({ enabled: false }) });
+    flash("flash-stop", "Trading off");
+    await load();
+  } catch (e) { flash("flash-stop", String(e.message || e), true); }
+};
+$("btn-bot-start").onclick = async () => {
+  try {
+    flash("flash-engine", "Starting bot…");
+    const res = await api("/api/bot/start", { method: "POST", body: "{}" });
+    flash("flash-engine", res.note || (res.ok ? "Bot started" : JSON.stringify(res)));
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-bot-stop").onclick = async () => {
+  if (!confirm("Stop the bot? Strategies stop. Feed-only collector is left alone.")) return;
+  try {
+    await api("/api/bot/stop", { method: "POST", body: "{}" });
+    flash("flash-engine", "Bot stopped");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-bot-restart").onclick = async () => {
+  const word = $("restart-word").value.trim();
+  if (word !== "RESTART") { flash("flash-engine", "Type RESTART to restart the bot", true); return; }
+  try {
+    flash("flash-engine", "Restarting bot…");
+    await api("/api/bot/restart", { method: "POST", body: JSON.stringify({ confirm: word }) });
+    $("restart-word").value = "";
+    flash("flash-engine", "Bot restarted — loads latest ENABLE_* / DRY_RUN");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-feed-start").onclick = async () => {
+  try {
+    const res = await api("/api/feed/start", { method: "POST", body: "{}" });
+    flash("flash-engine", res.note || "Feed-only started");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-feed-stop").onclick = async () => {
+  try {
+    await api("/api/feed/stop", { method: "POST", body: "{}" });
+    flash("flash-engine", "Feed-only stopped");
+    await load();
+  } catch (e) { flash("flash-engine", String(e.message || e), true); }
+};
+$("btn-save-books").onclick = async () => {
+  const inBot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  try {
+    const res = await api("/api/desk/books", { method: "POST", body: JSON.stringify({ in_bot: inBot, live }) });
+    flash("flash-books", res.note || "Saved. Type RESTART to load In-bot into RAM.");
+    await load();
+  } catch (e) { flash("flash-books", String(e.message || e), true); }
+};
+$("btn-save-money").onclick = async () => {
+  const paper = $("paper-only").checked;
+  const lots = Number($("live-max").value || 1);
+  const confirmWord = $("live-word").value.trim();
+  if (!paper) {
+    const ok = confirm("Write DRY_RUN=false? Real Angel fills still need Unlock + Live pick + Restart. LIVE_MAX_LOTS is the ceiling, not paper 100.");
+    if (!ok) return;
+  }
+  try {
+    const res = await api("/api/live/env", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: paper, live_max_lots: lots, confirm: confirmWord }),
+    });
+    $("live-word").value = "";
+    flash("flash-money", "Saved .env DRY_RUN=" + ((res.applied && res.applied.DRY_RUN) || "?") + " — Restart to load into the bot");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-unlock").onclick = async () => {
+  if (!confirm("Unlock live path? Orders still need DRY_RUN=false + Live pick + Restart.")) return;
+  try {
+    await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked: true }) });
+    flash("flash-money", "Live unlocked (still gated by Paper only / picks / restart)");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-lock").onclick = async () => {
+  try {
+    await api("/api/live", { method: "POST", body: JSON.stringify({ unlocked: false }) });
+    flash("flash-money", "Live locked");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+$("btn-save-cap").onclick = async () => {
+  try {
+    await api("/api/capital", {
+      method: "POST",
+      body: JSON.stringify({
+        total_capital_inr: Number($("cap-total").value || 0),
+        daily_loss_limit_inr: Number($("cap-dd").value || 0),
+      }),
+    });
+    flash("flash-money", "Capital saved");
+    await load();
+  } catch (e) { flash("flash-money", String(e.message || e), true); }
+};
+
+document.querySelectorAll("[data-watch]").forEach((btn) => {
+  btn.onclick = () => {
+    watchTab = btn.dataset.watch;
+    document.querySelectorAll("[data-watch]").forEach((b) => b.classList.toggle("on", b === btn));
+    loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  };
+});
+$("hist-strat").onchange = () => {
+  loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true));
+};
+$("exp-from").onchange = () => refreshExportMeta().catch(() => {});
+$("exp-to").onchange = () => refreshExportMeta().catch(() => {});
+$("btn-dl-pack").onclick = () => {
+  try {
+    downloadUrl("/api/export/pack.zip?" + rangeQs());
+    flash("flash-dl", "Downloading ZIP (ticks + all strategy trades)");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-trades").onclick = () => {
+  try {
+    downloadUrl("/api/export/trades.csv?" + rangeQs());
+    flash("flash-dl", "Downloading trades.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-ticks").onclick = () => {
+  try {
+    downloadUrl("/api/export/ticks.csv?" + rangeQs());
+    flash("flash-dl", "Downloading ticks.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-copy-trades").onclick = () => copyExport("trades").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-copy-ticks").onclick = () => copyExport("ticks").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-sheets-pack").onclick = () => {
+  downloadUrl("/api/sheets/pack.zip");
+  flash("flash-dl", "Downloading Sheets pack (scoreboard + trades + opens + signals)");
+};
+$("btn-copy-score").onclick = async () => {
+  try {
+    const data = await api("/api/sheets/scoreboard.tsv");
+    await navigator.clipboard.writeText(data.tsv || "");
+    flash("flash-dl", `Copied ${data.rows || 0} scoreboard rows — paste into Google Sheets`);
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-s14-zip").onclick = () => {
+  downloadUrl("/api/s14/sheet.zip");
+  flash("flash-dl", "Downloading S14 sheet ZIP (HTML + CSVs)");
+};
+
+async function boot() {
+  fillStratSelect();
+  $("hist-meta").textContent = "loading…";
+  try {
+    const d = await api("/api/export/defaults");
+    $("exp-from").value = d.date_from;
+    $("exp-to").value = d.date_to;
+    await refreshExportMeta();
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+  load().catch((e) => flash("flash-engine", String(e.message || e), true));
+  try {
+    await loadTape();
+  } catch (e) {
+    flash("flash-hist", String(e.message || e), true);
+    $("hist-meta").textContent = String(e.message || e);
+  }
+  loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true));
+  loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true));
+  loadWhy().catch((e) => flash("flash-why", String(e.message || e), true));
+}
+
+boot().catch((e) => flash("flash-engine", String(e.message || e), true));
+setInterval(() => load().catch(() => {}), 4000);
+setInterval(() => loadTape().catch((e) => flash("flash-hist", String(e.message || e), true)), 4000);
+setInterval(() => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true)), 12000);
+setInterval(() => loadS14Calc().catch((e) => flash("flash-s14", String(e.message || e), true)), 15000);
+setInterval(() => loadWhy().catch((e) => flash("flash-why", String(e.message || e), true)), 15000);
+</script>
+</body>
+</html>

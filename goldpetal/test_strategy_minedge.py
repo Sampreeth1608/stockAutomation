@@ -25,9 +25,18 @@ def _msg(buy_qty: float, sell_qty: float) -> dict:
 
 
 def test_fee_break_even_large() -> None:
-    be = fee_break_even_points(14380.0)
+    os.environ["IGNORE_FEES"] = "false"
+    be = fee_break_even_points(14380.0, lots=1)
     # Angel ~₹50 RT / ₹1 per point → roughly tens of points, not hundreds
     assert 30.0 < be < 120.0
+
+
+def test_fee_break_even_force_fees_when_ignore_on() -> None:
+    os.environ["IGNORE_FEES"] = "true"
+    assert fee_break_even_points(14380.0) == 0.0
+    be = fee_break_even_points(14380.0, force_fees=True, lots=1)
+    assert 30.0 < be < 120.0
+    os.environ["IGNORE_FEES"] = "false"
 
 
 def test_required_cover_fees() -> None:
@@ -120,8 +129,28 @@ def test_s6_requires_30_points() -> None:
     assert s.required_points == 30.0
 
 
+def test_s5_covers_fees_when_ignore_fees_on() -> None:
+    old = os.environ.get("IGNORE_FEES")
+    os.environ["IGNORE_FEES"] = "true"
+    os.environ["S5_COVER_FEES"] = "true"
+    try:
+        from strategy_minedge import minedge_from_env
+
+        s = minedge_from_env()
+        assert s.cover_fees is True
+        assert s.fee_break_even > 0
+        assert s.required_points >= s.min_edge_points
+    finally:
+        if old is None:
+            os.environ.pop("IGNORE_FEES", None)
+        else:
+            os.environ["IGNORE_FEES"] = old
+        os.environ.pop("S5_COVER_FEES", None)
+
+
 if __name__ == "__main__":
     test_fee_break_even_large()
+    test_fee_break_even_force_fees_when_ignore_on()
     test_required_cover_fees()
     test_required_user_only()
     test_point_atr_warms_then_moves()
@@ -129,4 +158,5 @@ if __name__ == "__main__":
     test_s5_enters_on_large_move_and_bias()
     test_s5_target_close()
     test_s6_requires_30_points()
+    test_s5_covers_fees_when_ignore_fees_on()
     print("ok")

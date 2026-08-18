@@ -105,6 +105,49 @@ def panel_restart_allowed(confirm: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+def apply_desk_books(
+    in_bot: list[str],
+    live: list[str],
+    *,
+    path: Path | None = None,
+    state_path: Path | None = None,
+) -> dict[str, Any]:
+    """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
+
+    Does not change DRY_RUN, does not restart, does not unlock live.
+    """
+    from control_state import SLIM_PAPER_STRATEGIES, set_live_approved
+
+    known = list(SLIM_PAPER_STRATEGIES)
+    in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
+    live_raw = [str(n).strip() for n in live if str(n).strip() in known]
+    live_set = [n for n in live_raw if n in in_set]
+    skipped = [n for n in live_raw if n not in in_set]
+    en = apply_panel_enables(in_set, path=path)
+    st = set_live_approved(
+        live_set,
+        path=state_path,
+        note="desk books: live picks (still need unlock + DRY_RUN=false)",
+    )
+    return {
+        "ok": bool(en.get("ok")),
+        "enabled": in_set,
+        "live_approved": list(st.live_approved),
+        "skipped_live_not_in_bot": skipped,
+        "restart_needed": True,
+        "applied": en.get("applied") or {},
+        "note": (
+            "Saved In-bot and Live picks. Restart the engine to load In-bot into RAM. "
+            "Live picks do not send Angel orders until money is LIVE and unlocked. "
+            + (
+                f"Ignored live picks not in-bot: {', '.join(skipped)}. "
+                if skipped
+                else ""
+            )
+        ),
+    }
+
+
 def apply_panel_enables(
     enabled_names: list[str],
     *,
@@ -137,6 +180,30 @@ def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> f
         ts = ts.replace(tzinfo=IST)
     now = now or datetime.now(IST)
     return (now - ts.astimezone(IST)).total_seconds()
+
+
+def desk_snapshot() -> dict[str, Any]:
+    """Minimal Desk-page state. No scoreboard, no per-book live qty, no checklist."""
+    st = load_state()
+    env = read_live_env()
+    dry = bool(env["dry_run"])
+    live_ok, _why = is_live_mode_allowed()
+    approved = list(st.live_approved or [])
+    from analytics.env_bridge import strategy_enable_snapshot
+
+    enables_all = strategy_enable_snapshot()
+    enables = {name: bool(enables_all.get(name)) for name in SLIM_PAPER_STRATEGIES}
+    books = [
+        {"strategy": name, "live_approved": name in approved}
+        for name in SLIM_PAPER_STRATEGIES
+    ]
+    return {
+        "dry_run": dry,
+        "live_max_lots": env["live_max_lots"],
+        "enables": enables,
+        "books": books,
+        "would_place_real_orders": bool(live_ok and not dry and approved),
+    }
 
 
 def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:

@@ -12,6 +12,7 @@ from live_readiness import (
     apply_panel_enables,
     apply_panel_live_env,
     bot_age_seconds,
+    desk_snapshot,
     live_readiness,
     panel_restart_allowed,
     read_live_env,
@@ -176,6 +177,45 @@ def test_apply_panel_enables_slim() -> None:
         td.cleanup()
 
 
+def test_apply_desk_books_live_requires_in_bot() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S12=true\nENABLE_S14=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S12_HHHL30"],
+            ["S12_HHHL30", "S14_WICK30_STRICT"],
+            path=env,
+            state_path=state,
+        )
+        assert res["ok"] is True
+        assert res["live_approved"] == ["S12_HHHL30"]
+        assert "S14_WICK30_STRICT" in res["skipped_live_not_in_bot"]
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_S12=true" in text
+        assert "ENABLE_S14=false" in text
+        assert "DRY_RUN=true" in text
+        assert "SECRET=keep" in text
+        assert res["restart_needed"] is True
+    finally:
+        td.cleanup()
+
+
+def test_desk_snapshot_skips_checklist() -> None:
+    os.environ["DRY_RUN"] = "true"
+    snap = desk_snapshot()
+    assert "steps" not in snap
+    assert "S14_WICK30_STRICT" in snap["enables"]
+    assert any(b["strategy"] == "S14_WICK30_STRICT" for b in snap["books"])
+    assert snap["would_place_real_orders"] is False
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -193,4 +233,8 @@ if __name__ == "__main__":
     print("ok restart word")
     test_apply_panel_enables_slim()
     print("ok enables")
+    test_apply_desk_books_live_requires_in_bot()
+    print("ok desk books")
+    test_desk_snapshot_skips_checklist()
+    print("ok desk snapshot")
     print("ALL test_live_readiness OK")

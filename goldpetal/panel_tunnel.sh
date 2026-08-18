@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Prefer this over opening TCP 8787 on the public internet.
+# Open the desk from your Mac. Do not run this on the VM.
 #
-# On your LAPTOP (not the VM), run:
-#   ssh -N -L 8787:127.0.0.1:8787 sampreeth1608@<VM_EXTERNAL_IP>
-# Then open: http://127.0.0.1:8787/
-#
-# On the VM, bind the panel to localhost only:
-#   python3 control_panel.py --host 127.0.0.1 --port 8787
-#
-# You can delete/disable the GCP firewall rule for 8787 after switching.
-
+#   ./panel_tunnel.sh                 # 8501 (Desk tab)
+#   ./panel_tunnel.sh 8.231.125.120   # if gcloud is not on the Mac
 set -euo pipefail
-HOST="${1:-}"
-if [[ -z "$HOST" ]]; then
-  echo "Usage: $0 <vm-external-ip>"
-  echo "Example: $0 34.93.12.45"
-  echo "Then open http://127.0.0.1:8787/ in your browser."
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+if curl -s -m 1 -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/instance/name >/dev/null 2>&1; then
+  echo "You are ON the VM. This tunnel runs on your Mac."
+  echo "Open a new Terminal.app window and run it there."
+  # shellcheck source=scripts/print_open_on_mac.sh
+  source "$HERE/scripts/print_open_on_mac.sh"
+  print_open_on_mac
   exit 1
 fi
-echo "Tunneling localhost:8787 → ${HOST}:8787 (Ctrl+C to stop)"
-echo "Open http://127.0.0.1:8787/ in your browser."
-exec ssh -N -L 8787:127.0.0.1:8787 "sampreeth1608@${HOST}"
+
+HOST="${1:-}"
+if [[ -z "$HOST" ]]; then
+  echo "Leave this Mac window running, then Chrome: http://127.0.0.1:8501/ → Desk"
+  exec gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501
+fi
+
+echo "Tunneling Mac:8501 → ${HOST}:8501 (Ctrl+C to stop)"
+echo "Chrome: http://127.0.0.1:8501/"
+exec ssh -N -L 8501:127.0.0.1:8501 "sampreeth1608@${HOST}"

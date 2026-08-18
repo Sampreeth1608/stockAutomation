@@ -43,7 +43,7 @@ from strategy_net_zigzag import (
 from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from strategy_hhhl import HhhlCandleStrategy, hhhl_from_env
 from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env
-from strategy_wick import WickCandleStrategy, wick_nowick_from_env, wick_strict_from_env
+from strategy_wick import WickCandleStrategy, wick_nowick_from_env, wick_record_actions, wick_strict_from_env
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
@@ -179,6 +179,13 @@ def run_once(
     stop_flag: dict,
 ) -> None:
     init_db()
+    try:
+        from trade_learner import get_learner
+
+        get_learner().fit_from_db()
+        print(f"Learner  : {get_learner().status_line()}", flush=True)
+    except Exception as exc:
+        print(f"Learner  : skip ({type(exc).__name__}: {exc})", flush=True)
     interval = _interval_minutes()
     dry_run = _dry_run()
     contract = find_goldpetal_futures(force_refresh=True)
@@ -209,11 +216,33 @@ def run_once(
     }
     closed = {"done": False}
 
-    def _may_enter(strategy_name: str, regime: str) -> tuple[bool, str]:
-        """Portfolio regime + control-panel emergency/capital gates for new entries."""
+    def _entry_features(strategy_name: str, side: str = "") -> dict:
+        from quality_filters import tick_features
+        from strategy_net_zigzag import net_imbalance
+
+        now_ist = datetime.now(IST)
+        msg = latest.get("message") or {}
+        tbq = float(msg.get("total_buy_quantity") or 0)
+        tsq = float(msg.get("total_sell_quantity") or 0)
+        _net, imb = net_imbalance(tbq, tsq) if (tbq or tsq) else (0.0, 0.0)
+        return tick_features(
+            strategy=strategy_name,
+            side=side,
+            hour_frac=now_ist.hour + now_ist.minute / 60.0,
+            weekday=now_ist.weekday(),
+            ltp=float(latest.get("cmp") or 0) or 0.0,
+            imb_pct=imb,
+        )
+
+    def _may_enter(
+        strategy_name: str, regime: str, *, side: str = ""
+    ) -> tuple[bool, str]:
+        """Portfolio regime + control-panel emergency/capital/ML gates for new entries."""
         if not portfolio.allows(strategy_name, regime):
             return False, f"regime={regime}"
-        return allow_new_entry(strategy_name)
+        return allow_new_entry(
+            strategy_name, features=_entry_features(strategy_name, side)
+        )
 
     def _strategy_active(strategy_name: str) -> bool:
         """False when ENABLE_* is off or desk force-disabled (stops paper emits)."""
@@ -249,6 +278,13 @@ def run_once(
             strategy=strategy,
             cmp=cmp,
         )
+        if str(action).upper() in {"CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
+            try:
+                from trade_learner import get_learner
+
+                get_learner().on_close(strategy)
+            except Exception:
+                pass
         if action in {"BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
             res = broker.place_signal(
                 strategy=strategy,
@@ -486,7 +522,7 @@ def run_once(
         action = result_s1.action
         # Block new entries when regime unfit / emergency / capital; optionally flatten.
         if action in {"BUY", "SHORT"}:
-            ok_enter, enter_why = _may_enter(strategy_s1.name, regime)
+            ok_enter, enter_why = _may_enter(strategy_s1.name, regime, side=action)
             if not ok_enter:
                 line = (
                     f"[{bar.time_label}] {strategy_s1.name} SKIP {action} "
@@ -558,7 +594,7 @@ def run_once(
         sell_sum = float((strategy_s2.last_minute or {}).get("sell_sum", 0))
 
         if action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s2.name, regime)
+            ok_enter, _why = _may_enter(strategy_s2.name, regime, side=action)
             if not ok_enter:
                 strategy_s2.position = "flat"
                 return
@@ -757,7 +793,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = allow_new_entry(strategy_s4.name)
+            ok_enter, _why = allow_new_entry(
+                strategy_s4.name, features=_entry_features(strategy_s4.name, result.action)
+            )
             if not ok_enter:
                 strategy_s4.position = "flat"
                 return
@@ -794,7 +832,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s5.name, regime_det.last.regime)
+            ok_enter, _why = _may_enter(
+                strategy_s5.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s5.position = "flat"
                 strategy_s5.entry_price = None
@@ -830,7 +870,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s6.name, regime_det.last.regime)
+            ok_enter, _why = _may_enter(
+                strategy_s6.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s6.position = "flat"
                 strategy_s6.entry_price = None
@@ -895,7 +937,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s8.name, regime_det.last.regime)
+            ok_enter, _why = _may_enter(
+                strategy_s8.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s8.position = "flat"
                 strategy_s8.entry_price = None
@@ -1005,7 +1049,9 @@ def run_once(
         }:
             return
         if result.action in {"BUY", "SHORT", "REVERSE_LONG", "REVERSE_SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s9.name, regime_det.last.regime)
+            ok_enter, _why = _may_enter(
+                strategy_s9.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s9.position = "flat"
                 strategy_s9.entry_price = None
@@ -1080,7 +1126,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(strategy_s10.name, regime_det.last.regime)
+            ok_enter, _why = _may_enter(
+                strategy_s10.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s10.position = "flat"
                 strategy_s10.entry_price = None
@@ -1151,7 +1199,9 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(strategy_s12.name, regime_det.last.regime)
+            ok_enter, why = _may_enter(
+                strategy_s12.name, regime_det.last.regime, side=result.action
+            )
             if not ok_enter:
                 strategy_s12.position = "flat"
                 strategy_s12.entry_price = None
@@ -1238,7 +1288,10 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, why = allow_new_entry(strategy_s13.name)
+            ok_enter, why = allow_new_entry(
+                strategy_s13.name,
+                features=_entry_features(strategy_s13.name, result.action),
+            )
             if not ok_enter:
                 strategy_s13.position = "flat"
                 strategy_s13.entry_price = None
@@ -1278,6 +1331,7 @@ def run_once(
             return
         if latest["cmp"] is None:
             return
+        prev = strategy.position
         result = strategy.on_tick(now, float(latest["cmp"]), message)
         skip = getattr(strategy, "last_skip", None)
         if result is None and state["tick_count"] % 50 == 0:
@@ -1287,15 +1341,20 @@ def run_once(
             )
             print(line, flush=True)
             logger.info(line)
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        planned = wick_record_actions(prev, result)
+        if not planned:
             return
-        if result.action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(strategy.name, regime_det.last.regime)
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = _may_enter(
+                strategy.name, regime_det.last.regime, side=enter_action
+            )
             if not ok_enter:
                 strategy.position = "flat"
                 strategy.entry_price = None
                 if hasattr(strategy, "release_decision_lock"):
                     strategy.release_decision_lock()
+                planned = [p for p in planned if p[0] == "CLOSE"]
                 line = (
                     f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
                     f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
@@ -1303,11 +1362,12 @@ def run_once(
                 )
                 print(line, flush=True)
                 logger.info(line)
-                return
+                if not planned:
+                    return
         if (
             strategy.position != "flat"
             and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and result.action != "CLOSE"
+            and enter_action != "CLOSE"
         ):
             from strategy import SignalResult as _SR
 
@@ -1322,24 +1382,29 @@ def run_once(
                 prev_net_delta=result.prev_net_delta,
                 reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
             )
-        _record_signal(
-            time_label=now.isoformat(timespec="seconds"),
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            strategy=strategy.name,
-            cmp=float(latest["cmp"]),
-        )
-        line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-            f"regime={regime_det.last.regime} CMP={latest['cmp']} "
-            f"=> {result.action} (pos={strategy.position}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
+            planned = [("CLOSE", "flat")]
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy.name,
+                cmp=float(latest["cmp"]),
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
+                f"regime={regime_det.last.regime} CMP={latest['cmp']} "
+                f"=> {action} (pos={pos_after}) | {reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
 
     def on_data(_wsapp, message):
         if stop_flag["stop"]:
@@ -1377,6 +1442,13 @@ def run_once(
 
             state["tick_count"] += 1
             tick_count = state["tick_count"]
+            if tick_count == 1 or tick_count % 200 == 0:
+                try:
+                    from trade_learner import get_learner
+
+                    get_learner().maybe_refit()
+                except Exception:
+                    pass
             if tick_count == 1 or tick_count % 50 == 0:
                 s3_extra = ""
                 if strategy_s3.enabled:

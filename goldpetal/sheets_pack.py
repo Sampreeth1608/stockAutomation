@@ -33,6 +33,7 @@ from capital import capital_snapshot
 from control_state import entries_blocked, is_live_mode_allowed, load_state
 from paper_report import _summarize
 from proposals import proposals_snapshot
+from charges import paper_lots
 from storage import (
     TRADE_CSV_FIELDS,
     DB_PATH,
@@ -132,7 +133,7 @@ def build_scoreboard_rows() -> list[dict[str, Any]]:
 
 
 def build_open_rows(*, db_path: Path = DB_PATH) -> list[dict[str, Any]]:
-    trades = build_trades(strategy=None, db_path=db_path)
+    trades = build_trades(strategy=None, db_path=db_path, lot_size=paper_lots())
     return [t for t in trades if t.get("status") == "OPEN"]
 
 
@@ -219,7 +220,7 @@ def write_sheets_pack(
     folder.mkdir(parents=True, exist_ok=True)
 
     score = build_scoreboard_rows()
-    all_trades = build_trades(strategy=None, db_path=db_path)
+    all_trades = build_trades(strategy=None, db_path=db_path, lot_size=paper_lots())
     opens = [t for t in all_trades if t.get("status") == "OPEN"]
     signals = build_signal_rows(limit=signal_limit, db_path=db_path)
     control = build_control_rows()
@@ -263,7 +264,7 @@ def write_sheets_pack(
 def sheets_pack_zip_bytes(*, db_path: Path = DB_PATH, signal_limit: int = 200) -> bytes:
     """In-memory ZIP for control-panel download."""
     score = build_scoreboard_rows()
-    all_trades = build_trades(strategy=None, db_path=db_path)
+    all_trades = build_trades(strategy=None, db_path=db_path, lot_size=paper_lots())
     opens = [t for t in all_trades if t.get("status") == "OPEN"]
     signals = build_signal_rows(limit=signal_limit, db_path=db_path)
     control = build_control_rows()

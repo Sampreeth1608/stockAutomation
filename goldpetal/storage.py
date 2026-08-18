@@ -12,7 +12,7 @@ DB_PATH = Path(__file__).resolve().parent / "data" / "ticks.db"
 
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -235,18 +235,36 @@ def latest_ticks(limit: int = 20, db_path: Path = DB_PATH) -> list[sqlite3.Row]:
 def list_signals(
     strategy: str | None = None,
     db_path: Path = DB_PATH,
+    *,
+    limit: int | None = None,
 ) -> list[sqlite3.Row]:
     init_db(db_path)
-    query = """
+    where = ""
+    params: list[Any] = []
+    if strategy:
+        where = " WHERE strategy = ?"
+        params.append(strategy)
+    if limit is not None:
+        query = f"""
+            SELECT id, time_label, symbol, strategy, action, position_after, reason,
+                   price_delta, net, net_delta, dry_run, cmp
+            FROM signals
+            {where}
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        params.append(int(limit))
+        with connect(db_path) as conn:
+            rows = list(conn.execute(query, params))
+        rows.reverse()
+        return rows
+    query = f"""
         SELECT id, time_label, symbol, strategy, action, position_after, reason,
                price_delta, net, net_delta, dry_run, cmp
         FROM signals
+        {where}
+        ORDER BY id ASC
     """
-    params: tuple[Any, ...] = ()
-    if strategy:
-        query += " WHERE strategy = ?"
-        params = (strategy,)
-    query += " ORDER BY id ASC"
     with connect(db_path) as conn:
         return list(conn.execute(query, params))
 
@@ -381,6 +399,7 @@ def build_trades(
     db_path: Path = DB_PATH,
     *,
     lot_size: float | None = None,
+    signal_limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) into round-trip trades + PnL.
 
@@ -389,6 +408,7 @@ def build_trades(
 
     Post-trade Angel fees + tax are always computed for display (even when
     IGNORE_FEES=true). lot_size overrides LOT_SIZE for fee/PnL scaling.
+    signal_limit caps how far back each book is scanned (desk tape).
     """
     if strategy is None:
         with connect(db_path) as conn:
@@ -402,13 +422,17 @@ def build_trades(
         merged: list[dict[str, Any]] = []
         trade_no = 0
         for name in names:
-            for t in _build_trades_one(name, db_path=db_path, lot_size=lot_size):
+            for t in _build_trades_one(
+                name, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+            ):
                 trade_no += 1
                 t = dict(t)
                 t["trade_no"] = trade_no
                 merged.append(t)
         return merged
-    return _build_trades_one(strategy, db_path=db_path, lot_size=lot_size)
+    return _build_trades_one(
+        strategy, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+    )
 
 
 def _build_trades_one(
@@ -416,9 +440,10 @@ def _build_trades_one(
     db_path: Path = DB_PATH,
     *,
     lot_size: float | None = None,
+    signal_limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) for one strategy."""
-    rows = list_signals(strategy=strategy, db_path=db_path)
+    rows = list_signals(strategy=strategy, db_path=db_path, limit=signal_limit)
     trades: list[dict[str, Any]] = []
     open_trade: dict[str, Any] | None = None
     trade_no = 0

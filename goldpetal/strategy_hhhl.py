@@ -28,6 +28,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from strategy import Position, SignalResult
+from quality_filters import hhll_break_ok
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -41,6 +42,10 @@ class HhhlConfig:
     allow_short: bool = True
     # Confirm in the final N minutes of the candle (default: last 1 minute).
     confirm_minutes: int = 1
+    # Close must finish this many points beyond prev high/low (false-break filter).
+    min_close_beyond: float = 3.0
+    # Reject if the break wick is most of the poke (close near the prior level).
+    max_break_wick_frac: float = 0.6
 
 
 class HhhlCandleStrategy:
@@ -71,6 +76,7 @@ class HhhlCandleStrategy:
         )
         return (
             f"TF={c.bar_minutes}m min_range={c.min_range:.0f} "
+            f"beyond={c.min_close_beyond:.0f} "
             f"confirm={c.confirm_minutes}m no_flip={c.no_flip} "
             f"L={c.allow_long} S={c.allow_short} {prev} "
             f"watch={self._watching or '-'} skip={self.last_skip or '-'} "
@@ -256,6 +262,20 @@ class HhhlCandleStrategy:
             self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
             return None
         if want_long and not want_short:
+            ok, why = hhll_break_ok(
+                side="long",
+                o=o,
+                h=h,
+                l=l,
+                c=c,
+                prev_h=ph,
+                prev_l=pl,
+                min_close_beyond=self.cfg.min_close_beyond,
+                max_break_wick_frac=self.cfg.max_break_wick_frac,
+            )
+            if not ok:
+                self.last_skip = why
+                return None
             self.position = "long"
             self.entry_price = c
             return SignalResult(
@@ -271,6 +291,20 @@ class HhhlCandleStrategy:
                 ),
             )
         if want_short and not want_long:
+            ok, why = hhll_break_ok(
+                side="short",
+                o=o,
+                h=h,
+                l=l,
+                c=c,
+                prev_h=ph,
+                prev_l=pl,
+                min_close_beyond=self.cfg.min_close_beyond,
+                max_break_wick_frac=self.cfg.max_break_wick_frac,
+            )
+            if not ok:
+                self.last_skip = why
+                return None
             self.position = "short"
             self.entry_price = c
             return SignalResult(
@@ -374,5 +408,7 @@ def hhhl_from_env() -> HhhlCandleStrategy:
         allow_long=_env_flag("S12_ALLOW_LONG", True),
         allow_short=_env_flag("S12_ALLOW_SHORT", True),
         confirm_minutes=int(os.getenv("S12_CONFIRM_MINUTES", "1")),
+        min_close_beyond=float(os.getenv("S12_MIN_CLOSE_BEYOND", "3")),
+        max_break_wick_frac=float(os.getenv("S12_MAX_BREAK_WICK_FRAC", "0.6")),
     )
     return HhhlCandleStrategy(cfg)

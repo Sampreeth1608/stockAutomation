@@ -54,7 +54,6 @@ from analytics.desk_auth import (  # noqa: E402
     dangerous_requires_totp,
     desk_password_configured,
     desk_password_hint,
-    desk_totp_configured,
     verify_password,
     verify_totp,
 )
@@ -79,6 +78,23 @@ STRATEGIES = [
     "S13_HHHL_DAY",
     "S14_WICK30_STRICT",
     "S15_WICK30_NOWICK",
+]
+
+# One page at a time — st.tabs runs every tab on every load (that is why the desk felt late).
+PAGES = [
+    "Desk",
+    "S14 chart",
+    "Overview",
+    "Proposals / ML",
+    "Deploy / Ops (view)",
+    "Control (stop)",
+    "Live Deploy (view)",
+    "Capital (view)",
+    "Models",
+    "Reasoning",
+    "Trades",
+    "Signals / Ticks",
+    "Live orders",
 ]
 
 
@@ -349,11 +365,8 @@ def inject_style() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;600&display=swap');
-        html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
-        h1, h2, h3 { font-family: 'Fraunces', serif !important; letter-spacing: -0.02em; }
+        html, body, [class*="css"] { font-family: ui-sans-serif, system-ui, sans-serif; }
         .block-container { padding-top: 1rem; max-width: 1200px; }
-        div[data-testid="stMetricValue"] { font-family: 'Fraunces', serif; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -465,7 +478,7 @@ def tab_overview(dd: Path, db: Path, *, lot_size: float = 1.0) -> None:
 
 
 def tab_s14_chart(dd: Path) -> None:
-    """Angel/MCX Gold Petal candles — first tab so it is visible without 8787."""
+    """Angel/MCX Gold Petal candles — research tab (Desk tab is the writer)."""
     from analytics.s14_chart import PLOTLY_ZOOM_CONFIG, labeled_candlestick_figure
     from s14_exchange_sheet import refresh_status, start_angel_refresh
 
@@ -475,8 +488,9 @@ def tab_s14_chart(dd: Path) -> None:
         "O/H/L/C is printed on each candle (not a table). "
         "Scroll to zoom, drag to pan, use the rangeslider, double-click to reset. "
         "On 30m/1h zoom in until the numbers sit on the bar. "
+        "Start/stop and live picks are on tab **Desk**. "
         "Open with `gcloud compute ssh … -- -N -L 8501:127.0.0.1:8501` then "
-        "http://127.0.0.1:8501/ → tab **S14 chart**."
+        "http://127.0.0.1:8501/ → **Desk** (this chart is the next tab)."
     )
     st.caption(f"Desk code: `{ROOT}`")
     st_status = refresh_status(sheet)
@@ -530,8 +544,8 @@ def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
         "Approve → paper **auto-writes** whitelist env keys (e.g. S11_PACK_PATH). "
-        f"Then Restart supervise on the 8787 panel ({OPERATOR_URL}). "
-        "Live still needs Unlock live + DRY_RUN=false on 8787."
+        f"Then Restart the bot on the Desk tab ({OPERATOR_URL}). "
+        "Live still needs Unlock live + DRY_RUN=false on Desk."
     )
     raw = load_json(dd / "control" / "proposals.json")
     items = (raw or {}).get("proposals") if isinstance(raw, dict) else (raw or [])
@@ -583,14 +597,14 @@ def tab_proposals(dd: Path) -> None:
                         f"Env auto-applied: {res.get('env_applied')}"
                     )
                     if res.get("restart_needed"):
-                        st.info(f"Restart supervise on 8787 ({OPERATOR_URL}) to load the pack.")
+                        st.info(f"Restart the bot on the Desk tab ({OPERATOR_URL}) to load the pack.")
                     st.cache_data.clear()
                 else:
                     st.error(res.get("error") or res)
             if b2.button("Approve → live", key=f"al_{p['id']}"):
                 st.warning(
-                    f"Do not approve live here. After paper looks good, check Live? "
-                    f"on the 8787 panel ({OPERATOR_URL})."
+                    f"Do not approve live here. After paper looks good, check Live "
+                    f"on the Desk tab ({OPERATOR_URL})."
                 )
             if b3.button("Reject", key=f"rj_{p['id']}"):
                 res = decide_proposal(p["id"], "rejected", note=note, apply_env=False)
@@ -610,7 +624,7 @@ def tab_control(dd: Path) -> None:
     st.info(
         operator_readonly_markdown()
         + " Streamlit may **stop** (emergency / pause / lock live). "
-        "Clear emergency, resume, and unlock live only on 8787."
+        "Clear emergency, resume, and unlock live only on the Desk tab."
     )
     state = load_json(dd / "control" / "state.json") or {}
     st.json(state)
@@ -633,7 +647,7 @@ def tab_control(dd: Path) -> None:
 def tab_deploy_ops(dd: Path) -> None:
     st.subheader("Deploy / Ops — read-only")
     st.info(operator_readonly_markdown())
-    st.caption(f"Change ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, and Restart on {OPERATOR_URL}")
+    st.caption(f"Change ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, and Restart on the Desk tab ({OPERATOR_URL})")
 
     if LOCAL_DESK:
         status = bot_status()
@@ -659,13 +673,13 @@ def tab_deploy_ops(dd: Path) -> None:
         with st.expander("strategy_run.log (tail)", expanded=False):
             st.code(status.get("log_tail") or "(empty)", language="text")
     else:
-        st.warning("Bot/.env snapshot is on the VM. Open 8787 there.")
+        st.warning("Bot/.env snapshot is on the VM. Open the Desk tab on 8501 there.")
 
 
 def tab_capital(dd: Path) -> None:
     st.subheader("Capital — read-only")
     st.info(operator_readonly_markdown())
-    st.caption(f"Edit book ₹ / lots on {OPERATOR_URL} Capital management.")
+    st.caption(f"Edit book ₹ / lots on the Desk tab ({OPERATOR_URL}).")
     cap = load_json(dd / "control" / "capital.json")
     if not cap:
         st.info("No capital.json yet.")
@@ -684,7 +698,7 @@ def tab_live_deploy(dd: Path) -> None:
     st.subheader("Live deploy — read-only")
     st.info(operator_readonly_markdown())
     st.caption(
-        f"live_approved, ENABLE_*, DRY_RUN, and Restart are on {OPERATOR_URL} Live money."
+        f"live_approved, ENABLE_*, DRY_RUN, and Restart are on the Desk tab ({OPERATOR_URL})."
     )
     state = load_json(dd / "control" / "state.json") or {}
     cap = load_json(dd / "control" / "capital.json") or {}
@@ -712,12 +726,12 @@ def tab_live_deploy(dd: Path) -> None:
     with st.expander("How live sizing works", expanded=False):
         st.markdown(
             f"""
-1. On **8787 Live money**: check Live? for the strategy, set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
-2. On **8787 Capital**: set ₹ / max lots.
-3. Unlock live on 8787. Type LIVE only if you intend `DRY_RUN=false`.
-4. Type RESTART on 8787. Size = min(strategy max_lots, LIVE_MAX_LOTS).
+1. On **Desk → Strategies**: In bot + Live pick, Save strategies.
+2. On **Desk → Live money**: set LIVE_MAX_LOTS, keep Paper only unless you mean Angel.
+3. Unlock live. Type LIVE only if you intend `DRY_RUN=false`.
+4. Type RESTART on Desk → Engine. Size = min(strategy max_lots, LIVE_MAX_LOTS).
 
-Do not also save these on Streamlit.
+Do not also save these on the other Streamlit tabs.
 """
         )
 
@@ -866,145 +880,104 @@ def main() -> None:
         page_title="Gold Petal Desk",
         page_icon="◆",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
     )
-    inject_style()
     if not require_desk_login():
         return
 
-    st.sidebar.title("Gold Petal desk")
-    if LOCAL_DESK:
-        st.sidebar.caption("VM local · live data/ · no Mac sync")
-        if st.session_state.get("desk_authed"):
-            if st.sidebar.button("Lock desk"):
-                st.session_state["desk_authed"] = False
-                st.rerun()
-            st.sidebar.caption(
-                "Auth: password"
-                + (" + OTP for dangerous ops" if desk_totp_configured() else "")
-            )
-    else:
-        st.sidebar.caption("Mac snapshot · sync from VM")
-    dd = Path(
-        st.sidebar.text_input("Data folder", value=str(DEFAULT_DATA))
-    ).expanduser()
-    st.session_state["data_dir"] = str(dd)
+    st.sidebar.title("Gold Petal")
+    page = st.sidebar.selectbox("Page", PAGES, index=0, key="gp_page")
+    if page != "Desk":
+        inject_style()
+    if LOCAL_DESK and st.session_state.get("desk_authed"):
+        if st.sidebar.button("Lock desk"):
+            st.session_state["desk_authed"] = False
+            st.rerun()
+
+    dd = DEFAULT_DATA
     db = dd / "ticks.db"
+    lot_size = 100.0 if LOCAL_DESK else 1.0
 
-    lot_size = float(
-        st.sidebar.number_input(
-            "Lots (fee display)",
-            min_value=1.0,
-            value=100.0 if LOCAL_DESK else 1.0,
-            step=1.0,
-            help="Scales gross PnL and Angel fees on the desk display.",
-        )
-    )
-    st.sidebar.caption(
-        "IGNORE_FEES rides freely. Closed trades always show fees+tax here."
-    )
+    if page != "Desk":
+        if LOCAL_DESK:
+            st.sidebar.caption("VM local")
+        else:
+            st.sidebar.caption("Mac snapshot")
+        dd = Path(
+            st.sidebar.text_input("Data folder", value=str(DEFAULT_DATA))
+        ).expanduser()
+        st.session_state["data_dir"] = str(dd)
+        db = dd / "ticks.db"
+        if page in {"Overview", "Trades"}:
+            lot_size = float(
+                st.sidebar.number_input(
+                    "Lots (fee display)",
+                    min_value=1.0,
+                    value=lot_size,
+                    step=1.0,
+                )
+            )
+        if LOCAL_DESK:
+            if st.sidebar.button("Refresh"):
+                st.cache_data.clear()
+        else:
+            cfg = VmConfig.from_env()
+            st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
+            st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
+            cfg = VmConfig(
+                vm=st.session_state.get("vm_name", cfg.vm),
+                zone=st.session_state.get("vm_zone", cfg.zone),
+                remote_dir=cfg.remote_dir,
+            )
+            skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=True)
+            if st.sidebar.button("Sync from VM", type="primary"):
+                with st.spinner("Syncing…"):
+                    os.environ["GP_VM"] = cfg.vm
+                    os.environ["GP_ZONE"] = cfg.zone
+                    code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
+                st.sidebar.code(out[-2000:] if out else f"exit {code}")
+                st.cache_data.clear()
+                if code == 0:
+                    st.sidebar.success("Synced")
+                else:
+                    st.sidebar.error(f"sync exit {code}")
 
-    if LOCAL_DESK:
-        if st.sidebar.button("Refresh", type="primary"):
-            st.cache_data.clear()
-            st.sidebar.success("Cache cleared")
-        st_status = bot_status()
-        st.sidebar.metric("Bot", "RUN" if st_status.get("running") else "STOP")
-    else:
-        cfg = VmConfig.from_env()
-        st.sidebar.text_input("VM", value=cfg.vm, key="vm_name")
-        st.sidebar.text_input("Zone", value=cfg.zone, key="vm_zone")
-        cfg = VmConfig(
-            vm=st.session_state.get("vm_name", cfg.vm),
-            zone=st.session_state.get("vm_zone", cfg.zone),
-            remote_dir=cfg.remote_dir,
-        )
-        skip_db = st.sidebar.checkbox("Light sync (skip ticks.db)", value=True)
-        if st.sidebar.button("Sync from VM", type="primary"):
-            with st.spinner("Syncing…"):
-                os.environ["GP_VM"] = cfg.vm
-                os.environ["GP_ZONE"] = cfg.zone
-                code, out = sync_snapshot(dd, cfg, skip_db=skip_db)
-            st.sidebar.code(out[-2000:] if out else f"exit {code}")
-            st.cache_data.clear()
-            if code == 0:
-                st.sidebar.success("Synced")
-            else:
-                st.sidebar.error(f"sync exit {code}")
-
-    if st.sidebar.button("Clear cache"):
-        st.cache_data.clear()
-
-    st.title("Gold Petal research desk")
-    mode = "VM local data" if LOCAL_DESK else "Mac snapshot"
-    st.caption(
-        f"{mode} · operator writes on 8787 only · "
-        f"S4/S5/S8/S11/S12/S13/S14/S15 · {date.today().isoformat()}"
-    )
+    if page != "Desk":
+        st.title("Gold Petal research")
+        st.caption(f"{'VM local' if LOCAL_DESK else 'Mac snapshot'} · {date.today().isoformat()}")
 
     if not dd.exists():
         st.warning("Data folder missing.")
         return
 
-    (
-        t_s14,
-        t0,
-        t1,
-        t_ops,
-        t2,
-        t_live,
-        t3,
-        t4,
-        t5,
-        t6,
-        t7,
-        t8,
-    ) = st.tabs(
-        [
-            "S14 chart",
-            "Overview",
-            "Proposals / ML",
-            "Deploy / Ops (view)",
-            "Control (stop)",
-            "Live Deploy (view)",
-            "Capital (view)",
-            "Models",
-            "Reasoning",
-            "Trades",
-            "Signals / Ticks",
-            "Live orders",
-        ]
-    )
-    with t_s14:
-        tab_s14_chart(dd)
-    with t0:
-        tab_overview(dd, db, lot_size=lot_size)
-    with t1:
-        tab_proposals(dd)
-    with t_ops:
-        tab_deploy_ops(dd)
-    with t2:
-        tab_control(dd)
-    with t_live:
-        tab_live_deploy(dd)
-    with t3:
-        tab_capital(dd)
-    with t4:
-        tab_ml(dd)
-    with t5:
-        tab_reasoning(dd)
-    with t6:
-        tab_trades(db, lot_size=lot_size)
-    with t7:
-        tab_signals_ticks(db)
-    with t8:
-        tab_live_orders(dd)
+    if page == "Desk":
+        from analytics.operator_tab import render_operator_desk
 
-    log_path = dd / "logs" / "strategy_run.log"
-    if log_path.exists():
-        with st.expander("strategy_run.log (tail)", expanded=False):
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            st.code("\n".join(text.splitlines()[-100:]), language="text")
+        render_operator_desk(local=LOCAL_DESK)
+    elif page == "S14 chart":
+        tab_s14_chart(dd)
+    elif page == "Overview":
+        tab_overview(dd, db, lot_size=lot_size)
+    elif page == "Proposals / ML":
+        tab_proposals(dd)
+    elif page == "Deploy / Ops (view)":
+        tab_deploy_ops(dd)
+    elif page == "Control (stop)":
+        tab_control(dd)
+    elif page == "Live Deploy (view)":
+        tab_live_deploy(dd)
+    elif page == "Capital (view)":
+        tab_capital(dd)
+    elif page == "Models":
+        tab_ml(dd)
+    elif page == "Reasoning":
+        tab_reasoning(dd)
+    elif page == "Trades":
+        tab_trades(db, lot_size=lot_size)
+    elif page == "Signals / Ticks":
+        tab_signals_ticks(db)
+    else:
+        tab_live_orders(dd)
 
 
 

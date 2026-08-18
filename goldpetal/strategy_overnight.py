@@ -401,7 +401,7 @@ def overnight_from_env() -> OvernightStrategy:
         "y",
     }
     min_score = float(os.getenv("S4_REASONING_MIN_SCORE", "0.45"))
-    lots = float(os.getenv("S4_REASONING_LOTS", "1"))
+    lots = float(os.getenv("S4_REASONING_LOTS", "100"))
     return OvernightStrategy(
         model_path=path,
         buy_prob=buy,
