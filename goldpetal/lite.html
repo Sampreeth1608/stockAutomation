@@ -93,7 +93,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <p class="hint" id="ml-s11-line">Loading S11 pack…</p>
     <p class="hint" id="ml-s18-line">Loading S18 pack…</p>
     <div id="ml-pending"></div>
-    <p class="hint">S18 ranks after Angel charges (tax excluded). Approve → paper, then type RESTART. Full inspector: <a href="/#ml">station ML tab</a>.</p>
+    <p class="hint">S11 and S18 rank after Angel charges (tax excluded). After the first S11 pack is approved, a new row appears only if it beats that pack. Approve → paper, then type RESTART. Full inspector: <a href="/#ml">station ML tab</a>.</p>
     <p class="flash" id="flash-ml"></p>
   </section>
 
@@ -191,8 +191,9 @@ function renderMl(d) {
     const paper = p.paper || {};
     const extra = p.extra || (paper.extra || {});
     const isS18 = p.strategy === "S18_OHLC_VOL_HTF";
-    const pnl = p.pnl_value != null ? p.pnl_value : (isS18 ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
-    const pnlLabel = p.pnl_label || (isS18 ? "after charges ₹" : "after-tax ₹");
+    const isS11 = p.strategy === "S11_DISCOVERED";
+    const pnl = p.pnl_value != null ? p.pnl_value : ((isS18 || isS11) ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
+    const pnlLabel = p.pnl_label || ((isS18 || isS11) ? "after charges ₹" : "after-tax ₹");
     return `<div style="border-top:1px solid var(--line);padding:.55rem 0">
       <div><b>${esc(p.title || p.strategy)}</b></div>
       <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ${esc(pnlLabel)} ${esc(pnl ?? "—")}</div>

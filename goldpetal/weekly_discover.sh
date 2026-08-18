@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Weekly multi-model strategy discovery from ticks → weekend proposal.
-# Cron (Sunday 19:00 IST):  0 19 * * 0 cd ~/goldpetal && ./weekly_discover.sh >> data/discover/cron.log 2>&1
+# Weekly S11 discovery from ticks. Trains always. ML proposal only if
+# after-charges profit (tax excluded) beats the loaded pack, or if none loaded yet.
+# Approve → paper on the station, then type RESTART. Not live.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p data/discover data/discover/models data/discover/packs data/control
@@ -9,7 +10,8 @@ if [[ -x ./venv/bin/python ]]; then
   PY=./venv/bin/python
 fi
 NOTE="week-$(date +%V)"
-exec "$PY" discover_strategies.py run \
+export PYTHONUNBUFFERED=1
+exec "$PY" -u discover_strategies.py run \
   --out-dir data/discover \
   --top-k 3 \
   --horizon 0 \

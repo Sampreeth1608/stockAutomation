@@ -228,7 +228,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="ml-panel" hidden>
         <h2>ML approvals — S11 + S18</h2>
-        <p class="hint">S11 weekend discovery and S18 weekly pack scores write proposals. Approve → paper keeps <span class="mono">DRY_RUN=true</span>. S18 shows profit after Angel charges (tax excluded). Type RESTART on Engine to load RAM. This tab never arms Angel.</p>
+        <p class="hint">S11 and S18 write a pending row only when a pack should be approved. Both show profit after Angel charges (tax excluded). After the first S11 pack is in paper, a new S11 row appears only if it beats that pack. Approve → paper keeps <span class="mono">DRY_RUN=true</span>. Type RESTART on Engine. This tab never arms Angel.</p>
         <div class="ml-banner" id="ml-restart" hidden>Type RESTART on Engine to load the pack into RAM. Desk restart is not enough.</div>
         <p class="flash" id="flash-ml"></p>
         <div class="row" style="margin-top:.45rem">
@@ -559,13 +559,14 @@ function renderMl() {
       ${mlStat("In .env", s11.enable_s11 ? "ENABLE_S11" : "off", s11.enable_s11 ? "ok" : "warn")}
       ${mlStat("DRY_RUN", s11.dry_run === false ? "false" : "true", s11.dry_run === false ? "bad" : "ok")}
       ${mlStat("Tape WR%", sc.win_rate != null ? pct(sc.win_rate) : "—")}
-      ${mlStat("Tape ₹", sc.pnl_after_tax != null ? money(sc.pnl_after_tax) : "—", pnlClass(sc.pnl_after_tax))}
+      ${mlStat("Tape after charges ₹", afterChargesInr(sc) != null ? money(afterChargesInr(sc)) : "—", pnlClass(afterChargesInr(sc)))}
       ${mlStat("Closed", sc.closed != null ? fmt(sc.closed, 0) : "—")}
     </div>
     <p class="mono">${esc(s11.pack_path || "(S11_PACK_PATH empty)")}</p>
     <p class="ml-meta">${packLine(pack)} · buy≥${esc(pack.buy_prob ?? "—")} short≤${esc(pack.short_prob ?? "—")} hold ${esc(pack.min_hold_sec ?? "—")}s every ${esc(pack.every_n_ticks ?? "—")}</p>
     ${pack.rationale ? `<p class="hint">${esc(pack.rationale)}</p>` : ""}
     ${pack.behavior_summary ? `<p class="hint">${esc(pack.behavior_summary)}</p>` : ""}
+    <p class="hint">S11 ranks after charges (tax excluded). After the first pack is approved, a new row appears only if it beats that pack. Type RESTART after Approve → paper.</p>
   </div>
   <div class="ml-card">
     <h3>Loaded S18 pack</h3>
@@ -586,9 +587,10 @@ function renderMl() {
     const loaded = s11.pack || {};
     const extra = p.extra || (paper.extra || {});
     const isS18 = p.strategy === "S18_OHLC_VOL_HTF";
+    const isS11 = p.strategy === "S11_DISCOVERED";
     const delta = paper.delta_vs_baseline_inr;
-    const pnlLabel = p.pnl_label || (isS18 ? "After charges ₹" : "After-tax ₹");
-    const pnlVal = p.pnl_value != null ? p.pnl_value : (isS18 ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
+    const pnlLabel = p.pnl_label || ((isS18 || isS11) ? "After charges ₹" : "After-tax ₹");
+    const pnlVal = p.pnl_value != null ? p.pnl_value : ((isS18 || isS11) ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
     const safety = p.safety_ok ? pill("safety ok", "ok") : pill("safety fail", "bad");
     const kind = pill(p.kind || "new", p.kind === "new" ? "ok" : "warn");
     const same = p.same_as_loaded ? pill("same as loaded", "ok") : "";
@@ -622,13 +624,13 @@ function renderMl() {
     </div>`;
   }).join("") || `<p class="hint">${pendingAll.length ? "No pending rows for this filter." : "No pending proposals. Run weekly_discover.sh (S11) or ./weekly_s18.sh (S18) on the VM."}</p>`;
   $("ml-packs").innerHTML = packs.length ? `<table>
-    <thead><tr><th>Pack</th><th>Model</th><th class="num">AUC</th><th>Safety</th><th class="num">Paper ₹</th><th></th></tr></thead>
+    <thead><tr><th>Pack</th><th>Model</th><th class="num">AUC</th><th>Safety</th><th class="num">After charges ₹</th><th></th></tr></thead>
     <tbody>${packs.map((row) => `<tr>
       <td>${row.is_loaded ? pill("loaded", "ok") + " " : ""}<span class="mono">${esc((row.path || "").replace("data/discover/packs/", ""))}</span></td>
       <td>${esc(row.model_name || "—")} ${esc(row.family || "")}</td>
       <td class="num">${aucStr(row.auc)}</td>
       <td>${row.safety_ok ? pill("ok", "ok") : pill("fail", "bad")}</td>
-      <td class="num ${pnlClass((row.paper || {}).after_tax_pnl)}">${money((row.paper || {}).after_tax_pnl)}</td>
+      <td class="num ${pnlClass((row.paper || {}).after_charges_pnl != null ? (row.paper || {}).after_charges_pnl : (row.paper || {}).after_tax_pnl)}">${money((row.paper || {}).after_charges_pnl != null ? (row.paper || {}).after_charges_pnl : (row.paper || {}).after_tax_pnl)}</td>
       <td><button class="btn ok" type="button" data-ml="load" data-path="${esc(row.path)}" data-safe="${row.safety_ok ? "1" : "0"}">${row.is_loaded ? "Reload" : "Load"}</button></td>
     </tr>`).join("")}</tbody>
   </table>` : `<p class="hint">No packs yet under data/discover/packs.</p>`;
@@ -636,13 +638,14 @@ function renderMl() {
   $("ml-discover").innerHTML = `<div class="ml-card">
     <p class="ml-meta">${esc(disc.report_path || "no latest_report.json")} ${disc.report_mtime_ist ? "· " + esc(disc.report_mtime_ist) : ""}</p>
     ${disc.behavior_summary ? `<p>${esc(disc.behavior_summary)}</p>` : `<p class="hint">No discovery report yet. Cron: Sunday 19:00 IST weekly_discover.sh</p>`}
-    ${cands.length ? `<table style="margin-top:.45rem"><thead><tr><th>Model</th><th>Template</th><th class="num">AUC</th><th class="num">Trades</th><th class="num">After-tax</th><th>Safety</th><th></th></tr></thead><tbody>
+    ${disc.current_pack && disc.current_pack.ok ? `<p class="hint">Loaded pack this week after charges ₹${esc(disc.current_pack.after_charges_pnl)} (tax excluded). A pending row appears only if a candidate beats that.</p>` : ""}
+    ${cands.length ? `<table style="margin-top:.45rem"><thead><tr><th>Model</th><th>Template</th><th class="num">AUC</th><th class="num">Trades</th><th class="num">After charges</th><th>Safety</th><th></th></tr></thead><tbody>
       ${cands.map((c) => `<tr>
         <td>${esc(c.model || "")}</td>
         <td>${esc(c.template || "")} ${esc(c.family || "")}</td>
         <td class="num">${aucStr(c.auc)}</td>
         <td class="num">${fmt(c.n_trades, 0)}</td>
-        <td class="num ${pnlClass(c.after_tax_pnl)}">${money(c.after_tax_pnl)}</td>
+        <td class="num ${pnlClass(c.after_charges_pnl != null ? c.after_charges_pnl : c.after_tax_pnl)}">${money(c.after_charges_pnl != null ? c.after_charges_pnl : c.after_tax_pnl)}</td>
         <td>${c.safety_ok ? pill("ok", "ok") : pill("fail", "bad")}</td>
         <td>${c.pack_path ? `<button class="btn ok" type="button" data-ml="load" data-path="${esc(c.pack_path)}" data-safe="${c.safety_ok ? "1" : "0"}">Load</button>` : ""}</td>
       </tr>`).join("")}

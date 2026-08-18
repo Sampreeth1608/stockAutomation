@@ -330,6 +330,44 @@ def test_joblib_model_path_does_not_crash_ml_tab(tmp_path: Path) -> None:
     assert pending[0]["proposed_pack"].get("error") == "empty"
 
 
+def test_s11_pending_uses_after_charges_label(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("DRY_RUN=true\nENABLE_S11=true\nS11_PACK_PATH=\n", encoding="utf-8")
+    props = tmp_path / "control" / "proposals.json"
+    add_proposal(
+        StrategyProposal(
+            id="s11ch",
+            week_id="2026-W34",
+            kind="new",
+            strategy="S11_DISCOVERED",
+            title="S11 after charges",
+            summary="first pack",
+            paper=PaperResult(
+                n_trades=8,
+                win_rate=0.5,
+                gross_pnl_inr=500.0,
+                after_tax_pnl_inr=410.0,
+                extra={
+                    "metric": "after_charges_ex_tax",
+                    "after_charges_inr": 410.0,
+                    "after_tax_inr": 300.0,
+                },
+            ),
+            safety_ok=True,
+            env_patch={
+                "ENABLE_S11": "true",
+                "S11_PACK_PATH": "data/discover/packs/week.json",
+                "DRY_RUN": "true",
+            },
+        ),
+        path=props,
+    )
+    payload = ml_desk_payload(root=tmp_path, env_path=env, proposals_path=props)
+    row = payload["proposals"]["pending"][0]
+    assert row["pnl_label"] == "After charges ₹"
+    assert row["pnl_value"] == 410.0
+
+
 if __name__ == "__main__":
     import tempfile
 
@@ -351,4 +389,6 @@ if __name__ == "__main__":
         test_reject_does_not_write_env(Path(td))
     with tempfile.TemporaryDirectory() as td:
         test_joblib_model_path_does_not_crash_ml_tab(Path(td))
+    with tempfile.TemporaryDirectory() as td:
+        test_s11_pending_uses_after_charges_label(Path(td))
     print("all s11 desk tests passed")

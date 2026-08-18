@@ -6,12 +6,15 @@ Pipeline:
      (price, book L1–L5, TBQ/TSQ, OI, volume, spread/microprice)
   2) Generate strategy recipes from that behavior understanding
   3) Train logreg / RF / GB on predictive features
-  4) Fee-aware paper sim → weekend proposal (S11)
+  4) Paper sim ranked on profit after Angel charges (tax excluded) → ML proposal
 
   python3 discover_strategies.py run --db data/ticks.db
   ./weekly_discover.sh
 
-Nothing enables paper/live until you approve the proposal and set env_patch.
+First S11 pack: pending only if after-charges profit > 0 and safety_ok.
+After you Approve → paper, later weeks still train, but a pending row
+appears only when a new pack beats the loaded pack on the same test
+ticks (after charges, tax excluded). Nothing goes live from ML.
 """
 
 from __future__ import annotations
@@ -73,14 +76,15 @@ class Candidate:
     win_rate: float
     gross_pnl: float
     after_tax_pnl: float
-    safety_ok: bool
+    after_charges_pnl: float = 0.0
+    safety_ok: bool = False
     safety_reasons: list[str] = field(default_factory=list)
     pack_path: str = ""
     model_path: str = ""
     behavior_summary: str = ""
 
     def score(self) -> float:
-        return float(self.after_tax_pnl) + 0.5 * min(self.n_trades, 40)
+        return float(self.after_charges_pnl) + 0.5 * min(self.n_trades, 40)
 
 
 TEMPLATES: list[Template] = [
@@ -205,8 +209,10 @@ def paper_sim(
         trades.append(
             {
                 "gross": float(bits["gross_pnl"]),
+                "after_charges": float(bits["pnl_after_charges"]),
                 "after_tax": float(bits["pnl_after_tax"]),
-                "win": 1.0 if float(bits["gross_pnl"]) > 0 else 0.0,
+                "fees": float(bits["charges"]),
+                "win": 1.0 if float(bits["pnl_after_charges"]) > 0 else 0.0,
             }
         )
         side = 0
@@ -251,18 +257,23 @@ def paper_sim(
         _close(float(ltp[-1]))
 
     n = len(trades)
+    empty = {
+        "n_trades": 0,
+        "win_rate": 0.0,
+        "gross_pnl": 0.0,
+        "after_charges_pnl": 0.0,
+        "after_tax_pnl": 0.0,
+        "fees_inr": 0.0,
+    }
     if n == 0:
-        return {
-            "n_trades": 0,
-            "win_rate": 0.0,
-            "gross_pnl": 0.0,
-            "after_tax_pnl": 0.0,
-        }
+        return empty
     return {
         "n_trades": float(n),
         "win_rate": float(np.mean([t["win"] for t in trades])),
         "gross_pnl": float(np.sum([t["gross"] for t in trades])),
+        "after_charges_pnl": float(np.sum([t["after_charges"] for t in trades])),
         "after_tax_pnl": float(np.sum([t["after_tax"] for t in trades])),
+        "fees_inr": float(np.sum([t["fees"] for t in trades])),
     }
 
 
@@ -279,17 +290,85 @@ def _safety(auc: float, sim: dict[str, float]) -> tuple[bool, list[str]]:
         reasons.append(f"n_trades={int(sim['n_trades'])}<5")
     else:
         reasons.append(f"n_trades={int(sim['n_trades'])} ok")
-    if sim["after_tax_pnl"] <= 0:
+    after_ch = float(sim.get("after_charges_pnl") or 0)
+    if after_ch <= 0:
         ok = False
-        reasons.append(f"after_tax={sim['after_tax_pnl']:.1f}<=0")
+        reasons.append(f"after_charges={after_ch:.1f}<=0")
     else:
-        reasons.append(f"after_tax={sim['after_tax_pnl']:.1f} ok")
+        reasons.append(f"after_charges={after_ch:.1f} ok")
     if sim["win_rate"] < 0.45:
         ok = False
         reasons.append(f"win_rate={sim['win_rate']:.2f}<0.45")
     else:
         reasons.append(f"win_rate={sim['win_rate']:.2f} ok")
     return ok, reasons
+
+
+def _env_pack_path(raw: str) -> str:
+    """S11_PACK_PATH must start with data/ when applied from the ML tab."""
+    s = str(raw or "").replace("\\", "/")
+    if "data/discover/" in s:
+        return "data/discover/" + s.split("data/discover/", 1)[1]
+    return s
+
+
+def template_from_pack(pack: dict[str, Any]) -> Template:
+    return Template(
+        name=str(pack.get("id") or "loaded"),
+        buy_prob=float(pack.get("buy_prob", 0.58)),
+        short_prob=float(pack.get("short_prob", 0.42)),
+        min_hold=int(float(pack.get("min_hold_sec", 30))),
+        min_imb=float(pack.get("min_imb", 0.0)),
+        every_n=int(pack.get("every_n_ticks", 5)),
+        features=list(pack.get("features") or FEATURE_COLUMNS),
+        rationale=str(pack.get("rationale") or ""),
+        family=str(pack.get("family") or "loaded"),
+    )
+
+
+def sim_pack_on_test(pack_path: Path, test_df: pd.DataFrame) -> dict[str, Any]:
+    """Replay the loaded S11 pack on this week's test ticks. After charges, no tax."""
+    if not pack_path.is_file():
+        return {"ok": False, "error": "pack missing", "path": str(pack_path)}
+    try:
+        pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return {"ok": False, "error": f"pack read failed: {exc}", "path": str(pack_path)}
+    model_path = Path(str(pack.get("model_path") or ""))
+    if not model_path.is_file():
+        return {"ok": False, "error": "model missing", "path": str(pack_path)}
+    try:
+        blob = joblib.load(model_path)
+    except Exception as exc:
+        return {"ok": False, "error": f"model load failed: {exc}", "path": str(pack_path)}
+    model = blob["model"] if isinstance(blob, dict) and "model" in blob else blob
+    feats = [c for c in (pack.get("features") or FEATURE_COLUMNS) if c in test_df.columns]
+    if len(feats) < 2:
+        return {"ok": False, "error": "pack features missing on test ticks", "path": str(pack_path)}
+    tmpl = template_from_pack(pack)
+    need = list(feats) + ["ltp"]
+    if "imb_l1" in test_df.columns:
+        need.append("imb_l1")
+    clean = test_df.dropna(subset=[c for c in need if c in test_df.columns]).copy()
+    if clean.empty:
+        return {"ok": False, "error": "empty test after dropna", "path": str(pack_path)}
+    try:
+        prob = model.predict_proba(clean[feats].astype(float))[:, 1]
+    except Exception as exc:
+        return {"ok": False, "error": f"predict failed: {exc}", "path": str(pack_path)}
+    ltp = clean["ltp"].to_numpy(dtype=float)
+    imb = (
+        clean["imb_l1"].to_numpy(dtype=float)
+        if "imb_l1" in clean.columns
+        else np.zeros(len(clean))
+    )
+    sim = paper_sim(ltp=ltp, prob=prob, imb=imb, template=tmpl)
+    return {
+        "ok": True,
+        "path": str(pack_path),
+        "pack_id": str(pack.get("id") or pack_path.stem),
+        **sim,
+    }
 
 
 def write_pack(
@@ -359,6 +438,7 @@ def run_discovery(
     threshold_bps: float = 2.0,
     train_frac: float = 0.7,
     top_k: int = 1,
+    loaded_pack_path: Path | str | None = None,
 ) -> list[Candidate]:
     raw = load_ticks_csv(csv_path)
     if len(raw) < 400:
@@ -378,11 +458,20 @@ def run_discovery(
         f"horizon={use_horizon} table={behavior.horizon_table}",
         flush=True,
     )
-
+    print(
+        f"building features on {len(raw)} ticks — SSH stays quiet until this finishes",
+        flush=True,
+    )
     feat = build_features(raw)
+    print(f"feature rows={len(feat)} — labeling horizon={use_horizon}", flush=True)
     labeled = add_labels(feat, horizon=use_horizon, threshold_bps=threshold_bps)
     usable = labeled.dropna(subset=FEATURE_COLUMNS + ["y_dir", "y_ret"]).copy()
     train_df, test_df = time_split(usable, train_frac=train_frac)
+    print(
+        f"train={len(train_df)} test={len(test_df)} — fitting logreg/rf/gb "
+        f"({len(templates)} recipes)",
+        flush=True,
+    )
     if train_df["y_dir"].nunique() < 2:
         raise SystemExit("train labels single-class — collect more varied ticks")
 
@@ -414,12 +503,17 @@ def run_discovery(
             aucs[feats] = {}
             probs[feats] = {"__ltp__": ltp_aligned, "__imb__": imb_aligned}
             for mname, model in _models().items():
+                print(
+                    f"fit {mname} features={len(feats)} n={len(X_train)} — wait",
+                    flush=True,
+                )
                 m = clone(model)
                 m.fit(X_train, y_train.to_numpy())
                 prob = m.predict_proba(X_test)[:, 1]
                 fitted[feats][mname] = m
                 probs[feats][mname] = prob
                 aucs[feats][mname] = _auc(y_test.to_numpy(), prob)
+                print(f"  {mname} auc={aucs[feats][mname]:.3f}", flush=True)
 
         ltp_use = probs[feats]["__ltp__"]
         imb_use = probs[feats]["__imb__"]
@@ -428,6 +522,11 @@ def run_discovery(
             auc = aucs[feats][mname]
             sim = paper_sim(ltp=ltp_use, prob=prob, imb=imb_use, template=tmpl)
             ok, reasons = _safety(auc, sim)
+            print(
+                f"sim {mname}/{tmpl.name} trades={int(sim['n_trades'])} "
+                f"after_charges₹={sim['after_charges_pnl']:.1f} safety={ok}",
+                flush=True,
+            )
             if (
                 tmpl.family != "baseline"
                 and behavior.fee_be_pts > 0
@@ -460,6 +559,7 @@ def run_discovery(
                     win_rate=float(sim["win_rate"]),
                     gross_pnl=float(sim["gross_pnl"]),
                     after_tax_pnl=float(sim["after_tax_pnl"]),
+                    after_charges_pnl=float(sim["after_charges_pnl"]),
                     safety_ok=ok,
                     safety_reasons=reasons,
                     pack_path=str(pack_path),
@@ -469,6 +569,11 @@ def run_discovery(
             )
 
     cands.sort(key=lambda c: (c.safety_ok, c.score()), reverse=True)
+    current_pack: dict[str, Any] | None = None
+    if loaded_pack_path:
+        loaded = Path(loaded_pack_path)
+        if str(loaded):
+            current_pack = sim_pack_on_test(loaded, test_df)
     report = {
         "week_id": week,
         "csv": str(csv_path),
@@ -479,6 +584,8 @@ def run_discovery(
         "behavior_report": str(behavior_path),
         "behavior_summary": behavior.summary,
         "reasoning": behavior.reasoning,
+        "metric": "after_charges_ex_tax",
+        "current_pack": current_pack,
         "predictive_families": [asdict(f) for f in behavior.families if f.predictive],
         "recipes": [asdict(r) for r in behavior.recipes],
         "candidates": [
@@ -491,6 +598,7 @@ def run_discovery(
                 "n_trades": c.n_trades,
                 "win_rate": c.win_rate,
                 "gross_pnl": c.gross_pnl,
+                "after_charges_pnl": c.after_charges_pnl,
                 "after_tax_pnl": c.after_tax_pnl,
                 "safety_ok": c.safety_ok,
                 "safety_reasons": c.safety_reasons,
@@ -506,43 +614,68 @@ def run_discovery(
     return cands[: max(1, top_k)]
 
 
-def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal | None:
-    if not cands:
+def propose_best(
+    cands: list[Candidate],
+    *,
+    note: str = "",
+    current: dict[str, Any] | None = None,
+    proposals_path: Path | None = None,
+) -> StrategyProposal | None:
+    """Pending ML row only for a first pack, or a pack that beats the loaded one."""
+    eligible = [
+        c
+        for c in cands
+        if c.safety_ok and float(c.after_charges_pnl) > 0
+    ]
+    if not eligible:
         return None
-    best = cands[0]
+    best = eligible[0]
+    if current:
+        if not current.get("ok"):
+            return None
+        if not current.get("path"):
+            return None
+    current_ok = bool(current and current.get("ok") and current.get("path"))
+    win_ch = float(best.after_charges_pnl)
+    if current_ok:
+        cur_ch = float(current.get("after_charges_pnl") or 0)
+        try:
+            same = Path(best.pack_path).resolve() == Path(str(current.get("path"))).resolve()
+        except OSError:
+            same = str(best.pack_path) == str(current.get("path"))
+        if same or win_ch <= cur_ch:
+            return None
+        kind = "improved"
+        baseline = cur_ch
+        delta = round(win_ch - cur_ch, 2)
+        vs = (
+            f"beats loaded {current.get('pack_id') or 'pack'} "
+            f"after charges ₹{cur_ch:+.0f}"
+        )
+    else:
+        kind = "new"
+        baseline = 0.0
+        delta = win_ch
+        vs = "first pack (none loaded yet)"
     week = _week_id()
     title = (
-        f"S11 behavior+ML: {best.model_name}+{best.template.name} "
-        f"[{best.template.family}] (AUC {best.auc:.3f})"
+        f"S11 pack {best.model_name}+{best.template.name} "
+        f"[{best.template.family}] — week {week}"
     )
     summary = (
-        f"Analyzed all tick families (price/book/OI/volume/spread) with math+stats+reasoning; "
-        f"generated recipes; trained logreg/rf/gb. "
-        f"best={best.model_name}/{best.template.name} "
-        f"({best.template.rationale or best.template.family}). "
-        f"Paper: trades={best.n_trades} win={best.win_rate:.0%} "
-        f"gross={best.gross_pnl:.1f} after_tax={best.after_tax_pnl:.1f}. "
-        f"Behavior: {best.behavior_summary[:220]} "
-        f"Approve → S11_PACK_PATH + ENABLE_S11 (DRY_RUN). {note}"
+        f"{best.model_name}/{best.template.name} after charges ₹{win_ch:+.0f} "
+        f"vs {vs} (tax excluded), test trades={best.n_trades}, "
+        f"win={best.win_rate:.0%}, AUC={best.auc:.3f}. Paper only. {note}"
     ).strip()
     env_patch = {
         "DRY_RUN": "true",
+        "ENABLE_S11": "true",
+        "S11_PACK_PATH": _env_pack_path(best.pack_path),
     }
-    if best.safety_ok:
-        env_patch["ENABLE_S11"] = "true"
-        env_patch["S11_PACK_PATH"] = best.pack_path
-    else:
-        # Do not tempt operators to enable a failing pack
-        env_patch["ENABLE_S11"] = "false"
-        env_patch["S11_PACK_PATH"] = ""
-        summary = (
-            summary
-            + " DO NOT enable — safety_ok=False (after-tax/AUC/trades gates failed)."
-        )
     prop = StrategyProposal(
         id="",
         week_id=week,
-        kind="new",
+        kind=kind,
         strategy="S11_DISCOVERED",
         title=title,
         summary=summary,
@@ -550,21 +683,27 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
             n_trades=best.n_trades,
             win_rate=best.win_rate,
             gross_pnl_inr=best.gross_pnl,
-            after_tax_pnl_inr=best.after_tax_pnl,
-            baseline_after_tax_inr=0.0,
-            delta_vs_baseline_inr=best.after_tax_pnl,
+            after_tax_pnl_inr=win_ch,
+            baseline_after_tax_inr=baseline,
+            delta_vs_baseline_inr=delta,
             extra={
+                "metric": "after_charges_ex_tax",
+                "after_charges_inr": win_ch,
+                "after_tax_inr": float(best.after_tax_pnl),
                 "auc": best.auc,
                 "model": best.model_name,
                 "template": best.template.name,
                 "family": best.template.family,
                 "rationale": best.template.rationale,
                 "behavior_summary": best.behavior_summary,
+                "current_pack": (current or {}).get("pack_id") if current_ok else "",
+                "current_after_charges_inr": baseline if current_ok else None,
                 "runners_up": [
                     {
                         "model": c.model_name,
                         "template": c.template.name,
                         "family": c.template.family,
+                        "after_charges": c.after_charges_pnl,
                         "after_tax": c.after_tax_pnl,
                         "auc": c.auc,
                         "safety_ok": c.safety_ok,
@@ -574,11 +713,25 @@ def propose_best(cands: list[Candidate], *, note: str = "") -> StrategyProposal 
             },
         ),
         model_path=best.model_path,
-        safety_ok=best.safety_ok,
-        safety_reasons=best.safety_reasons,
+        safety_ok=True,
+        safety_reasons=list(best.safety_reasons),
         env_patch=env_patch,
     )
+    if proposals_path is not None:
+        return add_proposal(prop, path=proposals_path)
     return add_proposal(prop)
+
+
+def _loaded_pack_from_env(explicit: str = "") -> str:
+    raw = (explicit or "").strip()
+    if raw:
+        return raw
+    try:
+        from analytics.env_bridge import read_env
+
+        return str(read_env().get("S11_PACK_PATH") or "").strip()
+    except Exception:
+        return ""
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -590,6 +743,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         csv_path = out_dir / "ticks_export.csv"
         n = export_full_ticks(csv_path, limit=args.limit)
         print(f"exported {n} ticks → {csv_path}")
+    loaded = _loaded_pack_from_env(getattr(args, "loaded_pack", "") or "")
+    print("S11 learner (ML proposal, after charges exclude tax, not live)")
+    if loaded:
+        print(f"loaded pack {loaded}")
+    else:
+        print("no loaded S11 pack — first profitable pack can go to ML")
     cands = run_discovery(
         csv_path=csv_path,
         out_dir=out_dir,
@@ -597,18 +756,43 @@ def cmd_run(args: argparse.Namespace) -> int:
         threshold_bps=args.threshold_bps,
         train_frac=args.train_frac,
         top_k=args.top_k,
+        loaded_pack_path=loaded or None,
     )
+    report: dict[str, Any] = {}
+    latest = out_dir / "latest_report.json"
+    if latest.is_file():
+        try:
+            raw = json.loads(latest.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                report = raw
+        except json.JSONDecodeError:
+            report = {}
+    current = report.get("current_pack") if isinstance(report.get("current_pack"), dict) else None
     for i, c in enumerate(cands):
         print(
             f"[{i}] {c.model_name}/{c.template.name} ({c.template.family}) "
             f"auc={c.auc:.3f} trades={c.n_trades} "
-            f"after_tax={c.after_tax_pnl:.1f} safety={c.safety_ok} "
+            f"after_charges₹={c.after_charges_pnl:.1f} safety={c.safety_ok} "
             f"pack={c.pack_path}"
         )
-    prop = propose_best(cands, note=args.note)
+    if current and current.get("ok"):
+        print(
+            f"current pack {current.get('pack_id')} "
+            f"after_charges₹={float(current.get('after_charges_pnl') or 0):.1f} "
+            f"on this week's test ticks"
+        )
+    elif loaded:
+        print(f"could not resim loaded pack: {(current or {}).get('error') or 'unknown'}")
+    prop = propose_best(cands, note=args.note, current=current)
     if prop:
-        print(f"proposal id={prop.id} status={prop.status} safety_ok={prop.safety_ok}")
+        print(f"proposal id={prop.id} kind={prop.kind} status={prop.status}")
         print("env_patch:", json.dumps(prop.env_patch, indent=2))
+        print("Approve → paper on the ML tab, then type RESTART. Keep DRY_RUN=true.")
+    else:
+        print(
+            "no ML proposal — kept loaded pack (or no safety-ok after-charges profit). "
+            "Models still wrote under data/discover. Approve only when a new pack beats paper."
+        )
     return 0
 
 
@@ -651,6 +835,11 @@ def main() -> None:
     run_p.add_argument("--train-frac", type=float, default=0.7)
     run_p.add_argument("--top-k", type=int, default=3)
     run_p.add_argument("--note", default="")
+    run_p.add_argument(
+        "--loaded-pack",
+        default="",
+        help="S11 pack to beat (default: S11_PACK_PATH from .env)",
+    )
     run_p.set_defaults(func=cmd_run)
 
     beh = sub.add_parser("behavior", help="Math/stats/reasoning over tick families only")
