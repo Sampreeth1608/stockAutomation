@@ -43,6 +43,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S13_ALLOW_LONG",
         "S13_ALLOW_SHORT",
         "S13_NO_FLIP",
+        "S13_MIN_WICK_GAP",
         "S14_BAR_MINUTES",
         "S14_MIN_RANGE",
         "S14_CONFIRM_MINUTES",
@@ -138,6 +139,8 @@ def _validate_value(key: str, value: str) -> str:
         "S14_ALLOW_SHORT",
         "S15_ALLOW_LONG",
         "S15_ALLOW_SHORT",
+        "S16_ALLOW_LONG",
+        "S16_ALLOW_SHORT",
     }:
         low = value.lower()
         if low not in {"true", "false", "1", "0", "yes", "no", "y", "n"}:
@@ -154,12 +157,23 @@ def _validate_value(key: str, value: str) -> str:
         "S14_CONFIRM_MINUTES",
         "S15_BAR_MINUTES",
         "S15_CONFIRM_MINUTES",
+        "S16_BAR_MINUTES",
     }:
         n = int(float(value))
         if n < 0 or n > 10_000:
             raise ValueError(f"{key} out of range")
         return str(n)
-    if key in {"S12_MIN_RANGE", "S13_MIN_RANGE", "S14_MIN_RANGE", "S14_NOWICK_EPS", "S14_OPEN_HOLD_MINUTES", "S15_MIN_RANGE", "S15_NOWICK_EPS"}:
+    if key in {
+        "S12_MIN_RANGE",
+        "S13_MIN_RANGE",
+        "S13_MIN_WICK_GAP",
+        "S14_MIN_RANGE",
+        "S14_NOWICK_EPS",
+        "S14_OPEN_HOLD_MINUTES",
+        "S15_MIN_RANGE",
+        "S15_NOWICK_EPS",
+        "S16_MIN_WICK_GAP",
+    }:
         f = float(value)
         if f < 0 or f > 1_000_000:
             raise ValueError(f"{key} out of range")

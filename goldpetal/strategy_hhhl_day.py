@@ -1,18 +1,23 @@
-"""S13_HHHL_DAY — daily HH/LL, same-candle confirm (paper).
+"""S13_HHHL_DAY — daily S16 close-vs-prev, last-15m same-day fill (paper).
 
-Same rule as S12, on the **trading day** vs **previous day**. Every action
-is taken on the day candle that printed the signal, in that day's last 15
-minutes — never at the next day's open.
+S16 formula on the **trading day** vs **previous day**. Confirm only in the
+last 15 minutes of *this* day (`MARKET_CLOSE` 23:30 → 23:15–23:30). Never
+the next day's open (that is S4). Fill at last-15m LTP.
 
-  Watch: if today's high > yesterday's high (or LL for short).
-  LONG  entry: that same day's last-15m close > open.
-  LONG  exit:  a later day with high < prev_high AND last-15m close < open.
-  SHORT entry / exit: the LL / higher-low mirrors.
+  C > prevC → HH/LL only (wicks ignored):
+    LONG  = higher high AND green
+    SHORT = lower low  AND red
+  C < prevC → wick only, min_wick_gap=0 (HH/LL ignored):
+    LONG  = lower > upper
+    SHORT = upper > lower
+  C = prevC → skip
 
-If the *exit* day also qualifies as a new long or short, re-enter on that
-same day candle. A CLOSE-only does not lock the rest of the 15m window.
+FLIP if already the other side. Stay in until the opposite signal (or
+emergency / live flatten). No min_range. No fakeout close-beyond. No
+bald-body. No open=high/low (that is S14).
 
-Does not replace S4 ML overnight — separate paper strategy.
+Does not replace S4 ML overnight — separate paper strategy. S16 1h stays
+its own book.
 """
 
 from __future__ import annotations
@@ -26,8 +31,10 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backtest_hhhl_candles import Candle
+from s16_hhhl_wick import s16_bar_decision
 from strategy import Position, SignalResult
-from quality_filters import hhll_break_ok
+from wick_candles import wick_measure
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "data" / "s13_state.json"
@@ -50,8 +57,19 @@ class DayOhlc:
         return self.close > self.open
 
 
+def _as_candle(bar: DayOhlc) -> Candle:
+    return Candle(
+        time=f"{bar.date} 00:00:00",
+        open=float(bar.open),
+        high=float(bar.high),
+        low=float(bar.low),
+        close=float(bar.close),
+    )
+
+
 @dataclass
 class HhhlDayConfig:
+    # Unused (old HH/LL-only). Kept so existing .env / tests still construct.
     min_range: float = 5.0
     # Confirm in the last N minutes of the day candle (default: last 15 minutes).
     entry_minutes_before_close: int = 15
@@ -61,9 +79,11 @@ class HhhlDayConfig:
     market_close: str = "23:30"
     allow_long: bool = True
     allow_short: bool = True
-    no_flip: bool = True
-    min_close_beyond: float = 3.0
+    # Unused: S16 always FLIPs. Kept for old .env / tests.
+    no_flip: bool = False
+    min_close_beyond: float = 0.0
     max_break_wick_frac: float = 0.6
+    min_wick_gap: float = 0.0
 
 
 class HhhlDayOvernightStrategy:
@@ -104,7 +124,8 @@ class HhhlDayOvernightStrategy:
     def status_line(self) -> str:
         c = self.cfg
         prev = (
-            f"prev={self.prev_day.date} H={self.prev_day.high:.0f} L={self.prev_day.low:.0f}"
+            f"prev={self.prev_day.date} H={self.prev_day.high:.0f} L={self.prev_day.low:.0f} "
+            f"C={self.prev_day.close:.0f}"
             if self.prev_day
             else "prev=none"
         )
@@ -115,10 +136,9 @@ class HhhlDayOvernightStrategy:
             else "today=none"
         )
         return (
-            f"daily HH/LL same-candle min_range={c.min_range:.0f} "
-            f"beyond={c.min_close_beyond:.0f} "
-            f"confirm={c.entry_minutes_before_close}m_before_close "
-            f"no_flip={c.no_flip} L={c.allow_long} S={c.allow_short} "
+            f"daily S16 C>prev→HH/LL C<prev→wick gap={c.min_wick_gap:g} "
+            f"confirm={c.entry_minutes_before_close}m_before_close FLIP "
+            f"L={c.allow_long} S={c.allow_short} "
             f"{prev} {today} pos={self.position}"
         )
 
@@ -327,157 +347,78 @@ class HhhlDayOvernightStrategy:
         self._acted_today = True
         self._acted_date = today
 
-    def _open_if_flat(self, px: float, today: str, *, reason_prefix: str = "") -> SignalResult | None:
-        """Enter long/short from flat when today has HH+green or LL+red."""
-        day = self._day
-        prev = self.prev_day
-        if day is None or prev is None:
-            self.last_skip = "need_prev_day"
+    def _flip_to(
+        self, side: str, px: float, today: str, why: str, cur: Candle
+    ) -> SignalResult | None:
+        if side == "long" and not self.cfg.allow_long:
+            self.last_skip = "long_disabled"
             return None
-        range_pts = day.range_pts
-        saw_hh = day.high > prev.high
-        saw_ll = day.low < prev.low
-        want_long = self.cfg.allow_long and saw_hh and day.close > day.open
-        want_short = self.cfg.allow_short and saw_ll and day.close < day.open
-        if range_pts < self.cfg.min_range:
-            self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
+        if side == "short" and not self.cfg.allow_short:
+            self.last_skip = "short_disabled"
             return None
-        if want_long and not want_short:
-            ok, why = hhll_break_ok(
-                side="long",
-                o=day.open,
-                h=day.high,
-                l=day.low,
-                c=day.close,
-                prev_h=prev.high,
-                prev_l=prev.low,
-                min_close_beyond=self.cfg.min_close_beyond,
-                max_break_wick_frac=self.cfg.max_break_wick_frac,
-            )
-            if not ok:
-                self.last_skip = why
-                return None
+        if side == "long" and self.position == "long":
+            self.last_skip = "already_long"
+            return None
+        if side == "short" and self.position == "short":
+            self.last_skip = "already_short"
+            return None
+
+        m = wick_measure(cur.open, cur.high, cur.low, cur.close)
+        prev = self.position
+        if side == "long":
             self.position = "long"
-            self.entry_price = px
-            self.entry_date = today
-            self._mark_acted(today)
-            self._save_state()
-            self.last_signal = "BUY"
-            return SignalResult(
-                action="BUY",
-                position_after="long",
-                price_delta=None,
-                net=None,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"{reason_prefix}s13 LONG same-day HH+green dayH={day.high:.1f}>prevH={prev.high:.1f} "
-                    f"C={day.close:.1f}>O={day.open:.1f} range={range_pts:.1f}"
-                ),
-            )
-        if want_short and not want_long:
-            ok, why = hhll_break_ok(
-                side="short",
-                o=day.open,
-                h=day.high,
-                l=day.low,
-                c=day.close,
-                prev_h=prev.high,
-                prev_l=prev.low,
-                min_close_beyond=self.cfg.min_close_beyond,
-                max_break_wick_frac=self.cfg.max_break_wick_frac,
-            )
-            if not ok:
-                self.last_skip = why
-                return None
-            self.position = "short"
-            self.entry_price = px
-            self.entry_date = today
-            self._mark_acted(today)
-            self._save_state()
-            self.last_signal = "SHORT"
-            return SignalResult(
-                action="SHORT",
-                position_after="short",
-                price_delta=None,
-                net=None,
-                net_delta=None,
-                prev_net_delta=None,
-                reason=(
-                    f"{reason_prefix}s13 SHORT same-day LL+red dayL={day.low:.1f}<prevL={prev.low:.1f} "
-                    f"C={day.close:.1f}<O={day.open:.1f} range={range_pts:.1f}"
-                ),
-            )
-        if saw_hh and not (day.close > day.open):
-            self.last_skip = "hh_but_not_green_at_close"
-        elif saw_ll and not (day.close < day.open):
-            self.last_skip = "ll_but_not_red_at_close"
+            action = "BUY"
+            extra = f"L={m.lower:.1f}>U={m.upper:.1f}"
         else:
-            self.last_skip = "no_hhll_signal"
-        return None
+            self.position = "short"
+            action = "SHORT"
+            extra = f"U={m.upper:.1f}>L={m.lower:.1f}"
+        self.entry_price = float(px)
+        self.entry_date = today
+        self._mark_acted(today)
+        self._save_state()
+        self.last_signal = action
+        kind = "FLIP" if prev != "flat" else "enter"
+        prev_c = f" prevC={self.prev_day.close:.1f}" if self.prev_day is not None else ""
+        return SignalResult(
+            action=action,
+            position_after=self.position,
+            price_delta=None,
+            net=None,
+            net_delta=None,
+            prev_net_delta=None,
+            reason=(
+                f"s13 {kind} {prev}→{self.position} {why} {extra} "
+                f"O={cur.open:.1f} H={cur.high:.1f} L={cur.low:.1f} "
+                f"C={cur.close:.1f}{prev_c} last-15m"
+            ),
+        )
 
     def _decide(self, px: float, today: str) -> SignalResult | None:
-        """Same-candle HH/LL vs previous day — used only in the confirm window."""
+        """S16 close-vs-prev on the forming day vs previous day — confirm window only."""
         day = self._day
         prev = self.prev_day
         if day is None or prev is None:
             self.last_skip = "need_prev_day"
             return None
-        range_pts = day.range_pts
-        want_long = self.cfg.allow_long and day.high > prev.high and day.close > day.open
-        want_short = self.cfg.allow_short and day.low < prev.low and day.close < day.open
-        exit_long = day.high < prev.high and day.close < day.open
-        exit_short = day.low > prev.low and day.close > day.open
-
-        if self.position == "long":
-            if exit_long or (want_short and not self.cfg.no_flip):
-                self.position = "flat"
-                self.entry_price = None
-                self.entry_date = None
-                reenter = self._open_if_flat(
-                    px, today, reason_prefix="s13 re-enter after close "
-                )
-                if reenter is not None:
-                    return reenter
-                self._save_state()
-                self.last_signal = "CLOSE"
-                return SignalResult(
-                    action="CLOSE",
-                    position_after="flat",
-                    price_delta=None,
-                    net=None,
-                    net_delta=None,
-                    prev_net_delta=None,
-                    reason=f"s13 exit long same-day LH+red range={range_pts:.1f}",
-                )
-            self.last_skip = "hold_long"
+        side, why = s16_bar_decision(
+            _as_candle(prev), _as_candle(day), min_wick_gap=float(self.cfg.min_wick_gap)
+        )
+        if side is None:
+            self.last_skip = why
             return None
+        return self._flip_to(side, px, today, why, _as_candle(day))
 
-        if self.position == "short":
-            if exit_short or (want_long and not self.cfg.no_flip):
-                self.position = "flat"
-                self.entry_price = None
-                self.entry_date = None
-                reenter = self._open_if_flat(
-                    px, today, reason_prefix="s13 re-enter after close "
-                )
-                if reenter is not None:
-                    return reenter
-                self._save_state()
-                self.last_signal = "CLOSE"
-                return SignalResult(
-                    action="CLOSE",
-                    position_after="flat",
-                    price_delta=None,
-                    net=None,
-                    net_delta=None,
-                    prev_net_delta=None,
-                    reason=f"s13 exit short same-day HL+green range={range_pts:.1f}",
-                )
-            self.last_skip = "hold_short"
-            return None
-
-        return self._open_if_flat(px, today)
+    def _watch_skip(self) -> None:
+        if self._day and self.prev_day:
+            if self._day.close > self.prev_day.close:
+                self.last_skip = "watching_up_close_hhll"
+            elif self._day.close < self.prev_day.close:
+                self.last_skip = "watching_down_close_wick"
+            else:
+                self.last_skip = "watching_equal_close"
+        else:
+            self.last_skip = "outside_confirm_window"
 
     def on_tick(
         self, now: datetime, ltp: float, message: dict[str, Any] | None = None
@@ -494,15 +435,7 @@ class HhhlDayOvernightStrategy:
             self.last_skip = "acted_today"
             return None
         if not self._in_confirm_window(now):
-            if self._day and self.prev_day:
-                if self._day.high > self.prev_day.high:
-                    self.last_skip = "watching_hh"
-                elif self._day.low < self.prev_day.low:
-                    self.last_skip = "watching_ll"
-                else:
-                    self.last_skip = "outside_confirm_window"
-            else:
-                self.last_skip = "outside_confirm_window"
+            self._watch_skip()
             return None
 
         return self._decide(px, today)
@@ -530,8 +463,9 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         market_close=os.getenv("MARKET_CLOSE", "23:30"),
         allow_long=_env_flag("S13_ALLOW_LONG", True),
         allow_short=_env_flag("S13_ALLOW_SHORT", True),
-        no_flip=_env_flag("S13_NO_FLIP", True),
-        min_close_beyond=float(os.getenv("S13_MIN_CLOSE_BEYOND", "3")),
+        no_flip=_env_flag("S13_NO_FLIP", False),
+        min_close_beyond=float(os.getenv("S13_MIN_CLOSE_BEYOND", "0")),
         max_break_wick_frac=float(os.getenv("S13_MAX_BREAK_WICK_FRAC", "0.6")),
+        min_wick_gap=float(os.getenv("S13_MIN_WICK_GAP", "0")),
     )
     return HhhlDayOvernightStrategy(cfg)
