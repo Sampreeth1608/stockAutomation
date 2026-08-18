@@ -344,12 +344,28 @@ def _print_one(
         print()
         print("1h 2ATR target / 1.5ATR trail:")
         print(" ", _fmt(atr))
+        if atr.wf_rows:
+            for i, fold in enumerate(atr.wf_rows, 1):
+                print(
+                    f"    walk-forward fold {i}: n={fold.n_trades} "
+                    f"AC₹={fold.after_charges:.1f} exp₹={fold.expectancy:.1f} "
+                    f"PF={fold.profit_factor:.2f} wr%={100.0 * fold.win_rate:.1f}"
+                )
         print(" ", _book_verdict(atr, s16, s18))
+        if atr.result is not None:
+            _print_trades(
+                atr.result,
+                title=f"1h {name} ATR BUY/SHORT (after charges, tax excluded)",
+            )
     m30_flip = next((m for m in rows_30 if m.name == name and m.exit_mode == EXIT_FLIP), None)
+    m30_atr = next((m for m in rows_30 if m.name == name and m.exit_mode == EXIT_ATR), None)
     if m30_flip is not None:
         print()
         print("30m flip+EOD (research baseline, not the paper 1h books):")
         print(" ", _fmt(m30_flip))
+    if m30_atr is not None:
+        print("30m 2ATR / 1.5ATR trail (research baseline):")
+        print(" ", _fmt(m30_atr))
 
 
 def _run_tf(
