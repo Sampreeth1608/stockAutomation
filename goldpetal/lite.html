@@ -89,6 +89,14 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
+    <h2>ML / S11</h2>
+    <p class="hint" id="ml-s11-line">Loading pack…</p>
+    <div id="ml-pending"></div>
+    <p class="hint">Full inspector, pack compare, and discovery report: <a href="/#ml">station ML tab</a>.</p>
+    <p class="flash" id="flash-ml"></p>
+  </section>
+
+  <section class="card">
     <h2>Live money</h2>
     <p class="armed" id="money-line"></p>
     <div class="row" style="margin-top:.5rem">
@@ -113,6 +121,9 @@ const SHORT = {
   S11_DISCOVERED: "S11 pack", S13_HHHL_DAY: "S13 daily S16",
   S16_HHHL_WICK_1H: "S16 HHHL+wick 1h",
 };
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
 function pill(text, kind) {
   return `<span class="pill ${kind || ""}">${text}</span>`;
 }
@@ -168,6 +179,26 @@ function render(d) {
     ? "ARMED — live-picked books send Angel orders."
     : "Paper. Unlock + Live pick + type LIVE + Restart to arm.";
 }
+function renderMl(d) {
+  const s11 = (d && d.s11) || {};
+  const pending = ((d && d.proposals) || {}).pending || [];
+  $("ml-s11-line").textContent = s11.load_hint || (s11.pack_path || "S11_PACK_PATH not set");
+  $("ml-pending").innerHTML = pending.map((p) => {
+    const paper = p.paper || {};
+    return `<div style="border-top:1px solid var(--line);padding:.55rem 0">
+      <div><b>${esc(p.title || p.strategy)}</b></div>
+      <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ₹ ${esc(paper.after_tax_pnl_inr ?? "—")}</div>
+      ${p.safety_ok === false ? `<label class="chk"><input type="checkbox" data-unsafe="${esc(p.id)}"/> Accept risk</label>` : ""}
+      <div class="row" style="margin-top:.35rem">
+        <button class="btn ok" type="button" data-ml="approve" data-id="${esc(p.id)}">Approve → paper</button>
+        <button class="btn danger" type="button" data-ml="reject" data-id="${esc(p.id)}">Reject</button>
+      </div>
+    </div>`;
+  }).join("") || `<p class="hint">No pending proposals.</p>`;
+}
+async function loadMl() {
+  renderMl(await api("/api/ml"));
+}
 async function load() {
   render(await api("/api/desk"));
 }
@@ -213,7 +244,23 @@ $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
   daily_loss_limit_inr: Number($("cap-dd").value || 0),
 }, "Capital saved");
 load().catch((e) => flash("flash-engine", String(e.message || e), true));
+loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
+$("ml-pending").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-ml]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const unsafe = document.querySelector(`[data-unsafe="${id}"]`);
+  const decision = btn.dataset.ml === "reject" ? "rejected" : "approved_paper";
+  api("/api/proposals/" + encodeURIComponent(id) + "/decide", {
+    method: "POST",
+    body: JSON.stringify({ decision, accept_unsafe: !!(unsafe && unsafe.checked) }),
+  }).then((res) => {
+    flash("flash-ml", res.reminder || res.note || "ok");
+    return loadMl();
+  }).catch((e) => flash("flash-ml", String(e.message || e), true));
+});
 setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
+setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 </script>
 </body>
 </html>

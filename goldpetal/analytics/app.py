@@ -96,10 +96,23 @@ PAGES = [
 ]
 
 
-def decide_proposal(pid: str, decision: str, note: str = "", *, apply_env: bool = True) -> dict:
+def decide_proposal(
+    pid: str,
+    decision: str,
+    note: str = "",
+    *,
+    apply_env: bool = True,
+    accept_unsafe: bool = False,
+) -> dict:
     if LOCAL_DESK:
         try:
-            return decide_proposal_local(pid, decision, note=note, apply_env=apply_env)
+            return decide_proposal_local(
+                pid,
+                decision,
+                note=note,
+                apply_env=apply_env,
+                accept_unsafe=accept_unsafe,
+            )
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return decide_proposal_remote(pid, decision, note=note)
@@ -541,9 +554,11 @@ def tab_s14_chart(dd: Path) -> None:
 def tab_proposals(dd: Path) -> None:
     st.subheader("Weekend proposals — ML / new & improved strategies")
     st.caption(
-        "Approve → paper **auto-writes** whitelist env keys (e.g. S11_PACK_PATH). "
-        f"Then Restart the bot on the Desk tab ({OPERATOR_URL}). "
-        "Live still needs Unlock live + DRY_RUN=false on Desk."
+        "Prefer the Station **ML** tab at "
+        f"{OPERATOR_URL}#ml — Approve → paper writes whitelist env "
+        "(S11_PACK_PATH + ENABLE_S11) and keeps DRY_RUN=true. "
+        "Then type RESTART on Engine. Approve → live is not on this page "
+        "(Unlock live on the station Live money column)."
     )
     raw = load_json(dd / "control" / "proposals.json")
     items = (raw or {}).get("proposals") if isinstance(raw, dict) else (raw or [])
@@ -579,11 +594,21 @@ def tab_proposals(dd: Path) -> None:
                 key=f"note_{p['id']}",
                 value="",
             )
+            accept_unsafe = True
+            if p.get("safety_ok") is False:
+                accept_unsafe = st.checkbox(
+                    "Accept risk (safety_ok=false)",
+                    key=f"unsafe_{p['id']}",
+                )
             b1, b2, b3 = st.columns(3)
             if b1.button("Approve → paper", key=f"ap_{p['id']}", type="primary"):
-                if p.get("safety_ok") is False:
-                    st.warning("safety_ok=False — only approve if you accept the risk.")
-                res = decide_proposal(p["id"], "approved_paper", note=note, apply_env=True)
+                res = decide_proposal(
+                    p["id"],
+                    "approved_paper",
+                    note=note,
+                    apply_env=True,
+                    accept_unsafe=bool(accept_unsafe),
+                )
                 if res.get("ok"):
                     audit(
                         "approve_paper",

@@ -8,7 +8,7 @@ OPERATOR_PANEL = "8501"
 OPERATOR_URL = "http://127.0.0.1:8501/"
 OPERATOR_WRITES = (
     "Emergency & trading, start/stop/feed, ENABLE_*, DRY_RUN, LIVE_MAX_LOTS, "
-    "live_approved, Restart bot, Capital — HTML desk on 8501"
+    "live_approved, S11 ML pack approve, Restart bot, Capital — HTML desk on 8501"
 )
 
 

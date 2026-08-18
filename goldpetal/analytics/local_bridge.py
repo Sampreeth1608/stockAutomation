@@ -22,26 +22,17 @@ def decide_proposal_local(
     note: str = "",
     *,
     apply_env: bool = True,
+    accept_unsafe: bool = False,
 ) -> dict[str, Any]:
-    from proposals import decide_proposal
+    from s11_desk import decide_proposal_for_desk
 
-    p = decide_proposal(proposal_id, decision, note=note)
-    env_result = None
-    if apply_env and decision in {"approved_paper", "approved_live"} and p.env_patch:
-        from analytics.env_bridge import apply_env_patch
-
-        env_result = apply_env_patch(p.env_patch)
-    return {
-        "ok": True,
-        "id": p.id,
-        "strategy": p.strategy,
-        "status": p.status,
-        "safety_ok": p.safety_ok,
-        "env_patch": p.env_patch,
-        "env_applied": env_result,
-        "title": p.title,
-        "restart_needed": bool(env_result and env_result.get("ok")),
-    }
+    return decide_proposal_for_desk(
+        proposal_id,
+        decision,
+        note=note,
+        apply_env=apply_env,
+        accept_unsafe=accept_unsafe,
+    )
 
 
 def set_control_local(
