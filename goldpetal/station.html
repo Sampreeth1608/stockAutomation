@@ -269,8 +269,15 @@ function pnlClass(n) {
 }
 function fmt(n, d) {
   const x = Number(n);
-  if (!Number.isFinite(x)) return "—";
-  return x.toLocaleString("en-IN", { maximumFractionDigits: d == null ? 2 : d });
+  if (n == null || n === "" || !Number.isFinite(x)) return "—";
+  if (d === 0) return String(Math.round(x));
+  return x.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function money(n) { return fmt(n, 2); }
+function pct(n) {
+  const x = Number(n);
+  if (n == null || n === "" || !Number.isFinite(x)) return "—";
+  return x.toFixed(0);
 }
 function pill(text, kind) {
   return `<span class="pill ${kind || ""}">${esc(text)}</span>`;
@@ -325,7 +332,7 @@ function allScore() {
 }
 function renderQuote() {
   const ltp = lastTape.ltp;
-  $("ltp").textContent = ltp == null || ltp === "" ? "—" : fmt(ltp, 1);
+  $("ltp").textContent = ltp == null || ltp === "" ? "—" : money(ltp);
   const tick = (lastTape.ticks || [])[0] || {};
   const bits = [];
   if (lastTape.last_tick_at) bits.push(String(lastTape.last_tick_at).slice(11, 19));
@@ -342,9 +349,9 @@ function renderKpis() {
   const pnl = all.pnl_after_tax != null ? all.pnl_after_tax : why.pnl_after_tax;
   const wr = why.win_rate_after_tax != null ? why.win_rate_after_tax : all.win_rate;
   const pnlEl = $("kpi-pnl");
-  pnlEl.textContent = pnl == null ? "—" : fmt(pnl, 0);
+  pnlEl.textContent = pnl == null ? "—" : money(pnl);
   pnlEl.className = pnlClass(pnl);
-  $("kpi-wr").textContent = wr == null || wr === "" ? "—" : Number(wr).toFixed(1);
+  $("kpi-wr").textContent = wr == null || wr === "" ? "—" : pct(wr);
 }
 function renderGrid() {
   const h = Object.assign({}, lastTape, lastHist);
@@ -367,10 +374,10 @@ function renderGrid() {
         <td>${esc(t.side || "")}</td>
         <td>${esc(t.status || "")}</td>
         <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
-        <td class="num">${esc(t.entry_price ?? "")}</td>
+        <td class="num">${money(t.entry_price)}</td>
         <td>${esc(String(t.exit_ts || "").slice(0, 19))}</td>
-        <td class="num">${esc(t.exit_price ?? "")}</td>
-        <td class="num ${pnlClass(pnl)}">${esc(pnl ?? "")}</td>
+        <td class="num">${money(t.exit_price)}</td>
+        <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
         <td>${esc(t.exit_reason || t.entry_reason || "")}</td>
       </tr>`;
     }).join("") || `<tr><td colspan="9">${h.trades_loading ? "Loading…" : (tab === "open" ? "No open positions" : "No trades")}</td></tr>`;
@@ -380,9 +387,9 @@ function renderGrid() {
     thead(["time", "ltp", "bid qty", "ask qty"]);
     $("grid-body").innerHTML = (h.ticks || []).map((t) => `<tr>
       <td>${esc(t.received_at || "")}</td>
-      <td class="num">${esc(t.ltp ?? "")}</td>
-      <td class="num">${esc(t.bp ?? "")}</td>
-      <td class="num">${esc(t.sp ?? "")}</td>
+      <td class="num">${money(t.ltp)}</td>
+      <td class="num">${fmt(t.bp, 0)}</td>
+      <td class="num">${fmt(t.sp, 0)}</td>
     </tr>`).join("") || `<tr><td colspan="4">No ticks yet</td></tr>`;
     return;
   }
@@ -393,7 +400,7 @@ function renderGrid() {
       <td>${esc(SHORT[s.strategy] || s.strategy || "")}</td>
       <td>${esc(s.action || "")}</td>
       <td>${esc(s.position_after || "")}</td>
-      <td class="num">${esc(s.cmp ?? "")}</td>
+      <td class="num">${money(s.cmp)}</td>
       <td>${esc(s.reason || "")}</td>
     </tr>`).join("") || `<tr><td colspan="6">No signals</td></tr>`;
     return;
@@ -402,12 +409,12 @@ function renderGrid() {
     thead(["book", "closed", "open", "win %", "gross ₹", "fees ₹", "after-tax ₹"]);
     $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
       <td>${esc(SHORT[r.strategy] || r.strategy || "")}</td>
-      <td class="num">${esc(r.closed ?? "")}</td>
-      <td class="num">${esc(r.open ?? "")}</td>
-      <td class="num">${esc(r.win_rate != null ? Number(r.win_rate).toFixed(1) : "")}</td>
-      <td class="num">${esc(r.gross_pnl ?? "")}</td>
-      <td class="num">${esc(r.charges ?? "")}</td>
-      <td class="num ${pnlClass(r.pnl_after_tax)}">${esc(r.pnl_after_tax ?? "")}</td>
+      <td class="num">${fmt(r.closed, 0)}</td>
+      <td class="num">${fmt(r.open, 0)}</td>
+      <td class="num">${pct(r.win_rate)}</td>
+      <td class="num">${money(r.gross_pnl)}</td>
+      <td class="num">${money(r.charges)}</td>
+      <td class="num ${pnlClass(r.pnl_after_tax)}">${money(r.pnl_after_tax)}</td>
     </tr>`).join("") || `<tr><td colspan="7">No P&L yet</td></tr>`;
     return;
   }
@@ -417,11 +424,11 @@ function renderGrid() {
   const rows = [o].concat(d.books || []).filter((b) => b && (b.strategy === "ALL" || (b.closed || 0) > 0 || (b.open || 0) > 0));
   $("grid-body").innerHTML = rows.map((b) => `<tr>
     <td>${esc(b.label || SHORT[b.strategy] || b.strategy || "")}</td>
-    <td class="num">${esc(b.closed ?? "")}</td>
-    <td class="num">${esc(b.win_rate_gross ?? "")}</td>
-    <td class="num ${pnlClass((b.win_rate_after_tax || 0) - 50)}">${esc(b.win_rate_after_tax ?? "")}</td>
-    <td class="num">${esc(b.fee_killed ?? "")}</td>
-    <td class="num ${pnlClass(b.pnl_after_tax)}">${esc(b.pnl_after_tax ?? "")}</td>
+    <td class="num">${fmt(b.closed, 0)}</td>
+    <td class="num">${pct(b.win_rate_gross)}</td>
+    <td class="num ${pnlClass((b.win_rate_after_tax || 0) - 50)}">${pct(b.win_rate_after_tax)}</td>
+    <td class="num">${fmt(b.fee_killed, 0)}</td>
+    <td class="num ${pnlClass(b.pnl_after_tax)}">${money(b.pnl_after_tax)}</td>
   </tr>`).join("") || `<tr><td colspan="6">No edge tape yet</td></tr>`;
   const lr = d.learner || {};
   $("foot-ml").textContent = lr.line || lr.note || "learner cold";
@@ -454,14 +461,14 @@ function renderDesk(d) {
     $("books").innerHTML = (live.books || []).map((b) => {
       const name = b.strategy;
       const sc = scoreFor(name);
-      const wr = sc.win_rate != null ? Number(sc.win_rate).toFixed(0) : "—";
+      const wr = sc.win_rate != null ? pct(sc.win_rate) : "—";
       const pnl = sc.pnl_after_tax;
       return `<tr>
         <td>${esc(SHORT[name] || name)}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
         <td class="num">${esc(wr)}</td>
-        <td class="num ${pnlClass(pnl)}">${pnl == null || pnl === "" ? "—" : fmt(pnl, 0)}</td>
+        <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
       </tr>`;
     }).join("") || `<tr><td colspan="5">no books</td></tr>`;
     $("paper-only").checked = live.dry_run !== false;

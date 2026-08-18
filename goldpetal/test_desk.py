@@ -26,7 +26,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S14 calc" not in html
     assert 'href="/full"' in html
     assert 'href="/lite"' in html
-    assert "--bg:" in html
+    assert "minimumFractionDigits: 2" in html
     assert "s14-chart" not in html
 
 
