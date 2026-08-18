@@ -98,6 +98,21 @@ def test_s13_close_then_later_tick_reenter() -> None:
         state.unlink()
 
 
+def test_s13_fakeout_close_not_beyond() -> None:
+    state = Path("/tmp/s13_test_fakeout.json")
+    s = _fresh(str(state))
+    s.cfg.min_close_beyond = 3.0
+    s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
+    s.on_tick(_ts("2026-08-11", "10:00"), 15080)
+    s.on_tick(_ts("2026-08-11", "12:00"), 15200)
+    r = s.on_tick(_ts("2026-08-11", "23:20"), 15102)
+    assert r is None
+    assert s.position == "flat"
+    assert "fakeout" in (s.last_skip or "")
+    if state.exists():
+        state.unlink()
+
+
 def test_no_entry_outside_window() -> None:
     state = Path("/tmp/s13_test_state2.json")
     s = _fresh(str(state))
@@ -210,6 +225,8 @@ if __name__ == "__main__":
     print("ok reenter_short")
     test_s13_close_then_later_tick_reenter()
     print("ok later_tick_reenter")
+    test_s13_fakeout_close_not_beyond()
+    print("ok fakeout")
     test_no_entry_outside_window()
     print("ok outside_window")
     test_short_same_day_last_15m()

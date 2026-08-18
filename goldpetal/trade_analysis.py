@@ -20,12 +20,12 @@ SHORT = {
 
 WHAT_IT_GUESSES = {
     "S4_OVERNIGHT": "Overnight gap (heuristic/ML). One idea near the close — not a 30m coin flip.",
-    "S5_MINEDGE": "Depth imbalance vs expected move. With IGNORE_FEES it does not wait to beat Angel costs.",
-    "S8_NET_ZIGZAG": "Order-book NET zigzags. Can re-enter often when imbalance flickers.",
+    "S5_MINEDGE": "Depth imbalance vs expected move. Waits until expected points can cover Angel fees (S5_COVER_FEES), even when IGNORE_FEES is on.",
+    "S8_NET_ZIGZAG": "Order-book NET zigzags. Needs a strong rising imbalance (default 14%) and a target that can cover fees.",
     "S11_DISCOVERED": "Auto-discovered rules. They are paper hypotheses, not proven edge.",
-    "S12_HHHL30": "30m higher-high / lower-low, last-minute confirm. Noise HH/LL prints many false breaks.",
-    "S13_HHHL_DAY": "Same HH/LL rule on the day candle. Fewer trades; still a breakout guess.",
-    "S14_WICK30_STRICT": "Always in. Every finished 30m bar must be LONG or SHORT (unless equal wick), then FLIP. That is one guess per bar, not a filter.",
+    "S12_HHHL30": "30m higher-high / lower-low, last-minute confirm. Skips wick-only fakeouts (close must finish beyond the prior high/low).",
+    "S13_HHHL_DAY": "Same HH/LL rule on the day candle, with the same close-beyond fakeout filter.",
+    "S14_WICK30_STRICT": "Same-candle open=high SHORT / open=low LONG, else wick. Weak nearly-equal wicks are skipped (formula order unchanged).",
     "S15_WICK30_NOWICK": "Bald 30m body only, HOLD (no reverse). Fewer trades; still no real edge filter.",
 }
 
@@ -141,12 +141,18 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
         )
     if ignore_fees_enabled():
         notes.append(
-            "IGNORE_FEES=true: strategies enter as if costs are ₹0. The tape still bills "
-            "brokerage, MCX, GST and 30% tax. That gap is why many 'wins' print red."
+            "IGNORE_FEES=true: most books still skip Angel fees in their own gates, "
+            "but S5 now waits for a move that can cover real costs (S5_COVER_FEES). "
+            "The tape still bills brokerage, MCX, GST and 30% tax."
         )
     notes.append(
         "Paper 100 lots is not live size (LIVE_MAX_LOTS cap 10). Fees scale with lots, "
         "so a 100-lot paper tape looks much worse than 1–10 live lots on the same points."
+    )
+    notes.append(
+        "A desk-wide learner estimates P(win after tax) from closed trades (logistic + "
+        "Wilson/Kelly). After ~15 closes per book it skips entries with p below "
+        "EDGE_MIN_PROBA or expected value ≤ 0. Cold start does not block."
     )
     s14 = next((b for b in books if b["strategy"] == "S14_WICK30_STRICT"), None)
     if s14 and int(s14["closed"]) >= 8:
@@ -199,4 +205,13 @@ def analysis_payload(*, db_path: Any = None) -> dict[str, Any]:
     payload["error"] = err
     payload["db_path"] = str(db)
     payload["window"] = "slim books, last 1500 signals each"
+    try:
+        from trade_learner import get_learner
+
+        lr = get_learner()
+        if lr.n == 0 and rows:
+            lr.fit(rows)
+        payload["learner"] = lr.snapshot()
+    except Exception as exc:
+        payload["learner"] = {"note": f"skip {type(exc).__name__}", "enabled": False}
     return payload

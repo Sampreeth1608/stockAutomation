@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from depth import depth_buy_sell_sums
-from edge import PointATR, edge_thresholds_from_env
+from edge import PointATR, edge_thresholds_from_env, fee_break_even_points
 from strategy import Action, Position, SignalResult
 
 
@@ -56,6 +56,10 @@ class MinEdgeStrategy:
         self.cover_fees = thr.cover_fees if cover_fees is None else bool(cover_fees)
         self.safety_mult = thr.safety_mult
         self.fee_break_even = thr.fee_break_even_points
+        if self.cover_fees and self.fee_break_even <= 0:
+            be = fee_break_even_points(force_fees=True)
+            if be > 0 and be < float("inf"):
+                self.fee_break_even = be
         self.every_n_ticks = max(1, every_n_ticks)
         self.imbalance_ratio = max(1.05, imbalance_ratio)
         self.atr = PointATR(window=atr_window)
@@ -245,7 +249,7 @@ class MinEdgeStrategy:
 
 
 def minedge_from_env() -> MinEdgeStrategy:
-    """S5: fee-aware min edge (COVER_FEES + MIN_EDGE_POINTS)."""
+    """S5: fee-aware min edge (S5_COVER_FEES even when IGNORE_FEES=true)."""
     every = int(os.getenv("S5_EVERY_N_TICKS", "5"))
     window = int(os.getenv("S5_ATR_WINDOW", "120"))
     imb = float(os.getenv("S5_IMBALANCE_RATIO", "1.35"))
@@ -265,10 +269,17 @@ def minedge_from_env() -> MinEdgeStrategy:
         "y",
     }
     min_ml = float(os.getenv("S5_ML_MIN_PROBA", "0.55"))
+    cover = os.getenv("S5_COVER_FEES", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
     return MinEdgeStrategy(
         every_n_ticks=every,
         atr_window=window,
         imbalance_ratio=imb,
+        cover_fees=cover,
         require_reasoning=reasoning,
         reasoning_min_score=min_score,
         reasoning_lots=lots,

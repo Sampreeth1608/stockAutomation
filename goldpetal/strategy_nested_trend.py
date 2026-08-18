@@ -490,7 +490,7 @@ def nested_trend_from_env() -> NestedTrendStrategy:
         return raw.strip().lower() in {"1", "true", "yes", "y"}
 
     cfg = NestedTrendConfig(
-        min_imb_pct=_f("S8_MIN_IMB_PCT", 10.0),
+        min_imb_pct=_f("S8_MIN_IMB_PCT", 14.0),
         weaken_pct=_f("S8_WEAKEN_PCT", 10.0),
         tp_points=_f("S8_TP_POINTS", 25.0),
         sl_points=_f("S8_SL_POINTS", 20.0),
@@ -499,7 +499,7 @@ def nested_trend_from_env() -> NestedTrendStrategy:
         net_ema_alpha=_f("S8_NET_EMA_ALPHA", 0.08),
         swing_ticks=int(_f("S8_SWING_TICKS", 40)),
         every_n_ticks=int(_f("S8_EVERY_N_TICKS", 1)),
-        use_fee_gate=_b("S8_USE_FEE_GATE", False),
+        use_fee_gate=_b("S8_USE_FEE_GATE", True),
         fee_be_points=_f("S8_FEE_BE_POINTS", 50.0),
         require_depth=_b("S8_REQUIRE_DEPTH", False),
         depth_ratio=_f("S8_DEPTH_RATIO", 1.15),
@@ -509,4 +509,6 @@ def nested_trend_from_env() -> NestedTrendStrategy:
         ltq_window=int(_f("S8_LTQ_WINDOW", 50)),
         depth_exit=_b("S8_DEPTH_EXIT", False),
     )
+    if cfg.use_fee_gate:
+        cfg.tp_points = max(float(cfg.tp_points), float(cfg.fee_be_points))
     return NestedTrendStrategy(cfg)

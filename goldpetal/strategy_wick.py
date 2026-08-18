@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 
 from strategy import Position, SignalResult
 from wick_candles import wick_exit_strict, wick_measure, wick_side
+from quality_filters import s14_wick_quality
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -64,6 +65,9 @@ class WickConfig:
     open_hold_minutes: float = 0.0
     # S14: open=high / open=low on the same finished candle as the wick.
     open_hold_on_close: bool = False
+    # Skip only a *weak wick* call. open=high/low is never filtered.
+    min_wick_gap: float = 3.0
+    min_wick_frac: float = 0.12
 
 
 class WickCandleStrategy:
@@ -330,6 +334,18 @@ class WickCandleStrategy:
         )
         if want is None:
             self.last_skip = why
+            return None
+        ok, qwhy = s14_wick_quality(
+            o,
+            h,
+            l,
+            c,
+            why,
+            min_gap=self.cfg.min_wick_gap,
+            min_frac=self.cfg.min_wick_frac,
+        )
+        if not ok:
+            self.last_skip = qwhy
             return None
         result = self._flip_to(want, o, h, l, c, why=why)
         self._last_wick_seen = want
@@ -673,6 +689,8 @@ def wick_strict_from_env() -> WickCandleStrategy:
         wick_on_close=True,
         open_hold_minutes=0.0,
         open_hold_on_close=hold_on,
+        min_wick_gap=float(os.getenv("S14_MIN_WICK_GAP", "3")),
+        min_wick_frac=float(os.getenv("S14_MIN_WICK_FRAC", "0.12")),
     )
     return WickCandleStrategy("S14_WICK30_STRICT", cfg)
 

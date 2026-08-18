@@ -178,6 +178,16 @@ def test_gate_reject_can_retry() -> None:
     assert buy2 is not None and buy2.action == "BUY"
 
 
+def test_fakeout_wick_does_not_enter() -> None:
+    """HH spike that closes barely above prev high is not a real break."""
+    s = HhhlCandleStrategy(HhhlConfig(min_range=5, no_flip=True), seed=False)
+    assert s.on_bar_row({"open": 100, "high": 105, "low": 99, "close": 104}) is None
+    r = s.on_bar_row({"open": 104, "high": 112, "low": 103, "close": 106})
+    assert r is None
+    assert s.position == "flat"
+    assert "fakeout" in (s.last_skip or "")
+
+
 if __name__ == "__main__":
     test_long_entry_exit_no_reentry()
     test_long_exit_same_candle_reenter_short()
@@ -189,4 +199,5 @@ if __name__ == "__main__":
     test_same_candle_last_minute_exit_after_entry()
     test_close_then_later_tick_reenter()
     test_gate_reject_can_retry()
+    test_fakeout_wick_does_not_enter()
     print("ALL test_strategy_hhhl OK")

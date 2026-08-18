@@ -7,7 +7,7 @@ import os
 from collections import deque
 from dataclasses import dataclass
 
-from charges import charges_from_env, round_trip_charges
+from charges import round_trip_charges
 
 
 @dataclass
@@ -24,13 +24,13 @@ class EdgeThresholds:
         return self.min_edge_points
 
 
-def fee_break_even_points(price: float = 14380.0) -> float:
+def fee_break_even_points(price: float = 14380.0, *, force_fees: bool = False) -> float:
     """Points needed so gross ₹ PnL covers a typical round-trip fee."""
-    from charges import ignore_fees_enabled
+    from charges import angel_charges_from_env, charges_from_env, ignore_fees_enabled
 
-    if ignore_fees_enabled():
+    if ignore_fees_enabled() and not force_fees:
         return 0.0
-    cfg = charges_from_env()
+    cfg = angel_charges_from_env() if force_fees else charges_from_env()
     fee = round_trip_charges(
         side="BUY", entry_price=price, exit_price=price + 1.0, cfg=cfg
     )["charges"]
@@ -40,7 +40,9 @@ def fee_break_even_points(price: float = 14380.0) -> float:
     return fee / point_value
 
 
-def edge_thresholds_from_env(price: float = 14380.0) -> EdgeThresholds:
+def edge_thresholds_from_env(
+    price: float = 14380.0, *, force_cover: bool | None = None
+) -> EdgeThresholds:
     try:
         from dotenv import load_dotenv
 
@@ -51,7 +53,10 @@ def edge_thresholds_from_env(price: float = 14380.0) -> EdgeThresholds:
 
     min_edge = float(os.getenv("MIN_EDGE_POINTS", "20"))
     safety = float(os.getenv("EDGE_SAFETY_MULT", "1.25"))
-    if ignore_fees_enabled():
+    if force_cover is True:
+        cover = True
+        be = fee_break_even_points(price, force_fees=True)
+    elif ignore_fees_enabled():
         cover = False
         be = 0.0
     else:

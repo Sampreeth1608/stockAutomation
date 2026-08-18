@@ -80,6 +80,27 @@ def test_open_low_on_same_closed_candle_longs() -> None:
     assert "open=low" in (sig.reason or "")
 
 
+def test_weak_wick_skipped_open_high_still_shorts() -> None:
+    """Tiny wick gap is skipped; open=high still shorts (formula unchanged)."""
+    s = _s14()
+    s.on_tick(ts("10:00"), 100.0)
+    s.on_tick(ts("10:05"), 99.0)
+    s.on_tick(ts("10:10"), 103.0)
+    s.on_tick(ts("10:29"), 101.0)
+    none = s.on_tick(ts("10:30"), 101.0)
+    assert none is None
+    assert s.position == "flat"
+    assert "weak_wick" in (s.last_skip or "")
+
+    s2 = _s14()
+    s2.on_tick(ts("10:00"), 100.0)
+    s2.on_tick(ts("10:10"), 90.0)
+    s2.on_tick(ts("10:11"), 95.0)
+    sig = s2.on_tick(ts("10:30"), 94.0)
+    assert sig is not None and sig.action == "SHORT"
+    assert "open=high" in (sig.reason or "")
+
+
 def test_open_high_and_low_flat_uses_wick() -> None:
     """O=H=L: skip open=high/low, equal wick → stay flat."""
     s = _s14()
@@ -271,6 +292,7 @@ def test_seed_restores_open_s14_position() -> None:
 if __name__ == "__main__":
     test_open_high_on_same_closed_candle_shorts()
     test_open_low_on_same_closed_candle_longs()
+    test_weak_wick_skipped_open_high_still_shorts()
     test_open_high_and_low_flat_uses_wick()
     test_neither_open_high_nor_low_uses_wick()
     test_forming_bar_does_not_trade()

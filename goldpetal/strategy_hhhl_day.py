@@ -27,6 +27,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from strategy import Position, SignalResult
+from quality_filters import hhll_break_ok
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "data" / "s13_state.json"
@@ -61,6 +62,8 @@ class HhhlDayConfig:
     allow_long: bool = True
     allow_short: bool = True
     no_flip: bool = True
+    min_close_beyond: float = 3.0
+    max_break_wick_frac: float = 0.6
 
 
 class HhhlDayOvernightStrategy:
@@ -113,6 +116,7 @@ class HhhlDayOvernightStrategy:
         )
         return (
             f"daily HH/LL same-candle min_range={c.min_range:.0f} "
+            f"beyond={c.min_close_beyond:.0f} "
             f"confirm={c.entry_minutes_before_close}m_before_close "
             f"no_flip={c.no_flip} L={c.allow_long} S={c.allow_short} "
             f"{prev} {today} pos={self.position}"
@@ -339,6 +343,20 @@ class HhhlDayOvernightStrategy:
             self.last_skip = f"min_range {range_pts:.1f}<{self.cfg.min_range}"
             return None
         if want_long and not want_short:
+            ok, why = hhll_break_ok(
+                side="long",
+                o=day.open,
+                h=day.high,
+                l=day.low,
+                c=day.close,
+                prev_h=prev.high,
+                prev_l=prev.low,
+                min_close_beyond=self.cfg.min_close_beyond,
+                max_break_wick_frac=self.cfg.max_break_wick_frac,
+            )
+            if not ok:
+                self.last_skip = why
+                return None
             self.position = "long"
             self.entry_price = px
             self.entry_date = today
@@ -358,6 +376,20 @@ class HhhlDayOvernightStrategy:
                 ),
             )
         if want_short and not want_long:
+            ok, why = hhll_break_ok(
+                side="short",
+                o=day.open,
+                h=day.high,
+                l=day.low,
+                c=day.close,
+                prev_h=prev.high,
+                prev_l=prev.low,
+                min_close_beyond=self.cfg.min_close_beyond,
+                max_break_wick_frac=self.cfg.max_break_wick_frac,
+            )
+            if not ok:
+                self.last_skip = why
+                return None
             self.position = "short"
             self.entry_price = px
             self.entry_date = today
@@ -499,5 +531,7 @@ def hhhl_day_from_env() -> HhhlDayOvernightStrategy:
         allow_long=_env_flag("S13_ALLOW_LONG", True),
         allow_short=_env_flag("S13_ALLOW_SHORT", True),
         no_flip=_env_flag("S13_NO_FLIP", True),
+        min_close_beyond=float(os.getenv("S13_MIN_CLOSE_BEYOND", "3")),
+        max_break_wick_frac=float(os.getenv("S13_MAX_BREAK_WICK_FRAC", "0.6")),
     )
     return HhhlDayOvernightStrategy(cfg)
