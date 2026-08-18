@@ -1,13 +1,13 @@
-"""Self-learning P(win after tax) gate for every strategy book.
+"""Self-learning entry gate: this upcoming trade vs a learned base.
 
-Fits a recency-weighted logistic model on closed trades, plus win rate by
-(strategy, side, hour). After warmup, a book whose after-tax win rate is
-below EDGE_TARGET_WINRATE (default 0.70) takes **no new BUY/SHORT** — a
-50% coin-flip tape sits out. Books already at 70%+ only take hour/side
-setups at or above that bar, and the bar only moves up.
+Each strategy has a **base** (typical after-tax win rate). Each BUY/SHORT
+has a **this-trade** score (this hour, side, and recency-weighted model).
+The book enters only when this trade looks better than the base — a good
+upcoming win rate, not a coin flip.
 
-A short per-book warmup still allows probes on a brand-new book. CLOSE /
-flatten is never gated. Refits after each CLOSE and periodically on ticks.
+70% is a stretch goal used when some hour/side actually reaches it. If a
+book never prints 70%, it still trades its better-than-base setups.
+CLOSE / flatten is never gated.
 """
 
 from __future__ import annotations
@@ -64,12 +64,7 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def _target_winrate() -> float:
-    """70% after-tax win odds, unless EDGE_TARGET_WINRATE is set.
-
-    An old .env with EDGE_MIN_PROBA=0.52 must not undo that bar. Raise the
-    alias only when it is already at least 70%. To trade looser, set
-    EDGE_TARGET_WINRATE explicitly.
-    """
+    """Stretch goal (default 70%) — used only when some hour/side hits it."""
     raw_target = os.getenv("EDGE_TARGET_WINRATE")
     if raw_target is not None and str(raw_target).strip() != "":
         try:
@@ -87,6 +82,16 @@ def _target_winrate() -> float:
     return 0.70
 
 
+def _min_floor() -> float:
+    """Skip this trade when it looks like a coin flip or worse."""
+    return max(0.50, min(0.70, _env_float("EDGE_MIN_FLOOR", 0.52)))
+
+
+def _above_base() -> float:
+    """How much better than the book's usual rate this trade must look."""
+    return max(0.0, min(0.20, _env_float("EDGE_ABOVE_BASE", 0.08)))
+
+
 def _min_samples() -> int:
     return max(8, _env_int("EDGE_MIN_SAMPLES", 20))
 
@@ -100,7 +105,7 @@ def _recent_window() -> int:
 
 
 def _need_cap() -> float:
-    return max(0.70, min(0.95, _env_float("EDGE_NEED_CAP", 0.92)))
+    return max(0.55, min(0.95, _env_float("EDGE_NEED_CAP", 0.92)))
 
 
 def _bucket_min() -> int:
@@ -260,7 +265,6 @@ class TradeLearner:
             name = str(t.get("strategy") or "")
             if name and name not in names:
                 names.append(name)
-        floor = _target_winrate()
         window = _recent_window()
         for name in names:
             closed = [
@@ -297,6 +301,7 @@ class TradeLearner:
                 "wins": float(n_wins),
                 "p": float(p_emp),
                 "p_emp": float(p_emp),
+                "base": float(p_laplace),
                 "laplace": float(p_laplace),
                 "wilson": float(p_wilson),
                 "avg_win": float(avg_win),
@@ -306,15 +311,6 @@ class TradeLearner:
                 "recent_n": float(r_n),
                 "recent_p": float(recent_p),
             }
-            prev = float(self.ratchet.get(name, floor))
-            if r_n >= _warmup_max():
-                # Never lower the bar. When recent WR is already at the
-                # floor, lock in that rate so the next entries have to
-                # beat it (win rate climbs instead of drifting back down).
-                climbed = max(floor, recent_p) if recent_p >= floor else floor
-                self.ratchet[name] = max(prev, climbed)
-            else:
-                self.ratchet[name] = max(prev, floor)
             for t in closed:
                 side_u = str(t.get("side") or "BUY").upper()
                 side_val = 1.0 if side_u in {"BUY", "LONG"} else -1.0
@@ -337,13 +333,40 @@ class TradeLearner:
                 b["avg_win"] = (float(b["win_sum"]) / bw) if bw else 0.0
                 bl = bn - bw
                 b["avg_loss"] = (float(b["loss_sum"]) / bl) if bl else 0.0
+        for name in self.by_book:
+            self.ratchet[name] = self.need_p(name)
         self._save_ratchet()
 
+    def _best_bucket_p(self, strategy: str) -> float:
+        prefix = f"{strategy}|"
+        need_n = _bucket_min()
+        best = 0.0
+        found = False
+        for bid, b in self.buckets.items():
+            if not str(bid).startswith(prefix):
+                continue
+            if int(b.get("n") or 0) < need_n:
+                continue
+            found = True
+            best = max(best, float(b.get("p") or 0.0))
+        return best if found else 0.0
+
+    def _base_p(self, strategy: str) -> float:
+        st = self.by_book.get(strategy, {})
+        return float(st.get("base") or st.get("laplace") or st.get("p") or 0.5)
+
     def need_p(self, strategy: str) -> float:
-        floor = _target_winrate()
-        cap = _need_cap()
-        r = float(self.ratchet.get(strategy, floor))
-        return max(floor, min(cap, r))
+        """Flexible bar: beat the base; demand 70% only when a hour actually hits it."""
+        floor = _min_floor()
+        stretch = _target_winrate()
+        base = self._base_p(strategy)
+        best = self._best_bucket_p(strategy)
+        need = max(floor, min(stretch, base + _above_base()))
+        if best >= stretch:
+            need = min(best, max(need, stretch))
+        elif best >= floor:
+            need = min(need, best)
+        return max(floor, min(_need_cap(), need))
 
     def fit(self, trades: list[dict[str, Any]]) -> None:
         closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
@@ -482,6 +505,7 @@ class TradeLearner:
                 "wins": 0.0,
                 "p": 0.5,
                 "p_emp": 0.5,
+                "base": 0.5,
                 "recent_p": 0.5,
                 "recent_n": 0.0,
                 "wilson": 0.5,
@@ -492,32 +516,29 @@ class TradeLearner:
             },
         )
         n = int(stats.get("n") or 0)
-        floor = _target_winrate()
+        base = self._base_p(strategy)
         need = self.need_p(strategy)
-        p_emp = float(stats.get("p_emp") or stats.get("p") or 0.5)
-        recent_p = float(stats.get("recent_p") or p_emp)
-        recent_n = int(stats.get("recent_n") or 0)
         p_setup, extra = self._setup_p(strategy, feat)
         if n == 0 or n < _warmup_max():
-            return True, f"ml_warmup n={n} p={p_setup:.2f} need={need:.2f}"
-
-        # Book below 70% sits out completely. 50% coin-flip tapes do not
-        # get "one good hour" exceptions. The climbing bar (need) applies
-        # only after the book itself is already at the floor.
-        book_p = p_emp
-        if recent_n >= _warmup_max():
-            book_p = min(p_emp, recent_p)
-        if book_p < floor:
-            return False, f"ml_book p={book_p:.2f}<{floor:.2f} n={n}"
+            return True, (
+                f"ml_warmup n={n} this={p_setup:.2f} base={base:.2f} need={need:.2f}"
+            )
 
         b_n = int(extra.get("bucket_n") or 0)
         p_b = float(extra.get("bucket_p") or -1.0)
-        # Proven losing hour/side: skip even if the global model is hopeful.
-        if b_n >= max(_bucket_min(), 8) and 0.0 <= p_b < need:
-            return False, f"ml_hour p={p_b:.2f}<{need:.2f} n={n} bn={b_n}"
-
+        # This hour/side is the book's usual-or-worse: skip.
+        if b_n >= max(_bucket_min(), 8) and 0.0 <= p_b <= base + 1e-9:
+            return False, (
+                f"ml_hour this={p_b:.2f}<=base={base:.2f} n={n} bn={b_n}"
+            )
         if p_setup < need:
-            return False, f"ml_p={p_setup:.2f}<{need:.2f} n={n}"
+            return False, (
+                f"ml_p this={p_setup:.2f}<need={need:.2f} base={base:.2f} n={n}"
+            )
+        if p_setup + 1e-9 < base:
+            return False, (
+                f"ml_base this={p_setup:.2f}<base={base:.2f} n={n}"
+            )
 
         bid = _bucket_id(strategy, _side_from_feat(feat), _hour_from_feat(feat))
         bucket = self.buckets.get(bid, {})
@@ -537,24 +558,32 @@ class TradeLearner:
             ev = p_setup * avg_win
             kel = 1.0
         streak = int(stats.get("loss_streak") or 0)
-        if streak >= 4 and p_setup < max(need, 0.75):
-            return False, f"ml_streak={streak} p={p_setup:.2f} n={n}"
-        return True, f"ml_p={p_setup:.2f} need={need:.2f} ev={ev:.1f} k={kel:.2f} n={n}"
+        if streak >= 4 and p_setup < max(need, base + _above_base()):
+            return False, f"ml_streak={streak} this={p_setup:.2f} n={n}"
+        return True, (
+            f"ml_p={p_setup:.2f} base={base:.2f} need={need:.2f} "
+            f"ev={ev:.1f} k={kel:.2f} n={n}"
+        )
 
     def snapshot(self) -> dict[str, Any]:
         books = {
             k: {ik: round(float(iv), 4) for ik, iv in v.items()}
             for k, v in self.by_book.items()
         }
-        floor = _target_winrate()
-        bits = [self.note, f"floor={floor:.0%}", f"warmup={_warmup_max()}"]
+        floor = _min_floor()
+        stretch = _target_winrate()
+        bits = [
+            self.note,
+            f"base-gate floor={floor:.0%} stretch={stretch:.0%}",
+            f"warmup={_warmup_max()}",
+        ]
         for name, st in books.items():
             if float(st.get("n") or 0) <= 0:
                 continue
             short = name.split("_")[0]
             need = self.need_p(name)
             bits.append(
-                f"{short} recent={st.get('recent_p', st.get('p', 0)):.2f} "
+                f"{short} base={st.get('base', st.get('p', 0)):.2f} "
                 f"need={need:.2f} n={int(st.get('n') or 0)}"
             )
         return {
@@ -563,7 +592,7 @@ class TradeLearner:
             "books": books,
             "ratchet": {k: round(float(v), 4) for k, v in self.ratchet.items()},
             "min_proba": floor,
-            "target_winrate": floor,
+            "target_winrate": stretch,
             "warmup_max": _warmup_max(),
             "enabled": _env_flag("EDGE_ML", True),
             "line": " · ".join(bits),
@@ -572,7 +601,7 @@ class TradeLearner:
     def status_line(self) -> str:
         return (
             f"trade_learner {self.note} books={len(self.by_book)} "
-            f"floor={_target_winrate():.0%} ratchet={len(self.ratchet)}"
+            f"floor={_min_floor():.0%} stretch={_target_winrate():.0%}"
         )
 
 

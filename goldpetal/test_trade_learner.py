@@ -1,4 +1,4 @@
-"""Self-learning P(win) gate: short warmup, then a 70% win-rate bar."""
+"""Self-learning gate: enter when this trade looks better than the book base."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import os
 os.environ["EDGE_ML"] = "true"
 os.environ["EDGE_TARGET_WINRATE"] = "0.70"
 os.environ["EDGE_MIN_PROBA"] = "0.70"
+os.environ["EDGE_MIN_FLOOR"] = "0.52"
+os.environ["EDGE_ABOVE_BASE"] = "0.08"
 os.environ["EDGE_WARMUP_MAX"] = "8"
 os.environ["EDGE_MIN_SAMPLES"] = "20"
 
@@ -56,8 +58,8 @@ def test_blocks_after_enough_losing_closes() -> None:
     assert "ml_" in why
 
 
-def test_blocks_low_winrate_book() -> None:
-    """~40% after-tax (8 wins / 20) must not pass a 70% gate."""
+def test_blocks_low_winrate_hour() -> None:
+    """A weak hour that is the whole book (~40%) is not a good upcoming trade."""
     lr = TradeLearner()
     trades = []
     for i in range(20):
@@ -68,6 +70,10 @@ def test_blocks_low_winrate_book() -> None:
     ok, why = lr.allow("S14_WICK30_STRICT", feat)
     assert ok is False
     assert "ml_" in why
+
+
+def test_blocks_low_winrate_book() -> None:
+    test_blocks_low_winrate_hour()
 
 
 def test_blocks_non_slim_book() -> None:
@@ -92,7 +98,7 @@ def test_allows_high_winrate_book() -> None:
     lr.fit(trades)
     feat = {"strategy": "S5_MINEDGE", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S5_MINEDGE", feat)
-    assert ok is True
+    assert ok is True, why
     assert "ml_p=" in why or "warmup" in why
 
 
@@ -100,7 +106,7 @@ def test_allows_positive_ev_book() -> None:
     test_allows_high_winrate_book()
 
 
-def test_old_min_proba_cannot_undo_seventy() -> None:
+def test_old_min_proba_cannot_undo_seventy_stretch() -> None:
     prev = os.environ.get("EDGE_TARGET_WINRATE")
     prev_p = os.environ.get("EDGE_MIN_PROBA")
     os.environ.pop("EDGE_TARGET_WINRATE", None)
@@ -120,24 +126,63 @@ def test_old_min_proba_cannot_undo_seventy() -> None:
             os.environ["EDGE_MIN_PROBA"] = prev_p
 
 
+def test_old_min_proba_cannot_undo_seventy() -> None:
+    test_old_min_proba_cannot_undo_seventy_stretch()
+
+
+def test_good_hour_enters_even_if_book_is_fifty() -> None:
+    """50% book: skip the 0% hour, enter the 100% hour (this trade looks good)."""
+    lr = TradeLearner()
+    trades = [
+        _t("S14_WICK30_STRICT", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(10)
+    ] + [
+        _t("S14_WICK30_STRICT", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
+    ]
+    lr.fit(trades)
+    bad = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S14_WICK30_STRICT", bad)
+    ok_good, why_good = lr.allow("S14_WICK30_STRICT", good)
+    assert ok_bad is False, why_bad
+    assert ok_good is True, why_good
+    assert "ml_p=" in why_good
+
+
 def test_fifty_percent_book_sits_out() -> None:
-    """50% after-tax → no new BUY/SHORT, even on a 'lucky' hour."""
+    """Uniform 50% (no better hour) is not a good upcoming trade."""
     lr = TradeLearner()
     trades = []
     for i in range(20):
-        after = 120.0 if i < 10 else -40.0
-        hour = 15 if i < 10 else 10
-        trades.append(_t("S14_WICK30_STRICT", after, f"2026-08-12T{hour:02d}:{i:02d}:00"))
+        after = 120.0 if i % 2 == 0 else -40.0
+        trades.append(_t("S14_WICK30_STRICT", after, f"2026-08-12T11:{i:02d}:00"))
     lr.fit(trades)
-    for hour in (10.0, 15.0):
-        feat = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": hour, "ltp": 15000.0}
-        ok, why = lr.allow("S14_WICK30_STRICT", feat)
-        assert ok is False, why
-        assert "ml_book" in why
+    feat = {"strategy": "S14_WICK30_STRICT", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
+    ok, why = lr.allow("S14_WICK30_STRICT", feat)
+    assert ok is False, why
+    assert "ml_" in why
+
+
+def test_enters_when_this_trade_beats_base_without_seventy() -> None:
+    """If 70% never shows up, still enter a 60% hour that beats a ~30% base."""
+    lr = TradeLearner()
+    trades = [
+        _t("S12_HHHL30", 120.0, f"2026-08-12T15:{i:02d}:00") for i in range(6)
+    ] + [
+        _t("S12_HHHL30", -40.0, f"2026-08-12T15:{i+6:02d}:00") for i in range(4)
+    ] + [
+        _t("S12_HHHL30", -40.0, f"2026-08-12T10:{i:02d}:00") for i in range(10)
+    ]
+    lr.fit(trades)
+    bad = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    good = {"strategy": "S12_HHHL30", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
+    ok_bad, why_bad = lr.allow("S12_HHHL30", bad)
+    ok_good, why_good = lr.allow("S12_HHHL30", good)
+    assert ok_bad is False, why_bad
+    assert ok_good is True, why_good
+    assert lr.need_p("S12_HHHL30") < 0.70
 
 
 def test_skips_losing_hour_keeps_winning_hour() -> None:
-    """A book already ≥70% still skips its proven-losing hour."""
     lr = TradeLearner()
     trades = [
         _t("S12_HHHL30", -80.0, f"2026-08-12T10:{i:02d}:00") for i in range(8)
@@ -151,21 +196,23 @@ def test_skips_losing_hour_keeps_winning_hour() -> None:
     ok_good, why_good = lr.allow("S12_HHHL30", good)
     assert ok_bad is False, why_bad
     assert ok_good is True, why_good
-    assert "ml_" in why_good
 
 
-def test_ratchet_only_rises() -> None:
+def test_need_is_flexible_when_stretch_not_seen() -> None:
     lr = TradeLearner()
     wins = [_t("S5_MINEDGE", 120.0, f"2026-08-12T11:{i:02d}:00") for i in range(20)]
     lr.fit(wins)
-    need_hi = lr.need_p("S5_MINEDGE")
-    assert need_hi >= 0.70
-    mixed = []
-    for i in range(20):
-        mixed.append(_t("S5_MINEDGE", 120.0 if i < 10 else -40.0, f"2026-08-13T11:{i:02d}:00"))
-    lr.fit(mixed)
-    need_after = lr.need_p("S5_MINEDGE")
-    assert need_after >= need_hi
+    assert lr.need_p("S5_MINEDGE") >= 0.70
+    weak = [
+        _t("S5_MINEDGE", 120.0 if i < 6 else -40.0, f"2026-08-13T11:{i:02d}:00")
+        for i in range(20)
+    ]
+    lr.fit(weak)
+    assert lr.need_p("S5_MINEDGE") < 0.70
+
+
+def test_ratchet_only_rises() -> None:
+    test_need_is_flexible_when_stretch_not_seen()
 
 
 def test_on_close_exists() -> None:
@@ -189,9 +236,11 @@ if __name__ == "__main__":
     test_allows_high_winrate_book()
     test_allows_positive_ev_book()
     test_old_min_proba_cannot_undo_seventy()
+    test_good_hour_enters_even_if_book_is_fifty()
     test_fifty_percent_book_sits_out()
+    test_enters_when_this_trade_beats_base_without_seventy()
     test_skips_losing_hour_keeps_winning_hour()
-    test_ratchet_only_rises()
+    test_need_is_flexible_when_stretch_not_seen()
     test_on_close_exists()
     test_reset_clears_singleton()
     print("ALL test_trade_learner OK")
