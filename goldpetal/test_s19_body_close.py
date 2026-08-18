@@ -57,19 +57,21 @@ def test_hold_through_mixed_then_flip() -> None:
         PREV,
         _b("2026-08-17 11:00:00", 104.0, 120.0, 103.0, 110.0),  # aligned long
         _b("2026-08-17 12:00:00", 90.0, 111.0, 89.0, 100.0),  # mixed green down — hold
-        _b("2026-08-17 13:00:00", 100.0, 101.0, 80.0, 85.0),  # aligned short — flip
+        _b("2026-08-17 13:00:00", 120.0, 121.0, 104.0, 105.0),  # mixed red up — hold
+        _b("2026-08-17 14:00:00", 105.0, 106.0, 80.0, 85.0),  # aligned short — flip
     ]
     r = simulate_s19(hours, lots=1.0, fees=False, session_filter=False)
     assert r.n_trades == 2
     assert r.trades[0].side == "LONG"
     assert r.trades[0].entry_time == "2026-08-17 11:00:00"
-    assert r.trades[0].exit_time == "2026-08-17 13:00:00"
+    assert r.trades[0].exit_time == "2026-08-17 14:00:00"
     assert r.trades[0].entry_px == 110.0
     assert r.trades[0].exit_px == 85.0
     assert r.trades[1].side == "SHORT"
-    assert r.trades[1].entry_time == "2026-08-17 13:00:00"
+    assert r.trades[1].entry_time == "2026-08-17 14:00:00"
     follow = simulate_close_follow(hours, lots=1.0, fees=False, session_filter=False)
     assert follow.n_trades > r.n_trades
+    assert follow.trades[0].exit_time == "2026-08-17 12:00:00"
 
 
 def test_after_charges_excludes_tax() -> None:
