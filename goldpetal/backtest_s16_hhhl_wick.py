@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backtest the one S16 formula: HH/LL AND wick, same-candle FLIP.
+"""Backtest the one S16 formula: up-close HH/LL, down-close wick, FLIP.
 
 Research only. Do not paper or live-enable until a 100-lot + fees row is picked.
 
@@ -59,10 +59,12 @@ def write_walk_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "high",
         "low",
         "close",
+        "prev_close",
         "prev_high",
         "prev_low",
         "upper",
         "lower",
+        "gate",
         "hhhl",
         "wick",
         "rule",
@@ -103,6 +105,7 @@ def run_from_ticks(
     drop_last: bool,
     out_dir: Path,
     print_bars_tf: str | None,
+    print_skips: bool,
 ) -> list[TfResult]:
     rows = load_ltp_rows(db)
     if not rows:
@@ -126,15 +129,22 @@ def run_from_ticks(
         walk = walk_candles(candles)
         write_walk_csv(out_dir / f"{name}_walk.csv", walk)
         if print_bars_tf == name:
+            shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
             print(flush=True)
-            print(f"=== {name} bars (finished) ===", flush=True)
-            for row in walk:
+            print(
+                f"=== {name} bars (finished"
+                + ("" if print_skips else ", skips hidden")
+                + ") ===",
+                flush=True,
+            )
+            for row in shown:
                 print(
                     f"{row['time']:<22} O={row['open']:.1f} H={row['high']:.1f} "
                     f"L={row['low']:.1f} C={row['close']:.1f}  "
+                    f"gate={row['gate']:<4}  "
                     f"U={row['upper']:.1f} Lw={row['lower']:.1f}  "
                     f"hhhl={row['hhhl']:<5} wick={row['wick']:<5}  "
-                    f"{row['rule']:<32} → {str(row['side']).upper():<5}  "
+                    f"{row['rule']:<28} → {str(row['side']).upper():<5}  "
                     f"{row['action']:<5}  {row['pos_before']}→{row['pos_after']}",
                     flush=True,
                 )
@@ -151,6 +161,7 @@ def run_from_angel(
     date_to: str,
     out_dir: Path,
     print_bars_tf: str | None,
+    print_skips: bool,
 ) -> list[TfResult]:
     from explain_s14_candles import (
         ANGEL_INTERVAL,
@@ -207,11 +218,12 @@ def run_from_angel(
         walk = walk_candles(candles)
         write_walk_csv(out_dir / f"{tf}_{symbol}.csv", walk)
         if print_bars_tf == tf:
+            shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
             print(flush=True)
             print(f"=== {tf} {symbol} ===", flush=True)
-            for row in walk:
+            for row in shown:
                 print(
-                    f"{row['time']:<22} {row['rule']:<32} → "
+                    f"{row['time']:<22} gate={row['gate']:<4} {row['rule']:<28} → "
                     f"{str(row['side']).upper():<5} {row['action']}",
                     flush=True,
                 )
@@ -232,6 +244,7 @@ def main() -> None:
     ap.add_argument("--no-session", action="store_true")
     ap.add_argument("--keep-last", action="store_true", help="keep still-forming last tick bar")
     ap.add_argument("--print-bars", default="30m", help="print this TF's bars (or '')")
+    ap.add_argument("--print-skips", action="store_true", help="include skip rows in the bar dump")
     ap.add_argument("--out", type=Path, default=Path("data/backtests/s16_hhhl_wick"))
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
@@ -260,6 +273,7 @@ def main() -> None:
             date_to=args.date_to,
             out_dir=args.out,
             print_bars_tf=print_bars_tf,
+            print_skips=bool(args.print_skips),
         )
     else:
         tfs = _parse_tick_tfs(args.tf or DEFAULT_TICK_TFS)
@@ -272,11 +286,12 @@ def main() -> None:
             drop_last=not args.keep_last,
             out_dir=args.out,
             print_bars_tf=print_bars_tf,
+            print_skips=bool(args.print_skips),
         )
 
     print_wick_summary(
         results,
-        title=f"S16 HHHL ∧ wick  lots={args.lots:g}  fees={fees}",
+        title=f"S16 C>prev HH/LL / C<prev wick  lots={args.lots:g}  fees={fees}",
     )
     print_by_day(results)
     write_outputs(results, args.out)

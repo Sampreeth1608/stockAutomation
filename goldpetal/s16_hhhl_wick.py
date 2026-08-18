@@ -1,27 +1,25 @@
-"""S16 research formula: HH/LL structure AND wick on the same finished candle.
+"""S16 research formula: close vs previous close picks HH/LL or wick.
 
 Not paper. Not live. Backtest first.
 
-Wait for the candle to **finish**. On that closed bar vs the previous closed bar:
+Wait for the candle to **finish**. Same closed bar vs previous closed bar:
 
-  Structure (S12):
+  If close > previous close → HH/LL only (S12):
     LONG  = higher high AND green  (H > prevH and C > O)
     SHORT = lower low  AND red    (L < prevL and C < O)
+    else skip (wicks are ignored on an up close)
 
-  Wick (S14 raw, nothing else):
+  If close < previous close → wick only (S14 raw):
     upper = high − max(open, close)
     lower = min(open, close) − low
     LONG  = lower > upper
     SHORT = upper > lower
-    equal = skip
+    equal = skip (HH/LL is ignored on a down close)
 
-  Combined AND:
-    LONG  only if structure LONG  and wick LONG
-    SHORT only if structure SHORT and wick SHORT
-    else skip
+  If close = previous close → skip
 
 FLIP if already the other side. Fill at this bar's close.
-Stay in until the opposite AND signal (or session flatten / last bar).
+Stay in until the opposite signal (or session flatten / last bar).
 No range skip. No bald-body. No open=high/low (that is S14).
 """
 
@@ -35,10 +33,10 @@ from charges import ChargeConfig, apply_charges_and_tax
 from wick_candles import wick_measure
 
 FORMULA = (
-    "Wait for the candle to finish. Same closed bar vs previous closed bar: "
-    "HH+green AND lower wick > upper wick → LONG | "
-    "LL+red AND upper wick > lower wick → SHORT | "
-    "else skip. FLIP if already the other side. Fill at this bar's close."
+    "Wait for the candle to finish. Same closed bar vs previous close: "
+    "C>prevC → HH/LL (HH+green LONG, LL+red SHORT) | "
+    "C<prevC → wick (lower>upper LONG, upper>lower SHORT) | "
+    "C=prevC skip. FLIP if already the other side. Fill at this bar's close."
 )
 
 
@@ -58,15 +56,21 @@ def wick_raw_side(cur: Candle) -> str | None:
 
 def s16_bar_decision(prev: Candle, cur: Candle) -> tuple[str | None, str]:
     """One finished candle → ('long'|'short'|None, why)."""
-    hh = hhhl_side(prev, cur)
-    wk = wick_raw_side(cur)
-    if hh == "long" and wk == "long":
-        return "long", "HH+green AND lower wick"
-    if hh == "short" and wk == "short":
-        return "short", "LL+red AND upper wick"
-    hh_s = hh or "none"
-    wk_s = wk or "none"
-    return None, f"skip (hhhl={hh_s} wick={wk_s})"
+    if cur.close > prev.close:
+        hh = hhhl_side(prev, cur)
+        if hh == "long":
+            return "long", "C>prev → HH+green"
+        if hh == "short":
+            return "short", "C>prev → LL+red"
+        return None, "C>prev → no HH/LL"
+    if cur.close < prev.close:
+        wk = wick_raw_side(cur)
+        if wk == "long":
+            return "long", "C<prev → lower wick"
+        if wk == "short":
+            return "short", "C<prev → upper wick"
+        return None, "C<prev → equal wick"
+    return None, "C=prev skip"
 
 
 def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
@@ -74,6 +78,12 @@ def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
     hh = hhhl_side(prev, cur)
     wk = wick_raw_side(cur)
     side, why = s16_bar_decision(prev, cur)
+    if cur.close > prev.close:
+        gate = "hhhl"
+    elif cur.close < prev.close:
+        gate = "wick"
+    else:
+        gate = "equal"
     prev_pos = pos
     action = "skip"
     pos_after = pos
@@ -90,10 +100,12 @@ def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
         "high": cur.high,
         "low": cur.low,
         "close": cur.close,
+        "prev_close": prev.close,
         "prev_high": prev.high,
         "prev_low": prev.low,
         "upper": round(m.upper, 2),
         "lower": round(m.lower, 2),
+        "gate": gate,
         "hhhl": hh or "none",
         "wick": wk or "none",
         "rule": why,
@@ -162,7 +174,7 @@ def simulate_s16(
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
 ) -> Any:
-    """AND formula with same-candle FLIP. Fill at signal-bar close."""
+    """Close-vs-prev gate with same-candle FLIP. Fill at signal-bar close."""
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
     trades: list[Trade] = []
     side: str | None = None
