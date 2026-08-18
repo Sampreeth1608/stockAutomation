@@ -155,6 +155,8 @@ def test_walk_marks_flip() -> None:
 def test_paper_wired_1h_not_s17() -> None:
     assert "S16_HHHL_WICK_1H" in ALL_STRATEGY_NAMES
     assert "S16_HHHL_WICK_1H" in SLIM_PAPER_STRATEGIES
+    assert "S13_HHHL_DAY" in SLIM_PAPER_STRATEGIES
+    assert "S4_OVERNIGHT" not in SLIM_PAPER_STRATEGIES
     assert "S12_HHHL30" not in SLIM_PAPER_STRATEGIES
     assert "S14_WICK30_STRICT" not in SLIM_PAPER_STRATEGIES
     assert "S15_WICK30_NOWICK" not in SLIM_PAPER_STRATEGIES

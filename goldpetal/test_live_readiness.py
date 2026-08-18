@@ -166,15 +166,18 @@ def test_apply_panel_enables_slim() -> None:
     try:
         env = Path(td.name) / ".env"
         env.write_text("ENABLE_S4=true\nENABLE_S9=true\nSECRET=keep\n", encoding="utf-8")
-        res = apply_panel_enables(["S4_OVERNIGHT", "S16_HHHL_WICK_1H"], path=env)
+        res = apply_panel_enables(["S4_OVERNIGHT", "S13_HHHL_DAY", "S16_HHHL_WICK_1H"], path=env)
         assert res["ok"] is True
         text = env.read_text(encoding="utf-8")
-        assert "ENABLE_S4=true" in text
+        assert "ENABLE_S4=false" in text
+        assert "ENABLE_S13=true" in text
         assert "ENABLE_S16=true" in text
         assert "ENABLE_S9=false" in text
         assert "ENABLE_S5=false" in text
         assert "SECRET=keep" in text
         assert "S16_HHHL_WICK_1H" in res["enabled"]
+        assert "S13_HHHL_DAY" in res["enabled"]
+        assert "S4_OVERNIGHT" not in res["enabled"]
     finally:
         td.cleanup()
 
@@ -215,6 +218,8 @@ def test_desk_snapshot_skips_checklist() -> None:
     assert "steps" not in snap
     assert "S16_HHHL_WICK_1H" in snap["enables"]
     assert any(b["strategy"] == "S16_HHHL_WICK_1H" for b in snap["books"])
+    assert "S4_OVERNIGHT" not in snap["enables"]
+    assert not any(b["strategy"] == "S4_OVERNIGHT" for b in snap["books"])
     assert "S14_WICK30_STRICT" not in snap["enables"]
     assert snap["would_place_real_orders"] is False
 

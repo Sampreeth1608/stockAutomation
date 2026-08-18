@@ -212,7 +212,6 @@ ALL_STRATEGY_NAMES: tuple[str, ...] = (
 )
 
 SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
-    "S4_OVERNIGHT",
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
     "S11_DISCOVERED",
