@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Count S17 close×high×body buckets. Research only. No book yet.
+"""Count S17 close×high×body buckets, then settle hhhl/wick/and/or books.
 
-  ./venv/bin/python backtest_s17_close_high_body.py --db data/ticks.db --session
+Research only. Do not paper or live-enable until a 100-lot + fees row is picked.
+
+  ./venv/bin/python backtest_s17_close_high_body.py --db data/ticks.db --session --lots 100 --fees
 """
 
 from __future__ import annotations
@@ -12,9 +14,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from backtest_hhhl_candles import TIMEFRAMES
-from backtest_wick_candles import build_ohlc_candles, load_ltp_rows
+from backtest_hhhl_candles import TIMEFRAMES, make_charge_cfg, print_by_day, write_outputs
+from backtest_wick_candles import build_ohlc_candles, load_ltp_rows, print_wick_summary
 from s17_close_high_body import (
+    BOOK_MODES,
     FORMULA,
     LISTED_BUCKETS,
     MISSING_BUCKETS,
@@ -23,11 +26,22 @@ from s17_close_high_body import (
     bucket_kind,
     counts_as_dict,
     ordered_bucket_names,
+    simulate_s17,
     tally_rows,
     walk_candles,
 )
 
 DEFAULT_TICK_TFS = ",".join(n for n, _ in TIMEFRAMES)
+
+
+def _parse_books(raw: str) -> list[str]:
+    out: list[str] = []
+    for bit in (x.strip().lower() for x in raw.split(",") if x.strip()):
+        if bit not in BOOK_MODES:
+            raise SystemExit(f"unknown book {bit!r}. have: {', '.join(BOOK_MODES)}")
+        if bit not in out:
+            out.append(bit)
+    return out
 
 
 def _parse_tick_tfs(raw: str) -> list[tuple[str, int]]:
@@ -87,7 +101,7 @@ def _print_completeness() -> None:
         + "  | leftover: C=pC, H=pH, C=O",
         flush=True,
     )
-    print("No LONG/SHORT assigned. Lows + wicks are recorded only.", flush=True)
+    print("Leftover (C=pC / H=pH / doji) is skipped in every book.", flush=True)
     print(flush=True)
 
 
@@ -177,12 +191,18 @@ def run_from_ticks(
     out_dir: Path,
     print_bars_tf: str | None,
     print_leftover: bool,
+    lots: float,
+    fees: bool,
+    books: list[str],
+    min_wick_gap: float,
 ) -> dict[str, Any]:
     ltp = load_ltp_rows(db)
     if not ltp:
         raise SystemExit(f"no ticks in {db}")
     summary: dict[str, Any] = {}
     out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = make_charge_cfg(fees=fees, lots=lots)
+    book_results = []
     for name, minutes in tfs:
         candles = build_ohlc_candles(ltp, minutes)
         if drop_last and len(candles) >= 2:
@@ -204,7 +224,29 @@ def run_from_ticks(
             "leftover_n": len(rows) - listed_n - missing_n,
             "counts": counts_as_dict(counts),
         }
+        for mode in books:
+            r = simulate_s17(
+                candles,
+                tf=f"{name}:{mode}",
+                mode=mode,
+                lots=lots,
+                fees=fees,
+                session_filter=use_session,
+                charge_cfg=cfg,
+                min_wick_gap=min_wick_gap,
+            )
+            book_results.append(r)
     print_listed_matrix(summary)
+    if book_results:
+        print_wick_summary(
+            book_results,
+            title=(
+                f"S17 books  lots={lots:g}  fees={fees}  wick_gap={min_wick_gap:g}"
+            ),
+        )
+        day_rows = [r for r in book_results if r.tf.startswith(("30m:", "45m:", "1h:", "2h:", "3h:"))]
+        print_by_day(day_rows or book_results)
+        write_outputs(book_results, out_dir)
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
@@ -224,16 +266,29 @@ def main() -> None:
         action="store_true",
         help="include C=pC / H=pH / doji rows in the bar dump",
     )
+    ap.add_argument("--lots", type=float, default=100.0)
+    ap.add_argument("--fees", action="store_true", default=True)
+    ap.add_argument("--no-fees", action="store_true")
+    ap.add_argument(
+        "--book",
+        default="hhhl,wick,and,or",
+        help="FLIP books to settle, or '' for counts only",
+    )
+    ap.add_argument("--wick-gap", type=float, default=3.0)
     ap.add_argument("--out", type=Path, default=Path("data/backtests/s17_close_high_body"))
     args = ap.parse_args()
     session_filter = bool(args.session) and not bool(args.no_session)
+    fees = bool(args.fees) and not bool(args.no_fees)
     print_bars_tf = (args.print_bars or "").strip().lower() or None
     if print_bars_tf == "30":
         print_bars_tf = "30m"
+    books = _parse_books(args.book) if (args.book or "").strip() else []
 
     _print_completeness()
     print(
-        f"session={session_filter}  source={args.db}  counts only — not a book",
+        f"session={session_filter}  lots={args.lots:g}  fees={fees}  "
+        f"books={','.join(books) or 'none'}  wick_gap={args.wick_gap:g}  "
+        f"source={args.db}",
         flush=True,
     )
     tfs = _parse_tick_tfs(args.tf or DEFAULT_TICK_TFS)
@@ -245,9 +300,13 @@ def main() -> None:
         out_dir=args.out,
         print_bars_tf=print_bars_tf,
         print_leftover=bool(args.print_leftover),
+        lots=args.lots,
+        fees=fees,
+        books=books,
+        min_wick_gap=float(args.wick_gap),
     )
     print(f"wrote {args.out}", flush=True)
-    print("Not paper. Not live. Add LONG/SHORT per column next.", flush=True)
+    print("Not paper. Not live. Pick a TF:book row first.", flush=True)
 
 
 if __name__ == "__main__":

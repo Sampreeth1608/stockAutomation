@@ -1,4 +1,4 @@
-"""S17: six close×high×body columns. Counts only. Not a book."""
+"""S17: six close×high×body columns. Counts + hhhl/wick/and/or books."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from s17_close_high_body import (
     LISTED_BUCKETS,
     MISSING_BUCKETS,
     classify_bar,
+    s17_bar_decision,
+    simulate_s17,
     tally_rows,
     walk_candles,
 )
@@ -101,6 +103,56 @@ def test_tally_and_or() -> None:
     assert rows[1]["kind"] == "missing"
 
 
+def test_books_skip_leftover() -> None:
+    cur = _c("2026-08-17 10:30:00", 100.0, 120.0, 90.0, 104.0)  # C=pC
+    for mode in ("hhhl", "wick", "and", "or"):
+        side, why = s17_bar_decision(PREV, cur, mode=mode)
+        assert side is None
+        assert "leftover" in why
+
+
+def test_col1_hhhl_long_wick_may_fight() -> None:
+    # HH green, upper wick
+    cur = _c("2026-08-17 10:30:00", 114.0, 120.0, 113.0, 115.0)
+    hh, _ = s17_bar_decision(PREV, cur, mode="hhhl")
+    wk, _ = s17_bar_decision(PREV, cur, mode="wick", min_wick_gap=0)
+    both, why_and = s17_bar_decision(PREV, cur, mode="and", min_wick_gap=0)
+    either, why_or = s17_bar_decision(PREV, cur, mode="or", min_wick_gap=0)
+    assert hh == "long"
+    assert wk == "short"
+    assert both is None
+    assert "and skip" in why_and
+    assert either is None
+    assert "fight" in why_or
+
+
+def test_missing_up_lh_green_wick_only() -> None:
+    cur = _c("2026-08-17 10:30:00", 100.0, 104.8, 90.0, 104.5)
+    hh, _ = s17_bar_decision(PREV, cur, mode="hhhl")
+    wk, _ = s17_bar_decision(PREV, cur, mode="wick", min_wick_gap=0)
+    either, _ = s17_bar_decision(PREV, cur, mode="or", min_wick_gap=0)
+    assert hh is None
+    assert wk == "long"
+    assert either == "long"
+
+
+def test_flip_hhhl_book() -> None:
+    candles = [
+        PREV,
+        _c("2026-08-17 10:30:00", 100.0, 120.0, 100.0, 110.0),  # col1 LONG @ 110
+        _c("2026-08-17 11:00:00", 108.0, 109.0, 80.0, 90.0),  # col4 LL+red SHORT @ 90
+        _c("2026-08-17 11:30:00", 90.0, 91.0, 89.0, 90.5),
+    ]
+    r = simulate_s17(
+        candles, tf="toy:hhhl", mode="hhhl", lots=1, fees=False, session_filter=False
+    )
+    assert r.n_trades == 2
+    assert r.trades[0].side == "LONG"
+    assert r.trades[0].entry_px == 110.0
+    assert r.trades[0].exit_px == 90.0
+    assert r.trades[1].side == "SHORT"
+
+
 def test_not_wired_to_paper_or_station() -> None:
     assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
     station = (Path(__file__).resolve().parent / "station.html").read_text(encoding="utf-8")
@@ -117,5 +169,9 @@ if __name__ == "__main__":
     test_records_low_and_wick()
     test_hhhl_and_wick_can_fight()
     test_tally_and_or()
+    test_books_skip_leftover()
+    test_col1_hhhl_long_wick_may_fight()
+    test_missing_up_lh_green_wick_only()
+    test_flip_hhhl_book()
     test_not_wired_to_paper_or_station()
     print("ALL test_s17_close_high_body OK")

@@ -1,6 +1,6 @@
 """S17 research: classify a finished bar by close / high / body.
 
-Not paper. Not live. No LONG/SHORT yet — counts only, then you add sides later.
+Not paper. Not live.
 
 c = this finished candle, p = previous finished candle.
 
@@ -18,12 +18,13 @@ Same 2×2×2 grid, two cells not listed (add later if you want them):
   7. C>pC  H<pH  C>O     up_lh_green
   8. C<pC  H>pH  C<O     dn_hh_red
 
-Leftover under strict > / <: C=pC, H=pH, C=O.
+Leftover under strict > / <: C=pC, H=pH, C=O. Books skip leftover.
 
-Inside every bucket we only *record* (not trade):
-  lows vs previous low (HL / LL / equal)
-  wick (upper vs lower)
-  S12 HH+green / LL+red
+Books (FLIP, fill at this bar's close), only on listed+missing:
+  hhhl = S12 (HH+green LONG, LL+red SHORT)
+  wick = raw wick if |U−L| ≥ min_wick_gap
+  and  = both same side
+  or   = either side, skip if they fight
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from backtest_hhhl_candles import Candle, in_session
+from backtest_hhhl_candles import Candle, Trade, in_session, make_charge_cfg
+from backtest_wick_candles import _tf_result_from_trades
+from charges import ChargeConfig, apply_charges_and_tax
 from wick_candles import wick_measure
 
 LISTED_BUCKETS: tuple[str, ...] = (
@@ -61,8 +64,11 @@ USER_COLUMNS: tuple[tuple[str, str, str, str], ...] = (
 FORMULA = (
     "Wait for the candle to finish. Classify vs previous close, previous high, "
     "and body (C vs O). Six listed gates; two more cells in the same grid; "
-    "equals are leftover. Record lows + wicks. No LONG/SHORT yet."
+    "equals are leftover. Record lows + wicks. Books (research): leftover skip; "
+    "hhhl / wick / AND / OR-skip-fight. Fill at close. FLIP."
 )
+
+BOOK_MODES: tuple[str, ...] = ("hhhl", "wick", "and", "or")
 
 
 def _cmp_tag(cur: float, prev: float, gt: str, lt: str) -> str:
@@ -241,3 +247,159 @@ def ordered_bucket_names(counts: dict[str, BucketCount]) -> list[str]:
     names = list(LISTED_BUCKETS) + list(MISSING_BUCKETS)
     extra = sorted(k for k in counts if k not in names)
     return names + extra
+
+
+def s17_bar_decision(
+    prev: Candle,
+    cur: Candle,
+    *,
+    mode: str = "hhhl",
+    min_wick_gap: float = 3.0,
+) -> tuple[str | None, str]:
+    """One finished candle → ('long'|'short'|None, why). Leftover always skip."""
+    if mode not in BOOK_MODES:
+        raise ValueError(f"unknown book mode {mode!r}. have: {', '.join(BOOK_MODES)}")
+    row = classify_bar(prev, cur)
+    if row["kind"] == "leftover":
+        return None, f"leftover {row['bucket']}"
+    hh = None if row["hhhl"] == "none" else str(row["hhhl"])
+    wk = None if row["wick"] == "none" else str(row["wick"])
+    if float(row["wick_gap"]) < float(min_wick_gap):
+        wk = None
+    tag = row["bucket"]
+    if mode == "hhhl":
+        if hh:
+            return hh, f"{tag} hhhl {hh}"
+        return None, f"{tag} no hhhl"
+    if mode == "wick":
+        if wk:
+            return wk, f"{tag} wick {wk}"
+        return None, f"{tag} no wick"
+    if mode == "and":
+        if hh and wk and hh == wk:
+            return hh, f"{tag} and {hh}"
+        return None, f"{tag} and skip"
+    # or: take the one signal; skip fights
+    if hh and wk and hh != wk:
+        return None, f"{tag} or fight skip"
+    side = hh or wk
+    if side:
+        return side, f"{tag} or {side}"
+    return None, f"{tag} or skip"
+
+
+def _close_leg(
+    *,
+    tf: str,
+    side: str,
+    entry_time: str,
+    entry_px: float,
+    exit_c: Candle,
+    cfg: ChargeConfig,
+) -> Trade:
+    if side == "LONG":
+        pts = exit_c.close - entry_px
+        order_side = "BUY"
+    else:
+        pts = entry_px - exit_c.close
+        order_side = "SELL"
+    settled = apply_charges_and_tax(
+        pts,
+        cfg,
+        side=order_side,
+        entry_price=entry_px,
+        exit_price=exit_c.close,
+    )
+    return Trade(
+        tf=tf,
+        side=side,
+        entry_time=entry_time,
+        entry_px=entry_px,
+        exit_time=exit_c.time,
+        exit_px=exit_c.close,
+        gross_pts=float(pts) * float(cfg.lot_size),
+        gross_pnl_inr=float(settled["gross_pnl"]),
+        after_tax_pnl_inr=float(settled["pnl_after_tax"]),
+        fees_inr=float(settled["charges"]),
+        lots=float(cfg.lot_size),
+    )
+
+
+def simulate_s17(
+    candles: list[Candle],
+    *,
+    tf: str,
+    mode: str = "hhhl",
+    lots: float = 100.0,
+    fees: bool = True,
+    session_filter: bool = True,
+    market_open: str = "09:00",
+    market_close: str = "23:30",
+    charge_cfg: ChargeConfig | None = None,
+    min_wick_gap: float = 3.0,
+) -> Any:
+    """FLIP book on listed+missing buckets. Fill at signal-bar close."""
+    cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
+    trades: list[Trade] = []
+    side: str | None = None
+    entry_px = 0.0
+    entry_time = ""
+
+    def close_trade(exit_c: Candle) -> None:
+        nonlocal side, entry_px, entry_time
+        assert side is not None
+        trades.append(
+            _close_leg(
+                tf=tf,
+                side=side,
+                entry_time=entry_time,
+                entry_px=entry_px,
+                exit_c=exit_c,
+                cfg=cfg,
+            )
+        )
+        side = None
+
+    for i in range(1, len(candles)):
+        prev, cur = candles[i - 1], candles[i]
+        sess_ok = (not session_filter) or in_session(
+            cur, open_hhmm=market_open, close_hhmm=market_close
+        )
+        if side is not None and session_filter and not sess_ok:
+            close_trade(cur)
+            continue
+        if session_filter and not sess_ok:
+            continue
+
+        want, _why = s17_bar_decision(
+            prev, cur, mode=mode, min_wick_gap=min_wick_gap
+        )
+        want_long = want == "long"
+        want_short = want == "short"
+
+        if side == "LONG":
+            if want_short:
+                close_trade(cur)
+                side = "SHORT"
+                entry_px = cur.close
+                entry_time = cur.time
+            continue
+        if side == "SHORT":
+            if want_long:
+                close_trade(cur)
+                side = "LONG"
+                entry_px = cur.close
+                entry_time = cur.time
+            continue
+        if want_long:
+            side = "LONG"
+            entry_px = cur.close
+            entry_time = cur.time
+        elif want_short:
+            side = "SHORT"
+            entry_px = cur.close
+            entry_time = cur.time
+
+    if side is not None and candles:
+        close_trade(candles[-1])
+    return _tf_result_from_trades(tf, len(candles), trades)
