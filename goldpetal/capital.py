@@ -31,10 +31,8 @@ DEFAULT_STRATEGIES = (
     "S9_STATE30",
     "S10_LEGACY30",
     "S11_DISCOVERED",
-    "S12_HHHL30",
     "S13_HHHL_DAY",
-    "S14_WICK30_STRICT",
-    "S15_WICK30_NOWICK",
+    "S16_HHHL_WICK_1H",
 )
 
 _HUNDRED_LOT = set(SLIM_PAPER_STRATEGIES)
@@ -94,7 +92,7 @@ def default_plan() -> CapitalPlan:
     each = round(deployable / len(DEFAULT_STRATEGIES), 2)
     strats = {}
     for name in DEFAULT_STRATEGIES:
-        # Slim paper books (S4/S5/S8/S11/S12–S15) sized at PAPER_LOTS (100).
+        # Slim paper books (S4/S5/S8/S11/S13/S16) sized at PAPER_LOTS (100).
         lots = 100 if name in _HUNDRED_LOT else 10
         strats[name] = StrategyBudget(
             strategy=name, budget_inr=each, max_lots=lots

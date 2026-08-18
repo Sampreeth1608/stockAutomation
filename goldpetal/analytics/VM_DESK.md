@@ -112,24 +112,45 @@ EOD_FLATTEN_INTRADAY=true
 EOD_FLATTEN_MINUTES=5
 ```
 
-## S12 same-candle 30m HH/LL
+## S12 / S14 / S15 — retired from paper
 
-During a 30m candle, if high > previous candle high, watch it; in that candle's
-**last minute**, if close > open → long (within that 30m, not +another 30m).
-Exit on a later 30m candle's last minute when high < prev high and close < open.
-If that same exit candle is also a new LL+red (or HH+green), re-enter short/long
-immediately. A CLOSE-only does not lock the last minute.
-Never fill on the first tick of the next bar. Short mirror. S12 is **not**
-EOD-flattened in the last 5m (that window overlaps `:29`).
+S12 30m HHHL, S14 wick, and S15 nowick are **not** loaded. Leave them off:
 
 ```bash
-ENABLE_S12=true
-S12_BAR_MINUTES=30
-S12_MIN_RANGE=5
-S12_CONFIRM_MINUTES=1
+ENABLE_S12=false
+ENABLE_S14=false
+ENABLE_S15=false
 ```
 
-## S14 / S15 30m wick (paper)
+Research helpers (`backtest_s14_tick.py`, `explain_s14_candles.py`) still exist for old tape.
+
+## S16 1h HH/LL-or-wick (paper)
+
+Wait for the **1h** candle to finish. Same closed bar vs previous close:
+
+  C > prevC → HH/LL only (wicks ignored): HH+green LONG, LL+red SHORT
+  C < prevC → wick only, gap 0: lower>upper LONG, upper>lower SHORT
+  C = prevC → skip
+
+FLIP at that bar's close. Fill at close. Session flatten at EOD. Keep `DRY_RUN=true`.
+
+```bash
+ENABLE_S16=true
+S16_BAR_MINUTES=60
+S16_MIN_WICK_GAP=0
+```
+
+Restart the **bot** after pull (desk restart is not enough). Look for
+`S16_HHHL_WICK_1H` and heartbeat `s16=` in `data/strategy_run.log`.
+
+Hist (VM `ticks.db`):
+
+```bash
+cd ~/goldpetal-repo/goldpetal
+./venv/bin/python backtest_s16_hhhl_wick.py --db data/ticks.db --lots 100 --session --fees
+```
+
+## S14 / S15 30m wick (research only, not paper)
 
 **S14** (nothing else):
 
@@ -180,18 +201,8 @@ Angel has 1m 3m 5m 10m 15m 30m 1h 1d (not 45m/2h/3h). `--from-ticks` uses
 Default TFs: 1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 3h, 1d, then a day-by-day table.
 Writes `data/backtests/s14_tick/`. `S14_OPEN_HOLD_MINUTES=0` turns off open=high/low (wick only).
 
-```bash
-ENABLE_S14=true
-S14_BAR_MINUTES=30
-S14_MIN_RANGE=0
-S14_OPEN_HOLD_MINUTES=2
-ENABLE_S15=true
-S15_BAR_MINUTES=30
-S15_MIN_RANGE=0
-```
-
-Restart supervise after pull. Look for `S14_WICK30_STRICT` / `S15_WICK30_NOWICK`
-and heartbeat `s14=` / `s15=` in `data/strategy_run.log`.
+S14/S15 stay **off** in paper `.env` (`ENABLE_S14=false`, `ENABLE_S15=false`).
+The backtest scripts above do not load the live runner.
 
 
 ## Day-by-day HH/LL on S4 horizon
@@ -210,7 +221,7 @@ Prints a day table (`prevH` / `prevL` / HH / LL / signal) and writes
 
 ## Paper allowlist (stop S9 etc.)
 
-On **8787 Live money**, Save ENABLE_* with only the slim books checked (S4/S5/S8/S11/S12/S13/S14/S15). That writes `ENABLE_S9=false` (and S1/S2/S3/S6/S10) then Restart supervise on 8787.
+On **8787 Live money**, Save ENABLE_* with only the slim books checked (S4/S5/S8/S11/S13/S16). That writes `ENABLE_S9=false` (and S1/S2/S3/S6/S10/S12/S14/S15) then Restart supervise on 8787.
 
 Trades tab may still show **old** S9 history — filter to slim strategies.
 
@@ -247,7 +258,11 @@ ENABLE_S8=true
 ENABLE_S9=false
 ENABLE_S10=false
 ENABLE_S11=true
-ENABLE_S12=true
+ENABLE_S12=false
+ENABLE_S13=true
+ENABLE_S14=false
+ENABLE_S15=false
+ENABLE_S16=true
 DRY_RUN=true
 IGNORE_FEES=true
 ```

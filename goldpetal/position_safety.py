@@ -30,6 +30,7 @@ INTRADAY_RESTORE = (
     "S13_HHHL_DAY",
     "S14_WICK30_STRICT",
     "S15_WICK30_NOWICK",
+    "S16_HHHL_WICK_1H",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -38,8 +39,7 @@ INTRADAY_RESTORE = (
     "S11_DISCOVERED",
 )
 
-# S12/S14/S15 last-minute confirm overlaps the last 5m before MARKET_CLOSE.
-# S13 is a multi-day hold.
+# S13 is a multi-day hold. Retired S12/S14/S15 last-minute confirm overlapped EOD.
 EOD_FLATTEN_SKIP = frozenset(
     {"S12_HHHL30", "S13_HHHL_DAY", "S14_WICK30_STRICT", "S15_WICK30_NOWICK"}
 )

@@ -43,7 +43,7 @@ def _round_trip(db: Path) -> None:
         net=20.0,
         net_delta=2.0,
         dry_run=True,
-        strategy="S14_WICK30_STRICT",
+        strategy="S16_HHHL_WICK_1H",
         cmp=15010.0,
         db_path=db,
     )
@@ -57,7 +57,7 @@ def _round_trip(db: Path) -> None:
         net=10.0,
         net_delta=-2.0,
         dry_run=True,
-        strategy="S14_WICK30_STRICT",
+        strategy="S16_HHHL_WICK_1H",
         cmp=15025.0,
         db_path=db,
     )
@@ -106,7 +106,7 @@ def test_history_payload_has_closed_trade_and_ticks() -> None:
         assert hist["ticks"]
         assert hist["total_closed"] >= 1
         assert hist["trades"]
-        assert hist["trades"][0]["strategy"] == "S14_WICK30_STRICT"
+        assert hist["trades"][0]["strategy"] == "S16_HHHL_WICK_1H"
         assert hist["lots"] == 100
         # 15 points at 100 lots → ₹1500 gross (1g contract, ₹1/point/lot)
         closed = hist["trades"][0]
@@ -129,11 +129,11 @@ def test_list_signals_limit_keeps_latest() -> None:
                 net=0.0,
                 net_delta=0.0,
                 dry_run=True,
-                strategy="S14_WICK30_STRICT",
+                strategy="S16_HHHL_WICK_1H",
                 cmp=15000.0 + i,
                 db_path=db,
             )
-        rows = list_signals(strategy="S14_WICK30_STRICT", db_path=db, limit=2)
+        rows = list_signals(strategy="S16_HHHL_WICK_1H", db_path=db, limit=2)
         assert len(rows) == 2
         assert rows[0]["reason"] == "3"
         assert rows[1]["reason"] == "4"

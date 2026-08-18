@@ -1,4 +1,7 @@
-"""S12_HHHL30 — Higher-high / lower-low on the *same* 30m candle (paper).
+"""S12_HHHL30 — Higher-high / lower-low on the *same* 30m candle.
+
+Retired from paper (ENABLE_S12=false). Module kept for tests and old tape.
+"""
 
 Judgement (user rule): every action is taken on the candle that printed the
 signal, in that candle's last minute — never on the next bar.

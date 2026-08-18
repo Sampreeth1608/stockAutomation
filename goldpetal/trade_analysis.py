@@ -16,6 +16,7 @@ SHORT = {
     "S13_HHHL_DAY": "S13 HHHL day",
     "S14_WICK30_STRICT": "S14 wick",
     "S15_WICK30_NOWICK": "S15 no-wick",
+    "S16_HHHL_WICK_1H": "S16 HHHL+wick 1h",
 }
 
 WHAT_IT_GUESSES = {
@@ -27,6 +28,7 @@ WHAT_IT_GUESSES = {
     "S13_HHHL_DAY": "Same HH/LL rule on the day candle, with the same close-beyond fakeout filter.",
     "S14_WICK30_STRICT": "Same-candle open=high SHORT / open=low LONG, else wick. Weak nearly-equal wicks are skipped (formula order unchanged).",
     "S15_WICK30_NOWICK": "Bald 30m body only, HOLD (no reverse). Fewer trades; still no real edge filter.",
+    "S16_HHHL_WICK_1H": "Wait for the 1h candle to finish. Up close: HH+green LONG / LL+red SHORT. Down close: wick (gap 0). FLIP at that close.",
 }
 
 
@@ -137,7 +139,7 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
     if flips:
         notes.append(
             f"{flips} closes are FLIPs (CLOSED_FORCED): the book dumped one side to take the other. "
-            f"Always-in rules (especially S14 every 30m) do this on noise."
+            f"Always-in rules (S16 on each finished 1h) do this on the opposite signal."
         )
     if ignore_fees_enabled():
         notes.append(
@@ -156,12 +158,12 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
         "coin flip. 70% is a stretch used when some hour actually hits it; if 70% is "
         "never available the book still takes its better-than-base setups. CLOSE is never gated."
     )
-    s14 = next((b for b in books if b["strategy"] == "S14_WICK30_STRICT"), None)
-    if s14 and int(s14["closed"]) >= 8:
+    s16 = next((b for b in books if b["strategy"] == "S16_HHHL_WICK_1H"), None)
+    if s16 and int(s16["closed"]) >= 8:
         notes.append(
-            f"S14 wick: {s14['closed']} closes, gross win {s14['win_rate_gross']}%, "
-            f"after-tax win {s14['win_rate_after_tax']}%, after-tax ₹ {s14['pnl_after_tax']}. "
-            f"It must pick LONG or SHORT on almost every finished 30m candle — that is a coin flip plus fees."
+            f"S16 1h: {s16['closed']} closes, gross win {s16['win_rate_gross']}%, "
+            f"after-tax win {s16['win_rate_after_tax']}%, after-tax ₹ {s16['pnl_after_tax']}. "
+            f"It waits for the hour to finish, then HH/LL on an up close or wick on a down close."
         )
     noisy = [
         b
