@@ -13,8 +13,11 @@ on that **same** closed bar vs the previous closed bar:
 
 FLIP if already the other side. Fill at this bar's close.
 No range skip. No bald-body. No open=high/low (that is S14).
-Intraday only: first fill is the first finished 1h of the session;
-flatten at MARKET_CLOSE (and leftover at next MARKET_OPEN). Never overnight.
+Intraday only: the first finished session 1h is stored as prev (no trade).
+The next finished session 1h can BUY/SHORT only if this formula picks a
+side vs that same-session prev. Never use yesterday's last hour or a
+preopen hour as prev. Flatten at MARKET_CLOSE (and leftover at next
+MARKET_OPEN). Never overnight.
 Not live-unlocked. Paper 100 lots ≠ live.
 """
 
@@ -127,6 +130,22 @@ class S16HhhlWickStrategy:
         t = dt.hour * 60 + dt.minute
         return (oh * 60 + om) <= t < (ch * 60 + cm)
 
+    def _same_session_prev(self, prev: Candle, cur: Candle) -> bool:
+        """Prev must be a session 1h from the same calendar day as cur."""
+        if not self._bar_started_in_session(prev):
+            return False
+        if not self._bar_started_in_session(cur):
+            return False
+        prev_day = prev.time[:10]
+        return bool(prev_day) and prev_day == cur.time[:10]
+
+    def _drop_stale_prev(self, now: datetime) -> None:
+        if self._prev is None:
+            return
+        today = now.strftime("%Y-%m-%d")
+        if self._prev.time[:10] != today or not self._bar_started_in_session(self._prev):
+            self._prev = None
+
     def _session_flatten_why(self, now: datetime) -> str | None:
         if self.position == "flat":
             return None
@@ -170,7 +189,10 @@ class S16HhhlWickStrategy:
             and self._bar_started_in_session(closed)
         ):
             result = self._decide_closed(closed)
-        if self._bar_started_in_session(closed):
+        if (
+            self._bar_started_in_session(closed)
+            and closed.time[:10] == now.strftime("%Y-%m-%d")
+        ):
             self._prev = closed
         return result
 
@@ -245,13 +267,18 @@ class S16HhhlWickStrategy:
             cur_ohlc = self._ohlc_from_rows(rows, cur_key)
             if prev_ohlc is not None:
                 o, h, l, c, _n = prev_ohlc
-                self._prev = Candle(
+                cand = Candle(
                     time=prev_key.strftime("%Y-%m-%d %H:%M:%S"),
                     open=o,
                     high=h,
                     low=l,
                     close=c,
                 )
+                if (
+                    cand.time[:10] == now.strftime("%Y-%m-%d")
+                    and self._bar_started_in_session(cand)
+                ):
+                    self._prev = cand
             if cur_ohlc is None:
                 return
             o, h, l, c, n = cur_ohlc
@@ -290,6 +317,7 @@ class S16HhhlWickStrategy:
     ) -> SignalResult | None:
         del message
         now = now.astimezone(IST)
+        self._drop_stale_prev(now)
         key = self._floor_bar(now)
         px = float(ltp)
         flatten_why = self._session_flatten_why(now)
@@ -304,7 +332,12 @@ class S16HhhlWickStrategy:
         if key != self._bar_key:
             closed = self._closed_candle()
             result = None if flatten_why else self._maybe_decide_closed(closed, now)
-            if flatten_why and closed is not None and self._bar_started_in_session(closed):
+            if (
+                flatten_why
+                and closed is not None
+                and self._bar_started_in_session(closed)
+                and closed.time[:10] == now.strftime("%Y-%m-%d")
+            ):
                 self._prev = closed
             self._reset_bar(key, px)
             if flatten_why:
@@ -338,7 +371,7 @@ class S16HhhlWickStrategy:
         if cur is None:
             self.last_skip = "no_closed_bar"
             return None
-        if self._prev is None:
+        if self._prev is None or not self._same_session_prev(self._prev, cur):
             self.last_skip = "need_prev_1h"
             return None
         side, why = s16_bar_decision(

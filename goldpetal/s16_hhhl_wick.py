@@ -267,6 +267,12 @@ def simulate_s16(
             continue
         if session_filter and not sess_ok:
             continue
+        if session_filter:
+            prev_sess = in_session(
+                prev, open_hhmm=market_open, close_hhmm=market_close
+            )
+            if (not prev_sess) or prev.time[:10] != cur.time[:10]:
+                continue
 
         want, _why = decide_fn(prev, cur)
         want_long = want == "long"

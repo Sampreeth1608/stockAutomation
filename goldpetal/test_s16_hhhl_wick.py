@@ -152,6 +152,36 @@ def test_walk_marks_flip() -> None:
     assert rows[1]["action"] == "FLIP"
 
 
+def test_session_filter_skips_first_hour_vs_prior_day() -> None:
+    candles = [
+        _c("2026-08-17 23:00:00", 90.0, 140.0, 80.0, 80.0),
+        _c("2026-08-18 09:00:00", 100.0, 130.0, 100.0, 120.0),
+        _c("2026-08-18 10:00:00", 120.0, 140.0, 119.0, 130.0),
+        _c("2026-08-18 11:00:00", 130.0, 131.0, 129.0, 130.5),
+    ]
+    r = simulate_s16(
+        candles, tf="toy:sess", lots=1, fees=False, session_filter=True, min_wick_gap=0
+    )
+    assert r.n_trades == 1
+    assert r.trades[0].entry_time == "2026-08-18 10:00:00"
+    assert r.trades[0].entry_px == 130.0
+
+
+def test_session_filter_skips_first_hour_vs_preopen() -> None:
+    candles = [
+        _c("2026-08-17 08:00:00", 90.0, 140.0, 80.0, 80.0),
+        _c("2026-08-17 09:00:00", 100.0, 130.0, 100.0, 120.0),
+        _c("2026-08-17 10:00:00", 120.0, 140.0, 119.0, 130.0),
+        _c("2026-08-17 11:00:00", 130.0, 131.0, 129.0, 130.5),
+    ]
+    r = simulate_s16(
+        candles, tf="toy:pre", lots=1, fees=False, session_filter=True, min_wick_gap=0
+    )
+    assert r.n_trades == 1
+    assert r.trades[0].entry_time == "2026-08-17 10:00:00"
+    assert r.trades[0].entry_px == 130.0
+
+
 def test_paper_wired_1h_not_s17() -> None:
     assert "S16_HHHL_WICK_1H" in ALL_STRATEGY_NAMES
     assert "S16_HHHL_WICK_1H" in SLIM_PAPER_STRATEGIES
@@ -213,6 +243,8 @@ if __name__ == "__main__":
     test_enter_then_flip()
     test_skip_bar_holds_open_trade()
     test_walk_marks_flip()
+    test_session_filter_skips_first_hour_vs_prior_day()
+    test_session_filter_skips_first_hour_vs_preopen()
     test_paper_wired_1h_not_s17()
     test_gap_compare_groups_every_tf_and_gap()
     print("ALL test_s16_hhhl_wick OK")

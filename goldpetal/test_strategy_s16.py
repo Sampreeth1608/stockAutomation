@@ -149,6 +149,119 @@ def test_overnight_leftover_closes_at_next_open() -> None:
     assert "overnight leftover" in (close.reason or "")
 
 
+def test_yesterday_prev_does_not_fill_first_hour() -> None:
+    from backtest_hhhl_candles import Candle
+
+    s = _s16()
+    s._prev = Candle("2026-08-16 22:00:00", 90.0, 140.0, 80.0, 80.0)
+    s.on_tick(_t(9, 0), 100.0)
+    s.on_tick(_t(9, 10), 105.0)
+    s.on_tick(_t(9, 20), 99.0)
+    s.on_tick(_t(9, 59), 104.0)
+    assert s.on_tick(_t(10, 0), 100.0) is None
+    assert s.position == "flat"
+    assert s.last_skip == "need_prev_1h"
+    assert s._prev is not None
+    assert s._prev.time.startswith("2026-08-17 09:00")
+    assert s._prev.close == 104.0
+
+
+def test_preopen_prev_does_not_fill_first_hour() -> None:
+    from backtest_hhhl_candles import Candle
+
+    s = _s16()
+    s._prev = Candle("2026-08-17 08:00:00", 90.0, 140.0, 80.0, 80.0)
+    s.on_tick(_t(9, 0), 100.0)
+    s.on_tick(_t(9, 10), 105.0)
+    s.on_tick(_t(9, 20), 99.0)
+    s.on_tick(_t(9, 59), 104.0)
+    assert s.on_tick(_t(10, 0), 100.0) is None
+    assert s.position == "flat"
+    assert s.last_skip == "need_prev_1h"
+
+
+def test_second_hour_picks_side_after_stale_prev() -> None:
+    from backtest_hhhl_candles import Candle
+
+    s = _s16()
+    s._prev = Candle("2026-08-16 22:00:00", 90.0, 140.0, 80.0, 80.0)
+    s.on_tick(_t(9, 0), 100.0)
+    s.on_tick(_t(9, 10), 105.0)
+    s.on_tick(_t(9, 20), 99.0)
+    s.on_tick(_t(9, 59), 104.0)
+    assert s.on_tick(_t(10, 0), 100.0) is None
+    s.on_tick(_t(10, 10), 120.0)
+    s.on_tick(_t(10, 59), 110.0)
+    result = s.on_tick(_t(11, 0), 110.0)
+    assert result is not None
+    assert result.action == "BUY"
+    assert "C>prev → HH+green" in result.reason
+    assert s.entry_price == 110.0
+
+
+def test_seed_skips_preopen_and_yesterday() -> None:
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        con = sqlite3.connect(str(db))
+        con.execute(
+            "CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "received_at TEXT NOT NULL, ltp REAL)"
+        )
+        con.executemany(
+            "INSERT INTO ticks (received_at, ltp) VALUES (?, ?)",
+            [
+                ("2026-08-16T23:00:00+05:30", 90.0),
+                ("2026-08-16T23:59:00+05:30", 80.0),
+                ("2026-08-17T08:00:00+05:30", 90.0),
+                ("2026-08-17T08:59:00+05:30", 80.0),
+                ("2026-08-17T09:00:00+05:30", 100.0),
+                ("2026-08-17T09:10:00+05:30", 101.0),
+            ],
+        )
+        con.commit()
+        con.close()
+        s = _s16()
+        s.seed_from_ticks(db, now=_t(9, 15))
+        assert s._prev is None
+        s.seed_from_ticks(db, now=datetime(2026, 8, 17, 0, 30, tzinfo=IST))
+        assert s._prev is None
+
+
+def test_seed_keeps_todays_closed_session_hour() -> None:
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        con = sqlite3.connect(str(db))
+        con.execute(
+            "CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "received_at TEXT NOT NULL, ltp REAL)"
+        )
+        con.executemany(
+            "INSERT INTO ticks (received_at, ltp) VALUES (?, ?)",
+            [
+                ("2026-08-17T09:00:00+05:30", 100.0),
+                ("2026-08-17T09:10:00+05:30", 105.0),
+                ("2026-08-17T09:59:00+05:30", 104.0),
+                ("2026-08-17T10:00:00+05:30", 100.0),
+                ("2026-08-17T10:10:00+05:30", 101.0),
+            ],
+        )
+        con.commit()
+        con.close()
+        s = _s16()
+        s.seed_from_ticks(db, now=_t(10, 15))
+        assert s._prev is not None
+        assert s._prev.time.startswith("2026-08-17 09:00")
+        assert s._prev.close == 104.0
+
+
 if __name__ == "__main__":
     test_forming_hour_does_not_trade()
     test_first_closed_hour_needs_prev()
@@ -159,4 +272,9 @@ if __name__ == "__main__":
     test_on_bar_row_uses_prev()
     test_flatten_at_market_close()
     test_overnight_leftover_closes_at_next_open()
+    test_yesterday_prev_does_not_fill_first_hour()
+    test_preopen_prev_does_not_fill_first_hour()
+    test_second_hour_picks_side_after_stale_prev()
+    test_seed_skips_preopen_and_yesterday()
+    test_seed_keeps_todays_closed_session_hour()
     print("ALL test_strategy_s16 OK")
