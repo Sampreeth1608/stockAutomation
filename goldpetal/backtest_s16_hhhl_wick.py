@@ -23,7 +23,6 @@ from backtest_hhhl_candles import (
     Candle,
     TfResult,
     make_charge_cfg,
-    print_by_day,
     write_outputs,
 )
 from backtest_wick_candles import (
@@ -119,6 +118,134 @@ def _gap_tag(gap: float) -> str:
 
 def _gaps_eq(a: float, b: float) -> bool:
     return abs(float(a) - float(b)) < 1e-9
+
+
+def _split_tf_tag(name: str) -> tuple[str, str]:
+    tf, sep, tag = name.partition(":")
+    return tf, tag if sep else "g?"
+
+
+def _group_gap_results(
+    results: list[TfResult],
+) -> tuple[list[str], list[str], dict[str, dict[str, TfResult]]]:
+    tf_order: list[str] = []
+    tag_order: list[str] = []
+    by: dict[str, dict[str, TfResult]] = {}
+    for r in results:
+        tf, tag = _split_tf_tag(r.tf)
+        if tf not in by:
+            by[tf] = {}
+            tf_order.append(tf)
+        by[tf][tag] = r
+        if tag not in tag_order:
+            tag_order.append(tag)
+    return tf_order, tag_order, by
+
+
+def print_gap_compare(results: list[TfResult]) -> None:
+    """One block per TF: every wick gap, plus Δ₹ vs the first gap (g0)."""
+    tf_order, tag_order, by = _group_gap_results(results)
+    if not tf_order:
+        return
+    base = tag_order[0]
+    print(f"=== Wick-gap compare — all TF × all gaps (Δ₹ vs {base}) ===")
+    for tf in tf_order:
+        row = by[tf]
+        any_r = next(iter(row.values()))
+        print(f"  {tf}  bars={any_r.n_bars}")
+        print(
+            f"    {'gap':>4}  {'tr':>4}  {'L/S':>7}  {'win%':>6}  "
+            f"{'₹':>10}  {'fees':>8}  {'maxDD':>8}  {'Δ₹':>10}"
+        )
+        base_pnl = row[base].after_tax_pnl_inr if base in row else 0.0
+        for tag in tag_order:
+            r = row.get(tag)
+            if r is None:
+                print(f"    {tag:>4}  —")
+                continue
+            delta = "—" if tag == base else f"{r.after_tax_pnl_inr - base_pnl:+.0f}"
+            print(
+                f"    {tag:>4}  {r.n_trades:4d}  {r.n_long:3d}/{r.n_short:<3d}  "
+                f"{100 * r.win_rate:5.1f}%  {r.after_tax_pnl_inr:10.0f}  "
+                f"{r.fees_inr:8.0f}  {r.max_dd_inr:8.0f}  {delta:>10}"
+            )
+        print()
+    print(f"Δ₹ = this gap minus {base}. Positive means the wider wick gap helped after tax.")
+    print()
+
+
+def print_by_day_gaps(results: list[TfResult]) -> None:
+    tf_order, tag_order, by = _group_gap_results(results)
+    print("=== Day-by-day after-tax ₹ — all TF × all gaps ===")
+    for tf in tf_order:
+        days: set[str] = set()
+        for r in by[tf].values():
+            days.update(r.by_day)
+        if not days:
+            continue
+        print(f"  -- {tf} --")
+        for day in sorted(days):
+            bits: list[str] = []
+            for tag in tag_order:
+                r = by[tf].get(tag)
+                d = r.by_day.get(day) if r else None
+                if not d:
+                    bits.append(f"{tag}:—")
+                    continue
+                bits.append(
+                    f"{tag}:{d['after_tax_pnl_inr']:+.0f}({int(d['n_trades'])}t)"
+                )
+            print(f"  {day}  " + "  ".join(bits))
+    print()
+
+
+def write_gap_compare_csv(path: Path, results: list[TfResult]) -> None:
+    tf_order, tag_order, by = _group_gap_results(results)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "tf",
+        "gap",
+        "n_bars",
+        "n_trades",
+        "n_long",
+        "n_short",
+        "win_rate",
+        "gross_pts",
+        "fees_inr",
+        "after_tax_pnl_inr",
+        "max_dd_inr",
+        "delta_vs_base_inr",
+    ]
+    base = tag_order[0] if tag_order else ""
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for tf in tf_order:
+            base_pnl = (
+                by[tf][base].after_tax_pnl_inr if base in by[tf] else 0.0
+            )
+            for tag in tag_order:
+                r = by[tf].get(tag)
+                if r is None:
+                    continue
+                w.writerow(
+                    {
+                        "tf": tf,
+                        "gap": tag,
+                        "n_bars": r.n_bars,
+                        "n_trades": r.n_trades,
+                        "n_long": r.n_long,
+                        "n_short": r.n_short,
+                        "win_rate": round(r.win_rate, 4),
+                        "gross_pts": round(r.gross_pts, 2),
+                        "fees_inr": round(r.fees_inr, 2),
+                        "after_tax_pnl_inr": round(r.after_tax_pnl_inr, 2),
+                        "max_dd_inr": round(r.max_dd_inr, 2),
+                        "delta_vs_base_inr": round(
+                            r.after_tax_pnl_inr - base_pnl, 2
+                        ),
+                    }
+                )
 
 
 def run_from_ticks(
@@ -353,10 +480,11 @@ def main() -> None:
             f"S16 C>prev HH/LL / C<prev wick-gap  lots={args.lots:g}  fees={fees}"
         ),
     )
-    day_rows = [r for r in results if r.tf.endswith(":" + _gap_tag(print_gap))]
-    print_by_day(day_rows or results)
+    print_gap_compare(results)
+    print_by_day_gaps(results)
     write_outputs(results, args.out)
-    print(f"wrote {args.out}", flush=True)
+    write_gap_compare_csv(args.out / "gap_compare.csv", results)
+    print(f"wrote {args.out} (including gap_compare.csv)", flush=True)
     print("Not paper. Not live. Pick a TF row first.", flush=True)
 
 

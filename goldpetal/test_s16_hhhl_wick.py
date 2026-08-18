@@ -161,6 +161,37 @@ def test_not_wired_to_paper_or_station() -> None:
     assert "ENABLE_S16" not in runner
 
 
+def test_gap_compare_groups_every_tf_and_gap() -> None:
+    from backtest_s16_hhhl_wick import _group_gap_results, print_gap_compare
+
+    candles = [
+        PREV,
+        _c("2026-08-17 10:30:00", 104.0, 130.0, 80.0, 90.0),
+        _c("2026-08-17 11:00:00", 89.0, 91.0, 85.0, 88.0),
+        _c("2026-08-17 11:30:00", 88.0, 89.0, 87.0, 88.5),
+    ]
+    results = []
+    for tf in ("30m", "1h"):
+        for gap, tag in ((0, "g0"), (3, "g3"), (5, "g5"), (10, "g10")):
+            results.append(
+                simulate_s16(
+                    candles,
+                    tf=f"{tf}:{tag}",
+                    lots=1,
+                    fees=False,
+                    session_filter=False,
+                    min_wick_gap=gap,
+                )
+            )
+    tfs, tags, by = _group_gap_results(results)
+    assert tfs == ["30m", "1h"]
+    assert tags == ["g0", "g3", "g5", "g10"]
+    assert by["30m"]["g0"].n_trades == 2
+    assert by["30m"]["g3"].n_trades == 1
+    assert by["1h"]["g10"].n_trades == 1
+    print_gap_compare(results)
+
+
 if __name__ == "__main__":
     test_up_close_takes_hh_green_even_with_upper_wick()
     test_up_close_without_hhhl_skips_even_if_wick()
@@ -175,4 +206,5 @@ if __name__ == "__main__":
     test_skip_bar_holds_open_trade()
     test_walk_marks_flip()
     test_not_wired_to_paper_or_station()
+    test_gap_compare_groups_every_tf_and_gap()
     print("ALL test_s16_hhhl_wick OK")
