@@ -164,7 +164,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </header>
   <div class="you-strip" id="you-strip">
     <b>You</b>
-    <span class="hint">Records what you would do. Does not place an order.</span>
+    <span class="hint" id="you-strip-hint">Records only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Does not place an order.</span>
     <span class="mono" id="you-strip-ltp">LTP —</span>
     <button class="btn ok" type="button" data-you="buy">BUY</button>
     <button class="btn danger" type="button" data-you="short">SHORT</button>
@@ -292,8 +292,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="you-panel" hidden>
         <h2>Human trade capture</h2>
-        <p class="hint">Your manual trades use timing and a skip filter that coded rules do not have. Press what you would do <b>now</b>. We store 50×1m candles, 30s of LTP, book, OI, VWAP — then mark 5s / 10s / 30s / 1m / 5m from the tape. <b>Does not place an order.</b> NO TRADE is as important as BUY.</p>
-        <div class="ml-banner ok">This tab never ENABLES a book and never arms Angel. Keep DRY_RUN=true.</div>
+        <p class="hint">Your manual trades use timing and a skip filter that coded rules do not have. Press what you would do <b>now</b> — only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). We store 50×1m candles, 30s of LTP, book, OI, VWAP — then mark 5s / 10s / 30s / 1m / 5m from the tape. <b>Does not place an order.</b> NO TRADE is as important as BUY.</p>
+        <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. This tab never ENABLES a book and never arms Angel. Keep DRY_RUN=true.</div>
         <p class="flash" id="flash-you"></p>
         <div class="ml-card">
           <h3>Record this market</h3>
@@ -860,6 +860,21 @@ function vsLabel(k) {
     you_skipped_rule_quiet: "NO TRADE — rule also quiet",
   })[k] || k;
 }
+function applyYouSession(d) {
+  const sess = (d && d.session) || {};
+  const open = !!sess.open;
+  document.querySelectorAll("button[data-you]").forEach((b) => { b.disabled = !open; });
+  const stripHint = $("you-strip-hint");
+  if (stripHint) {
+    stripHint.textContent = (sess.label || "Records only while Gold Petal is open (Mon–Fri 09:00–23:30 IST)") +
+      ". Does not place an order.";
+  }
+  const banner = $("you-session-banner");
+  if (banner) {
+    banner.textContent = (sess.label || "session") + " — never ENABLES a book, never arms Angel. Keep DRY_RUN=true.";
+    banner.className = "ml-banner" + (open ? " ok" : "");
+  }
+}
 function renderYou() {
   const d = lastYou || {};
   const s = d.summary || {};
@@ -867,6 +882,7 @@ function renderYou() {
   $("you-ltp").textContent = d.ltp != null ? money(d.ltp) : "—";
   const stripLtp = $("you-strip-ltp");
   if (stripLtp) stripLtp.textContent = "LTP " + (d.ltp != null ? money(d.ltp) : "—");
+  applyYouSession(d);
   const n = s.n || 0;
   const el = $("you-badge");
   if (el) el.textContent = n ? " (" + n + ")" : "";
@@ -910,11 +926,14 @@ function renderYou() {
 }
 async function loadYou() {
   lastYou = await api("/api/capture");
+  applyYouSession(lastYou);
   if (watchTab === "you") renderYou();
   else {
     const n = ((lastYou.summary || {}).n) || 0;
     const el = $("you-badge");
     if (el) el.textContent = n ? " (" + n + ")" : "";
+    const stripLtp = $("you-strip-ltp");
+    if (stripLtp) stripLtp.textContent = "LTP " + (lastYou.ltp != null ? money(lastYou.ltp) : "—");
   }
 }
 async function recordYou(action) {

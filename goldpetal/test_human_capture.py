@@ -11,8 +11,10 @@ from control_state import ALL_STRATEGY_NAMES, SLIM_PAPER_STRATEGIES
 from human_capture import (
     capture_summary,
     example_public,
+    is_session_open,
     ltp_at_or_after,
     record_human,
+    session_status,
     settle_open,
     snapshot_market,
 )
@@ -20,6 +22,8 @@ from live_readiness import PAPER_ONLY_BOOKS
 from storage import init_db, save_tick
 
 IST = ZoneInfo("Asia/Kolkata")
+# Tuesday inside Gold Petal hours (Mon–Fri 09:00–23:30 IST)
+OPEN = datetime(2026, 8, 18, 11, 0, tzinfo=IST)
 
 
 def _tick(
@@ -76,7 +80,15 @@ def test_record_buy_does_not_trade(tmp_path: Path) -> None:
     snap = snapshot_market(db, tick_limit=50)
     assert snap["ltp"] is not None
     assert snap["ltp"] > 1000
-    rec = record_human("buy", confidence=4, note="looks genuine", db=db, path=store, snapshot=snap)
+    rec = record_human(
+        "buy",
+        confidence=4,
+        note="looks genuine",
+        db=db,
+        path=store,
+        snapshot=snap,
+        now=OPEN,
+    )
     assert rec["action"] == "buy"
     assert rec["places_order"] is False
     assert rec["paper"] is False
@@ -99,7 +111,7 @@ def test_no_trade_is_the_filter(tmp_path: Path) -> None:
     store = tmp_path / "examples.json"
     _tape(db, 10)
     snap = snapshot_market(db, tick_limit=40)
-    rec = record_human("no_trade", note="depth thin", db=db, path=store, snapshot=snap)
+    rec = record_human("no_trade", note="depth thin", db=db, path=store, snapshot=snap, now=OPEN)
     assert rec["action"] == "no_trade"
     assert rec["vs_coded"] in {
         "you_skipped_rule_would_take",
@@ -114,7 +126,7 @@ def test_settle_fills_horizons(tmp_path: Path) -> None:
     t0 = datetime(2026, 8, 18, 11, 0, tzinfo=IST)
     _tick(db, when=t0, ltp_paise=1_400_000, volume=2000)
     snap = snapshot_market(db, tick_limit=20)
-    rec = record_human("buy", db=db, path=store, snapshot=snap)
+    rec = record_human("buy", db=db, path=store, snapshot=snap, now=OPEN)
     _tick(db, when=t0 + timedelta(seconds=8), ltp_paise=1_400_800, volume=2100)
     _tick(db, when=t0 + timedelta(seconds=12), ltp_paise=1_401_000, volume=2200)
     n = settle_open(db, path=store, now=t0 + timedelta(seconds=15))
@@ -135,8 +147,8 @@ def test_summary_counts_skips(tmp_path: Path) -> None:
     store = tmp_path / "examples.json"
     _tape(db, 6)
     snap = snapshot_market(db, tick_limit=30)
-    record_human("buy", db=db, path=store, snapshot=snap)
-    record_human("no_trade", db=db, path=store, snapshot=snap)
+    record_human("buy", db=db, path=store, snapshot=snap, now=OPEN)
+    record_human("no_trade", db=db, path=store, snapshot=snap, now=OPEN)
     from human_capture import load_examples
 
     s = capture_summary(load_examples(store))
@@ -146,6 +158,27 @@ def test_summary_counts_skips(tmp_path: Path) -> None:
     vs = s["vs_coded"]
     assert vs["you_buy_rule_missed"] + vs["you_buy_rule_also"] == 1
     assert vs["you_skipped_rule_would_take"] + vs["you_skipped_rule_quiet"] == 1
+
+
+def test_refuses_when_market_closed(tmp_path: Path) -> None:
+    db = tmp_path / "ticks.db"
+    store = tmp_path / "examples.json"
+    _tape(db, 6)
+    snap = snapshot_market(db, tick_limit=20)
+    night = datetime(2026, 8, 18, 23, 45, tzinfo=IST)
+    weekend = datetime(2026, 8, 22, 12, 0, tzinfo=IST)  # Saturday
+    preopen = datetime(2026, 8, 18, 8, 59, tzinfo=IST)
+    assert not is_session_open(night)
+    assert not is_session_open(weekend)
+    assert not is_session_open(preopen)
+    assert is_session_open(OPEN)
+    assert session_status(OPEN)["open"] is True
+    for when in (night, weekend, preopen):
+        try:
+            record_human("buy", db=db, path=store, snapshot=snap, now=when)
+            raise AssertionError("closed session must not record")
+        except RuntimeError as exc:
+            assert "market closed" in str(exc)
 
 
 def test_not_a_paper_book() -> None:
@@ -176,5 +209,7 @@ if __name__ == "__main__":
     test_no_trade_is_the_filter(td / "b")
     test_settle_fills_horizons(td / "c")
     test_summary_counts_skips(td / "d")
+    (td / "e").mkdir()
+    test_refuses_when_market_closed(td / "e")
     test_not_a_paper_book()
     print("ALL test_human_capture OK")

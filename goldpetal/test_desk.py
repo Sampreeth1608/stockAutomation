@@ -29,6 +29,7 @@ def test_station_is_the_operator_page() -> None:
     assert "NO TRADE" in html
     assert "Does not place an order" in html
     assert "you_skipped_rule_would_take" in html
+    assert "Mon–Fri 09:00–23:30" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
@@ -87,6 +88,7 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Research Lab" in html
     assert "You — capture" in html
     assert "/#you" in html
+    assert "Mon–Fri 09:00–23:30" in html
     assert "/#lab" in html
     assert "/#lab" in html
     assert "after charges" in html

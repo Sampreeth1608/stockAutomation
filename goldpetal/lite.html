@@ -105,7 +105,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 
   <section class="card">
     <h2>You — capture</h2>
-    <p class="hint">Records what you would do. Does not trade. Full tape: <a href="/#you">station You tab</a>.</p>
+    <p class="hint">Records what you would do, only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Does not trade. Full tape: <a href="/#you">station You tab</a>.</p>
     <p class="hint" id="you-ltp-line">LTP …</p>
     <div class="row">
       <button class="btn ok" type="button" data-you="buy">BUY</button>
@@ -293,11 +293,15 @@ loadLab().catch(() => {});
 async function loadYou() {
   const d = await api("/api/capture");
   const s = (d && d.summary) || {};
-  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—");
+  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—") +
+    ((d.session && d.session.open) ? " · session open" : " · market closed");
   $("you-sum").textContent = "captured " + (s.n || 0) +
     " · BUY " + (s.n_buy || 0) +
     " · SHORT " + (s.n_short || 0) +
     " · NO TRADE " + (s.n_no_trade || 0);
+  const open = !!(d.session && d.session.open);
+  document.querySelectorAll("button[data-you]").forEach((b) => { b.disabled = !open; });
+  if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
 }
 document.querySelectorAll("button[data-you]").forEach((btn) => {
   btn.onclick = () => {

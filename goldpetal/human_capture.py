@@ -9,6 +9,7 @@ outcomes from ticks. No ENABLE. No Angel. Learning ≠ deploy.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from datetime import datetime, timedelta
@@ -31,6 +32,8 @@ LOOKBACK_1M = 50
 LOOKBACK_TICK_SEC = 30
 RECENT_TICK_LIMIT = 12000
 ACTIONS = frozenset({"buy", "short", "no_trade"})
+DEFAULT_MARKET_OPEN = "09:00"
+DEFAULT_MARKET_CLOSE = "23:30"
 
 _lock = threading.Lock()
 
@@ -41,6 +44,61 @@ def _now() -> datetime:
 
 def _now_iso() -> str:
     return _now().isoformat(timespec="seconds")
+
+
+def _aware(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        return now.replace(tzinfo=IST)
+    return now.astimezone(IST)
+
+
+def market_window() -> tuple[str, str]:
+    open_s = (os.getenv("MARKET_OPEN") or DEFAULT_MARKET_OPEN).strip() or DEFAULT_MARKET_OPEN
+    close_s = (os.getenv("MARKET_CLOSE") or DEFAULT_MARKET_CLOSE).strip() or DEFAULT_MARKET_CLOSE
+    return open_s, close_s
+
+
+def _parse_hhmm(value: str) -> tuple[int, int]:
+    parts = str(value or "").strip().split(":")
+    if len(parts) != 2:
+        return 9, 0
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return 9, 0
+
+
+def session_status(now: datetime | None = None) -> dict[str, Any]:
+    """Same Gold Petal window as the bot: Mon–Fri MARKET_OPEN–MARKET_CLOSE IST."""
+    clock = _aware(now or _now())
+    open_s, close_s = market_window()
+    oh, om = _parse_hhmm(open_s)
+    ch, cm = _parse_hhmm(close_s)
+    start = clock.replace(hour=oh, minute=om, second=0, microsecond=0)
+    end = clock.replace(hour=ch, minute=cm, second=0, microsecond=0)
+    weekend = clock.weekday() >= 5
+    open_ok = (not weekend) and (start <= clock <= end)
+    if weekend:
+        label = f"weekend — session is Mon–Fri {open_s}–{close_s} IST"
+    elif open_ok:
+        label = f"session open {open_s}–{close_s} IST"
+    else:
+        label = (
+            f"market closed — session is Mon–Fri {open_s}–{close_s} IST "
+            f"(now {clock.strftime('%a %H:%M')})"
+        )
+    return {
+        "open": open_ok,
+        "weekend": weekend,
+        "open_hhmm": open_s,
+        "close_hhmm": close_s,
+        "now_ist": clock.isoformat(timespec="seconds"),
+        "label": label,
+    }
+
+
+def is_session_open(now: datetime | None = None) -> bool:
+    return bool(session_status(now).get("open"))
 
 
 def _parse_ts(raw: str) -> datetime | None:
@@ -382,6 +440,7 @@ def record_human(
     db: Path | None = None,
     path: Path = EXAMPLES_PATH,
     snapshot: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     act = str(action or "").strip().lower().replace("-", "_").replace(" ", "_")
     if act in {"long", "buy_long"}:
@@ -392,6 +451,12 @@ def record_human(
         act = "no_trade"
     if act not in ACTIONS:
         raise ValueError("action must be buy, short, or no_trade")
+    sess = session_status(now)
+    if not sess["open"]:
+        raise RuntimeError(
+            "market closed — capture only Mon–Fri "
+            f"{sess['open_hhmm']}–{sess['close_hhmm']} IST"
+        )
     conf = max(1, min(5, int(confidence or 3)))
     snap = snapshot if snapshot is not None else snapshot_market(db)
     ltp = snap.get("ltp")
@@ -400,15 +465,18 @@ def record_human(
     coded = snap.get("coded") or {}
     example = {
         "id": uuid.uuid4().hex[:10],
-        "created_at_ist": _now_iso(),
+        "created_at_ist": _now_iso() if now is None else _aware(now).isoformat(timespec="seconds"),
         "action": act,
         "confidence": conf,
         "note": str(note or "")[:400],
         "entry_px": float(ltp),
-        "entry_at": snap.get("last_tick_at") or _now_iso(),
+        "entry_at": snap.get("last_tick_at") or (
+            _now_iso() if now is None else _aware(now).isoformat(timespec="seconds")
+        ),
         "vs_coded": _vs_coded(act, coded),
         "coded": coded,
         "snapshot": snap,
+        "session": sess,
         "outcomes": {},
         "settled": False,
         "places_order": False,
@@ -595,6 +663,7 @@ def capture_desk_payload(
             pass
     items = load_examples(path)
     ltp = latest_ltp(db_path)
+    sess = session_status()
     return {
         "ok": True,
         "ts_ist": _now_iso(),
@@ -602,10 +671,12 @@ def capture_desk_payload(
         "live_blocked": True,
         "ltp": ltp,
         "db_path": str(db_path),
+        "session": sess,
         "summary": capture_summary(items),
         "recent": [example_public(x) for x in items[:40]],
         "note": (
-            "Press BUY / SHORT / NO TRADE when you would (or would not) take it. "
+            "Press BUY / SHORT / NO TRADE only while Gold Petal is open "
+            f"(Mon–Fri {sess['open_hhmm']}–{sess['close_hhmm']} IST). "
             "We store candles, book, OI, and 30s of LTP — not a one-line rule. "
             "Does not paper. Does not live. Keep DRY_RUN=true."
         ),
