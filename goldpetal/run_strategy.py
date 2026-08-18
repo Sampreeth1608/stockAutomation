@@ -376,7 +376,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S13      : daily HH/LL same-candle "
+        f"S13      : daily S16 close-vs-prev last-15m "
         f"[{'ON' if portfolio.is_enabled(strategy_s13.name) else 'OFF'}] "
         f"{strategy_s13.status_line}",
         flush=True,
@@ -1175,7 +1175,7 @@ def run_once(
         logger.info(line)
 
     def emit_s13_if_changed(now: datetime, message: dict) -> None:
-        """S13: daily HH/LL — enter/exit in last 15m of the signal day (not next open)."""
+        """S13: daily S16 close-vs-prev — last 15m of the signal day (not next open)."""
         if not _strategy_active(strategy_s13.name):
             return
         if latest["cmp"] is None:
@@ -1186,13 +1186,16 @@ def run_once(
             and strategy_s13.position == "flat"
         ):
             return
+        prev_pos = strategy_s13.position
+        prev_entry = strategy_s13.entry_price
+        prev_date = strategy_s13.entry_date
         result = strategy_s13.on_tick(now, float(latest["cmp"]), message)
         skip = getattr(strategy_s13, "last_skip", None)
         day = getattr(strategy_s13, "_day", None)
         prev = getattr(strategy_s13, "prev_day", None)
         if result is None and state["tick_count"] % 50 == 0:
             prev_s = (
-                f"prev={prev.date} prevH={prev.high} prevL={prev.low}"
+                f"prev={prev.date} prevH={prev.high} prevL={prev.low} prevC={prev.close}"
                 if prev is not None
                 else "prev=none"
             )
@@ -1207,19 +1210,23 @@ def run_once(
             )
             print(line, flush=True)
             logger.info(line)
-        if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
+        planned = wick_record_actions(prev_pos, result)
+        if not planned:
             return
-        if result.action in {"BUY", "SHORT"}:
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
             ok_enter, why = allow_new_entry(
                 strategy_s13.name,
-                features=_entry_features(strategy_s13.name, result.action),
+                features=_entry_features(strategy_s13.name, enter_action),
             )
             if not ok_enter:
-                strategy_s13.position = "flat"
-                strategy_s13.entry_price = None
-                strategy_s13.entry_date = None
+                strategy_s13.position = prev_pos
+                strategy_s13.entry_price = prev_entry
+                strategy_s13.entry_date = prev_date
                 if hasattr(strategy_s13, "release_action_lock"):
                     strategy_s13.release_action_lock()
+                if hasattr(strategy_s13, "_save_state"):
+                    strategy_s13._save_state()
                 line = (
                     f"[{now.isoformat(timespec='seconds')}] S13_HHHL_DAY "
                     f"ENTRY BLOCKED ({why}) — will retry in confirm window | "
@@ -1228,24 +1235,33 @@ def run_once(
                 print(line, flush=True)
                 logger.info(line)
                 return
-        _record_signal(
-            time_label=now.isoformat(timespec="seconds"),
-            action=result.action,
-            position_after=result.position_after,
-            reason=result.reason,
-            price_delta=result.price_delta,
-            net=result.net,
-            net_delta=result.net_delta,
-            strategy=strategy_s13.name,
-            cmp=float(latest["cmp"]),
+        fill_px = (
+            float(strategy_s13.entry_price)
+            if strategy_s13.entry_price is not None
+            else float(latest["cmp"])
         )
-        line = (
-            f"[{now.isoformat(timespec='seconds')}] {strategy_s13.name} "
-            f"CMP={latest['cmp']} => {result.action} "
-            f"(pos={strategy_s13.position}) | {result.reason}"
-        )
-        print(line, flush=True)
-        logger.info(line)
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev_pos} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy_s13.name,
+                cmp=fill_px,
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy_s13.name} "
+                f"CMP={fill_px} => {action} "
+                f"(pos={pos_after}) | {reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
 
     def emit_s16_if_changed(now: datetime, message: dict) -> None:
         """S16: 1h close-vs-prev HH/LL or wick — FLIP at the finished hour close."""
@@ -1438,7 +1454,7 @@ def run_once(
             emit_s9_if_changed(now, message)
             # S10: legacy 30m always zigzag (+₹42k MTF paper path)
             emit_s10_if_changed(now, message)
-            # S13: daily HH/LL same-candle (last 15m of the signal day)
+            # S13: daily S16 close-vs-prev (last 15m of the signal day)
             emit_s13_if_changed(now, message)
             # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close
             emit_s16_if_changed(now, message)

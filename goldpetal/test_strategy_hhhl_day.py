@@ -1,4 +1,4 @@
-"""Tests for S13_HHHL_DAY daily HH/LL same-candle strategy."""
+"""Tests for S13_HHHL_DAY — daily S16 close-vs-prev, last-15m fill."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from strategy_hhhl_day import DayOhlc, HhhlDayConfig, HhhlDayOvernightStrategy
+from strategy_wick import wick_record_actions
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -20,12 +21,12 @@ def _fresh(path: str) -> HhhlDayOvernightStrategy:
     if state.exists():
         state.unlink()
     return HhhlDayOvernightStrategy(
-        HhhlDayConfig(min_range=5, entry_minutes_before_close=15, no_flip=True),
+        HhhlDayConfig(entry_minutes_before_close=15, min_wick_gap=0.0),
         state_path=state,
     )
 
 
-def test_long_near_close_holds_next_open_exits_same_candle() -> None:
+def test_up_close_hh_green_buys_last_15m_holds_next_open() -> None:
     state = Path("/tmp/s13_test_state.json")
     s = _fresh(str(state))
     s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
@@ -37,30 +38,44 @@ def test_long_near_close_holds_next_open_exits_same_candle() -> None:
         ("23:00", 15250),
     ]:
         r = s.on_tick(_ts("2026-08-11", t), px)
-        assert r is None or r.action in {"BUY", "SHORT", "CLOSE"}
+        assert r is None
 
     buy = s.on_tick(_ts("2026-08-11", "23:20"), 15260)
     assert buy is not None and buy.action == "BUY"
     assert s.position == "long"
-    assert "same-day" in (buy.reason or "")
+    assert "C>prev → HH+green" in (buy.reason or "")
+    assert "last-15m" in (buy.reason or "")
 
-    # Next morning must NOT flatten — that was next-candle exit.
+    # Next morning must NOT flatten — that was next-candle / next-open exit.
     morning = s.on_tick(_ts("2026-08-12", "09:02"), 15200)
     assert morning is None
     assert s.position == "long"
-
-    # Later day: LH + red in last 15m → CLOSE on that day candle.
-    s.on_tick(_ts("2026-08-12", "12:00"), 15180)
-    close = s.on_tick(_ts("2026-08-12", "23:20"), 15120)
-    assert close is not None and close.action == "CLOSE"
-    assert s.position == "flat"
-    assert "same-day" in (close.reason or "")
     if state.exists():
         state.unlink()
 
 
-def test_long_exit_same_day_reenter_short() -> None:
-    """Exit-long day that is also LL+red → close long and open short."""
+def test_down_close_equal_wick_holds_overnight() -> None:
+    """Bald down day is C<prev with equal wick → skip, stay in the long."""
+    state = Path("/tmp/s13_test_hold_equal_wick.json")
+    s = _fresh(str(state))
+    s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
+    s.on_tick(_ts("2026-08-11", "10:00"), 15080)
+    s.on_tick(_ts("2026-08-11", "12:00"), 15200)
+    buy = s.on_tick(_ts("2026-08-11", "23:20"), 15260)
+    assert buy is not None and buy.action == "BUY"
+
+    s.on_tick(_ts("2026-08-12", "09:02"), 15200)
+    s.on_tick(_ts("2026-08-12", "12:00"), 15180)
+    hold = s.on_tick(_ts("2026-08-12", "23:20"), 15120)
+    assert hold is None
+    assert s.position == "long"
+    assert "equal wick" in (s.last_skip or "") or "C<prev" in (s.last_skip or "")
+    if state.exists():
+        state.unlink()
+
+
+def test_down_close_upper_wick_flips_short() -> None:
+    """C<prev + upper wick → SHORT; long overnight FLIPs (CLOSE+SHORT on tape)."""
     state = Path("/tmp/s13_test_reenter.json")
     s = _fresh(str(state))
     s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
@@ -68,19 +83,25 @@ def test_long_exit_same_day_reenter_short() -> None:
     s.on_tick(_ts("2026-08-11", "12:00"), 15200)
     buy = s.on_tick(_ts("2026-08-11", "23:20"), 15260)
     assert buy is not None and buy.action == "BUY"
-    # Next day: LH vs 15260 AND LL vs 15080, red close
+    # Next day: spike above open then close down → upper wick.
     s.on_tick(_ts("2026-08-12", "10:00"), 15200)
+    s.on_tick(_ts("2026-08-12", "12:00"), 15300)
     s.on_tick(_ts("2026-08-12", "14:00"), 14850)
     short = s.on_tick(_ts("2026-08-12", "23:20"), 14880)
     assert short is not None and short.action == "SHORT"
     assert s.position == "short"
-    assert "re-enter" in (short.reason or "")
+    assert "FLIP" in (short.reason or "")
+    assert "C<prev → upper wick" in (short.reason or "")
+    assert wick_record_actions("long", short) == [
+        ("CLOSE", "flat"),
+        ("SHORT", "short"),
+    ]
     if state.exists():
         state.unlink()
 
 
-def test_s13_close_then_later_tick_reenter() -> None:
-    """CLOSE at 23:16 (LH+red); 23:22 breaks yesterday low → SHORT same day."""
+def test_skip_then_later_tick_flips() -> None:
+    """Equal close at 23:16 skips; 23:22 down-close upper wick FLIPs."""
     state = Path("/tmp/s13_test_later_tick.json")
     s = _fresh(str(state))
     s.prev_day = DayOhlc("2026-08-11", 15080, 15260, 15080, 15260)
@@ -88,27 +109,42 @@ def test_s13_close_then_later_tick_reenter() -> None:
     s.entry_price = 15260.0
     s.entry_date = "2026-08-11"
     s.on_tick(_ts("2026-08-12", "10:00"), 15200)
-    close = s.on_tick(_ts("2026-08-12", "23:16"), 15140)
-    assert close is not None and close.action == "CLOSE"
-    assert s.position == "flat"
+    skip = s.on_tick(_ts("2026-08-12", "23:16"), 15260)
+    assert skip is None
+    assert s.position == "long"
+    assert "C=prev" in (s.last_skip or "")
     short = s.on_tick(_ts("2026-08-12", "23:22"), 15000)
     assert short is not None and short.action == "SHORT"
     assert s.position == "short"
+    assert "FLIP" in (short.reason or "")
     if state.exists():
         state.unlink()
 
 
-def test_s13_fakeout_close_not_beyond() -> None:
+def test_up_close_hh_green_ignores_old_fakeout_filter() -> None:
+    """Close barely beyond prev high used to be a fakeout skip; S16 still BUYs."""
     state = Path("/tmp/s13_test_fakeout.json")
     s = _fresh(str(state))
-    s.cfg.min_close_beyond = 3.0
     s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
     s.on_tick(_ts("2026-08-11", "10:00"), 15080)
     s.on_tick(_ts("2026-08-11", "12:00"), 15200)
     r = s.on_tick(_ts("2026-08-11", "23:20"), 15102)
+    assert r is not None and r.action == "BUY"
+    assert s.position == "long"
+    if state.exists():
+        state.unlink()
+
+
+def test_up_close_no_hhhl_skips() -> None:
+    state = Path("/tmp/s13_test_no_hhhl.json")
+    s = _fresh(str(state))
+    s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
+    s.on_tick(_ts("2026-08-11", "10:00"), 15080)
+    s.on_tick(_ts("2026-08-11", "12:00"), 15090)
+    r = s.on_tick(_ts("2026-08-11", "23:20"), 15080)
     assert r is None
     assert s.position == "flat"
-    assert "fakeout" in (s.last_skip or "")
+    assert "no HH/LL" in (s.last_skip or "")
     if state.exists():
         state.unlink()
 
@@ -123,7 +159,9 @@ def test_no_entry_outside_window() -> None:
     assert mid is None
     assert s.position == "flat"
     assert s.last_skip in {
-        "watching_hh",
+        "watching_up_close_hhll",
+        "watching_down_close_wick",
+        "watching_equal_close",
         "outside_confirm_window",
         "outside_entry_window",
     }
@@ -131,15 +169,32 @@ def test_no_entry_outside_window() -> None:
         state.unlink()
 
 
-def test_short_same_day_last_15m() -> None:
+def test_down_close_lower_wick_long() -> None:
+    """Old HH/LL-only short (LL+red) is S16 lower-wick LONG on a down close."""
     state = Path("/tmp/s13_test_state3.json")
     s = _fresh(str(state))
     s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
     s.on_tick(_ts("2026-08-11", "10:00"), 15040)
     s.on_tick(_ts("2026-08-11", "14:00"), 14880)
-    short = s.on_tick(_ts("2026-08-11", "23:20"), 14890)
+    long = s.on_tick(_ts("2026-08-11", "23:20"), 14890)
+    assert long is not None and long.action == "BUY"
+    assert s.position == "long"
+    assert "C<prev → lower wick" in (long.reason or "")
+    if state.exists():
+        state.unlink()
+
+
+def test_down_close_upper_wick_short_from_flat() -> None:
+    state = Path("/tmp/s13_test_short_wick.json")
+    s = _fresh(str(state))
+    s.prev_day = DayOhlc("2026-08-10", 15000, 15100, 14900, 15050)
+    s.on_tick(_ts("2026-08-11", "10:00"), 15100)
+    s.on_tick(_ts("2026-08-11", "12:00"), 15200)
+    s.on_tick(_ts("2026-08-11", "14:00"), 14990)
+    short = s.on_tick(_ts("2026-08-11", "23:20"), 15000)
     assert short is not None and short.action == "SHORT"
     assert s.position == "short"
+    assert "C<prev → upper wick" in (short.reason or "")
     if state.exists():
         state.unlink()
 
@@ -219,18 +274,24 @@ def test_sql_seed_hydrates_today_from_ticks_db() -> None:
 
 
 if __name__ == "__main__":
-    test_long_near_close_holds_next_open_exits_same_candle()
-    print("ok long_same_candle_exit")
-    test_long_exit_same_day_reenter_short()
-    print("ok reenter_short")
-    test_s13_close_then_later_tick_reenter()
-    print("ok later_tick_reenter")
-    test_s13_fakeout_close_not_beyond()
-    print("ok fakeout")
+    test_up_close_hh_green_buys_last_15m_holds_next_open()
+    print("ok long_last_15m_hold_open")
+    test_down_close_equal_wick_holds_overnight()
+    print("ok equal_wick_hold")
+    test_down_close_upper_wick_flips_short()
+    print("ok flip_short")
+    test_skip_then_later_tick_flips()
+    print("ok later_tick_flip")
+    test_up_close_hh_green_ignores_old_fakeout_filter()
+    print("ok no_fakeout")
+    test_up_close_no_hhhl_skips()
+    print("ok no_hhhl")
     test_no_entry_outside_window()
     print("ok outside_window")
-    test_short_same_day_last_15m()
-    print("ok short")
+    test_down_close_lower_wick_long()
+    print("ok lower_wick_long")
+    test_down_close_upper_wick_short_from_flat()
+    print("ok upper_wick_short")
     test_merge_forming_day_keeps_open_widens_range()
     print("ok merge")
     test_hl_extend_persists_today_bar()

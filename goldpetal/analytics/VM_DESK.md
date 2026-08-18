@@ -77,24 +77,27 @@ git pull origin cursor/s14-wick-length-a4b2
 ./scripts/run_desk_vm.sh --restart
 ```
 
-## S13 daily HH/LL same-candle (paper)
+## S13 daily S16 (paper)
 
-Same rule as S12 on the **day** candle: if today's high > yesterday's high, watch
-the day; in the **last 15 minutes before MARKET_CLOSE**, if close > open → long.
-Exit only on a later day that prints LH + red in **that day's last 15 minutes**
-(not at the next open). If that exit day is also LL+red, re-enter short on the
-same day (HH+green after a short exit → re-enter long). Short is the mirror
-(LL + red close / HL + green close).
+S16 close-vs-prev on the **day** candle vs the previous day. Confirm only in the
+**last 15 minutes before MARKET_CLOSE** (never the next day's open — that is S4).
+Fill at last-15m LTP. Overnight hold until the opposite signal.
+
+- C > prevC → HH/LL only (HH+green LONG, LL+red SHORT). Wicks ignored.
+- C < prevC → wick only, gap 0 (lower>upper LONG, upper>lower SHORT). HH/LL ignored.
+- C = prevC → skip
+- FLIP if already the other side. No min_range, no fakeout close-beyond.
+
+S16 1h stays a separate book (`S16_HHHL_WICK_1H`).
 
 ```bash
 # in .env
 ENABLE_S13=true
-S13_MIN_RANGE=5
 S13_ENTRY_MINUTES_BEFORE_CLOSE=15
-S13_NO_FLIP=true
+S13_MIN_WICK_GAP=0
 ```
 
-Restart supervise after pull. Look for `S13_HHHL_DAY` / `same-day` in `data/strategy_run.log`.
+Restart supervise after pull. Look for `S13_HHHL_DAY` / `daily S16` in `data/strategy_run.log`.
 
 ## Restart / orphan / EOD safety (intraday)
 
