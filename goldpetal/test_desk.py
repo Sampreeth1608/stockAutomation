@@ -21,10 +21,12 @@ def test_station_is_the_operator_page() -> None:
     assert "/api/tape" in html
     assert "/api/history" in html
     assert "/api/analysis" in html
-    assert "/api/s14/calc" in html
+    assert "/api/s14/calc" not in html
+    assert 'data-tab="s14"' not in html
+    assert "S14 calc" not in html
     assert 'href="/full"' in html
     assert 'href="/lite"' in html
-    assert "--bg: #ecece8" in html or "--bg:#ecece8" in html.replace(" ", "")
+    assert "--bg:" in html
     assert "s14-chart" not in html
 
 
