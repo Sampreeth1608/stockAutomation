@@ -260,6 +260,120 @@ def test_seed_keeps_todays_closed_session_hour() -> None:
         assert s._prev is not None
         assert s._prev.time.startswith("2026-08-17 09:00")
         assert s._prev.close == 104.0
+        assert s.on_tick(_t(10, 15), 101.0) is None
+        assert s.position == "flat"
+
+
+def _ticks_db(rows: list[tuple[str, float]]):
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    td = tempfile.TemporaryDirectory()
+    db = Path(td.name) / "ticks.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "received_at TEXT NOT NULL, token TEXT, ltp REAL, raw_json TEXT DEFAULT '{}')"
+    )
+    con.executemany("INSERT INTO ticks (received_at, ltp) VALUES (?, ?)", rows)
+    con.commit()
+    con.close()
+    return td, db
+
+
+def test_restart_after_4pm_catches_up_closed_hour() -> None:
+    """Restart at 16:07 must still decide 15:00 vs 14:00 (missed 16:00 tick)."""
+    td, db = _ticks_db(
+        [
+            ("2026-08-17T14:00:00+05:30", 100.0),
+            ("2026-08-17T14:10:00+05:30", 105.0),
+            ("2026-08-17T14:20:00+05:30", 99.0),
+            ("2026-08-17T14:59:00+05:30", 104.0),
+            ("2026-08-17T15:00:00+05:30", 100.0),
+            ("2026-08-17T15:10:00+05:30", 120.0),
+            ("2026-08-17T15:59:00+05:30", 110.0),
+            ("2026-08-17T16:00:00+05:30", 110.0),
+            ("2026-08-17T16:07:00+05:30", 111.0),
+        ]
+    )
+    try:
+        s = _s16()
+        s.seed_from_ticks(db, now=_t(16, 7))
+        result = s.on_tick(_t(16, 7), 111.0)
+        assert result is not None
+        assert result.action == "BUY"
+        assert "C>prev → HH+green" in result.reason
+        assert "restart catch-up" in result.reason
+        assert s.position == "long"
+        assert s.entry_price == 110.0
+        assert s.on_tick(_t(16, 20), 112.0) is None
+        assert s.position == "long"
+    finally:
+        td.cleanup()
+
+
+def test_restart_catchup_skips_when_formula_has_no_side() -> None:
+    td, db = _ticks_db(
+        [
+            ("2026-08-17T14:00:00+05:30", 100.0),
+            ("2026-08-17T14:10:00+05:30", 120.0),
+            ("2026-08-17T14:59:00+05:30", 104.0),
+            ("2026-08-17T15:00:00+05:30", 104.0),
+            ("2026-08-17T15:10:00+05:30", 104.5),
+            ("2026-08-17T15:20:00+05:30", 90.0),
+            ("2026-08-17T15:59:00+05:30", 104.2),
+            ("2026-08-17T16:07:00+05:30", 104.2),
+        ]
+    )
+    try:
+        s = _s16()
+        s.seed_from_ticks(db, now=_t(16, 7))
+        assert s.on_tick(_t(16, 7), 104.2) is None
+        assert s.position == "flat"
+        assert "no HH/LL" in str(s.last_skip)
+    finally:
+        td.cleanup()
+
+
+def test_restart_does_not_repeat_already_recorded_close() -> None:
+    from storage import init_db, save_signal
+
+    td, db = _ticks_db(
+        [
+            ("2026-08-17T14:00:00+05:30", 100.0),
+            ("2026-08-17T14:10:00+05:30", 105.0),
+            ("2026-08-17T14:59:00+05:30", 104.0),
+            ("2026-08-17T15:00:00+05:30", 100.0),
+            ("2026-08-17T15:10:00+05:30", 120.0),
+            ("2026-08-17T15:59:00+05:30", 110.0),
+            ("2026-08-17T16:07:00+05:30", 111.0),
+        ]
+    )
+    try:
+        init_db(db)
+        save_signal(
+            time_label="2026-08-17T16:00:05+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="live 16:00 close",
+            price_delta=None,
+            net=0.0,
+            net_delta=None,
+            dry_run=True,
+            strategy="S16_HHHL_WICK_1H",
+            cmp=110.0,
+            db_path=db,
+        )
+        s = _s16()
+        s.seed_from_ticks(db, now=_t(16, 7))
+        assert s.position == "long"
+        assert s.on_tick(_t(16, 7), 111.0) is None
+        assert s.position == "long"
+        assert s.entry_price == 110.0
+    finally:
+        td.cleanup()
 
 
 if __name__ == "__main__":
@@ -277,4 +391,7 @@ if __name__ == "__main__":
     test_second_hour_picks_side_after_stale_prev()
     test_seed_skips_preopen_and_yesterday()
     test_seed_keeps_todays_closed_session_hour()
+    test_restart_after_4pm_catches_up_closed_hour()
+    test_restart_catchup_skips_when_formula_has_no_side()
+    test_restart_does_not_repeat_already_recorded_close()
     print("ALL test_strategy_s16 OK")

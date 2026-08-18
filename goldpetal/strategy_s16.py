@@ -16,8 +16,10 @@ No range skip. No bald-body. No open=high/low (that is S14).
 Intraday only: the first finished session 1h is stored as prev (no trade).
 The next finished session 1h can BUY/SHORT only if this formula picks a
 side vs that same-session prev. Never use yesterday's last hour or a
-preopen hour as prev. Flatten at MARKET_CLOSE (and leftover at next
-MARKET_OPEN). Never overnight.
+preopen hour as prev. A restart after that hour already finished still
+applies the last closed session 1h vs the hour before it (fill at that
+bar's close), unless a signal was already recorded at/after that close.
+Flatten at MARKET_CLOSE (and leftover at next MARKET_OPEN). Never overnight.
 Not live-unlocked. Paper 100 lots ≠ live.
 """
 
@@ -66,6 +68,9 @@ class S16HhhlWickStrategy:
         self._bar_o = self._bar_h = self._bar_l = self._bar_c = None
         self._bar_n = 0
         self._prev: Candle | None = None
+        self._catchup_prev: Candle | None = None
+        self._catchup_cur: Candle | None = None
+        self._last_signal_at: datetime | None = None
         if seed:
             self.seed_from_ticks()
 
@@ -227,11 +232,12 @@ class S16HhhlWickStrategy:
             row = last[0]
             action = str(row["action"] or "").upper()
             pos = str(row["position_after"] or "").lower()
+            tl = str(row["time_label"] or "")
+            self._last_signal_at = _parse_ts(tl)
             if action in {"BUY", "SHORT"} and pos in {"long", "short"}:
                 self.position = pos  # type: ignore[assignment]
                 cmp = row["cmp"]
                 self.entry_price = float(cmp) if cmp is not None else None
-                tl = str(row["time_label"] or "")
                 self.entry_date = tl[:10] if tl else None
             elif action == "CLOSE" or pos == "flat":
                 self.position = "flat"
@@ -240,18 +246,66 @@ class S16HhhlWickStrategy:
         except Exception:
             return
 
+    def _session_candle(
+        self,
+        key: datetime,
+        ohlc: tuple[float, float, float, float, int] | None,
+        now: datetime,
+    ) -> Candle | None:
+        if ohlc is None:
+            return None
+        o, h, l, c, _n = ohlc
+        cand = Candle(
+            time=key.strftime("%Y-%m-%d %H:%M:%S"),
+            open=o,
+            high=h,
+            low=l,
+            close=c,
+        )
+        if cand.time[:10] != now.strftime("%Y-%m-%d"):
+            return None
+        if not self._bar_started_in_session(cand):
+            return None
+        return cand
+
+    def _already_decided_close(self, closed_key: datetime) -> bool:
+        if self._last_signal_at is None:
+            return False
+        close_at = closed_key + timedelta(minutes=max(1, self.cfg.bar_minutes))
+        return self._last_signal_at >= close_at
+
+    def _run_catchup(self, now: datetime) -> SignalResult | None:
+        """Apply the last finished session 1h if restart missed that close tick."""
+        cur = self._catchup_cur
+        prev = self._catchup_prev
+        self._catchup_cur = None
+        self._catchup_prev = None
+        if cur is None or prev is None or not self._in_session(now):
+            return None
+        saved = self._prev
+        self._prev = prev
+        try:
+            result = self._decide_closed(cur)
+        finally:
+            self._prev = saved if saved is not None else cur
+        if result is not None:
+            result.reason = f"{result.reason} restart catch-up"
+        return result
+
     def seed_from_ticks(
         self, db_path: Path | None = None, *, now: datetime | None = None
     ) -> None:
-        """Hydrate the previous closed 1h bar and the in-progress 1h OHLC."""
+        """Hydrate last closed 1h, catch up that close if restart missed it."""
         try:
             db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
             if not db.exists():
                 return
             self._seed_position_from_signals(db)
             now = (now or datetime.now(IST)).astimezone(IST)
+            step = timedelta(minutes=max(1, self.cfg.bar_minutes))
             cur_key = self._floor_bar(now)
-            prev_key = cur_key - timedelta(minutes=max(1, self.cfg.bar_minutes))
+            closed_key = cur_key - step
+            prev_key = closed_key - step
             start = prev_key.strftime("%Y-%m-%dT%H:%M:%S")
             con = sqlite3.connect(str(db))
             try:
@@ -263,22 +317,18 @@ class S16HhhlWickStrategy:
                 ).fetchall()
             finally:
                 con.close()
-            prev_ohlc = self._ohlc_from_rows(rows, prev_key)
+            prev_c = self._session_candle(
+                prev_key, self._ohlc_from_rows(rows, prev_key), now
+            )
+            closed_c = self._session_candle(
+                closed_key, self._ohlc_from_rows(rows, closed_key), now
+            )
             cur_ohlc = self._ohlc_from_rows(rows, cur_key)
-            if prev_ohlc is not None:
-                o, h, l, c, _n = prev_ohlc
-                cand = Candle(
-                    time=prev_key.strftime("%Y-%m-%d %H:%M:%S"),
-                    open=o,
-                    high=h,
-                    low=l,
-                    close=c,
-                )
-                if (
-                    cand.time[:10] == now.strftime("%Y-%m-%d")
-                    and self._bar_started_in_session(cand)
-                ):
-                    self._prev = cand
+            if closed_c is not None:
+                self._prev = closed_c
+                if prev_c is not None and not self._already_decided_close(closed_key):
+                    self._catchup_prev = prev_c
+                    self._catchup_cur = closed_c
             if cur_ohlc is None:
                 return
             o, h, l, c, n = cur_ohlc
@@ -321,11 +371,17 @@ class S16HhhlWickStrategy:
         key = self._floor_bar(now)
         px = float(ltp)
         flatten_why = self._session_flatten_why(now)
+        had_catchup = self._catchup_cur is not None
+        catchup = None if flatten_why else self._run_catchup(now)
 
         if self._bar_key is None:
             self._reset_bar(key, px)
             if flatten_why:
                 return self._flatten(px, flatten_why)
+            if catchup is not None:
+                return catchup
+            if had_catchup:
+                return None
             self.last_skip = "waiting_1h_close"
             return None
 
@@ -342,7 +398,7 @@ class S16HhhlWickStrategy:
             self._reset_bar(key, px)
             if flatten_why:
                 return self._flatten(px, flatten_why)
-            return result
+            return result if result is not None else catchup
 
         assert self._bar_h is not None and self._bar_l is not None
         self._bar_h = max(self._bar_h, px)
@@ -351,6 +407,10 @@ class S16HhhlWickStrategy:
         self._bar_n += 1
         if flatten_why:
             return self._flatten(px, flatten_why)
+        if catchup is not None:
+            return catchup
+        if had_catchup:
+            return None
         self.last_skip = "waiting_1h_close"
         return None
 
