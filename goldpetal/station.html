@@ -56,7 +56,7 @@ button, input, select { font: inherit; }
   border-right: 1px solid var(--line); background: var(--panel); }
 .col:last-child { border-right: 0; }
 .pane { padding: .7rem .85rem; border-bottom: 1px solid var(--line); }
-.pane h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
+.pane h2, #dl-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
   text-transform: uppercase; color: var(--gold); }
 .grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .scroll { overflow: auto; flex: 1; min-height: 0; }
@@ -81,10 +81,13 @@ td { padding: .4rem .55rem; border-bottom: 1px solid #efeae0; vertical-align: mi
 td.ok, .ok { color: var(--ok); }
 td.bad, .bad { color: var(--bad); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-input[type=number], input[type=text], select {
+input[type=number], input[type=text], input[type=date], select {
   background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: .38rem .5rem; font: 13px var(--mono); }
 input[type=number], input[type=text] { width: 6.4rem; }
+input[type=date] { width: 11.2rem; }
+#dl-panel { padding: .85rem 1rem 1.1rem; }
+#dl-panel[hidden], #grid-wrap[hidden] { display: none !important; }
 label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted); font-size: 13px; }
 .flash { min-height: 1rem; color: var(--gold); font-size: 13px; margin: .3rem 0 0; }
 .flash.bad { color: var(--bad); }
@@ -168,14 +171,37 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="signals">Signals</button>
           <button class="tab" type="button" data-tab="score">P&amp;L</button>
           <button class="tab" type="button" data-tab="why">Edge</button>
+          <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
       </div>
-      <div class="scroll">
+      <div class="scroll" id="grid-wrap">
         <table>
           <thead id="grid-head"></thead>
           <tbody id="grid-body"></tbody>
         </table>
+      </div>
+      <div class="scroll" id="dl-panel" hidden>
+        <h2>Downloads</h2>
+        <p class="hint">CSV / ZIP for the laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV. Compact start/stop is the Risk and Engine column on the right.</p>
+        <div class="row" style="margin-top:.45rem">
+          <label class="chk">From <input type="date" id="exp-from"/></label>
+          <label class="chk">To <input type="date" id="exp-to"/></label>
+          <span class="mono" id="exp-meta"></span>
+        </div>
+        <div class="row" style="margin-top:.7rem">
+          <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
+          <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
+          <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+          <button class="btn warn" type="button" id="btn-copy-trades">Copy trades → Sheets</button>
+          <button class="btn warn" type="button" id="btn-copy-ticks">Copy ticks → Sheets</button>
+        </div>
+        <div class="row" style="margin-top:.45rem">
+          <button class="btn" type="button" id="btn-sheets-pack">Download Sheets pack</button>
+          <button class="btn warn" type="button" id="btn-copy-score">Copy scoreboard → Sheets</button>
+          <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
+        </div>
+        <p class="flash" id="flash-dl"></p>
       </div>
       <div class="pane">
         <p class="mono" id="grid-meta">loading market…</p>
@@ -244,8 +270,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div id="foot-left">station · 8501</div>
     <div id="foot-ml">learner …</div>
     <div>
-      <a href="/lite">Compact controls</a>
-      · <a href="/full">Archive / downloads</a>
+      Downloads tab · <a href="/lite">phone layout</a>
+      · <a href="/full">old archive</a>
     </div>
   </footer>
 </div>
@@ -357,7 +383,49 @@ function renderKpis() {
   pnlEl.className = pnlClass(pnl);
   $("kpi-wr").textContent = wr == null || wr === "" ? "—" : pct(wr);
 }
+function showMainTab() {
+  const dl = watchTab === "dl";
+  $("grid-wrap").hidden = dl;
+  $("dl-panel").hidden = !dl;
+  $("hist-strat").style.visibility = dl ? "hidden" : "visible";
+  if (dl) $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
+}
+function rangeQs() {
+  const from = $("exp-from").value;
+  const to = $("exp-to").value;
+  if (!from || !to) throw new Error("Pick From and To dates");
+  return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+}
+function downloadUrl(path) {
+  const a = document.createElement("a");
+  a.href = path;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+async function refreshExportMeta() {
+  try {
+    const s = await api("/api/export/summary?" + rangeQs());
+    $("exp-meta").textContent = `${s.tick_count || 0} ticks · ${s.trade_count || 0} trades`;
+  } catch (e) {
+    $("exp-meta").textContent = String(e.message || e);
+  }
+}
+async function copyExport(kind) {
+  const data = await api(`/api/export/tsv?kind=${encodeURIComponent(kind)}&` + rangeQs());
+  await navigator.clipboard.writeText(data.tsv || "");
+  flash("flash-dl", `Copied ${data.rows || 0} ${kind} rows — paste into Google Sheets`);
+}
+async function bootExports() {
+  try {
+    const d = await api("/api/export/defaults");
+    $("exp-from").value = d.date_from;
+    $("exp-to").value = d.date_to;
+    await refreshExportMeta();
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+}
 function renderGrid() {
+  if (watchTab === "dl") return;
   const h = Object.assign({}, lastTape, lastHist);
   const tab = watchTab;
   const strat = $("hist-strat").value;
@@ -537,10 +605,48 @@ document.querySelectorAll("#tabs .tab").forEach((btn) => {
   btn.onclick = () => {
     watchTab = btn.dataset.tab;
     document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b === btn));
+    showMainTab();
     renderGrid();
     if (watchTab === "why" && !lastWhy) loadWhy().catch(() => {});
   };
 });
+$("exp-from").onchange = () => refreshExportMeta().catch(() => {});
+$("exp-to").onchange = () => refreshExportMeta().catch(() => {});
+$("btn-dl-pack").onclick = () => {
+  try {
+    downloadUrl("/api/export/pack.zip?" + rangeQs());
+    flash("flash-dl", "Downloading ZIP (ticks + all strategy trades)");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-trades").onclick = () => {
+  try {
+    downloadUrl("/api/export/trades.csv?" + rangeQs());
+    flash("flash-dl", "Downloading trades.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-dl-ticks").onclick = () => {
+  try {
+    downloadUrl("/api/export/ticks.csv?" + rangeQs());
+    flash("flash-dl", "Downloading ticks.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-copy-trades").onclick = () => copyExport("trades").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-copy-ticks").onclick = () => copyExport("ticks").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-sheets-pack").onclick = () => {
+  downloadUrl("/api/sheets/pack.zip");
+  flash("flash-dl", "Downloading Sheets pack (scoreboard + trades + opens + signals)");
+};
+$("btn-copy-score").onclick = async () => {
+  try {
+    const data = await api("/api/sheets/scoreboard.tsv");
+    await navigator.clipboard.writeText(data.tsv || "");
+    flash("flash-dl", `Copied ${data.rows || 0} scoreboard rows — paste into Google Sheets`);
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-s14-zip").onclick = () => {
+  downloadUrl("/api/s14/sheet.zip");
+  flash("flash-dl", "Downloading S14 sheet ZIP (HTML + CSVs)");
+};
 $("hist-strat").onchange = () => loadHistory().catch(() => {});
 $("btn-kill").onclick = () => act("flash-stop", "/api/emergency", { off: true }, "Emergency off");
 $("btn-clear").onclick = () => act("flash-stop", "/api/emergency", { off: false }, "Emergency cleared");
@@ -579,6 +685,7 @@ $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
 
 tickClock();
 setInterval(tickClock, 1000);
+bootExports().catch((e) => flash("flash-dl", String(e.message || e), true));
 loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadTape().catch(() => {});
 loadHistory().catch(() => {});

@@ -18,6 +18,13 @@ def test_station_is_the_operator_page() -> None:
     assert "Unlock live" in html
     assert "Positions" in html
     assert "Blotter" in html
+    assert "Downloads" in html
+    assert "Download all (ZIP)" in html
+    assert "Copy trades → Sheets" in html
+    assert "/api/export/pack.zip" in html
+    assert "/api/export/trades.csv" in html
+    assert "/api/sheets/pack.zip" in html
+    assert 'data-tab="dl"' in html
     assert "/api/tape" in html
     assert "/api/history" in html
     assert "/api/analysis" in html
