@@ -5,6 +5,8 @@ Research only. Do not paper or live-enable until a 100-lot + fees row is picked.
 
   python3 backtest_s16_hhhl_wick.py --db data/ticks.db --lots 100 --session --fees
   ./venv/bin/python backtest_s16_hhhl_wick.py --from-angel --tf 30m,1h,1d --from 2026-08-02
+
+Default sweeps wick gaps 0,3,5,10 on the down-close path. 30m bars print for gap=3.
 """
 
 from __future__ import annotations
@@ -64,6 +66,8 @@ def write_walk_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "prev_low",
         "upper",
         "lower",
+        "wick_gap",
+        "min_wick_gap",
         "gate",
         "hhhl",
         "wick",
@@ -95,6 +99,28 @@ def _parse_tick_tfs(raw: str) -> list[tuple[str, int]]:
     return out
 
 
+def _parse_gaps(raw: str) -> list[float]:
+    out: list[float] = []
+    for bit in (x.strip() for x in raw.split(",") if x.strip()):
+        g = float(bit)
+        if g < 0:
+            raise SystemExit(f"wick gap must be ≥ 0, got {g}")
+        out.append(g)
+    if not out:
+        raise SystemExit("no wick gaps")
+    return out
+
+
+def _gap_tag(gap: float) -> str:
+    if float(gap) == int(gap):
+        return f"g{int(gap)}"
+    return f"g{gap:g}"
+
+
+def _gaps_eq(a: float, b: float) -> bool:
+    return abs(float(a) - float(b)) < 1e-9
+
+
 def run_from_ticks(
     db: Path,
     *,
@@ -106,6 +132,8 @@ def run_from_ticks(
     out_dir: Path,
     print_bars_tf: str | None,
     print_skips: bool,
+    wick_gaps: list[float],
+    print_gap: float,
 ) -> list[TfResult]:
     rows = load_ltp_rows(db)
     if not rows:
@@ -117,37 +145,40 @@ def run_from_ticks(
         if drop_last and len(candles) >= 2:
             candles = candles[:-1]
         use_session = session_filter and name != "1d"
-        r = simulate_s16(
-            candles,
-            tf=f"{name}:s16",
-            lots=lots,
-            fees=fees,
-            session_filter=use_session,
-            charge_cfg=cfg,
-        )
-        results.append(r)
-        walk = walk_candles(candles)
-        write_walk_csv(out_dir / f"{name}_walk.csv", walk)
-        if print_bars_tf == name:
-            shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
-            print(flush=True)
-            print(
-                f"=== {name} bars (finished"
-                + ("" if print_skips else ", skips hidden")
-                + ") ===",
-                flush=True,
+        for gap in wick_gaps:
+            tag = _gap_tag(gap)
+            r = simulate_s16(
+                candles,
+                tf=f"{name}:{tag}",
+                lots=lots,
+                fees=fees,
+                session_filter=use_session,
+                charge_cfg=cfg,
+                min_wick_gap=gap,
             )
-            for row in shown:
+            results.append(r)
+            walk = walk_candles(candles, min_wick_gap=gap)
+            write_walk_csv(out_dir / f"{name}_{tag}_walk.csv", walk)
+            if print_bars_tf == name and _gaps_eq(gap, print_gap):
+                shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
+                print(flush=True)
                 print(
-                    f"{row['time']:<22} O={row['open']:.1f} H={row['high']:.1f} "
-                    f"L={row['low']:.1f} C={row['close']:.1f}  "
-                    f"gate={row['gate']:<4}  "
-                    f"U={row['upper']:.1f} Lw={row['lower']:.1f}  "
-                    f"hhhl={row['hhhl']:<5} wick={row['wick']:<5}  "
-                    f"{row['rule']:<28} → {str(row['side']).upper():<5}  "
-                    f"{row['action']:<5}  {row['pos_before']}→{row['pos_after']}",
+                    f"=== {name} bars wick-gap={gap:g} (finished"
+                    + ("" if print_skips else ", skips hidden")
+                    + ") ===",
                     flush=True,
                 )
+                for row in shown:
+                    print(
+                        f"{row['time']:<22} O={row['open']:.1f} H={row['high']:.1f} "
+                        f"L={row['low']:.1f} C={row['close']:.1f}  "
+                        f"gate={row['gate']:<4}  "
+                        f"U={row['upper']:.1f} Lw={row['lower']:.1f}  "
+                        f"Δ={row['wick_gap']:.1f}  "
+                        f"{row['rule']:<32} → {str(row['side']).upper():<5}  "
+                        f"{row['action']:<5}  {row['pos_before']}→{row['pos_after']}",
+                        flush=True,
+                    )
     return results
 
 
@@ -162,6 +193,8 @@ def run_from_angel(
     out_dir: Path,
     print_bars_tf: str | None,
     print_skips: bool,
+    wick_gaps: list[float],
+    print_gap: float,
 ) -> list[TfResult]:
     from explain_s14_candles import (
         ANGEL_INTERVAL,
@@ -206,27 +239,31 @@ def run_from_angel(
             raw = [b for b in raw if in_session_dt(parse_bar_ts(b["time"]), tf=tf)]
         raw = [b for b in raw if bar_is_finished(b["time"], tf, now)]
         candles = candles_from_dicts(raw)
-        r = simulate_s16(
-            candles,
-            tf=f"{tf}:s16",
-            lots=lots,
-            fees=fees,
-            session_filter=False,
-            charge_cfg=cfg,
-        )
-        results.append(r)
-        walk = walk_candles(candles)
-        write_walk_csv(out_dir / f"{tf}_{symbol}.csv", walk)
-        if print_bars_tf == tf:
-            shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
-            print(flush=True)
-            print(f"=== {tf} {symbol} ===", flush=True)
-            for row in shown:
-                print(
-                    f"{row['time']:<22} gate={row['gate']:<4} {row['rule']:<28} → "
-                    f"{str(row['side']).upper():<5} {row['action']}",
-                    flush=True,
-                )
+        for gap in wick_gaps:
+            tag = _gap_tag(gap)
+            r = simulate_s16(
+                candles,
+                tf=f"{tf}:{tag}",
+                lots=lots,
+                fees=fees,
+                session_filter=False,
+                charge_cfg=cfg,
+                min_wick_gap=gap,
+            )
+            results.append(r)
+            walk = walk_candles(candles, min_wick_gap=gap)
+            write_walk_csv(out_dir / f"{tf}_{tag}_{symbol}.csv", walk)
+            if print_bars_tf == tf and _gaps_eq(gap, print_gap):
+                shown = walk if print_skips else [row for row in walk if row["action"] != "skip"]
+                print(flush=True)
+                print(f"=== {tf} {symbol} wick-gap={gap:g} ===", flush=True)
+                for row in shown:
+                    print(
+                        f"{row['time']:<22} gate={row['gate']:<4} Δ={row['wick_gap']:.1f} "
+                        f"{row['rule']:<32} → "
+                        f"{str(row['side']).upper():<5} {row['action']}",
+                        flush=True,
+                    )
     return results
 
 
@@ -245,6 +282,17 @@ def main() -> None:
     ap.add_argument("--keep-last", action="store_true", help="keep still-forming last tick bar")
     ap.add_argument("--print-bars", default="30m", help="print this TF's bars (or '')")
     ap.add_argument("--print-skips", action="store_true", help="include skip rows in the bar dump")
+    ap.add_argument(
+        "--wick-gaps",
+        default="0,3,5,10",
+        help="comma list of min |upper-lower| on down-close wicks",
+    )
+    ap.add_argument(
+        "--print-gap",
+        type=float,
+        default=3.0,
+        help="which wick gap gets the 30m bar dump",
+    )
     ap.add_argument("--out", type=Path, default=Path("data/backtests/s16_hhhl_wick"))
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
@@ -253,9 +301,15 @@ def main() -> None:
     if print_bars_tf == "30":
         print_bars_tf = "30m"
 
+    wick_gaps = _parse_gaps(args.wick_gaps)
+    print_gap = float(args.print_gap)
+    if not any(_gaps_eq(print_gap, g) for g in wick_gaps):
+        print_gap = wick_gaps[0]
+
     print(FORMULA, flush=True)
     print(
         f"lots={args.lots:g}  fees={fees}  session={session_filter}  "
+        f"wick_gaps={','.join(str(g) if g != int(g) else str(int(g)) for g in wick_gaps)}  "
         f"source={'Angel' if args.from_angel else args.db}",
         flush=True,
     )
@@ -274,6 +328,8 @@ def main() -> None:
             out_dir=args.out,
             print_bars_tf=print_bars_tf,
             print_skips=bool(args.print_skips),
+            wick_gaps=wick_gaps,
+            print_gap=print_gap,
         )
     else:
         tfs = _parse_tick_tfs(args.tf or DEFAULT_TICK_TFS)
@@ -287,13 +343,18 @@ def main() -> None:
             out_dir=args.out,
             print_bars_tf=print_bars_tf,
             print_skips=bool(args.print_skips),
+            wick_gaps=wick_gaps,
+            print_gap=print_gap,
         )
 
     print_wick_summary(
         results,
-        title=f"S16 C>prev HH/LL / C<prev wick  lots={args.lots:g}  fees={fees}",
+        title=(
+            f"S16 C>prev HH/LL / C<prev wick-gap  lots={args.lots:g}  fees={fees}"
+        ),
     )
-    print_by_day(results)
+    day_rows = [r for r in results if r.tf.endswith(":" + _gap_tag(print_gap))]
+    print_by_day(day_rows or results)
     write_outputs(results, args.out)
     print(f"wrote {args.out}", flush=True)
     print("Not paper. Not live. Pick a TF row first.", flush=True)

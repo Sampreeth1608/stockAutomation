@@ -51,11 +51,62 @@ def test_down_close_upper_wick_short() -> None:
     assert "upper wick" in why
 
 
+def test_tiny_wick_gap_skips_when_gap_is_3() -> None:
+    """3 Aug 10:30 style: U=2 Lw=3 must not FLIP when gap=3."""
+    cur = _c("2026-08-17 10:30:00", 104.0, 106.0, 100.0, 103.0)
+    assert cur.close < PREV.close
+    m_long, _why0 = s16_bar_decision(PREV, cur, min_wick_gap=0)
+    m_gap, why3 = s16_bar_decision(PREV, cur, min_wick_gap=3)
+    assert m_long == "long"
+    assert m_gap is None
+    assert "wick gap 1.0<3" in why3
+
+
+def test_clear_wick_still_fires_with_gap_3() -> None:
+    cur = _c("2026-08-17 10:30:00", 104.0, 120.0, 103.0, 103.5)
+    side, why = s16_bar_decision(PREV, cur, min_wick_gap=3)
+    assert side == "short"
+    assert "upper wick" in why
+
+
+def test_up_close_ignores_wick_gap() -> None:
+    cur = _c("2026-08-17 10:30:00", 100.0, 120.0, 100.0, 110.0)
+    side, _ = s16_bar_decision(PREV, cur, min_wick_gap=10)
+    assert side == "long"
+
+
 def test_equal_close_skips() -> None:
     cur = _c("2026-08-17 10:30:00", 104.0, 120.0, 90.0, 104.0)
     side, why = s16_bar_decision(PREV, cur)
     assert side is None
     assert "C=prev" in why
+
+
+def test_tiny_down_wick_does_not_flip_when_gap_3() -> None:
+    """Down-close U=2 Lw=3 FLIPs at gap=0, holds at gap=3."""
+    candles = [
+        PREV,
+        _c("2026-08-17 10:30:00", 104.0, 130.0, 80.0, 90.0),  # C<prev upper wick → short @ 90
+        _c("2026-08-17 11:00:00", 89.0, 91.0, 85.0, 88.0),  # C<prev U=2 Lw=3
+        _c("2026-08-17 11:30:00", 88.0, 89.0, 87.0, 88.5),
+    ]
+    r0 = simulate_s16(
+        candles, tf="toy:g0", lots=1, fees=False, session_filter=False, min_wick_gap=0
+    )
+    r3 = simulate_s16(
+        candles, tf="toy:g3", lots=1, fees=False, session_filter=False, min_wick_gap=3
+    )
+    assert r0.n_trades == 2
+    assert r0.trades[0].side == "SHORT"
+    assert r0.trades[0].exit_time == "2026-08-17 11:00:00"
+    assert r0.trades[1].side == "LONG"
+    assert r3.n_trades == 1
+    assert r3.trades[0].side == "SHORT"
+    assert r3.trades[0].entry_time == "2026-08-17 10:30:00"
+    assert r3.trades[0].exit_time == "2026-08-17 11:30:00"
+    skip_row = walk_candles(candles, min_wick_gap=3)[1]
+    assert skip_row["action"] == "skip"
+    assert skip_row["wick_gap"] == 1.0
 
 
 def test_enter_then_flip() -> None:
@@ -116,6 +167,10 @@ if __name__ == "__main__":
     test_down_close_uses_wick_not_hhhl()
     test_down_close_upper_wick_short()
     test_equal_close_skips()
+    test_tiny_wick_gap_skips_when_gap_is_3()
+    test_clear_wick_still_fires_with_gap_3()
+    test_up_close_ignores_wick_gap()
+    test_tiny_down_wick_does_not_flip_when_gap_3()
     test_enter_then_flip()
     test_skip_bar_holds_open_trade()
     test_walk_marks_flip()

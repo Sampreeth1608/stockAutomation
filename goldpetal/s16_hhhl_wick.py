@@ -12,9 +12,10 @@ Wait for the candle to **finish**. Same closed bar vs previous closed bar:
   If close < previous close → wick only (S14 raw):
     upper = high − max(open, close)
     lower = min(open, close) − low
+    require |upper − lower| ≥ min_wick_gap (default 3; experiment 0/3/5/10)
     LONG  = lower > upper
     SHORT = upper > lower
-    equal = skip (HH/LL is ignored on a down close)
+    else skip (HH/LL is ignored on a down close)
 
   If close = previous close → skip
 
@@ -35,7 +36,7 @@ from wick_candles import wick_measure
 FORMULA = (
     "Wait for the candle to finish. Same closed bar vs previous close: "
     "C>prevC → HH/LL (HH+green LONG, LL+red SHORT) | "
-    "C<prevC → wick (lower>upper LONG, upper>lower SHORT) | "
+    "C<prevC → wick if |U−L| ≥ gap (lower>upper LONG, upper>lower SHORT) | "
     "C=prevC skip. FLIP if already the other side. Fill at this bar's close."
 )
 
@@ -54,7 +55,12 @@ def wick_raw_side(cur: Candle) -> str | None:
     return wick_measure(cur.open, cur.high, cur.low, cur.close).dominant
 
 
-def s16_bar_decision(prev: Candle, cur: Candle) -> tuple[str | None, str]:
+def s16_bar_decision(
+    prev: Candle,
+    cur: Candle,
+    *,
+    min_wick_gap: float = 3.0,
+) -> tuple[str | None, str]:
     """One finished candle → ('long'|'short'|None, why)."""
     if cur.close > prev.close:
         hh = hhhl_side(prev, cur)
@@ -64,20 +70,29 @@ def s16_bar_decision(prev: Candle, cur: Candle) -> tuple[str | None, str]:
             return "short", "C>prev → LL+red"
         return None, "C>prev → no HH/LL"
     if cur.close < prev.close:
-        wk = wick_raw_side(cur)
-        if wk == "long":
+        m = wick_measure(cur.open, cur.high, cur.low, cur.close)
+        diff = abs(m.upper - m.lower)
+        if diff < float(min_wick_gap):
+            return None, f"C<prev → wick gap {diff:.1f}<{float(min_wick_gap):g}"
+        if m.lower > m.upper:
             return "long", "C<prev → lower wick"
-        if wk == "short":
+        if m.upper > m.lower:
             return "short", "C<prev → upper wick"
         return None, "C<prev → equal wick"
     return None, "C=prev skip"
 
 
-def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
+def explain_bar(
+    prev: Candle,
+    cur: Candle,
+    pos: str,
+    *,
+    min_wick_gap: float = 3.0,
+) -> dict[str, Any]:
     m = wick_measure(cur.open, cur.high, cur.low, cur.close)
     hh = hhhl_side(prev, cur)
     wk = wick_raw_side(cur)
-    side, why = s16_bar_decision(prev, cur)
+    side, why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
     if cur.close > prev.close:
         gate = "hhhl"
     elif cur.close < prev.close:
@@ -105,6 +120,8 @@ def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
         "prev_low": prev.low,
         "upper": round(m.upper, 2),
         "lower": round(m.lower, 2),
+        "wick_gap": round(abs(m.upper - m.lower), 2),
+        "min_wick_gap": float(min_wick_gap),
         "gate": gate,
         "hhhl": hh or "none",
         "wick": wk or "none",
@@ -116,11 +133,15 @@ def explain_bar(prev: Candle, cur: Candle, pos: str) -> dict[str, Any]:
     }
 
 
-def walk_candles(candles: list[Candle]) -> list[dict[str, Any]]:
+def walk_candles(
+    candles: list[Candle],
+    *,
+    min_wick_gap: float = 3.0,
+) -> list[dict[str, Any]]:
     pos = "flat"
     out: list[dict[str, Any]] = []
     for i in range(1, len(candles)):
-        row = explain_bar(candles[i - 1], candles[i], pos)
+        row = explain_bar(candles[i - 1], candles[i], pos, min_wick_gap=min_wick_gap)
         pos = str(row["pos_after"])
         out.append(row)
     return out
@@ -173,6 +194,7 @@ def simulate_s16(
     market_open: str = "09:00",
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
+    min_wick_gap: float = 3.0,
 ) -> Any:
     """Close-vs-prev gate with same-candle FLIP. Fill at signal-bar close."""
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
@@ -207,7 +229,7 @@ def simulate_s16(
         if session_filter and not sess_ok:
             continue
 
-        want, _why = s16_bar_decision(prev, cur)
+        want, _why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
         want_long = want == "long"
         want_short = want == "short"
 
