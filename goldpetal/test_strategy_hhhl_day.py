@@ -273,6 +273,52 @@ def test_sql_seed_hydrates_today_from_ticks_db() -> None:
         db.unlink()
 
 
+def test_seed_replaces_stale_prev_close() -> None:
+    import sqlite3
+
+    state = Path("/tmp/s13_test_stale_prev_close.json")
+    db = Path("/tmp/s13_test_stale_prev_close.db")
+    if db.exists():
+        db.unlink()
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE ticks (id INTEGER PRIMARY KEY, received_at TEXT, ltp REAL)"
+    )
+    con.executemany(
+        "INSERT INTO ticks (received_at, ltp) VALUES (?, ?)",
+        [
+            ("2026-08-17T09:00:00+05:30", 15000.0),
+            ("2026-08-17T12:00:00+05:30", 15480.0),
+            ("2026-08-17T23:20:00+05:30", 15200.0),
+        ],
+    )
+    con.commit()
+    con.close()
+    s = _fresh(str(state))
+    s.prev_day = DayOhlc("2026-08-17", 15000.0, 15400.0, 15000.0, 15400.0)
+    s._seed_from_ticks(db, today="2026-08-18")
+    assert s.prev_day is not None
+    assert s.prev_day.date == "2026-08-17"
+    assert s.prev_day.close == 15200.0
+    assert s.prev_day.high == 15480.0
+    if state.exists():
+        state.unlink()
+    if db.exists():
+        db.unlink()
+
+
+def test_next_open_does_not_clobber_sql_prev_close() -> None:
+    s = _fresh("/tmp/s13_test_roll_keep_sql_close.json")
+    s.prev_day = DayOhlc("2026-08-17", 15000.0, 15480.0, 15000.0, 15200.0)
+    s._day = DayOhlc("2026-08-17", 15000.0, 15480.0, 15000.0, 15400.0)
+    s.on_tick(_ts("2026-08-18", "09:00"), 15300.0)
+    assert s.prev_day is not None
+    assert s.prev_day.date == "2026-08-17"
+    assert s.prev_day.close == 15200.0
+    assert s._day is not None and s._day.date == "2026-08-18"
+    Path("/tmp/s13_test_roll_keep_sql_close.json").unlink(missing_ok=True)
+
+
 def _front_contract(*, days_left: int, rolled: bool = False, symbol: str = "GOLDPETAL31AUG26FUT") -> dict:
     return {
         "symbol": symbol,
@@ -351,6 +397,10 @@ if __name__ == "__main__":
     print("ok persist")
     test_sql_seed_hydrates_today_from_ticks_db()
     print("ok sql seed")
+    test_seed_replaces_stale_prev_close()
+    print("ok stale prev close")
+    test_next_open_does_not_clobber_sql_prev_close()
+    print("ok roll keeps sql close")
     test_last_front_session_closes_and_blocks()
     print("ok last front flatten")
     test_contract_switch_closes_and_resets_book()
