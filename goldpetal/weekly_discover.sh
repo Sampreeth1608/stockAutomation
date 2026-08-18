@@ -10,7 +10,8 @@ if [[ -x ./venv/bin/python ]]; then
   PY=./venv/bin/python
 fi
 NOTE="week-$(date +%V)"
-exec "$PY" discover_strategies.py run \
+export PYTHONUNBUFFERED=1
+exec "$PY" -u discover_strategies.py run \
   --out-dir data/discover \
   --top-k 3 \
   --horizon 0 \

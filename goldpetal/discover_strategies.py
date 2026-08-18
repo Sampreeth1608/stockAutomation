@@ -458,11 +458,20 @@ def run_discovery(
         f"horizon={use_horizon} table={behavior.horizon_table}",
         flush=True,
     )
-
+    print(
+        f"building features on {len(raw)} ticks — SSH stays quiet until this finishes",
+        flush=True,
+    )
     feat = build_features(raw)
+    print(f"feature rows={len(feat)} — labeling horizon={use_horizon}", flush=True)
     labeled = add_labels(feat, horizon=use_horizon, threshold_bps=threshold_bps)
     usable = labeled.dropna(subset=FEATURE_COLUMNS + ["y_dir", "y_ret"]).copy()
     train_df, test_df = time_split(usable, train_frac=train_frac)
+    print(
+        f"train={len(train_df)} test={len(test_df)} — fitting logreg/rf/gb "
+        f"({len(templates)} recipes)",
+        flush=True,
+    )
     if train_df["y_dir"].nunique() < 2:
         raise SystemExit("train labels single-class — collect more varied ticks")
 
@@ -494,12 +503,17 @@ def run_discovery(
             aucs[feats] = {}
             probs[feats] = {"__ltp__": ltp_aligned, "__imb__": imb_aligned}
             for mname, model in _models().items():
+                print(
+                    f"fit {mname} features={len(feats)} n={len(X_train)} — wait",
+                    flush=True,
+                )
                 m = clone(model)
                 m.fit(X_train, y_train.to_numpy())
                 prob = m.predict_proba(X_test)[:, 1]
                 fitted[feats][mname] = m
                 probs[feats][mname] = prob
                 aucs[feats][mname] = _auc(y_test.to_numpy(), prob)
+                print(f"  {mname} auc={aucs[feats][mname]:.3f}", flush=True)
 
         ltp_use = probs[feats]["__ltp__"]
         imb_use = probs[feats]["__imb__"]
@@ -508,6 +522,11 @@ def run_discovery(
             auc = aucs[feats][mname]
             sim = paper_sim(ltp=ltp_use, prob=prob, imb=imb_use, template=tmpl)
             ok, reasons = _safety(auc, sim)
+            print(
+                f"sim {mname}/{tmpl.name} trades={int(sim['n_trades'])} "
+                f"after_charges₹={sim['after_charges_pnl']:.1f} safety={ok}",
+                flush=True,
+            )
             if (
                 tmpl.family != "baseline"
                 and behavior.fee_be_pts > 0
