@@ -1,6 +1,6 @@
-"""S7_FLOW_BRAIN — paper tick pressure brain. Not S16. Not live.
+"""FLOW_BRAIN — paper tick pressure. Not S7_HOURLY. Not S16. Not live.
 
-ENABLE_S7 defaults false. Paper 100 lots ≠ live. Stay DRY_RUN.
+ENABLE_FLOW_BRAIN defaults false. Paper 100 lots ≠ live. Stay DRY_RUN.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from flow_brain import BOOK, FlowBrain, classify_message
 from strategy import Position, SignalResult
 
 
-class S7FlowBrainStrategy:
+class FlowBrainLiveStrategy:
     name = BOOK
 
     def __init__(
@@ -192,13 +192,13 @@ class S7FlowBrainStrategy:
         return None
 
 
-def s7_from_env() -> S7FlowBrainStrategy:
+def flow_brain_from_env() -> FlowBrainLiveStrategy:
     from strategy_s18 import _load_dotenv
 
     _load_dotenv()
-    return S7FlowBrainStrategy(
+    return FlowBrainLiveStrategy(
         market_open=os.getenv("MARKET_OPEN", "09:00"),
         market_close=os.getenv("MARKET_CLOSE", "23:30"),
-        min_hold_s=float(os.getenv("S7_MIN_HOLD_SEC", "20") or 20),
-        cooldown_s=float(os.getenv("S7_COOLDOWN_SEC", "15") or 15),
+        min_hold_s=float(os.getenv("FLOW_BRAIN_MIN_HOLD_SEC", "20") or 20),
+        cooldown_s=float(os.getenv("FLOW_BRAIN_COOLDOWN_SEC", "15") or 15),
     )

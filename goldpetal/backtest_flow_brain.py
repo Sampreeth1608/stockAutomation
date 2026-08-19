@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backtest S7 flow brain on ticks (LTP + TBQ + TSQ). Not S16. Not live.
+"""Backtest FLOW_BRAIN on ticks (LTP + TBQ + TSQ). Not S7_HOURLY. Not S16. Not live.
 
   python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees
 """
@@ -27,11 +27,11 @@ def _ac_wr(result: Any) -> float:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="S7 flow brain tape (research, not live).")
+    ap = argparse.ArgumentParser(description="FLOW_BRAIN tape (research, not live).")
     ap.add_argument("--db", type=Path, default=Path("data/ticks.db"))
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--fees", action="store_true")
-    ap.add_argument("--out-dir", type=Path, default=Path("data/backtests/s7_flow_brain"))
+    ap.add_argument("--out-dir", type=Path, default=Path("data/backtests/flow_brain"))
     args = ap.parse_args()
 
     if args.fees:
@@ -44,7 +44,7 @@ def main() -> None:
     print("LONG  = price up + buy flow up + expanding")
     print("SHORT = price down + sell flow up + expanding")
     print("Skip absorption (flow without price). Exit on decay.")
-    print("Not S16. ENABLE_S7 stays false. Stay DRY_RUN.")
+    print("Not S7_HOURLY. Not S16. ENABLE_FLOW_BRAIN stays false. Stay DRY_RUN.")
     print()
 
     if not args.db.exists():
@@ -80,8 +80,8 @@ def main() -> None:
     print()
     write_outputs([result], args.out_dir)
     print(
-        "Stay DRY_RUN. ENABLE_S7 stays false. Do not live-unlock. "
-        "This is not S16 and does not change paper S16."
+        "Stay DRY_RUN. ENABLE_FLOW_BRAIN stays false. Do not live-unlock. "
+        "This is not S7_HOURLY and not S16."
     )
 
 

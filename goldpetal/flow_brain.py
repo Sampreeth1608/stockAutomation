@@ -1,4 +1,4 @@
-"""S7 flow brain: live LTP + TBQ + TSQ pressure. New book. Not S16.
+"""FLOW_BRAIN: live LTP + TBQ + TSQ pressure. New book. Not S7_HOURLY. Not S16.
 
 Angel TBQ/TSQ are session cumulatives. Pressure is the *change* over a
 few seconds (new buy qty vs new sell qty), not whether the totals fall.
@@ -19,7 +19,7 @@ Decay     = the opposite.
 Trade only continuation+expansion. Flatten on decay / opposite / EOD.
 Fill at LTP. Rank after Angel charges, tax excluded.
 
-ENABLE_S7 defaults false. Paper-only. Stay DRY_RUN. Not live.
+ENABLE_FLOW_BRAIN defaults false. Paper-only. Stay DRY_RUN. Not live.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from backtest_hhhl_candles import Trade, make_charge_cfg
 from backtest_wick_candles import _tf_result_from_trades
 from charges import ChargeConfig, apply_charges_and_tax
 
-BOOK = "S7_FLOW_BRAIN"
+BOOK = "FLOW_BRAIN"
 LAB_NAME = BOOK
 
 FORMULA = (
@@ -41,7 +41,7 @@ FORMULA = (
     "Imbalance = (dTBQ−dTSQ)/(dTBQ+dTSQ). LONG when price up, buy flow up, "
     "and both are expanding. SHORT the mirror. No trade on absorption "
     "(flow without price). Exit on decay or opposite continuation. "
-    "Fill at LTP. Flatten session close. Not S16. Not live."
+    "Fill at LTP. Flatten session close. Not S7_HOURLY. Not S16. Not live."
 )
 
 BULL_CONT = "bull_cont"
@@ -312,7 +312,7 @@ def _in_session(dt: datetime, market_open: str, market_close: str) -> bool:
 def simulate_flow_brain(
     samples: list[tuple[datetime, float, float, float]],
     *,
-    tf: str = "tick:s7_flow",
+    tf: str = "tick:flow_brain",
     lots: float = 100.0,
     fees: bool = True,
     session_filter: bool = True,

@@ -1,4 +1,4 @@
-"""S7 flow brain. New book. Not S16. ENABLE defaults false. Not live."""
+"""FLOW_BRAIN. New book. Not S7_HOURLY. Not S16. ENABLE defaults false. Not live."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from flow_brain import (
     simulate_flow_brain,
 )
 from live_readiness import PAPER_ONLY_BOOKS
-from strategy_flow_brain import S7FlowBrainStrategy
+from strategy_flow_brain import FlowBrainLiveStrategy
 
 
 def _dt(i: int, *, step: float = 0.25) -> datetime:
@@ -109,7 +109,7 @@ def test_tbq_reset_does_not_crash() -> None:
 
 
 def test_live_strategy_matches_sim_long() -> None:
-    strat = S7FlowBrainStrategy(min_hold_s=1.0, cooldown_s=0.0)
+    strat = FlowBrainLiveStrategy(min_hold_s=1.0, cooldown_s=0.0)
     got = None
     for dt, ltp, tbq, tsq in _bull_expanding():
         res = strat.on_tick(
@@ -134,10 +134,12 @@ def test_wired_enable_off_not_slim_not_s16() -> None:
     portfolio = (root / "portfolio.py").read_text(encoding="utf-8")
     env_bridge = (root / "analytics" / "env_bridge.py").read_text(encoding="utf-8")
     s16 = (root / "strategy_s16.py").read_text(encoding="utf-8")
-    assert "s7_from_env" in runner
-    assert "ENABLE_S7" in runner
-    assert 'on("ENABLE_S7", "false")' in portfolio
-    assert '"ENABLE_S7": "false"' in env_bridge
+    assert "flow_brain_from_env" in runner
+    assert "ENABLE_FLOW_BRAIN" in runner
+    assert "ENABLE_S7" not in runner
+    assert "S7_FLOW_BRAIN" not in runner
+    assert 'on("ENABLE_FLOW_BRAIN", "false")' in portfolio
+    assert '"ENABLE_FLOW_BRAIN": "false"' in env_bridge
     assert "flow_brain" not in s16
     assert "ENABLE_S16" in (root / "portfolio.py").read_text(encoding="utf-8")
 
@@ -150,4 +152,4 @@ if __name__ == "__main__":
     test_tbq_reset_does_not_crash()
     test_live_strategy_matches_sim_long()
     test_wired_enable_off_not_slim_not_s16()
-    print("s7 flow brain tests ok")
+    print("flow brain tests ok")

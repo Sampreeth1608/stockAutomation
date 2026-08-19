@@ -28,7 +28,7 @@ HEALTH_PATH = ROOT / "data" / "control" / "bot_health.json"
 INTRADAY_RESTORE = (
     "S4_OVERNIGHT",
     "S5_MINEDGE",
-    "S7_FLOW_BRAIN",
+    "FLOW_BRAIN",
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
     "S13_HHHL_DAY",
@@ -57,7 +57,7 @@ SESSION_CLOSE_OVERNIGHT = frozenset(
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
-        "S7_FLOW_BRAIN",
+        "FLOW_BRAIN",
         "S21_AMISE",
         "S22_AMISE",
         "S23_AMISE",

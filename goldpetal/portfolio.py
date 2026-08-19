@@ -27,7 +27,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
-        "S7_FLOW_BRAIN",
+        "FLOW_BRAIN",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -45,7 +45,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
     "CHOP": {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
-        "S7_FLOW_BRAIN",
+        "FLOW_BRAIN",
         "S8_NET_ZIGZAG",
         "S10_LEGACY30",
         "S13_HHHL_DAY",
@@ -61,7 +61,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
-        "S7_FLOW_BRAIN",
+        "FLOW_BRAIN",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -81,7 +81,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S6_MIN30",
-        "S7_FLOW_BRAIN",
+        "FLOW_BRAIN",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -158,8 +158,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S5_MINEDGE")
     if on("ENABLE_S6", "false"):
         enabled.add("S6_MIN30")
-    if on("ENABLE_S7", "false"):
-        enabled.add("S7_FLOW_BRAIN")
+    if on("ENABLE_FLOW_BRAIN", "false"):
+        enabled.add("FLOW_BRAIN")
     if on("ENABLE_S8", "true"):
         enabled.add("S8_NET_ZIGZAG")
     if on("ENABLE_S9", "false"):
