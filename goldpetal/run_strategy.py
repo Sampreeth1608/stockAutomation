@@ -45,9 +45,6 @@ from strategy_state_s9 import StateS9Strategy, state_s9_from_env
 from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env, s4_swing_from_env
 from strategy_s16 import S16HhhlWickStrategy, s16_from_env
 from strategy_s18 import S18OhlcVolHtfStrategy, s18_from_env
-from strategy_s19 import S19BodyCloseStrategy, s19_from_env
-from strategy_s20 import S20FadeHlStrategy, s20_from_env
-from strategy_amise import load_amise_slot_books
 from strategy_wick import wick_record_actions
 from zigzag_recorder import recorder_from_env
 from s9_state_journal import s9_journal_from_env
@@ -180,8 +177,8 @@ def run_once(
     strategy_s13: HhhlDayOvernightStrategy,
     strategy_s16: S16HhhlWickStrategy,
     strategy_s18: S18OhlcVolHtfStrategy,
-    strategy_s19: S19BodyCloseStrategy,
-    strategy_s20: S20FadeHlStrategy,
+    strategy_s19,
+    strategy_s20,
     portfolio,
     regime_det: RegimeDetector,
     mood_det: MoodDetector,
@@ -2076,6 +2073,35 @@ def run_once(
         print(f"connect() finished. closed={closed['done']}", flush=True)
 
 
+def _optional_book(name: str, import_path: str, attr: str):
+    """Load a paper book; missing files must not kill the Gold Petal tape."""
+    try:
+        import importlib
+
+        mod = importlib.import_module(import_path)
+        return getattr(mod, attr)
+    except Exception as exc:
+        def _missing(*_a, **_k):
+            from strategy_disabled import DisabledStrategy
+
+            stub = DisabledStrategy(name)
+            stub._load_error = f"{type(exc).__name__}: {exc}"
+            print(f"{name}: skip ({stub._load_error})", flush=True)
+            return stub
+
+        return _missing
+
+
+def _load_amise_slots(portfolio):
+    try:
+        from strategy_amise import load_amise_slot_books
+
+        return load_amise_slot_books(portfolio)
+    except Exception as exc:
+        print(f"AMISE: skip ({type(exc).__name__}: {exc})", flush=True)
+        return []
+
+
 def main() -> None:
     stop_flag = {"stop": False}
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -2083,9 +2109,13 @@ def main() -> None:
     from strategy_disabled import DisabledStrategy
 
     def _load(name: str, factory):
-        if portfolio.is_enabled(name):
+        if not portfolio.is_enabled(name):
+            return DisabledStrategy(name)
+        try:
             return factory()
-        return DisabledStrategy(name)
+        except Exception as exc:
+            print(f"{name}: skip ({type(exc).__name__}: {exc})", flush=True)
+            return DisabledStrategy(name)
 
     strategy_s1 = _load("S1_NETDELTA", PressureStrategy)
     strategy_s2 = _load("S2_BALANCE", balance_from_env)
@@ -2109,9 +2139,15 @@ def main() -> None:
     strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
     strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
     strategy_s18 = _load("S18_OHLC_VOL_HTF", s18_from_env)
-    strategy_s19 = _load("S19_BODY_CLOSE_1H", s19_from_env)
-    strategy_s20 = _load("S20_FADE_HL", s20_from_env)
-    amise_slots = load_amise_slot_books(portfolio)
+    strategy_s19 = _load(
+        "S19_BODY_CLOSE_1H",
+        _optional_book("S19_BODY_CLOSE_1H", "strategy_s19", "s19_from_env"),
+    )
+    strategy_s20 = _load(
+        "S20_FADE_HL",
+        _optional_book("S20_FADE_HL", "strategy_s20", "s20_from_env"),
+    )
+    amise_slots = _load_amise_slots(portfolio)
     regime_det = RegimeDetector(window=60)
     mood_det = MoodDetector(window=80)
     init_db()
