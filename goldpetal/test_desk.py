@@ -50,8 +50,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" in quote
-    assert "gp-header-v4" in html
-    assert " · v4" in html
+    assert "gp-header-v5" in html
+    assert " · v5" in html
     assert "tape dead" in html
     assert "function tapeAgeSec" in html
     assert "Approve → paper" in html
@@ -188,7 +188,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "8501" in sh
     assert "streamlit run analytics/app.py" not in sh.split("pkill")[0]
     assert "Save strategies" in sh
-    assert "gp-header-v4" in sh
+    assert "gp-header-v5" in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
     assert "Save strategies" in station
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")

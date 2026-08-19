@@ -10,15 +10,23 @@ from typing import Any, Optional
 DB_PATH = Path(__file__).resolve().parent / "data" / "ticks.db"
 
 
-def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
+def connect(db_path: Path = DB_PATH, timeout: float = 30) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = sqlite3.connect(db_path, timeout=timeout)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.Error:
+        pass
     return conn
 
 
 def init_db(db_path: Path = DB_PATH) -> None:
     with connect(db_path) as conn:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ticks (

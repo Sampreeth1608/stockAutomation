@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 from control_state import paper_strategy_names
 from live_orders import recent_orders
 from paper_report import summarize_trades
-from storage import DB_PATH, build_trades, connect, init_db, latest_signals, latest_ticks
+from storage import DB_PATH, build_trades, latest_signals, latest_ticks
 from charges import paper_lots
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -164,13 +165,22 @@ def last_tick_snapshot(*, db_path: Path | None = None, now: datetime | None = No
 
 
 def _last_tick_meta(db_path: Path) -> dict[str, Any]:
-    init_db(db_path)
-    with connect(db_path) as conn:
+    empty = {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+    if not Path(db_path).is_file():
+        return empty
+    conn = sqlite3.connect(str(db_path), timeout=2.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=2000")
         row = conn.execute(
             "SELECT id, received_at, ltp FROM ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
+    except Exception:
+        return empty
+    finally:
+        conn.close()
     if not row:
-        return {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+        return empty
     return {
         "tick_count": int(row["id"] or 0),
         "ltp": row["ltp"],

@@ -190,7 +190,10 @@ def desk_payload() -> dict[str, Any]:
     bot = dict(bot_status(lite=True))
     bot.pop("log_tail", None)
     sess = dict(session_status())
-    tape = last_tick_snapshot()
+    try:
+        tape = last_tick_snapshot()
+    except Exception:
+        tape = {"tape_live": False, "tape_age_sec": None, "last_tick_at": ""}
     feed = str(bot.get("feed_source") or "off")
     feed_on = bool(bot.get("running")) or feed in {"bot", "collector"}
     sess["tape_live"] = bool(tape.get("tape_live"))
