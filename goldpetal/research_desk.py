@@ -21,6 +21,8 @@ from amise_slots import (
     apply_slot_enable,
     assign_slot,
     desk_slots_payload,
+    is_amise_slot,
+    write_slot,
 )
 from control_state import approve_strategy_live, approve_strategy_paper
 from proposals import decide_proposal, get_proposal, load_proposals, save_proposals
@@ -47,9 +49,9 @@ LIVE_BLOCKED_REASON = (
 )
 
 PAPER_REMINDER = (
-    "Approved. AMISE named the next free slot (S21, then S22, then S25 after "
-    "S24), wrote paper ENABLE, and queued it for Angel after you Unlock. "
-    "Restart the bot to load RAM. Keep DRY_RUN=true until you type LIVE yourself."
+    "Approved. New genomes take the next free slot (S21, then S22, then S25 after "
+    "S24). Improves of an existing chair overwrite that same slot. Paper ENABLE "
+    "is on. Restart the bot to load RAM. Keep DRY_RUN=true until you type LIVE yourself."
 )
 
 
@@ -104,6 +106,12 @@ def research_desk_payload(
     ]
     lib = _library_payload()
     counts = lib.get("counts") or {}
+    try:
+        from improve_books import improve_desk_payload
+
+        improve = improve_desk_payload()
+    except Exception as exc:
+        improve = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "roster": []}
     return {
         "ok": True,
         "ts_ist": _now_iso(),
@@ -131,13 +139,15 @@ def research_desk_payload(
         "pending": pending,
         "decided": decided[:30],
         "slots": desk_slots_payload(),
+        "improve": improve,
         "note": (
-            "AI researches. You decide. New strategies found on the last lab run "
-            "must beat S16 and S18 after charges with a 10% margin, pass PF/drawdown/"
-            "both-sides, survive 3-fold walk-forward, pass 2× and 3× costs, and pass "
-            "holdout when the tape is long enough. Approve names the next "
-            "slot (S21, S22, …) and turns that slot's paper ENABLE on. Restart "
-            "the bot. This tab never sets DRY_RUN=false."
+            "AI researches. You decide. New strategies must beat S16 and S18 after "
+            "charges with a 10% margin, pass PF/drawdown/both-sides, survive 3-fold "
+            "walk-forward, pass 2× and 3× costs, and pass holdout when the tape is "
+            "long enough. Approve names the next slot (S21, S22, …) and papers it. "
+            "Filled chairs keep learning from closed trades; a stronger genome "
+            "overwrites that same slot after you Approve. S13/S16 formulas stay. "
+            "Restart the bot. This tab never sets DRY_RUN=false."
         ),
         "last_run_at": lib.get("updated_at_ist") or "",
     }
@@ -236,12 +246,22 @@ def decide_research(
             )
         else:
             genome = genome_from_dict(graw)
-            slot_info = assign_slot(
-                genome,
-                proposal_id=p.id,
-                folder=slots_dir,
-                note=note,
-            )
+            target = str(extra.get("target_slot") or "").strip()
+            if extra.get("improve") and is_amise_slot(target):
+                slot_info = write_slot(
+                    target,
+                    genome,
+                    proposal_id=p.id,
+                    folder=slots_dir,
+                    note=note,
+                )
+            else:
+                slot_info = assign_slot(
+                    genome,
+                    proposal_id=p.id,
+                    folder=slots_dir,
+                    note=note,
+                )
             if not slot_info.get("ok"):
                 reminder = str(slot_info.get("error") or "slot assign failed")
             else:
@@ -257,11 +277,18 @@ def decide_research(
                 if queue_live:
                     approve_strategy_live(slot, path=state_path)
                 control_touched = True
-                reminder = (
-                    f"Named {slot}. Paper ENABLE written. Restart the bot to load it. "
-                    "Angel is queued on Live pick — Unlock + type LIVE still required. "
-                    "This tab did not set DRY_RUN=false."
-                )
+                if extra.get("improve") and is_amise_slot(target):
+                    reminder = (
+                        f"Updated {slot} genome in place. Paper ENABLE stays on. "
+                        "Restart the bot to load the new params. "
+                        "This tab did not set DRY_RUN=false."
+                    )
+                else:
+                    reminder = (
+                        f"Named {slot}. Paper ENABLE written. Restart the bot to load it. "
+                        "Angel is queued on Live pick — Unlock + type LIVE still required. "
+                        "This tab did not set DRY_RUN=false."
+                    )
     return {
         "ok": True,
         "id": p.id,

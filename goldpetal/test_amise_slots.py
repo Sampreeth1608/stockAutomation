@@ -11,6 +11,7 @@ from amise_slots import (
     load_slot_genome,
     next_free_slot,
     slot_env_patch,
+    write_slot,
 )
 from analytics.env_bridge import write_env_updates
 from control_state import ALL_STRATEGY_NAMES, SLIM_PAPER_STRATEGIES, paper_strategy_names
@@ -47,6 +48,16 @@ def test_assign_fills_s21_then_s22(tmp_path: Path) -> None:
     assert b["slot"] == "S22_AMISE"
     same = assign_slot(_g(), proposal_id="p1b", folder=tmp_path)
     assert same["slot"] == "S21_AMISE"
+    other = write_slot(
+        "S21_AMISE",
+        StrategyGenome(name="mut", entry_long=("bull",), entry_short=("bear",)).normalized(),
+        folder=tmp_path,
+    )
+    assert other["slot"] == "S21_AMISE"
+    assert other["overwritten"] is True
+    g2 = load_slot_genome("S21_AMISE", tmp_path)
+    assert g2 is not None and g2.name.startswith("mut")
+    assert load_slot_genome("S22_AMISE", tmp_path) is not None
 
 
 def test_fifth_assign_is_s25(tmp_path: Path) -> None:

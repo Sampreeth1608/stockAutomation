@@ -47,7 +47,8 @@ def test_scan_guardian_empty() -> None:
     assert "S8_NET_ZIGZAG" in names
     assert "S16_HHHL_WICK_1H" in names
     assert "S13_HHHL_DAY" in names
-    assert "S19_BODY_CLOSE_1H" not in names
+    assert "S19_BODY_CLOSE_1H" in names
+    assert "S20_FADE_HL" in names
 
 
 def test_amise_desk_payload_empty_db(tmp_path: Path) -> None:
@@ -130,6 +131,9 @@ def test_not_a_paper_book() -> None:
     assert "ENABLE" in sh
     assert "S21_AMISE" in ALL_STRATEGY_NAMES
     assert "S21_AMISE" in SLIM_PAPER_STRATEGIES
+    station = (root / "station.html").read_text(encoding="utf-8")
+    assert "lab-improve" in station
+    assert "same chair" in station.lower() or "same-slot" in station.lower() or "overwrite" in station.lower()
 
 
 if __name__ == "__main__":

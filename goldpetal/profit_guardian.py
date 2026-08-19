@@ -12,10 +12,9 @@ from typing import Any
 from amise_slots import allocated_slots
 from control_state import SLIM_PAPER_STRATEGIES
 
+# Watch every slim paper book plus filled AMISE chairs. S13/S16 stay formula-locked.
 GUARDIAN_BOOKS: tuple[str, ...] = tuple(
-    n
-    for n in SLIM_PAPER_STRATEGIES
-    if n not in {"S19_BODY_CLOSE_1H", "S20_FADE_HL"} and not n.endswith("_AMISE")
+    n for n in SLIM_PAPER_STRATEGIES if not n.endswith("_AMISE")
 )
 
 

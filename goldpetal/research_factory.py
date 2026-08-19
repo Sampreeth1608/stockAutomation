@@ -729,9 +729,12 @@ def proposal_from_challenger(
     row: dict[str, Any],
     *,
     week_id: str,
+    target_slot: str = "",
+    parent_after_charges: float | None = None,
 ) -> StrategyProposal:
     g = genome_from_dict(row.get("genome") or {})
     m = row.get("metrics") or {}
+    slot = str(target_slot or "").strip()
     extra = {
         "metric": "after_charges_ex_tax",
         "after_charges_inr": m.get("after_charges"),
@@ -743,7 +746,14 @@ def proposal_from_challenger(
         "paper_next": True,
         "live": False,
         "enable": False,
+        "improve": bool(slot),
+        "target_slot": slot,
+        "parent_after_charges": parent_after_charges,
     }
+    title = g.name
+    if slot:
+        n = slot.replace("_AMISE", "").replace("S", "")
+        title = f"Improve S{n} AMISE: {g.name}"[:80]
     patch = research_env_patch()
     if not env_patch_is_safe(patch):
         raise RuntimeError("research env_patch must be DRY_RUN=true only")
@@ -752,7 +762,7 @@ def proposal_from_challenger(
         week_id=week_id,
         kind=RESEARCH_KIND,
         strategy=RESEARCH_STRATEGY,
-        title=g.name,
+        title=title,
         summary=str(row.get("supervisor") or g.name),
         paper=PaperResult(
             n_trades=int(m.get("n_trades") or 0),
@@ -937,7 +947,8 @@ def run_research_lab(
     pending_ids: list[str] = []
     if propose:
         for row in proposed:
-            prop = proposal_from_challenger(row, week_id=stamp)
+            gid = str((row.get("genome") or {}).get("genome_id") or "g")
+            prop = proposal_from_challenger(row, week_id=f"{stamp}:{gid}")
             if proposals_path is not None:
                 add_proposal(prop, path=proposals_path)
             else:

@@ -12,8 +12,9 @@ os.environ["EDGE_ABOVE_BASE"] = "0.08"
 os.environ["EDGE_WARMUP_MAX"] = "8"
 os.environ["EDGE_MIN_SAMPLES"] = "20"
 
-from control_state import ALL_STRATEGY_NAMES
-from trade_learner import LEARN_STRATEGIES, STRAT_INDEX, TradeLearner, reset_learner
+from control_state import ALL_STRATEGY_NAMES, all_strategy_names
+import trade_learner as tl
+from trade_learner import TradeLearner, refresh_learn_strategies, reset_learner
 
 
 def _t(strategy: str, after: float, ts: str, side: str = "BUY") -> dict:
@@ -30,13 +31,26 @@ def _t(strategy: str, after: float, ts: str, side: str = "BUY") -> dict:
 
 
 def test_learns_every_strategy_name() -> None:
-    assert LEARN_STRATEGIES == ALL_STRATEGY_NAMES
+    refresh_learn_strategies()
     for name in ALL_STRATEGY_NAMES:
-        assert name in STRAT_INDEX
-    assert "S1_NETDELTA" in STRAT_INDEX
-    assert "S9_STATE30" in STRAT_INDEX
-    assert "S13_HHHL_DAY" in STRAT_INDEX
-    assert "S16_HHHL_WICK_1H" in STRAT_INDEX
+        assert name in tl.STRAT_INDEX
+    for name in all_strategy_names():
+        assert name in tl.LEARN_STRATEGIES
+        assert name in tl.STRAT_INDEX
+    assert "S1_NETDELTA" in tl.STRAT_INDEX
+    assert "S9_STATE30" in tl.STRAT_INDEX
+    assert "S13_HHHL_DAY" in tl.STRAT_INDEX
+    assert "S16_HHHL_WICK_1H" in tl.STRAT_INDEX
+    assert "S21_AMISE" in tl.STRAT_INDEX
+
+
+def test_learns_new_amise_slot_after_approve() -> None:
+    try:
+        refresh_learn_strategies(["S25_AMISE", "S26_AMISE"])
+        assert "S25_AMISE" in tl.STRAT_INDEX
+        assert "S26_AMISE" in tl.LEARN_STRATEGIES
+    finally:
+        refresh_learn_strategies()
 
 
 def test_warmup_does_not_block() -> None:
@@ -230,6 +244,7 @@ def test_reset_clears_singleton() -> None:
 
 if __name__ == "__main__":
     test_learns_every_strategy_name()
+    test_learns_new_amise_slot_after_approve()
     test_warmup_does_not_block()
     test_blocks_after_enough_losing_closes()
     test_blocks_low_winrate_book()

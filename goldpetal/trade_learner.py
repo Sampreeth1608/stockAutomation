@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from control_state import ALL_STRATEGY_NAMES
+from control_state import all_strategy_names
 from quality_filters import (
     expected_value,
     hour_cycle,
@@ -35,8 +35,27 @@ RATCHET_PATH = ROOT / "data" / "models" / "edge_ratchet.json"
 _LOCK = threading.Lock()
 _LEARNER: "TradeLearner | None" = None
 
-LEARN_STRATEGIES: tuple[str, ...] = ALL_STRATEGY_NAMES
-STRAT_INDEX = {name: i for i, name in enumerate(LEARN_STRATEGIES)}
+LEARN_STRATEGIES: tuple[str, ...] = ()
+STRAT_INDEX: dict[str, int] = {}
+
+
+def refresh_learn_strategies(
+    extra: list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Every paper book, including S25+ after Lab Approve, joins the hour gate."""
+    global LEARN_STRATEGIES
+    names: list[str] = []
+    for n in list(all_strategy_names()) + list(extra or []):
+        s = str(n or "").strip()
+        if s and s not in names:
+            names.append(s)
+    LEARN_STRATEGIES = tuple(names)
+    STRAT_INDEX.clear()
+    STRAT_INDEX.update({name: i for i, name in enumerate(LEARN_STRATEGIES)})
+    return LEARN_STRATEGIES
+
+
+refresh_learn_strategies()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -369,6 +388,8 @@ class TradeLearner:
         return max(floor, min(_need_cap(), need))
 
     def fit(self, trades: list[dict[str, Any]]) -> None:
+        extra = [str(t.get("strategy") or "") for t in trades]
+        refresh_learn_strategies(extra)
         closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
         self.n = len(closed)
         self._book_stats(trades)
@@ -420,6 +441,7 @@ class TradeLearner:
         from storage import DB_PATH, build_trades
 
         db = db_path or DB_PATH
+        refresh_learn_strategies()
         rows: list[dict[str, Any]] = []
         try:
             for name in LEARN_STRATEGIES:

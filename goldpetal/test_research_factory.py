@@ -360,6 +360,9 @@ def test_proposal_and_lab_approve_assigns_s21(tmp_path: Path) -> None:
     assert prop.strategy == RESEARCH_STRATEGY
     assert prop.env_patch == {"DRY_RUN": "true"}
     assert "ENABLE" not in "".join(prop.env_patch.keys())
+    extra = prop.paper.extra or {}
+    assert extra.get("improve") is False
+    assert extra.get("target_slot") == ""
     add_proposal(prop, path=props)
     live = decide_research(prop.id, "approved_live", proposals_path=props)
     assert live["ok"] is False
@@ -507,6 +510,9 @@ def test_not_wired_to_paper_or_live() -> None:
     assert "S21_AMISE" in ALL_STRATEGY_NAMES
     assert "S24_AMISE" in SLIM_PAPER_STRATEGIES
     assert "S11_DISCOVERED" not in SLIM_PAPER_STRATEGIES
+    amise = (root / "amise.py").read_text(encoding="utf-8")
+    assert "run_improve" in amise
+    assert "improve_books" in amise
 
 
 if __name__ == "__main__":

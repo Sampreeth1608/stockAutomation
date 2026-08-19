@@ -219,7 +219,8 @@ def start_amise_lab(
         "note": (
             "Factory started: cheap-screen, then 3-fold + recipes + sklearn ranks "
             "+ 2×/3× costs + holdout. Skipping those does not make stronger books. "
-            "Challengers that pass go to Lab. You Approve. Does not ENABLE until Approve. "
+            "Challengers that pass go to Lab. Filled chairs also get a same-slot "
+            "improve pass from closed trades / tape. You Approve. Does not ENABLE until Approve. "
             "Keep DRY_RUN=true."
         ),
     }
@@ -454,7 +455,7 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "PROFIT GUARDIAN",
             "RISK",
             "YOUR APPROVAL",
-            "S21+ PAPER (after Approve, next free name)",
+            "S21+ PAPER (new name or same-slot improve after Approve)",
             "ANGEL (after Unlock + LIVE)",
             "MEMORY",
         ],
@@ -462,7 +463,8 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
             "It invents challengers on Run factory / auto lab (screen, then strong gates). "
             "You Approve on Lab — that names the next slot (S21, S22, … S25 after S24) "
-            "and turns paper ENABLE on. Restart the bot. "
+            "or overwrites a filled chair with a stronger genome. "
+            "Existing books keep learning from closed trades. Restart the bot. "
             "This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE. "
             "Does not rewrite S13/S16. Keep DRY_RUN=true until you type LIVE."
         ),
@@ -480,6 +482,7 @@ def run_amise(
     folds: int = 3,
     memory_path: Path | None = None,
     fast: bool = False,
+    improve: bool = True,
 ) -> dict[str, Any]:
     """Full research loop. Factory only if lab=True. Never ENABLE."""
     from desk_data import resolve_desk_db
@@ -491,9 +494,12 @@ def run_amise(
     guardian = scan_guardian(db=path)
     similar = similar_states(path, mood)
     lab_payload: dict[str, Any] = {}
+    improve_payload: dict[str, Any] = {}
+    hours: list[Any] = []
     if lab:
         from backtest_flow_lab import _load_bars
         from flow_lab import FlowParams, session_bars, tape_flags
+        from improve_books import run_improve
         from research_factory import FAST_LAB_KWARGS, run_research_lab
 
         ns = argparse.Namespace(
@@ -534,6 +540,30 @@ def run_amise(
             "gates": lab_payload.get("gates") or [],
             "holdout_bars": lab_payload.get("holdout_bars") or 0,
         }
+        if improve:
+            improve_payload = run_improve(
+                hours,
+                db=path,
+                lots=float(lots),
+                fees=bool(fees),
+                n_folds=int(lab_kw.get("n_folds") or 3),
+                strong=True,
+                propose=bool(propose),
+                full=not bool(fast),
+            )
+            lab_payload["improve"] = {
+                "proposed_ids": improve_payload.get("proposed_ids") or [],
+                "amise": [
+                    {
+                        "slot": r.get("slot"),
+                        "status": r.get("status"),
+                        "proposed": r.get("proposed"),
+                    }
+                    for r in (improve_payload.get("amise") or [])
+                ],
+                "s18_proposed": bool((improve_payload.get("s18") or {}).get("proposed")),
+                "hour_gate_n": (improve_payload.get("hour_gate") or {}).get("n"),
+            }
     payload = {
         "engine": ENGINE_NAME,
         "updated_at_ist": _now_iso(),
@@ -548,9 +578,11 @@ def run_amise(
         "guardian": guardian,
         "similar": similar,
         "lab": lab_payload,
+        "improve": improve_payload,
         "note": (
             "AMISE run stored. Factory ran." if lab else "AMISE observe run (no factory). "
         )
+        + "Existing books also get an improve pass when the factory runs. "
         + "Not ENABLE. Keep DRY_RUN=true.",
     }
     write_memory(payload, path=memory_path or MEMORY_PATH)
@@ -569,12 +601,17 @@ def main() -> int:
     ap.add_argument("--folds", type=int, default=3)
     ap.add_argument("--fast", action="store_true", help="screen losers first, then the same strong lab")
     ap.add_argument("--full", action="store_true", help="full weekly lab (overrides --fast)")
+    ap.add_argument(
+        "--no-improve",
+        action="store_true",
+        help="skip the closed-trade / same-slot improve pass after the factory",
+    )
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
     use_fast = bool(args.fast) and not bool(args.full)
     print("AMISE — invents challengers, you approve S21, S22, …. Keep DRY_RUN=true.")
-    print("Market state → factory (optional) → fit → guardian → memory → you approve")
-    print("Approve on Lab names the next slot and papers it. Never DRY_RUN=false.", flush=True)
+    print("Market state → factory (optional) → improve existing books → you approve")
+    print("Approve on Lab names the next slot (or overwrites that chair). Never DRY_RUN=false.", flush=True)
     result = run_amise(
         db=args.db,
         lab=bool(args.lab),
@@ -584,6 +621,7 @@ def main() -> int:
         minutes=int(args.minutes),
         folds=int(args.folds),
         fast=use_fast,
+        improve=not bool(args.no_improve),
     )
     m = result.get("market") or {}
     print(f"regime={m.get('regime')} mood={m.get('mood')} transition={m.get('transition')}")
@@ -611,7 +649,14 @@ def main() -> int:
         )
     else:
         print("factory skipped (pass --lab to run discovery + validation)")
-    print("You approve on the station AMISE / Lab tabs. Approve → next S21+ slot. Keep DRY_RUN=true.")
+    imp = result.get("improve") or {}
+    if imp:
+        print(
+            f"improve proposed={len(imp.get('proposed_ids') or [])} "
+            f"s18={((imp.get('s18') or {}).get('proposed'))} "
+            f"hour_n={((imp.get('hour_gate') or {}).get('n'))}"
+        )
+    print("You approve on the station AMISE / Lab tabs. New slot or same-chair improve. Keep DRY_RUN=true.")
     return 0
 
 
