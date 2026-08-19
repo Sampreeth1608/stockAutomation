@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backtest paper S16 vs S16 + same-hour TBQ/TSQ strength.
+"""Backtest paper S16 vs drop-weak vs fade-weak TBQ/TSQ hours.
 
 Research only. Does not rewrite paper S16. Stay DRY_RUN.
 
@@ -44,7 +44,7 @@ def _line(label: str, result: Any) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="S16 vs S16+TBQ/TSQ hour strength (research, not live)."
+        description="S16 vs drop-weak vs fade-weak TBQ/TSQ (research, not live)."
     )
     ap.add_argument("--db", type=Path, default=Path("data/ticks.db"))
     ap.add_argument("--lots", type=float, default=100.0)
@@ -64,11 +64,11 @@ def main() -> None:
     print("Paper S16:", S16_FORMULA)
     print("Overlay:", FORMULA)
     print()
-    print("Strong up  = hour C>O and TBQ>TSQ → keep / allow LONG")
-    print("Weak up    = hour C>O and TBQ<TSQ → get out, no LONG")
-    print("Strong down= hour C<O and TBQ<TSQ → keep / allow SHORT")
-    print("Weak down  = hour C<O and TBQ>TSQ → get out, no SHORT")
-    print("S16 still decides HH/LL vs wick. Weak hours flatten, they do not reverse.")
+    print("Strong up   = hour C>O and TBQ>TSQ → keep / allow LONG")
+    print("Weak up     = hour C>O and TBQ<TSQ → drop: flatten | fade: SHORT")
+    print("Strong down = hour C<O and TBQ<TSQ → keep / allow SHORT")
+    print("Weak down   = hour C<O and TBQ>TSQ → drop: flatten | fade: LONG")
+    print("S16 still decides HH/LL vs wick on strong hours.")
     print()
 
     if not args.db.exists():
@@ -103,23 +103,46 @@ def main() -> None:
         min_wick_gap=0.0,
         charge_cfg=cfg,
     )
-    overlay = simulate_s16_tbq_net(
+    drop = simulate_s16_tbq_net(
         bars,
-        tf=f"{args.minutes}m:s16_tbq",
+        tf=f"{args.minutes}m:s16_tbq_drop",
         lots=float(args.lots),
         fees=bool(args.fees),
         session_filter=True,
         min_wick_gap=0.0,
         charge_cfg=cfg,
+        weak="drop",
+    )
+    fade = simulate_s16_tbq_net(
+        bars,
+        tf=f"{args.minutes}m:s16_tbq_fade",
+        lots=float(args.lots),
+        fees=bool(args.fees),
+        session_filter=True,
+        min_wick_gap=0.0,
+        charge_cfg=cfg,
+        weak="fade",
     )
     print()
     print("=== after Angel charges, tax excluded (paper S16 gap=0) ===")
-    _line("S16 plain          ", plain)
-    _line("S16 + TBQ/TSQ hour ", overlay)
-    d = after_charges_inr(overlay) - after_charges_inr(plain)
-    print(f"delta overlay − plain after_charges₹={d:.1f}")
+    rows = [
+        ("S16 plain           ", plain),
+        ("S16 + drop weak     ", drop),
+        ("S16 + fade weak     ", fade),
+    ]
+    for label, result in rows:
+        _line(label, result)
     print()
-    write_outputs([plain, overlay], args.out_dir)
+    ranked = sorted(rows, key=lambda item: after_charges_inr(item[1]), reverse=True)
+    print("rank after charges (tax excluded):")
+    for i, (label, result) in enumerate(ranked, start=1):
+        print(f"  {i}. {label.strip()}  ₹{after_charges_inr(result):.1f}")
+    d_drop = after_charges_inr(drop) - after_charges_inr(plain)
+    d_fade = after_charges_inr(fade) - after_charges_inr(plain)
+    print(f"delta drop − plain after_charges₹={d_drop:.1f}")
+    print(f"delta fade − plain after_charges₹={d_fade:.1f}")
+    print()
+    write_outputs([plain, drop, fade], args.out_dir)
     print(
         "Stay DRY_RUN. Paper S16 is unchanged. Do not ENABLE a new book and "
         "do not live-unlock from this tape."

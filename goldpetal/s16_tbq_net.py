@@ -1,39 +1,37 @@
 """S16 + hour TBQ/TSQ strength. Research overlay. Not a paper rewrite. Not live.
 
-S16 still picks the side (C>prev → HH/LL, C<prev → wick, FLIP).
-This layer grades the *same finished hour*:
+S16 still picks the side on *strong* hours (C>prev → HH/LL, C<prev → wick).
+Same finished hour is graded with TBQ−TSQ:
 
-  price up  (C>O) and net+ (TBQ>TSQ) → strong up   → keep / allow LONG
-  price up  (C>O) and net- (TBQ<TSQ) → weak up     → flatten, no LONG
-  price down (C<O) and net-          → strong down → keep / allow SHORT
-  price down (C<O) and net+          → weak down   → flatten, no SHORT
+  price up   (C>O) and net+ (TBQ>TSQ) → strong up   → S16 may LONG
+  price up   (C>O) and net- (TBQ<TSQ) → weak up     → SHORT the fake rally
+  price down (C<O) and net-          → strong down → S16 may SHORT
+  price down (C<O) and net+          → weak down   → BUY the fake dump
 
-S16 rules still play: a strong down can FLIP a long to short; a strong
-up can FLIP a short to long. Weak hours only exit, they do not reverse.
+``weak=drop``: flatten on weak, do not reverse.
+``weak=fade``: weak up shorts, weak down buys, FLIP.
 
 Fill at bar close. Rank after Angel charges, tax excluded. Stay DRY_RUN.
-Do not change ENABLE_S16 / strategy_s16.py until a later tape beats
-plain S16 after charges with enough trades and the operator asks.
+Do not change ENABLE_S16 / strategy_s16.py.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from backtest_hhhl_candles import Candle, Trade, in_session, make_charge_cfg
 from backtest_wick_candles import _tf_result_from_trades
 from charges import ChargeConfig
-from ohlcv_lab import after_charges_inr
 from s16_hhhl_wick import _close_leg, s16_bar_decision
 from s18_ohlc_vol_htf import VolBar
 
 LAB_NAME = "S16_TBQ_NET"
 
 FORMULA = (
-    "S16 1h (C>prev HH/LL, C<prev wick, FLIP) plus same-hour TBQ−TSQ: "
-    "C>O and TBQ>TSQ = strong up keep/allow long; C>O and TBQ<TSQ = weak up "
-    "get out; C<O and TBQ<TSQ = strong down keep/allow short; C<O and TBQ>TSQ "
-    "= weak down get out. Weak hours flatten, they do not reverse. "
+    "S16 1h (C>prev HH/LL, C<prev wick, FLIP) plus same-hour TBQ−TSQ. "
+    "C>O and TBQ>TSQ = strong up keep/allow long; C<O and TBQ<TSQ = strong "
+    "down keep/allow short. Weak hours: drop = flatten no reverse; fade = "
+    "weak up SHORT the fake rally, weak down LONG the fake dump (FLIP). "
     "Research only. Does not rewrite paper S16."
 )
 
@@ -42,6 +40,8 @@ WEAK_UP = "weak_up"
 STRONG_DOWN = "strong_down"
 WEAK_DOWN = "weak_down"
 MIXED = "mixed"
+
+WeakMode = Literal["drop", "fade"]
 
 
 def _bar_net(bar: Any) -> float:
@@ -86,6 +86,24 @@ def gate_s16_want(want: str | None, kind: str) -> str | None:
     return None
 
 
+def overlay_want(
+    s16_want: str | None,
+    kind: str,
+    *,
+    weak: WeakMode = "drop",
+) -> str | None:
+    """Map S16 + hour kind to a side. Fade uses weak hours as counter-trend."""
+    if weak == "fade":
+        if kind == WEAK_UP:
+            return "short"
+        if kind == WEAK_DOWN:
+            return "long"
+        if kind in (STRONG_UP, STRONG_DOWN):
+            return gate_s16_want(s16_want, kind)
+        return s16_want
+    return gate_s16_want(s16_want, kind)
+
+
 def simulate_s16_tbq_net(
     bars: list[Any],
     *,
@@ -97,6 +115,7 @@ def simulate_s16_tbq_net(
     market_close: str = "23:30",
     charge_cfg: ChargeConfig | None = None,
     min_wick_gap: float = 0.0,
+    weak: WeakMode = "drop",
 ) -> Any:
     """S16 decide, then strong/weak hour overlay. Fill at close. Flatten EOD."""
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
@@ -140,13 +159,14 @@ def simulate_s16_tbq_net(
                 continue
 
         kind = flow_kind(cur_b)
-        if side == "LONG" and kind == WEAK_UP:
-            close_trade(cur)
-        elif side == "SHORT" and kind == WEAK_DOWN:
-            close_trade(cur)
+        if weak == "drop":
+            if side == "LONG" and kind == WEAK_UP:
+                close_trade(cur)
+            elif side == "SHORT" and kind == WEAK_DOWN:
+                close_trade(cur)
 
-        want, _why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
-        want = gate_s16_want(want, kind)
+        s16_want, _why = s16_bar_decision(prev, cur, min_wick_gap=min_wick_gap)
+        want = overlay_want(s16_want, kind, weak=weak)
 
         if side == "LONG":
             if want == "short":
