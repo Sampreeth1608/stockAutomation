@@ -12,9 +12,13 @@ from ohlcv_lab import LabMetrics
 from proposals import PaperResult, StrategyProposal, add_proposal, get_proposal
 from research_desk import decide_research, research_desk_payload
 from research_factory import (
+    BEAT_MULT,
     FAST_LAB_KWARGS,
     LAB_NAME,
+    MIN_PF,
+    Robustness,
     gate_failures,
+    holdout_split,
     proposal_from_challenger,
     run_research_lab,
 )
@@ -107,23 +111,54 @@ def _uptrend(n: int = 60) -> list[FlowBar]:
     return bars
 
 
-def _m(*, n: int = 25, ac: float = 1000.0, wf: int = 3, folds: int = 3) -> LabMetrics:
+def _m(
+    *,
+    n: int = 25,
+    ac: float = 1000.0,
+    wf: int = 3,
+    folds: int = 3,
+    pf: float = 1.6,
+    dd: float = 100.0,
+    n_long: int = 12,
+    n_short: int = 13,
+) -> LabMetrics:
     return LabMetrics(
         name="x",
         family="t",
         exit_mode="flip_eod",
         n_trades=n,
-        n_long=12,
-        n_short=13,
+        n_long=n_long,
+        n_short=n_short,
         after_charges=ac,
         expectancy=ac / max(n, 1),
-        profit_factor=1.6,
+        profit_factor=pf,
         avg_win=80.0,
         avg_loss=-40.0,
-        max_dd=100.0,
+        max_dd=dd,
         win_rate=0.55,
         wf_wins=wf,
         wf_folds=folds,
+    )
+
+
+def _rob(
+    *,
+    cost_2x: bool = True,
+    cost_3x: bool = True,
+    delay: bool = True,
+    jitter: bool = True,
+) -> Robustness:
+    return Robustness(
+        cost_1x=1000.0,
+        cost_2x=400.0,
+        cost_3x=100.0 if cost_3x else -50.0,
+        delay_1bar=500.0,
+        jitter_lo=400.0,
+        jitter_hi=600.0,
+        cost_2x_pass=cost_2x,
+        cost_3x_pass=cost_3x,
+        delay_pass=delay,
+        jitter_pass=jitter,
     )
 
 
@@ -215,12 +250,13 @@ def test_env_patch_never_enable() -> None:
     assert not env_patch_is_safe({"DRY_RUN": "false"})
 
 
-def test_fast_lab_skips_heavy_ml() -> None:
-    assert FAST_LAB_KWARGS["sklearn"] is False
-    assert FAST_LAB_KWARGS["include_recipes"] is False
-    assert FAST_LAB_KWARGS["robustness"] is False
-    assert FAST_LAB_KWARGS["n_folds"] == 2
-    assert FAST_LAB_KWARGS["max_compose"] == 8
+def test_fast_lab_keeps_strong_gates() -> None:
+    assert FAST_LAB_KWARGS["sklearn"] is True
+    assert FAST_LAB_KWARGS["include_recipes"] is True
+    assert FAST_LAB_KWARGS["robustness"] is True
+    assert FAST_LAB_KWARGS["n_folds"] == 3
+    assert FAST_LAB_KWARGS["strong"] is True
+    assert FAST_LAB_KWARGS["screen_first"] is True
 
 
 def test_gates_reject_thin_and_champion_loss() -> None:
@@ -234,6 +270,37 @@ def test_gates_reject_thin_and_champion_loss() -> None:
     assert any("S18" in x for x in fails)
     win = _m(n=25, ac=1200, wf=2)
     assert gate_failures(win, s16=s16, s18=s18, rob=None) == []
+
+
+def test_strong_gates_need_margin_pf_3x_and_both_sides() -> None:
+    s16 = _m(n=20, ac=500)
+    s18 = _m(n=10, ac=800)
+    barely = _m(n=25, ac=810, wf=2)
+    fails = gate_failures(barely, s16=s16, s18=s18, rob=None)
+    assert any("margin" in x for x in fails)
+    weak_pf = _m(n=25, ac=1200, wf=2, pf=1.05)
+    assert any("PF" in x for x in gate_failures(weak_pf, s16=s16, s18=s18, rob=None))
+    dd = _m(n=25, ac=1200, wf=2, dd=2000.0)
+    assert any("drawdown" in x for x in gate_failures(dd, s16=s16, s18=s18, rob=None))
+    oneside = _m(n=25, ac=1200, wf=2, n_long=24, n_short=1)
+    assert any("one-sided" in x for x in gate_failures(oneside, s16=s16, s18=s18, rob=None))
+    win = _m(n=25, ac=1200, wf=2)
+    assert any(
+        "3×" in x for x in gate_failures(win, s16=s16, s18=s18, rob=_rob(cost_3x=False))
+    )
+    assert gate_failures(win, s16=s16, s18=s18, rob=_rob()) == []
+    assert BEAT_MULT == 1.10
+    assert MIN_PF == 1.25
+
+
+def test_holdout_split_needs_long_tape() -> None:
+    train, hold = holdout_split(_uptrend(40))
+    assert hold == []
+    assert len(train) == 40
+    train, hold = holdout_split(_uptrend(80))
+    assert len(hold) >= 20
+    assert len(train) + len(hold) == 80
+    assert train[-1].time != hold[0].time
 
 
 def test_factory_rejects_short_tape(tmp_path: Path) -> None:
@@ -451,8 +518,10 @@ if __name__ == "__main__":
     test_genome_compile_long_on_hh_hl_bull()
     test_mutate_and_combine()
     test_env_patch_never_enable()
-    test_fast_lab_skips_heavy_ml()
+    test_fast_lab_keeps_strong_gates()
     test_gates_reject_thin_and_champion_loss()
+    test_strong_gates_need_margin_pf_3x_and_both_sides()
+    test_holdout_split_needs_long_tape()
     td = P(tempfile.mkdtemp())
     for name in ("a", "b", "c", "d"):
         (td / name).mkdir()

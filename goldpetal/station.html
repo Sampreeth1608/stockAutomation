@@ -312,7 +312,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> for the fast path (or let auto-lab run). Approve on Lab names the next slot (S21, S22, …) and papers it. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> (cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout). Approve on Lab names the next slot (S21, S22, …) and papers it. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Unlock + LIVE on Live money.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -947,6 +947,7 @@ function renderLab() {
         ${mlStat("Win %", wrFrac(paper.win_rate))}
         ${mlStat("Walk-forward", esc(extra.walk_forward || "—"))}
         ${mlStat("2× costs", rob.cost_2x_pass ? "PASS" : (rob.cost_2x_pass === false ? "FAIL" : "—"), rob.cost_2x_pass ? "ok" : "warn")}
+        ${mlStat("3× costs", rob.cost_3x_pass ? "PASS" : (rob.cost_3x_pass === false ? "FAIL" : "—"), rob.cost_3x_pass ? "ok" : "warn")}
       </div>
       <p class="hint">${esc(p.summary || extra.supervisor || "")}</p>
       <textarea data-lab-note="${esc(p.id)}" placeholder="note (optional)"></textarea>
@@ -1057,7 +1058,7 @@ function renderAmise() {
     ${mlStat("Factory", job.running ? "RUNNING" : "idle", job.running ? "warn" : "ok")}
   </div>
   <p class="ml-meta">Last factory run ${esc(fac.last_run_at || job.last_run_at || "none")} · auto ${job.auto ? ("every " + (job.auto_hours || 12) + "h") : "off"} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
-  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. That names the next S21+ slot and papers it.") : "No pending factory proposals. Click Run factory (fast path). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. That names the next S21+ slot and papers it.") : "No pending factory proposals. Click Run factory (screen, then strong gates). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
   const slotRows = slots.slots || [];
   $("amise-slots").innerHTML = slotRows.length ? `<table>
     <thead><tr><th>Slot</th><th>Genome</th><th>When</th></tr></thead>

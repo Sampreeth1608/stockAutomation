@@ -66,13 +66,23 @@ LAST_RUN_PATH = RESEARCH_DIR / "last_run.json"
 MIN_WF_WINS = 2
 MIN_DISCOVERY_N = 12
 MAX_AND = 4
-# Desk / auto-lab: skip recipes, sklearn RF, and 3× robustness. Still beats S16+S18 after charges.
+# Stronger than "barely beat S16/S18". Skipping these does not make better books.
+BEAT_MULT = 1.10
+MIN_PF = 1.25
+MIN_SIDE = 3
+HOLD_FRAC = 0.20
+MIN_HOLD_BARS = 20
+MIN_TRAIN_BARS = 40
+# Desk / auto-lab: cheap-screen losers, then run the strong lab on the shortlist.
+# 3 folds, recipes, sklearn ranks, 2× and 3× costs, holdout. Never skip gates to "find more".
 FAST_LAB_KWARGS: dict[str, Any] = {
-    "n_folds": 2,
-    "include_recipes": False,
-    "max_compose": 8,
-    "robustness": False,
-    "sklearn": False,
+    "n_folds": 3,
+    "include_recipes": True,
+    "max_compose": 24,
+    "robustness": True,
+    "sklearn": True,
+    "strong": True,
+    "screen_first": True,
 }
 
 
@@ -523,6 +533,29 @@ def run_robustness(
     )
 
 
+def holdout_split(
+    bars: list[FlowBar],
+    *,
+    frac: float = HOLD_FRAC,
+    min_hold: int = MIN_HOLD_BARS,
+    min_train: int = MIN_TRAIN_BARS,
+) -> tuple[list[FlowBar], list[FlowBar]]:
+    """Last ``frac`` of the tape is unseen by discovery. Empty holdout = tape too short."""
+    n = len(bars)
+    if n < min_train + min_hold:
+        return list(bars), []
+    cut = int(n * (1.0 - float(frac)))
+    cut = max(min_train, min(cut, n - min_hold))
+    return list(bars[:cut]), list(bars[cut:])
+
+
+def _champ_ac(s16: LabMetrics, s18: LabMetrics | None) -> float:
+    ac = float(s16.after_charges)
+    if s18 is not None:
+        ac = max(ac, float(s18.after_charges))
+    return ac
+
+
 def gate_failures(
     m: LabMetrics,
     *,
@@ -530,6 +563,10 @@ def gate_failures(
     s18: LabMetrics | None,
     rob: Robustness | None,
     min_trades: int = MIN_TRADES,
+    strong: bool = True,
+    holdout: LabMetrics | None = None,
+    s16_hold: LabMetrics | None = None,
+    s18_hold: LabMetrics | None = None,
 ) -> list[str]:
     fails: list[str] = []
     if m.n_trades < min_trades:
@@ -545,6 +582,8 @@ def gate_failures(
     if rob is not None:
         if not rob.cost_2x_pass:
             fails.append("2× costs failed")
+        if strong and not rob.cost_3x_pass:
+            fails.append("3× costs failed")
         if not rob.delay_pass:
             fails.append("1-bar delay fragile")
         if not rob.jitter_pass:
@@ -552,6 +591,30 @@ def gate_failures(
         regime_fails = sum(1 for v in rob.regimes.values() if v == "FAIL")
         if regime_fails >= 2:
             fails.append("failed ≥2 market regimes")
+    if strong:
+        champ = _champ_ac(s16, s18)
+        if champ > 0 and m.after_charges < champ * BEAT_MULT:
+            fails.append(
+                f"need {BEAT_MULT:.0%} margin vs champions (AC₹={champ:.1f}, have {m.after_charges:.1f})"
+            )
+        if m.profit_factor < MIN_PF:
+            fails.append(f"PF {m.profit_factor:.2f} < {MIN_PF}")
+        if m.after_charges > 0 and m.max_dd > m.after_charges:
+            fails.append(f"drawdown ₹{m.max_dd:.0f} > after-charges")
+        if m.n_trades >= MIN_SIDE * 2 and (m.n_long < MIN_SIDE or m.n_short < MIN_SIDE):
+            fails.append("one-sided book (need both long and short sample)")
+        if holdout is not None:
+            if holdout.n_trades < 5:
+                fails.append(f"holdout too thin ({holdout.n_trades} < 5)")
+            elif holdout.after_charges <= 0:
+                fails.append("holdout after charges ≤ 0")
+            elif s16_hold is not None and holdout.after_charges <= s16_hold.after_charges:
+                fails.append(f"holdout loses to S16 (AC₹={s16_hold.after_charges:.1f})")
+            elif (
+                s18_hold is not None
+                and holdout.after_charges <= s18_hold.after_charges
+            ):
+                fails.append(f"holdout loses to S18 (AC₹={s18_hold.after_charges:.1f})")
     return fails
 
 
@@ -583,6 +646,8 @@ def evaluate_challenger(
     n_folds: int,
     params: FlowParams | None = None,
     robustness: bool = True,
+    strong: bool = True,
+    holdout_bars: list[FlowBar] | None = None,
 ) -> dict[str, Any]:
     g = genome.normalized()
     p = params or params_from_genome(g)
@@ -609,10 +674,33 @@ def evaluate_challenger(
     rob = None
     if robustness and m.n_trades >= 8 and m.after_charges > 0:
         rob = run_robustness(bars, g, m, lots=lots, fees=fees, params=p)
-    fails = gate_failures(m, s16=s16, s18=s18, rob=rob)
+    hold_m = None
+    s16_h = None
+    s18_h = None
+    hold = list(holdout_bars or [])
+    if strong and len(hold) >= MIN_HOLD_BARS:
+        hold_m = run_genome_book(
+            hold, g, lots=lots, fees=fees, n_folds=0, params=p, tf="hold", skip_wf=True
+        )
+        s16_h = champion_s16(hold, lots=lots, fees=fees)
+        s18_h = champion_s18(hold, lots=lots, fees=fees)
+    fails = gate_failures(
+        m,
+        s16=s16,
+        s18=s18,
+        rob=rob,
+        strong=strong,
+        holdout=hold_m,
+        s16_hold=s16_h,
+        s18_hold=s18_h,
+    )
+    pub = metrics_public(m) or {}
+    if hold_m is not None:
+        pub["holdout_after_charges"] = round(float(hold_m.after_charges), 2)
+        pub["holdout_n"] = int(hold_m.n_trades)
     return {
         "genome": g.to_dict(),
-        "metrics": metrics_public(m),
+        "metrics": pub,
         "robustness": rob.to_dict() if rob else None,
         "fails": fails,
         "proposed": not fails,
@@ -675,7 +763,10 @@ def proposal_from_challenger(
         ),
         model_path=str(LIBRARY_PATH.relative_to(ROOT)) if LIBRARY_PATH.exists() else "data/research/library.json",
         safety_ok=True,
-        safety_reasons=["gates passed: n, after-charges vs S16+S18, walk-forward, 2× costs"],
+        safety_reasons=[
+            "gates passed: n, after-charges vs S16+S18 with margin, PF, drawdown, "
+            "both sides, walk-forward, 2× and 3× costs, holdout"
+        ],
         status="pending",
         env_patch=patch,
     )
@@ -692,17 +783,26 @@ def run_research_lab(
     max_compose: int = 24,
     robustness: bool = True,
     sklearn: bool = True,
+    strong: bool = True,
+    screen_first: bool = True,
     propose: bool = False,
     proposals_path: Path | None = None,
     library_path: Path | None = None,
     week_id: str = "",
 ) -> dict[str, Any]:
-    """Closed research loop. ``propose=True`` writes pending rows only."""
+    """Closed research loop. ``propose=True`` writes pending rows only.
+
+    Cheap-screens thin/losing genomes, then runs 3-fold + recipes + robustness
+    + extra strength gates on the shortlist. Skipping those gates does not
+    produce stronger books — it only lets weaker ones through.
+    """
     p = params or FlowParams()
     flags = tape_flags(bars)
+    train, hold = holdout_split(bars)
+    disc_bars = train or bars
     s16 = champion_s16(bars, lots=lots, fees=fees)
     s18 = champion_s18(bars, lots=lots, fees=fees)
-    scores = discover_relationships(bars, params=p, flags=flags)
+    scores = discover_relationships(disc_bars, params=p, flags=flags)
     composed = compose_from_discovery(scores, flags=flags)[:max_compose]
     genomes: list[StrategyGenome] = list(composed)
     if include_recipes:
@@ -721,28 +821,36 @@ def run_research_lab(
         seen.add(g.genome_id)
         uniq.append(g)
 
+    champ = _champ_ac(s16, s18)
     rows: list[dict[str, Any]] = []
     for g in uniq:
-        skip_wf_rob = False
-        # Cheap pre-sim for atom genomes that will be thin; recipes still get full book.
-        if not g.recipe:
+        skip_deep = False
+        if screen_first:
             quick = run_genome_book(
                 bars, g, lots=lots, fees=fees, n_folds=0, params=p, tf="pre", skip_wf=True
             )
-            if quick.n_trades < 8:
-                fails = gate_failures(quick, s16=s16, s18=s18, rob=None)
+            cheap_fail = quick.n_trades < 8 or quick.after_charges <= champ
+            if cheap_fail:
+                fails = gate_failures(
+                    quick, s16=s16, s18=s18, rob=None, strong=False
+                )
+                if not fails:
+                    fails = [
+                        f"screen: n={quick.n_trades} AC₹={quick.after_charges:.1f} "
+                        f"not ahead of champions (AC₹={champ:.1f})"
+                    ]
                 rows.append(
                     {
                         "genome": g.to_dict(),
                         "metrics": metrics_public(quick),
                         "robustness": None,
-                        "fails": fails or [f"thin sample ({quick.n_trades} < 8)"],
+                        "fails": fails,
                         "proposed": False,
-                        "supervisor": supervisor_note(g, quick, fails or ["thin"]),
+                        "supervisor": supervisor_note(g, quick, fails),
                     }
                 )
-                skip_wf_rob = True
-        if skip_wf_rob:
+                skip_deep = True
+        if skip_deep:
             continue
         rows.append(
             evaluate_challenger(
@@ -755,6 +863,8 @@ def run_research_lab(
                 n_folds=n_folds,
                 params=p,
                 robustness=robustness,
+                strong=strong,
+                holdout_bars=hold,
             )
         )
 
@@ -792,7 +902,22 @@ def run_research_lab(
             }
             for s in scores[:20]
         ],
-        "sklearn_importances": sklearn_importances(bars, params=p) if sklearn else [],
+        "sklearn_importances": sklearn_importances(disc_bars, params=p) if sklearn else [],
+        "holdout_bars": len(hold),
+        "train_bars": len(disc_bars),
+        "strong": bool(strong),
+        "gates": [
+            "after-charges beat S16 and S18",
+            f"{BEAT_MULT:.0%} margin vs best champion",
+            f"PF ≥ {MIN_PF}",
+            "drawdown ≤ after-charges",
+            "both long and short sample",
+            f"walk-forward ≥ {MIN_WF_WINS} folds",
+            "2× and 3× costs",
+            "1-bar delay + threshold jitter",
+            "holdout last 20% when the tape is long enough",
+            "sklearn feature ranks (research only, not a BUY model)",
+        ],
         "counts": {
             "found": len(ranked),
             "passed_validation": len(proposed),
@@ -803,8 +928,9 @@ def run_research_lab(
         "rejected": rejected[:40],
         "proposed_ids": [],
         "note": (
-            "AI researches. You decide. Approve on the Lab tab does not ENABLE "
-            "a book and never arms live. Paper then live each need a later yes."
+            "AI researches. You decide. Skipping folds/recipes/sklearn/robustness "
+            "does not make stronger books — it only lets weaker ones through. "
+            "Approve on the Lab tab does not ENABLE a book and never arms live."
         ),
     }
     write_library(payload, path=library_path or LIBRARY_PATH)

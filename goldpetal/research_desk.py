@@ -133,8 +133,9 @@ def research_desk_payload(
         "slots": desk_slots_payload(),
         "note": (
             "AI researches. You decide. New strategies found on the last lab run "
-            "must beat S16 and S18 after charges, survive walk-forward, and pass "
-            "2×-cost robustness before they appear here. Approve names the next "
+            "must beat S16 and S18 after charges with a 10% margin, pass PF/drawdown/"
+            "both-sides, survive 3-fold walk-forward, pass 2× and 3× costs, and pass "
+            "holdout when the tape is long enough. Approve names the next "
             "slot (S21, S22, …) and turns that slot's paper ENABLE on. Restart "
             "the bot. This tab never sets DRY_RUN=false."
         ),

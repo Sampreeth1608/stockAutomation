@@ -44,7 +44,7 @@ def main() -> None:
     ap.add_argument("--max-compose", type=int, default=24)
     ap.add_argument("--skip-recipes", action="store_true")
     ap.add_argument("--no-robustness", action="store_true")
-    ap.add_argument("--fast", action="store_true", help="desk-speed lab (2 folds, no recipes/sklearn/robustness)")
+    ap.add_argument("--fast", action="store_true", help="smaller compose list; same strong gates")
     ap.add_argument("--propose", action="store_true", help="write pending Lab rows (not ENABLE)")
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
@@ -80,12 +80,14 @@ def main() -> None:
         hours,
         lots=float(args.lots),
         fees=fees,
-        n_folds=2 if args.fast else int(args.folds),
+        n_folds=int(args.folds),
         params=params,
-        include_recipes=False if args.fast else (not bool(args.skip_recipes)),
+        include_recipes=not bool(args.skip_recipes),
         max_compose=8 if args.fast else int(args.max_compose),
-        robustness=False if args.fast else (not bool(args.no_robustness)),
-        sklearn=not bool(args.fast),
+        robustness=not bool(args.no_robustness),
+        sklearn=True,
+        strong=True,
+        screen_first=True,
         propose=bool(args.propose),
     )
     counts = result.get("counts") or {}
@@ -122,7 +124,7 @@ def main() -> None:
         print()
     if not (result.get("challengers") or []):
         print("No challenger beat S16 and S18 after charges with ≥20 trades,")
-        print("walk-forward, and 2×-cost robustness. Nothing proposed. That is correct.")
+        print("walk-forward, 2×/3× costs, and holdout. Nothing proposed. That is correct.")
         print()
         rejected = result.get("rejected") or []
         if rejected:

@@ -7,9 +7,9 @@ One research system. Four brains + your approval.
   profit guardian → risk snapshot → YOU APPROVE → S21, S22, … paper → memory
 
 Desk ``GET /api/amise`` is read-only (never runs the factory).
-``POST /api/amise/lab`` starts the factory in the background (fast path)
-and writes Lab pending rows. Approve on Lab names the next slot (S21,
-then S22, then S25 after S24) and turns paper ENABLE on.
+``POST /api/amise/lab`` starts the factory in the background (cheap-screen,
+then the strong lab) and writes Lab pending rows. Approve on Lab names the
+next slot (S21, then S22, then S25 after S24) and turns paper ENABLE on.
 This module never sets DRY_RUN=false.
 
 CLI:
@@ -217,12 +217,11 @@ def start_amise_lab(
         "propose": bool(propose),
         "fast": bool(use_fast),
         "note": (
-            "Fast factory started (fewer folds, no recipes/sklearn). "
-            if use_fast
-            else "Full factory started (walk-forward + robustness + sklearn ranks). "
-        )
-        + "Challengers that beat S16+S18 after charges go to Lab. "
-        "You Approve. Does not ENABLE until Approve. Keep DRY_RUN=true.",
+            "Factory started: cheap-screen, then 3-fold + recipes + sklearn ranks "
+            "+ 2×/3× costs + holdout. Skipping those does not make stronger books. "
+            "Challengers that pass go to Lab. You Approve. Does not ENABLE until Approve. "
+            "Keep DRY_RUN=true."
+        ),
     }
 
 
@@ -461,7 +460,7 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         ],
         "note": (
             "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
-            "It invents challengers on Run factory / auto lab (fast path on the desk). "
+            "It invents challengers on Run factory / auto lab (screen, then strong gates). "
             "You Approve on Lab — that names the next slot (S21, S22, … S25 after S24) "
             "and turns paper ENABLE on. Restart the bot. "
             "This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE. "
@@ -510,13 +509,7 @@ def run_amise(
         hours, _m30, source = _load_bars(ns)
         hours = session_bars(hours)
         flags = tape_flags(hours)
-        lab_kw: dict[str, Any] = dict(FAST_LAB_KWARGS) if fast else {
-            "n_folds": int(folds),
-            "include_recipes": True,
-            "max_compose": 24,
-            "robustness": True,
-            "sklearn": True,
-        }
+        lab_kw: dict[str, Any] = dict(FAST_LAB_KWARGS)
         if not fast:
             lab_kw["n_folds"] = int(folds)
         lab_payload = run_research_lab(
@@ -537,6 +530,9 @@ def run_amise(
             "proposed_ids": lab_payload.get("proposed_ids") or [],
             "updated_at_ist": lab_payload.get("updated_at_ist") or _now_iso(),
             "fast": bool(fast),
+            "strong": True,
+            "gates": lab_payload.get("gates") or [],
+            "holdout_bars": lab_payload.get("holdout_bars") or 0,
         }
     payload = {
         "engine": ENGINE_NAME,
@@ -571,7 +567,7 @@ def main() -> int:
     ap.add_argument("--no-fees", action="store_true")
     ap.add_argument("--minutes", type=int, default=60)
     ap.add_argument("--folds", type=int, default=3)
-    ap.add_argument("--fast", action="store_true", help="lighter desk lab (skip recipes/sklearn/robustness)")
+    ap.add_argument("--fast", action="store_true", help="screen losers first, then the same strong lab")
     ap.add_argument("--full", action="store_true", help="full weekly lab (overrides --fast)")
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
