@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Backtest FLOW_BRAIN on ticks (LTP + TBQ + TSQ). Not S7_HOURLY. Not S16. Not live.
+"""Backtest FLOW_BRAIN gate packs on ticks (LTP + TBQ + TSQ).
+
+Not S7_HOURLY. Not S16. Not live.
 
   python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees
+  python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees --pack quality
 """
 
 from __future__ import annotations
@@ -12,18 +15,45 @@ from pathlib import Path
 from typing import Any
 
 from backtest_hhhl_candles import count_ticks, make_charge_cfg, write_outputs
-from flow_brain import BOOK, FORMULA, samples_from_tick_rows, simulate_flow_brain
+from flow_brain import (
+    BOOK,
+    FORMULA,
+    GATE_PACK_ORDER,
+    GATE_PACKS,
+    after_charges_win_rate,
+    samples_from_tick_rows,
+    simulate_flow_brain,
+)
 from mtf_bars import load_tick_rows
 from ohlcv_lab import after_charges_inr
 
 
-def _ac_wr(result: Any) -> float:
-    trades = list(getattr(result, "trades", []) or [])
-    n = len(trades)
-    if n == 0:
-        return 0.0
-    wins = sum(1 for t in trades if (t.gross_pnl_inr - t.fees_inr) > 0)
-    return wins / n
+def _pack_names(raw: str) -> list[str]:
+    text = (raw or "all").strip().lower()
+    if text in {"all", "*"}:
+        return list(GATE_PACK_ORDER)
+    names = [p.strip() for p in text.split(",") if p.strip()]
+    bad = [n for n in names if n not in GATE_PACKS]
+    if bad:
+        known = ", ".join(GATE_PACK_ORDER)
+        raise SystemExit(f"unknown pack(s) {bad}. known: {known}")
+    return names
+
+
+def _row(name: str, result: Any) -> dict[str, Any]:
+    ac = after_charges_inr(result)
+    wr = 100.0 * after_charges_win_rate(result)
+    return {
+        "pack": name,
+        "result": result,
+        "trades": result.n_trades,
+        "n_long": result.n_long,
+        "n_short": result.n_short,
+        "win_pct": wr,
+        "gross": result.gross_pnl_inr,
+        "fees": result.fees_inr,
+        "after_charges": ac,
+    }
 
 
 def main() -> None:
@@ -32,10 +62,17 @@ def main() -> None:
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--fees", action="store_true")
     ap.add_argument("--out-dir", type=Path, default=Path("data/backtests/flow_brain"))
+    ap.add_argument(
+        "--pack",
+        default="all",
+        help="v1, confirm10, hold_opp, quality, or all (default all)",
+    )
     args = ap.parse_args()
 
     if args.fees:
         os.environ["IGNORE_FEES"] = "false"
+
+    packs = _pack_names(args.pack)
 
     print(BOOK)
     print(FORMULA)
@@ -43,7 +80,9 @@ def main() -> None:
     print("Pressure = 5s change in TBQ vs TSQ (cumulatives).")
     print("LONG  = price up + buy flow up + expanding")
     print("SHORT = price down + sell flow up + expanding")
-    print("Skip absorption (flow without price). Exit on decay.")
+    print("Skip absorption (flow without price).")
+    print("Packs add confirm / min-hold / no-flip / persist / quality floors.")
+    print("v1 is the 8k-trade unfiltered tape. Rank after charges, tax excluded.")
     print("Not S7_HOURLY. Not S16. ENABLE_FLOW_BRAIN stays false. Stay DRY_RUN.")
     print()
 
@@ -56,32 +95,82 @@ def main() -> None:
             "copy the VM tape. Stay DRY_RUN."
         )
     print(f"ticks={n}  db={args.db}  lots={args.lots:g}  fees={args.fees}", flush=True)
+    print(f"packs={','.join(packs)}", flush=True)
     print("loading ticks...", flush=True)
     rows = load_tick_rows(args.db)
     samples = samples_from_tick_rows(rows)
     print(f"samples={len(samples)}", flush=True)
     cfg = make_charge_cfg(fees=bool(args.fees), lots=float(args.lots))
-    result = simulate_flow_brain(
-        samples,
-        lots=float(args.lots),
-        fees=bool(args.fees),
-        session_filter=True,
-        charge_cfg=cfg,
-    )
-    ac = after_charges_inr(result)
-    wr = 100.0 * _ac_wr(result)
+
+    rows_out: list[dict[str, Any]] = []
+    results = []
+    for name in packs:
+        print(f"sim {name}...", flush=True)
+        result = simulate_flow_brain(
+            samples,
+            lots=float(args.lots),
+            fees=bool(args.fees),
+            session_filter=True,
+            charge_cfg=cfg,
+            gates=GATE_PACKS[name],
+        )
+        rec = _row(name, result)
+        rows_out.append(rec)
+        results.append(result)
+        print(
+            f"  {name}: trades={rec['trades']} L/S={rec['n_long']}/{rec['n_short']} "
+            f"after_charges_win%={rec['win_pct']:.1f} gross₹={rec['gross']:.1f} "
+            f"fees₹={rec['fees']:.1f} after_charges₹={rec['after_charges']:.1f}",
+            flush=True,
+        )
+
     print()
     print("=== after Angel charges, tax excluded ===")
     print(
-        f"{BOOK}: trades={result.n_trades} L/S={result.n_long}/{result.n_short} "
-        f"after_charges_win%={wr:.1f} gross₹={result.gross_pnl_inr:.1f} "
-        f"fees₹={result.fees_inr:.1f} after_charges₹={ac:.1f} (tax excluded)"
+        f"{'pack':<10} {'trades':>7} {'L/S':>9} {'win%':>7} "
+        f"{'gross₹':>12} {'fees₹':>12} {'after_charges₹':>16}"
     )
+    print("-" * 78)
+    for rec in rows_out:
+        print(
+            f"{rec['pack']:<10} {rec['trades']:7d} "
+            f"{rec['n_long']:4d}/{rec['n_short']:<4d} {rec['win_pct']:6.1f}% "
+            f"{rec['gross']:12.1f} {rec['fees']:12.1f} {rec['after_charges']:16.1f}"
+        )
     print()
-    write_outputs([result], args.out_dir)
+    by_ac = sorted(rows_out, key=lambda r: r["after_charges"], reverse=True)
+    by_wr = sorted(rows_out, key=lambda r: (r["win_pct"], r["after_charges"]), reverse=True)
+    print(
+        f"best after_charges: {by_ac[0]['pack']} "
+        f"₹{by_ac[0]['after_charges']:.1f}  win%={by_ac[0]['win_pct']:.1f}  "
+        f"trades={by_ac[0]['trades']}"
+    )
+    print(
+        f"best after_charges_win%: {by_wr[0]['pack']} "
+        f"{by_wr[0]['win_pct']:.1f}%  after_charges₹={by_wr[0]['after_charges']:.1f}  "
+        f"trades={by_wr[0]['trades']}"
+    )
+    v1 = next((r for r in rows_out if r["pack"] == "v1"), None)
+    if v1 is not None:
+        print(
+            f"v1 baseline: trades={v1['trades']} win%={v1['win_pct']:.1f} "
+            f"after_charges₹={v1['after_charges']:.1f}"
+        )
+        for rec in rows_out:
+            if rec["pack"] == "v1":
+                continue
+            d_wr = rec["win_pct"] - v1["win_pct"]
+            d_ac = rec["after_charges"] - v1["after_charges"]
+            print(
+                f"  {rec['pack']} vs v1: win% {d_wr:+.1f}pp  "
+                f"after_charges ₹{d_ac:+.1f}  trades {rec['trades'] - v1['trades']:+d}"
+            )
+    print()
+    write_outputs(results, args.out_dir)
     print(
         "Stay DRY_RUN. ENABLE_FLOW_BRAIN stays false. Do not live-unlock. "
-        "This is not S7_HOURLY and not S16."
+        "This is not S7_HOURLY and not S16. 3 trades at 100% that still "
+        "lose after fees is not a go."
     )
 
 

@@ -17,7 +17,9 @@ Expansion = price response growing AND flow imbalance growing.
 Decay     = the opposite.
 
 Trade only continuation+expansion. Flatten on decay / opposite / EOD.
-Fill at LTP. Rank after Angel charges, tax excluded.
+Gate packs (confirm / min-hold / no-flip / persist / quality) sit on
+top of that state so the book is not a scratch machine. Fill at LTP.
+Rank after Angel charges, tax excluded.
 
 ENABLE_FLOW_BRAIN defaults false. Paper-only. Stay DRY_RUN. Not live.
 """
@@ -40,8 +42,10 @@ FORMULA = (
     "Tick LTP + TBQ + TSQ. Pressure = 5s change in cumulative buy/sell qty. "
     "Imbalance = (dTBQ−dTSQ)/(dTBQ+dTSQ). LONG when price up, buy flow up, "
     "and both are expanding. SHORT the mirror. No trade on absorption "
-    "(flow without price). Exit on decay or opposite continuation. "
-    "Fill at LTP. Flatten session close. Not S7_HOURLY. Not S16. Not live."
+    "(flow without price). Gate packs: confirm N seconds, min-hold, "
+    "cooldown, no-flip, persist until opposite, min flow/price/ATR. "
+    "v1 is the unfiltered 8k-trade tape. Fill at LTP. Flatten session "
+    "close. Not S7_HOURLY. Not S16. Not live."
 )
 
 BULL_CONT = "bull_cont"
@@ -54,6 +58,14 @@ MIXED = "mixed"
 
 Scale = Literal["none", "small", "medium", "large", "extreme"]
 Want = Literal["long", "short"]
+
+SCALE_RANK: dict[str, int] = {
+    "none": 0,
+    "small": 1,
+    "medium": 2,
+    "large": 3,
+    "extreme": 4,
+}
 
 
 def move_scale(pts: float, atr: float) -> Scale:
@@ -257,6 +269,139 @@ class FlowBrain:
         return snap
 
 
+@dataclass
+class FlowGates:
+    """Entry/exit filters on top of the pressure state. v1 is the 8k-trade tape."""
+
+    name: str = "v1"
+    decide_every_s: float = 1.0
+    min_flow_imb: float = 0.12
+    min_price_pts: float = 1.0
+    absorb_atr_frac: float = 0.03
+    min_hold_s: float = 20.0
+    cooldown_s: float = 15.0
+    confirm_s: float = 0.0
+    min_scale: str = "none"
+    min_atr: float = 0.0
+    min_atr_frac: float = 0.0
+    require_imb_vel: bool = False
+    require_expanding: bool = True
+    allow_flip: bool = True
+    persist_until_opposite: bool = False
+    keep_s: float = 180.0
+
+    def brain(self) -> FlowBrain:
+        return FlowBrain(
+            keep_s=self.keep_s,
+            decide_every_s=self.decide_every_s,
+            min_flow_imb=self.min_flow_imb,
+            min_price_pts=self.min_price_pts,
+            absorb_atr_frac=self.absorb_atr_frac,
+        )
+
+
+def gated_want(snap: FlowState, g: FlowGates) -> Want | None:
+    """Apply quality gates to a continuation want.
+
+    v1 keeps the engine's expanding-only want. Confirm/persist packs drop
+    the acceleration flicker (5s vs 10s equalizes in a steady trend) and
+    trade continuation that still clears the floors.
+    """
+    if g.require_expanding:
+        want = snap.want
+    elif snap.state == BULL_CONT and snap.flow_imb_5s > 0:
+        want = "long"
+    elif snap.state == BEAR_CONT and snap.flow_imb_5s < 0:
+        want = "short"
+    else:
+        want = None
+    if want is None:
+        return None
+    if SCALE_RANK.get(snap.scale, 0) < SCALE_RANK.get(g.min_scale, 0):
+        return None
+    if snap.atr < float(g.min_atr):
+        return None
+    if g.min_atr_frac > 0 and snap.atr > 0:
+        if abs(snap.d_ltp_5s) < float(g.min_atr_frac) * snap.atr:
+            return None
+    if g.require_imb_vel:
+        # Reject fading flow. Zero velocity (steady pressure) is allowed.
+        if want == "long" and snap.imb_vel < 0:
+            return None
+        if want == "short" and snap.imb_vel > 0:
+            return None
+    return want
+
+
+GATE_PACKS: dict[str, FlowGates] = {
+    "v1": FlowGates(name="v1"),
+    "confirm10": FlowGates(
+        name="confirm10",
+        decide_every_s=2.0,
+        confirm_s=10.0,
+        min_hold_s=60.0,
+        cooldown_s=30.0,
+        require_expanding=False,
+        persist_until_opposite=True,
+    ),
+    "hold_opp": FlowGates(
+        name="hold_opp",
+        decide_every_s=5.0,
+        min_hold_s=120.0,
+        cooldown_s=60.0,
+        require_expanding=False,
+        allow_flip=False,
+        persist_until_opposite=True,
+    ),
+    "quality": FlowGates(
+        name="quality",
+        decide_every_s=5.0,
+        min_flow_imb=0.28,
+        min_price_pts=4.0,
+        confirm_s=15.0,
+        min_hold_s=180.0,
+        cooldown_s=120.0,
+        min_scale="small",
+        min_atr=5.0,
+        min_atr_frac=0.12,
+        require_imb_vel=True,
+        require_expanding=False,
+        allow_flip=False,
+        persist_until_opposite=True,
+    ),
+}
+
+
+def kill_long(snap: FlowState, persist: bool) -> bool:
+    """Flat-exit without a reverse. Persist ignores decay; opposite is handled by want."""
+    if persist:
+        return snap.state == ABSORB_BUY
+    return snap.state in {BEAR_CONT, ABSORB_BUY} or (
+        snap.decaying and snap.state != BULL_CONT
+    )
+
+
+def kill_short(snap: FlowState, persist: bool) -> bool:
+    """Flat-exit without a reverse. Persist ignores decay; opposite is handled by want."""
+    if persist:
+        return snap.state == ABSORB_SELL
+    return snap.state in {BULL_CONT, ABSORB_SELL} or (
+        snap.decaying and snap.state != BEAR_CONT
+    )
+
+
+def after_charges_win_rate(result: Any) -> float:
+    trades = list(getattr(result, "trades", []) or [])
+    n = len(trades)
+    if n == 0:
+        return 0.0
+    wins = sum(1 for t in trades if (t.gross_pnl_inr - t.fees_inr) > 0)
+    return wins / n
+
+
+GATE_PACK_ORDER = ("v1", "confirm10", "hold_opp", "quality")
+
+
 def classify_message(brain: FlowBrain, now: datetime, ltp: float, message: dict[str, Any]) -> FlowState | None:
     tbq = float(message.get("total_buy_quantity") or 0.0)
     tsq = float(message.get("total_sell_quantity") or 0.0)
@@ -312,7 +457,7 @@ def _in_session(dt: datetime, market_open: str, market_close: str) -> bool:
 def simulate_flow_brain(
     samples: list[tuple[datetime, float, float, float]],
     *,
-    tf: str = "tick:flow_brain",
+    tf: str | None = None,
     lots: float = 100.0,
     fees: bool = True,
     session_filter: bool = True,
@@ -322,10 +467,30 @@ def simulate_flow_brain(
     min_hold_s: float = 20.0,
     cooldown_s: float = 15.0,
     brain: FlowBrain | None = None,
+    gates: FlowGates | None = None,
 ) -> Any:
-    """Walk ticks. Fill at LTP. Flatten at session end / last sample."""
+    """Walk ticks. Fill at LTP. Flatten at session end / last sample.
+
+    gates=None keeps v1 (8k-trade tape). Packs own hold/cooldown/brain.
+    """
+    g = gates
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
-    eng = brain or FlowBrain()
+    if g is not None:
+        eng = brain or g.brain()
+        hold = float(g.min_hold_s)
+        cool = float(g.cooldown_s)
+        confirm_s = float(g.confirm_s)
+        allow_flip = bool(g.allow_flip)
+        persist = bool(g.persist_until_opposite)
+        label = tf or f"fb_{g.name}"
+    else:
+        eng = brain or FlowBrain()
+        hold = float(min_hold_s)
+        cool = float(cooldown_s)
+        confirm_s = 0.0
+        allow_flip = True
+        persist = False
+        label = tf or "tick:flow_brain"
     trades: list[Trade] = []
     side: str | None = None
     entry_px = 0.0
@@ -335,13 +500,15 @@ def simulate_flow_brain(
     last_dt: datetime | None = None
     last_px = 0.0
     n_decisions = 0
+    pending_want: Want | None = None
+    pending_since = 0.0
 
     def close_now(dt: datetime, px: float) -> None:
-        nonlocal side, entry_px, entry_time, entry_t, last_exit_t
+        nonlocal side, entry_px, entry_time, entry_t, last_exit_t, pending_want, pending_since
         assert side is not None
         trades.append(
             _close_px(
-                tf=tf,
+                tf=label,
                 side=side,
                 entry_time=entry_time,
                 entry_px=entry_px,
@@ -352,6 +519,13 @@ def simulate_flow_brain(
         )
         last_exit_t = dt.timestamp()
         side = None
+        pending_want = None
+        pending_since = 0.0
+
+    def take_want(snap: FlowState) -> Want | None:
+        if g is None:
+            return snap.want
+        return gated_want(snap, g)
 
     for dt, ltp, tbq, tsq in samples:
         last_dt, last_px = dt, float(ltp)
@@ -359,6 +533,7 @@ def simulate_flow_brain(
         if side is not None and session_filter and not sess_ok:
             close_now(dt, float(ltp))
             eng.buf.clear()
+            pending_want = None
             continue
         if session_filter and not sess_ok:
             continue
@@ -367,51 +542,67 @@ def simulate_flow_brain(
             continue
         n_decisions += 1
         t = snap.t
-        want = snap.want
+        raw_want = snap.want
+        want = take_want(snap)
         if side == "LONG":
             held = t - entry_t
-            kill = snap.state in {BEAR_CONT, ABSORB_BUY} or (
-                snap.decaying and snap.state != BULL_CONT
-            )
-            if want == "short" and held >= min_hold_s:
+            opposite = raw_want == "short" or want == "short"
+            if opposite and held >= hold:
                 close_now(dt, snap.ltp)
-                side = "SHORT"
-                entry_px = snap.ltp
-                entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                entry_t = t
-            elif kill and held >= min_hold_s:
+                if allow_flip and want == "short":
+                    side = "SHORT"
+                    entry_px = snap.ltp
+                    entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    entry_t = t
+            elif kill_long(snap, persist) and held >= hold:
                 close_now(dt, snap.ltp)
             continue
         if side == "SHORT":
             held = t - entry_t
-            kill = snap.state in {BULL_CONT, ABSORB_SELL} or (
-                snap.decaying and snap.state != BEAR_CONT
-            )
-            if want == "long" and held >= min_hold_s:
+            opposite = raw_want == "long" or want == "long"
+            if opposite and held >= hold:
                 close_now(dt, snap.ltp)
-                side = "LONG"
-                entry_px = snap.ltp
-                entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                entry_t = t
-            elif kill and held >= min_hold_s:
+                if allow_flip and want == "long":
+                    side = "LONG"
+                    entry_px = snap.ltp
+                    entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    entry_t = t
+            elif kill_short(snap, persist) and held >= hold:
                 close_now(dt, snap.ltp)
             continue
-        if t - last_exit_t < cooldown_s:
+        if t - last_exit_t < cool:
+            pending_want = None
+            pending_since = 0.0
             continue
+        if want is None:
+            pending_want = None
+            pending_since = 0.0
+            continue
+        if confirm_s > 0:
+            if pending_want != want:
+                pending_want = want
+                pending_since = t
+                continue
+            if t - pending_since < confirm_s:
+                continue
         if want == "long":
             side = "LONG"
             entry_px = snap.ltp
             entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
             entry_t = t
+            pending_want = None
+            pending_since = 0.0
         elif want == "short":
             side = "SHORT"
             entry_px = snap.ltp
             entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
             entry_t = t
+            pending_want = None
+            pending_since = 0.0
 
     if side is not None and last_dt is not None:
         close_now(last_dt, last_px)
-    result = _tf_result_from_trades(tf, n_decisions, trades)
+    result = _tf_result_from_trades(label, n_decisions, trades)
     return result
 
 
