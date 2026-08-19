@@ -42,7 +42,7 @@ def test_station_is_the_operator_page() -> None:
     assert "Gold Petal stopped" in html
     assert "function renderSessionLine" in html
     assert "function goldPetalSessionNow" in html
-    quote = html.split("function renderQuote()")[1].split("function moodKind")[0]
+    quote = html.split("function renderQuote(")[1].split("function moodKind")[0]
     assert "buy qty" not in quote
     assert "sell qty" not in quote
     assert "ticks" not in quote
@@ -50,7 +50,9 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" in quote
-    assert "gp-header-v3" in html
+    assert "gp-header-v4" in html
+    assert " · v4" in html
+    assert "tape dead" in html
     assert "function tapeAgeSec" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
@@ -186,6 +188,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "8501" in sh
     assert "streamlit run analytics/app.py" not in sh.split("pkill")[0]
     assert "Save strategies" in sh
+    assert "gp-header-v4" in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
     assert "Save strategies" in station
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")

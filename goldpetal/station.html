@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v3: running only with a live tape; no last-print clock under LTP -->
+<!-- gp-header-v4: clock independent of tape; running needs live ticks -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST —</div>
+      <div class="clock" id="clock">IST — · v4</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -515,12 +515,20 @@ function typing() {
   return el && el.matches && el.matches("input, textarea, select");
 }
 async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
-  if (!res.ok) throw new Error(data.error || data.note || text || res.status);
-  return data;
+  const o = opts || {};
+  const ctrl = new AbortController();
+  const ms = Number(o.timeoutMs) || (o.method && String(o.method).toUpperCase() !== "GET" ? 60000 : 8000);
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { signal: ctrl.signal }));
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
+    if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 function flash(id, msg, bad) {
   const el = $(id);
@@ -529,12 +537,15 @@ function flash(id, msg, bad) {
   el.className = "flash" + (bad ? " bad" : "");
 }
 function tickClock() {
-  const now = new Date();
-  const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
-    weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  $("clock").textContent = "IST " + ist;
-  renderSessionLine();
-  renderQuote();
+  try {
+    const now = new Date();
+    const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
+      weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const clock = $("clock");
+    if (clock) clock.textContent = "IST " + ist + " · v4";
+  } catch (e) {}
+  try { renderSessionLine(); } catch (e) {}
+  try { renderQuote(false); } catch (e) {}
 }
 function hhmmToSec(value) {
   const p = String(value || "09:00").split(":");
@@ -603,6 +614,7 @@ function renderSessionLine() {
   const armed = !!live.would_place_real_orders;
   const running = goldPetalIsRunning();
   let line = running ? ("Gold Petal running · " + hours) : ("Gold Petal stopped · " + hours);
+  if (!running && s.open && !tapeIsLive()) line = "Gold Petal stopped · tape dead · " + hours;
   if (s.weekend) line += " · weekend";
   if (armed) line += " · LIVE ARMED";
   el.textContent = line;
@@ -653,15 +665,20 @@ function allScore() {
   const rows = lastHist.scoreboard || [];
   return rows.find((r) => r.strategy === "ALL" || r.strategy == null) || rows[rows.length - 1] || {};
 }
-function renderQuote() {
+function renderQuote(withMood) {
+  const el = $("ltp");
+  const meta = $("quote-meta");
+  if (!el) return;
   const ltp = lastTape.ltp;
   const hasPx = !(ltp == null || ltp === "");
-  $("ltp").textContent = hasPx ? money(ltp) : "—";
-  $("ltp").classList.toggle("stale", hasPx && !tapeIsLive());
-  if (!hasPx) $("quote-meta").textContent = "waiting for quote";
-  else if (!tapeIsLive()) $("quote-meta").textContent = "tape stopped";
-  else $("quote-meta").textContent = "";
-  renderMood();
+  el.textContent = hasPx ? money(ltp) : "—";
+  el.classList.toggle("stale", hasPx && !tapeIsLive());
+  if (meta) {
+    if (!hasPx) meta.textContent = "waiting for quote";
+    else if (!tapeIsLive()) meta.textContent = "tape stopped";
+    else meta.textContent = "";
+  }
+  if (withMood !== false) renderMood();
 }
 function moodKind(mood) {
   const m = String(mood || "").toUpperCase();
@@ -703,16 +720,15 @@ function fitLabel(f) {
 function renderFits() {
   const line = $("fit-line");
   const rows = lastMood.fits || [];
-  if (line) {
-    if (!rows.length) {
-      line.textContent = "one regime for all books · mood gate picks who may open";
-    } else {
-      line.textContent = rows.map((f) => {
-        const short = shortName(f.strategy).replace(/ .*/, "") || f.strategy;
-        return short + " " + fitLabel(f);
-      }).join(" · ");
-    }
+  let text = "one regime for all books · mood gate picks who may open";
+  if (rows.length) {
+    text = rows.map((f) => {
+      const short = shortName(f.strategy).replace(/ .*/, "") || f.strategy;
+      return short + " " + fitLabel(f);
+    }).join(" · ");
   }
+  if (!tapeIsLive()) text = "tape stopped · " + text;
+  if (line) line.textContent = text;
   document.querySelectorAll("[data-fit]").forEach((el) => {
     const f = fitFor(el.dataset.fit);
     el.textContent = fitLabel(f);
@@ -1502,28 +1518,42 @@ function renderAll() {
   if (lastDesk.live_desk) renderDesk(lastDesk);
 }
 async function loadDesk() {
-  const d = await api("/api/desk");
-  renderDesk(d);
+  if (loadDesk.busy) return;
+  loadDesk.busy = true;
+  try {
+    const d = await api("/api/desk");
+    renderDesk(d);
+  } finally { loadDesk.busy = false; }
 }
 async function loadTape() {
-  lastTape = await api("/api/tape");
-  renderAll();
-  if (lastTape.error) flash("flash-grid", lastTape.error, true);
+  if (loadTape.busy) return;
+  loadTape.busy = true;
+  try {
+    lastTape = await api("/api/tape");
+    renderAll();
+    if (lastTape.error) flash("flash-grid", lastTape.error, true);
+  } finally { loadTape.busy = false; }
 }
 async function loadHistory() {
-  fillStratSelect();
-  const strat = $("hist-strat").value;
-  const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
-  lastHist = await api(q);
-  lastTape = Object.assign({}, lastTape, {
-    ticks: lastHist.ticks || lastTape.ticks,
-    signals: lastHist.signals || lastTape.signals,
-    tick_count: lastHist.tick_count != null ? lastHist.tick_count : lastTape.tick_count,
-    ltp: lastHist.ltp != null ? lastHist.ltp : lastTape.ltp,
-    db_path: lastHist.db_path || lastTape.db_path,
-    last_tick_at: lastHist.last_tick_at || lastTape.last_tick_at,
-  });
-  renderAll();
+  if (loadHistory.busy) return;
+  loadHistory.busy = true;
+  try {
+    fillStratSelect();
+    const strat = $("hist-strat").value;
+    const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
+    lastHist = await api(q, { timeoutMs: 20000 });
+    lastTape = Object.assign({}, lastTape, {
+      ticks: lastHist.ticks || lastTape.ticks,
+      signals: lastHist.signals || lastTape.signals,
+      tick_count: lastHist.tick_count != null ? lastHist.tick_count : lastTape.tick_count,
+      ltp: lastHist.ltp != null ? lastHist.ltp : lastTape.ltp,
+      db_path: lastHist.db_path || lastTape.db_path,
+      last_tick_at: lastHist.last_tick_at || lastTape.last_tick_at,
+      tape_live: lastHist.tape_live != null ? lastHist.tape_live : lastTape.tape_live,
+      tape_age_sec: lastHist.tape_age_sec != null ? lastHist.tape_age_sec : lastTape.tape_age_sec,
+    });
+    renderAll();
+  } finally { loadHistory.busy = false; }
 }
 async function loadWhy() {
   lastWhy = await api("/api/analysis");
