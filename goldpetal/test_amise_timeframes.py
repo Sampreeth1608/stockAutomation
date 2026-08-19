@@ -161,6 +161,25 @@ def test_amise_slot_uses_genome_tf_not_env_hour(monkeypatch=None) -> None:
     assert s._floor_bar(key).hour == 9
 
 
+def test_you_mimic_hours_flatten(monkeypatch=None) -> None:
+    g = _g(
+        timeframe="1m",
+        params={
+            "lookback": 1,
+            "atr_n": 1,
+            "you_open_min": 600,
+            "you_close_min": 630,
+            "you_hours_mask": float(1 << 10),
+        },
+    )
+    s = AmiseSlotStrategy("S21_AMISE", g, seed=False)
+    assert s._in_you_hours(datetime(2026, 8, 18, 10, 15, tzinfo=IST)) is True
+    assert s._in_you_hours(datetime(2026, 8, 18, 12, 0, tzinfo=IST)) is False
+    s.position = "long"
+    why = s._session_flatten_why(datetime(2026, 8, 18, 12, 0, tzinfo=IST))
+    assert why is not None and "you hours" in why
+
+
 def test_amise_slot_from_env_reads_genome_tf(tmp_path) -> None:
     from amise_slots import assign_slot
 
@@ -188,6 +207,7 @@ if __name__ == "__main__":
     test_token_split_does_not_share_volume()
     test_stamp_tf_keeps_1h_name_and_changes_id()
     test_amise_slot_uses_genome_tf_not_env_hour()
+    test_you_mimic_hours_flatten()
     td = P(tempfile.mkdtemp())
     test_amise_slot_from_env_reads_genome_tf(td)
     print("ALL test_amise_timeframes OK")

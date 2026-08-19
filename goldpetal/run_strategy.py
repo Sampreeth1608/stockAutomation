@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -211,6 +212,15 @@ def run_once(
             print(f"Broker positions seeded: {seeded}", flush=True)
     except Exception as exc:
         logger.warning("Could not seed broker positions: %s", exc)
+    try:
+        from you_trade import YOU_BOOK, load_you_position
+
+        you_pos = load_you_position()
+        side = str(you_pos.get("side") or "flat")
+        if side in {"long", "short", "flat"} and hasattr(broker, "seed_positions"):
+            broker.seed_positions({YOU_BOOK: side})
+    except Exception as exc:
+        logger.warning("Could not seed You-tab position: %s", exc)
 
     symbol = contract["symbol"]
     token = contract["token"]
@@ -277,7 +287,7 @@ def run_once(
         net_delta,
         strategy: str,
         cmp,
-    ) -> None:
+    ) -> Any:
         db_save_signal(
             time_label=time_label,
             symbol=symbol,
@@ -313,6 +323,8 @@ def run_once(
                 )
                 print(line, flush=True)
                 logger.info(line)
+            return res
+        return None
 
     print("=== Gold Petal strategy runner ===", flush=True)
     print(f"Symbol   : {symbol}", flush=True)
@@ -1333,6 +1345,45 @@ def run_once(
         """S20: 1h fade HL — buy bounced low / short rejected high. Paper only."""
         emit_hour_book(strategy_s20, now, message)
 
+    def emit_you_if_pending(now: datetime, message: dict) -> None:
+        """You-tab MARKET click. Not a paper book. Live only if already armed."""
+        del message
+        from you_trade import YOU_BOOK, finish_you_order, take_pending_you_order
+
+        job = take_pending_you_order()
+        if not job:
+            return
+        act = str(job.get("action") or "").upper()
+        if act == "BUY":
+            after = "long"
+        elif act == "SHORT":
+            after = "short"
+        else:
+            after = "flat"
+        ts = now.isoformat(timespec="seconds")
+        res = _record_signal(
+            time_label=ts,
+            action=act,
+            position_after=after,
+            reason=(
+                f"you tab {act} example={job.get('example_id') or ''} "
+                f"queued={job.get('id')}"
+            ),
+            price_delta=None,
+            net=0.0,
+            net_delta=None,
+            strategy=YOU_BOOK,
+            cmp=latest.get("cmp"),
+        )
+        try:
+            finish_you_order(job, res)
+        except Exception as exc:
+            print(f"[YOU] finish failed: {exc}", flush=True)
+            logger.warning("[YOU] finish failed: %s", exc)
+        line = f"[{ts}] [YOU] {act} {YOU_BOOK} queued={job.get('id')}"
+        print(line, flush=True)
+        logger.info(line)
+
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
         """1h FLIP books. Mood gate via _may_enter. Block does not flatten a hold."""
         if not _strategy_active(strategy.name):
@@ -1517,11 +1568,14 @@ def run_once(
                             "S18": strategy_s18.position,
                             "S19": strategy_s19.position,
                             "S20": strategy_s20.position,
+                            "YOU": broker.positions.get("YOU_MANUAL", "flat"),
                         },
                         "runner": "run_strategy",
                     }
                 )
 
+            # You tab: one queued MARKET order (record already stored on the desk)
+            emit_you_if_pending(now, message)
             # S2: 1-min sum of buy1-5 vs sell1-5
             emit_s2_if_changed(now, message)
             # S3: ML model BUY/SHORT/CLOSE

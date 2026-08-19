@@ -24,9 +24,13 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="amise"' in html
     assert 'data-tab="you"' in html
     assert 'id="you-strip"' in html
-    assert "You · capture" in html
-    assert "Human trade capture" in html
+    assert "You · trade" in html
+    assert "You — trade and teach" in html
     assert "/api/capture" in html
+    assert "/api/capture/learn" in html
+    assert "Send to Angel" in html
+    assert "Learn my style" in html
+    assert "type YOU" in html
     assert "/api/mood" in html
     assert 'id="mood-pill"' in html
     assert 'id="fit-strip"' in html
@@ -35,7 +39,7 @@ def test_station_is_the_operator_page() -> None:
     assert "MOOD_GATE" in html
     assert "observe only" in html
     assert "NO TRADE" in html
-    assert "Does not place an order" in html
+    assert "Send to Angel" in html
     assert "you_skipped_rule_would_take" in html
     assert "Mon–Fri 09:00–23:30" in html
     assert "Gold Petal running" in html
@@ -50,8 +54,15 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v11" in html
-    assert " · v11" in html
+    assert "gp-header-v15" in html
+    assert " · v15" in html
+    assert "exact IST click time" in html
+    assert "tape_lag_ms" in html
+    assert "Let it trade" in html
+    assert "You vs mimic" in html
+    assert "/api/capture/go" in html
+    assert "whole day" in html
+    assert "30m" in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
     hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
@@ -124,7 +135,11 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Trading station" in html
     assert "ML / S11 + S18" in html
     assert "Research Lab" in html
-    assert "You — capture" in html
+    assert "You — trade" in html
+    assert "whole day" in html
+    assert "30m" in html
+    assert "Let it trade" in html
+    assert "/api/capture/go" in html
     assert "/#you" in html
     assert "/api/mood" in html
     assert "id=\"mood-line\"" in html
@@ -173,6 +188,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/amise" in text
     assert "amise_desk_payload" in text
     assert "/api/capture" in text
+    assert "/api/capture/learn" in text
+    assert "/api/capture/go" in text
+    assert "after_new_example" in text
+    assert "start_mimic_paper" in text
+    assert "request_you_order" in text
     assert "/api/mood" in text
     assert "mood_desk_payload" in text
     assert "record_human" in text

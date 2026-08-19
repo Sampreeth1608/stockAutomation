@@ -90,6 +90,8 @@ def strategy_may_trade_live(strategy: str) -> tuple[bool, str]:
     ok, reason = is_live_mode_allowed()
     if not ok:
         return False, reason
+    if str(strategy) == "YOU_MANUAL":
+        return True, "ok_you_tab"
     require = _env_bool("LIVE_REQUIRE_APPROVAL", True)
     if not require:
         return True, "ok_no_approval_required"
