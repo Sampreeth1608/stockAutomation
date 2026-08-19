@@ -5,10 +5,11 @@ The tape is classified once. Every paper book reads the same regime and a
 fit score (trade / stand down / hold swing). Copying "if falling then short"
 into every formula would make them all trade the same.
 
-Desk always shows state + fit. Paper does not change until MOOD_GATE=true
-(default false). Flattening opens needs MOOD_FLATTEN=true. S13/S4 skip the
-tick-window gate and are never dumped. Not a paper book. Do not ENABLE.
-Does not change S13/S16 formulas. Keep DRY_RUN=true.
+Desk always shows state + fit. Paper uses the gate (MOOD_GATE default on)
+so books that do not fit this regime will not open. Flattening opens still
+needs MOOD_FLATTEN=true. S13/S4 skip the tick-window gate and are never
+dumped. Not a paper book. Do not ENABLE. Does not change S13/S16 formulas.
+Keep DRY_RUN=true.
 
 Not built here: relationship factory, auto challengers, combining books into
 one order, or a profit-printer. Learning ≠ deploy. You approve.
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any, Deque, Literal
 from zoneinfo import ZoneInfo
 
+from amise_slots import AMISE_SLOT_BOOKS, is_amise_slot, load_slot_genome, slot_is_fade
+
 IST = ZoneInfo("Asia/Kolkata")
 # Daily/overnight books: show mood, never flatten, skip tick-window entry gate.
 MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT"})
@@ -36,6 +39,7 @@ FIT_BOOKS: tuple[str, ...] = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
+    *AMISE_SLOT_BOOKS,
 )
 Mood = Literal[
     "UNKNOWN",
@@ -62,7 +66,7 @@ Stance = Literal["trade", "stand_down", "hold_swing"]
 
 
 def mood_gate_on() -> bool:
-    return (os.getenv("MOOD_GATE") or "false").strip().lower() in {"1", "true", "yes", "y"}
+    return (os.getenv("MOOD_GATE") or "true").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def mood_flatten_on() -> bool:
@@ -261,6 +265,19 @@ def _fit_one(
     }
     vol_book = name == "S5_MINEDGE"
     fade_book = name == "S20_FADE_HL"
+    amise_book = is_amise_slot(name)
+    if amise_book:
+        if load_slot_genome(name) is None:
+            return {
+                "strategy": name,
+                "weight": 0.08,
+                "stance": "stand_down",
+                "preferred_side": "none",
+                "why": "empty AMISE slot — waiting for Lab Approve",
+            }
+        fade_book = slot_is_fade(name)
+        if not fade_book:
+            trend_book = True
 
     if regime == "BURST" or mood == "BURST":
         return {
@@ -600,7 +617,7 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
     d["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
     d["note"] = (
         "One market state for all books, plus a fit per book. "
-        "Observe only unless MOOD_GATE=true. "
+        "Gate is on: a book that does not fit will not open. "
         "MOOD_FLATTEN=true is required to dump opens. "
         "Does not ENABLE. Does not change S13/S16 formulas. "
         "Does not auto-replace a champion. Keep DRY_RUN=true."

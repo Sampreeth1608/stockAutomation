@@ -167,7 +167,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div class="ltp" id="ltp">—</div>
         <div class="meta" id="quote-meta">waiting for ticks</div>
       </div>
-      <div class="mood-box" id="mood-box" title="One tape read for all books. Observe only until MOOD_GATE=true. Not a paper book.">
+      <div class="mood-box" id="mood-box" title="One tape read for all books. MOOD_GATE is on: unfit books do not open. Not a paper book.">
         <span class="pill" id="mood-pill">mood warming up</span>
         <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · observe only</div>
       </div>
@@ -179,7 +179,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </header>
   <div class="fit-strip" id="fit-strip">
     <b>Fit</b>
-    <span id="fit-line">one regime for all books · observe only until MOOD_GATE=true</span>
+    <span id="fit-line">one regime for all books · mood gate picks who may open</span>
   </div>
   <div class="you-strip" id="you-strip">
     <b>You</b>
@@ -293,8 +293,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="lab-panel" hidden>
         <h2>AI Research Lab — approval station</h2>
-        <p class="hint">The factory can discover, test, improve and <b>propose</b>. It cannot ENABLE a book or arm Angel. Rank is after Angel charges (tax excluded) vs paper S16 and S18. Walk-forward and 2×-cost robustness must pass. Approve records your yes only. Paper observation and live each need a later explicit request. Keep <span class="mono">DRY_RUN=true</span>.</p>
-        <div class="ml-banner" id="lab-live-block">This tab never sets DRY_RUN=false, never writes ENABLE_*, never live-unlocks.</div>
+        <p class="hint">The factory can discover, test, improve and <b>propose</b>. Approve names S21–S24 and turns that slot's paper ENABLE on. Restart the bot. This tab never sets DRY_RUN=false. Angel still needs Unlock + type LIVE. Rank is after Angel charges vs paper S16 and S18. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <div class="ml-banner" id="lab-live-block">Approve papers S21–S24. This tab never sets DRY_RUN=false and never live-unlocks.</div>
         <p class="flash" id="flash-lab"></p>
         <div class="row" style="margin-top:.45rem">
           <button class="btn" type="button" id="btn-lab-refresh">Refresh</button>
@@ -312,11 +312,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. It does not ENABLE a book, does not rewrite S13/S16, and cannot guarantee rising profits. Factory runs on the VM (<span class="mono">python3 amise.py --db data/ticks.db --lab</span>). This tab is observe + approval queue. Keep <span class="mono">DRY_RUN=true</span>.</p>
-        <div class="ml-banner" id="amise-live-block">This tab never sets DRY_RUN=false, never writes ENABLE_*, never live-unlocks.</div>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> to invent challengers (or let auto-lab run). Approve on Lab names S21–S24 and papers them. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Unlock + LIVE on Live money.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
           <button class="btn" type="button" id="btn-amise-refresh">Refresh</button>
+          <button class="btn ok" type="button" id="btn-amise-lab">Run factory</button>
           <span class="mono" id="amise-meta"></span>
         </div>
         <div id="amise-pipeline"></div>
@@ -327,8 +328,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <h2 style="margin-top:1rem">Profit Guardian</h2>
         <div id="amise-guardian"></div>
         <h2 style="margin-top:1rem">Factory / challengers</h2>
-        <p class="hint">Approve on the <a href="/#lab">Lab tab</a>. Approve ≠ paper ENABLE.</p>
+        <p class="hint">Approve on the <a href="/#lab">Lab tab</a>. Approve names S21–S24 and turns paper on. Restart the bot.</p>
         <div id="amise-factory"></div>
+        <h2 style="margin-top:1rem">S21–S24 slots</h2>
+        <div id="amise-slots"></div>
         <h2 style="margin-top:1rem">Risk</h2>
         <div id="amise-risk"></div>
         <h2 style="margin-top:1rem">Similar-state memory</h2>
@@ -444,6 +447,7 @@ const $ = (id) => document.getElementById(id);
 const PAPER_BOOKS = [
   "S5_MINEDGE", "S8_NET_ZIGZAG",
   "S11_DISCOVERED", "S13_HHHL_DAY", "S16_HHHL_WICK_1H",   "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL",
+  "S21_AMISE", "S22_AMISE", "S23_AMISE", "S24_AMISE",
 ];
 const SHORT = {
   S4_OVERNIGHT: "S4 HHHL swing", S5_MINEDGE: "S5 minedge", S8_NET_ZIGZAG: "S8 zigzag",
@@ -452,6 +456,7 @@ const SHORT = {
   S18_OHLC_VOL_HTF: "S18 OHLC+vol+day",
   S19_BODY_CLOSE_1H: "S19 body+close 1h",
   S20_FADE_HL: "S20 fade low/high",
+  S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
   S12_HHHL30: "S12 HHHL 30m", S14_WICK30_STRICT: "S14 wick", S15_WICK30_NOWICK: "S15 no-wick",
 };
 let watchTab = "open";
@@ -614,7 +619,7 @@ function renderFits() {
   const rows = lastMood.fits || [];
   if (line) {
     if (!rows.length) {
-      line.textContent = "one regime for all books · observe only until MOOD_GATE=true";
+      line.textContent = "one regime for all books · mood gate picks who may open";
     } else {
       line.textContent = rows.map((f) => {
         const short = (SHORT[f.strategy] || f.strategy).replace(/ .*/, "") || f.strategy;
@@ -691,8 +696,8 @@ function showMainTab() {
   $("hist-strat").style.visibility = extra ? "hidden" : "visible";
   if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
-  if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — AI proposes, you decide. Never ENABLE from this tab";
-  if (watchTab === "amise") $("grid-meta").textContent = "AMISE — research system. Observe + approval. Never ENABLE from this tab";
+  if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve names S21–S24 and papers that slot. Never DRY_RUN=false";
+  if (watchTab === "amise") $("grid-meta").textContent = "AMISE — regime + fit + factory. Run factory here. Approve on Lab.";
   if (watchTab === "you") $("grid-meta").textContent = "Human capture — records what you see. Does not trade";
 }
 function rangeQs() {
@@ -946,7 +951,7 @@ function renderLab() {
         <button class="btn" type="button" data-lab="live" data-id="${esc(p.id)}">Live (blocked)</button>
       </div>
     </div>`;
-  }).join("") : `<p class="hint">No pending lab proposals. Run <span class="mono">backtest_research_factory.py --propose</span> from a VM worktree. Thin tapes correctly propose nothing.</p>`;
+  }).join("") : `<p class="hint">No pending lab proposals. Click Run factory on the AMISE tab (or wait for auto-lab). Thin tapes correctly propose nothing.</p>`;
   $("lab-passed").innerHTML = passed.length ? passed.map((row) => {
     const g = row.genome || {};
     const m = row.metrics || {};
@@ -1035,14 +1040,26 @@ function renderAmise() {
       </tr>`).join("")}</tbody>
     </table>` : `<p class="hint">No closed paper trades yet.</p>`}
   </div>`;
+  const job = fac.job || {};
+  const slots = d.slots || {};
   $("amise-factory").innerHTML = `<div class="ml-stats">
     ${mlStat("Found", String(counts.found || 0))}
     ${mlStat("Passed gates", String(counts.passed_validation || 0), counts.passed_validation ? "ok" : "")}
     ${mlStat("Awaiting you", String(pending.length), pending.length ? "warn" : "ok")}
     ${mlStat("Rejected", String(counts.rejected || 0))}
+    ${mlStat("Factory", job.running ? "RUNNING" : "idle", job.running ? "warn" : "ok")}
   </div>
-  <p class="ml-meta">Last factory run ${esc(fac.last_run_at || "none")} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
-  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve / Reject.") : "No pending factory proposals. Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  <p class="ml-meta">Last factory run ${esc(fac.last_run_at || job.last_run_at || "none")} · auto ${job.auto ? ("every " + (job.auto_hours || 12) + "h") : "off"} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
+  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. That names S21–S24 and papers them.") : "No pending factory proposals. Click Run factory (slow). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  const slotRows = slots.slots || [];
+  $("amise-slots").innerHTML = slotRows.length ? `<table>
+    <thead><tr><th>Slot</th><th>Genome</th><th>When</th></tr></thead>
+    <tbody>${slotRows.map((s) => `<tr>
+      <td>${esc(s.short || s.slot)}</td>
+      <td>${s.filled ? esc(s.name || s.genome_id) : "empty — waiting for Lab Approve"}</td>
+      <td>${esc(String(s.assigned_at_ist || "").slice(0, 19))}</td>
+    </tr>`).join("")}</tbody>
+  </table>` : `<p class="hint">S21–S24 fill after you Approve a factory challenger.</p>`;
   $("amise-risk").innerHTML = `<div class="ml-card">
     <p class="ml-meta">emergency ${ctl.emergency_off ? "ON" : "clear"} · trading ${ctl.trading_enabled === false ? "held" : "on"} · live ${ctl.live_unlocked ? "unlocked" : "locked"}</p>
     <p class="ml-meta">book ₹ ${esc(cap.total_capital_inr ?? "—")} · day-loss ₹ ${esc(cap.daily_loss_limit_inr ?? "—")} · today ₹ ${esc(cap.today_pnl_inr ?? "—")} ${risk.daily_loss_breached ? "· DAILY LOSS HIT" : ""}</p>
@@ -1051,7 +1068,7 @@ function renderAmise() {
   const a30 = sim.after_30m || {};
   $("amise-memory").innerHTML = `<div class="ml-card">
     <p class="ml-meta">${esc(mem.updated_at_ist || "no CLI run yet")} · similar n=${esc(sim.n ?? "—")} · regime ${esc(sim.regime || "—")}</p>
-    <p class="hint">${esc(sim.note || mem.note || "Run python3 amise.py --db data/ticks.db on the VM to fill similar-state memory.")}</p>
+    <p class="hint">${esc(sim.note || mem.note || "Similar-state memory fills when AMISE runs (Refresh / auto).")}</p>
     ${a5.n ? `<p class="ml-meta">After 5m (n=${esc(a5.n)}): up ${esc(a5.up_pct)}% · flat ${esc(a5.flat_pct)}% · down ${esc(a5.down_pct)}%</p>` : ""}
     ${a30.n ? `<p class="ml-meta">After 30m (n=${esc(a30.n)}): up ${esc(a30.up_pct)}% · flat ${esc(a30.flat_pct)}% · down ${esc(a30.down_pct)}%</p>` : ""}
   </div>`;
@@ -1171,8 +1188,11 @@ async function decideLab(id, decision) {
     body: JSON.stringify({ decision, note: noteEl ? noteEl.value : "" }),
   });
   if (res.research) lastLab = res.research;
-  flash("flash-lab", res.reminder || res.error || (decision === "rejected" ? "Rejected" : "Recorded"));
+  const slotBit = res.slot ? (" Named " + res.slot + ".") : "";
+  flash("flash-lab", (res.reminder || res.error || (decision === "rejected" ? "Rejected" : "Recorded")) + slotBit);
   renderLab();
+  loadDesk().catch(() => {});
+  loadAmise().catch(() => {});
 }
 async function decideMl(id, decision) {
   const noteEl = document.querySelector(`[data-note="${id}"]`);
@@ -1403,6 +1423,14 @@ $("ml-filter").onchange = () => { if (lastMl) renderMl(); };
 $("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 $("btn-lab-refresh").onclick = () => loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
 $("btn-amise-refresh").onclick = () => loadAmise().catch((e) => flash("flash-amise", String(e.message || e), true));
+$("btn-amise-lab").onclick = () => {
+  api("/api/amise/lab", { method: "POST", body: JSON.stringify({}) })
+    .then((res) => {
+      flash("flash-amise", res.note || (res.running ? "Factory running" : "ok"));
+      return loadAmise();
+    })
+    .catch((e) => flash("flash-amise", String(e.message || e), true));
+};
 $("btn-you-refresh").onclick = () => loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-you]");

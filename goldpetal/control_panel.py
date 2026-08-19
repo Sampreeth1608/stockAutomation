@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -385,7 +386,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "gate_on": False,
                         "flatten_on": False,
                         "note": (
-                            "Desk still runs. Mood is observe-only until MOOD_GATE=true. "
+                            "Desk still runs. Mood gate defaults on so unfit books do not open. "
                             "Not a paper book. Keep DRY_RUN=true."
                         ),
                     }
@@ -405,10 +406,20 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "live_blocked": True,
                         "enable_blocked": True,
                         "note": (
-                            "Desk still runs. AMISE is research-only. "
-                            "Does not ENABLE. Keep DRY_RUN=true."
+                            "Desk still runs. AMISE invents challengers; you Approve. "
+                            "Never DRY_RUN=false. Keep DRY_RUN=true."
                         ),
                     }
+                status, body, ctype = _json_bytes(payload)
+                self._send(status, body, ctype)
+                return
+            if path == "/api/amise/lab":
+                try:
+                    from amise import amise_lab_status
+
+                    payload = amise_lab_status()
+                except Exception as exc:
+                    payload = {"ok": False, "error": str(exc), "running": False}
                 status, body, ctype = _json_bytes(payload)
                 self._send(status, body, ctype)
                 return
@@ -608,6 +619,23 @@ class ControlHandler(BaseHTTPRequestHandler):
                 res = {**res, "live_desk": live_readiness()}
                 self._send(*_json_bytes(res, status))
                 return
+            if path == "/api/amise/lab":
+                from amise import start_amise_lab
+
+                res = start_amise_lab(propose=True)
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
+            if path == "/api/amise/gate":
+                from amise import ensure_mood_gate
+
+                res = ensure_mood_gate()
+                res["gate_on"] = True
+                res["note"] = (
+                    "MOOD_GATE=true written. Restart the bot so paper books "
+                    "stand down in unfit regimes. Never dumps S13. Keep DRY_RUN=true."
+                )
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
             if path == "/api/bot/start":
                 from analytics.bot_ops import start_bot
 
@@ -769,6 +797,19 @@ class ControlHandler(BaseHTTPRequestHandler):
             self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
 
 
+def _amise_auto_loop() -> None:
+    import time
+
+    from amise import maybe_start_auto_lab
+
+    while True:
+        time.sleep(60)
+        try:
+            maybe_start_auto_lab()
+        except Exception:
+            continue
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Gold Petal control panel")
     ap.add_argument("--host", default="127.0.0.1")
@@ -776,6 +817,13 @@ def main() -> None:
     args = ap.parse_args()
     load_state()
     load_capital()
+    try:
+        from amise import ensure_mood_gate
+
+        ensure_mood_gate()
+    except Exception:
+        pass
+    threading.Thread(target=_amise_auto_loop, name="amise-auto-lab", daemon=True).start()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
     print(f"cwd {ROOT}  Gold Petal station → http://{args.host}:{args.port}/", flush=True)
     try:

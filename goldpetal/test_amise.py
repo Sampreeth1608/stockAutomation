@@ -108,20 +108,26 @@ def test_not_a_paper_book() -> None:
     assert ENGINE_NAME not in SLIM_PAPER_STRATEGIES
     assert "AMISE" not in PAPER_ONLY_BOOKS
     paper = (root / "station.html").read_text(encoding="utf-8").split("const PAPER_BOOKS")[1].split("];")[0]
-    assert "AMISE" not in paper
+    assert '"AMISE"' not in paper.replace("S21_AMISE", "").replace("S22_AMISE", "").replace("S23_AMISE", "").replace("S24_AMISE", "")
+    assert "S21_AMISE" in paper
     station = (root / "station.html").read_text(encoding="utf-8")
     assert 'data-tab="amise"' in station
     assert "/api/amise" in station
     assert "Profit Guardian" in station
+    assert "Run factory" in station
     panel = (root / "control_panel.py").read_text(encoding="utf-8")
     assert "/api/amise" in panel
     assert "amise_desk_payload" in panel
+    assert "/api/amise/lab" in panel
     env = (root / ".env.example").read_text(encoding="utf-8")
     assert "amise.py" in env
     assert "ENABLE_AMISE=" not in env
+    assert "ENABLE_S21=false" in env
     sh = (root / "weekly_amise.sh").read_text(encoding="utf-8")
     assert "amise.py" in sh
     assert "ENABLE" in sh
+    assert "S21_AMISE" in ALL_STRATEGY_NAMES
+    assert "S21_AMISE" in SLIM_PAPER_STRATEGIES
 
 
 if __name__ == "__main__":

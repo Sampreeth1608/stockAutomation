@@ -208,6 +208,8 @@ def test_env_patch_never_enable() -> None:
     assert patch == {"DRY_RUN": "true"}
     assert env_patch_is_safe(patch)
     assert not env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S16": "true"})
+    assert env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S21": "true"})
+    assert not env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S21": "false"})
     assert not env_patch_is_safe({"DRY_RUN": "false"})
 
 
@@ -251,8 +253,12 @@ def test_factory_rejects_short_tape(tmp_path: Path) -> None:
     assert (not props.exists()) or load_proposals(props) == []
 
 
-def test_proposal_and_lab_approve_do_not_enable(tmp_path: Path) -> None:
+def test_proposal_and_lab_approve_assigns_s21(tmp_path: Path) -> None:
     props = tmp_path / "proposals.json"
+    env = tmp_path / ".env"
+    state = tmp_path / "state.json"
+    slots = tmp_path / "slots"
+    env.write_text("DRY_RUN=true\nENABLE_S21=false\n", encoding="utf-8")
     row = {
         "genome": StrategyGenome(
             name="demo-breakout",
@@ -284,16 +290,38 @@ def test_proposal_and_lab_approve_do_not_enable(tmp_path: Path) -> None:
     inv = decide_research(prop.id, "investigate", note="look again", proposals_path=props)
     assert inv["ok"] is True
     assert inv["status"] == "pending"
-    before = list(load_state().paper_approved)
-    res = decide_research(prop.id, "approved_paper", note="queue only", proposals_path=props)
+    res = decide_research(
+        prop.id,
+        "approved_paper",
+        note="name S21",
+        proposals_path=props,
+        env_path=env,
+        slots_dir=slots,
+        state_path=state,
+        apply_env=True,
+        queue_live=True,
+        sync_environ=False,
+    )
     assert res["ok"] is True
-    assert res["control_touched"] is False
-    assert res["env_applied"] is False
+    assert res["slot"] == "S21_AMISE"
+    assert res["control_touched"] is True
+    assert res["env_applied"] is True
     assert res["status"] == "approved_paper"
-    st = load_state()
+    assert res["live_unlocked"] is False
+    assert res["dry_run_forced"] is True
+    text = env.read_text(encoding="utf-8")
+    assert "DRY_RUN=true" in text
+    assert "DRY_RUN=false" not in text
+    assert "ENABLE_S21=true" in text
+    st = load_state(state)
+    assert "S21_AMISE" in st.paper_approved
+    assert "S21_AMISE" in st.live_approved
     assert RESEARCH_STRATEGY not in st.paper_approved
-    assert RESEARCH_STRATEGY not in st.live_approved
-    assert list(st.paper_approved) == before
+    from amise_slots import load_slot_genome
+
+    g = load_slot_genome("S21_AMISE", slots)
+    assert g is not None
+    assert "hh" in g.entry_long
     refused = decide_proposal_for_desk(
         prop.id,
         "approved_paper",
@@ -302,6 +330,43 @@ def test_proposal_and_lab_approve_do_not_enable(tmp_path: Path) -> None:
     )
     assert refused["ok"] is False
     assert refused.get("lab") is True
+
+
+def test_lab_reject_does_not_assign(tmp_path: Path) -> None:
+    props = tmp_path / "proposals.json"
+    env = tmp_path / ".env"
+    state = tmp_path / "state.json"
+    slots = tmp_path / "slots"
+    env.write_text("DRY_RUN=true\nENABLE_S21=false\n", encoding="utf-8")
+    row = {
+        "genome": StrategyGenome(
+            name="nope",
+            entry_long=("hh",),
+            entry_short=("lh",),
+        ).normalized().to_dict(),
+        "metrics": {"n_trades": 40, "after_charges": 1200.0, "win_rate": 0.6},
+        "robustness": {"cost_2x_pass": True},
+        "supervisor": "no",
+        "fails": [],
+    }
+    prop = proposal_from_challenger(row, week_id="lab-test")
+    add_proposal(prop, path=props)
+    res = decide_research(
+        prop.id,
+        "rejected",
+        proposals_path=props,
+        env_path=env,
+        slots_dir=slots,
+        state_path=state,
+        apply_env=True,
+        sync_environ=False,
+    )
+    assert res["ok"] is True
+    assert res["slot"] is None
+    assert res["control_touched"] is False
+    assert "ENABLE_S21=true" not in env.read_text(encoding="utf-8")
+    st = load_state(state)
+    assert "S21_AMISE" not in st.paper_approved
 
 
 def test_ml_hides_research_and_refuses_pending(tmp_path: Path) -> None:
@@ -349,6 +414,7 @@ def test_not_wired_to_paper_or_live() -> None:
     station = (root / "station.html").read_text(encoding="utf-8")
     paper = station.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "RESEARCH_FACTORY" not in paper
+    assert "S21_AMISE" in paper
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     portfolio = (root / "portfolio.py").read_text(encoding="utf-8")
     assert "ENABLE_RESEARCH" not in runner
@@ -359,6 +425,8 @@ def test_not_wired_to_paper_or_live() -> None:
     assert "import research_factory" not in desk
     genome_head = (root / "strategy_genome.py").read_text(encoding="utf-8").split("def params_from_genome")[0]
     assert "from flow_lab import" not in genome_head
+    assert "S21_AMISE" in ALL_STRATEGY_NAMES
+    assert "S24_AMISE" in SLIM_PAPER_STRATEGIES
 
 
 if __name__ == "__main__":
@@ -372,10 +440,11 @@ if __name__ == "__main__":
     test_env_patch_never_enable()
     test_gates_reject_thin_and_champion_loss()
     td = P(tempfile.mkdtemp())
-    for name in ("a", "b", "c"):
+    for name in ("a", "b", "c", "d"):
         (td / name).mkdir()
     test_factory_rejects_short_tape(td / "a")
-    test_proposal_and_lab_approve_do_not_enable(td / "b")
+    test_proposal_and_lab_approve_assigns_s21(td / "b")
+    test_lab_reject_does_not_assign(td / "d")
     test_ml_hides_research_and_refuses_pending(td / "c")
     test_not_wired_to_paper_or_live()
     print("ALL test_research_factory OK")

@@ -1,9 +1,10 @@
-"""Research Lab desk — approval station. Not ML. Not live.
+"""Research Lab desk — approval station. Not ML. Not a live unlock.
 
 The factory may write pending proposals. This module is the only place
 the operator records Approve / Paper test / Reject / Investigate.
-Approve does not ENABLE a book, does not paper-allowlist RESEARCH_FACTORY,
-and never sets DRY_RUN=false.
+Approve names the next AMISE slot (S21–S24), writes paper ENABLE for that
+slot, and paper-allowlists it. It never sets DRY_RUN=false. Angel still
+needs Unlock + LIVE on the desk.
 """
 
 from __future__ import annotations
@@ -15,11 +16,20 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from amise_slots import (
+    AMISE_SLOT_BOOKS,
+    apply_slot_enable,
+    assign_slot,
+    desk_slots_payload,
+)
+from control_state import approve_strategy_live, approve_strategy_paper
 from proposals import decide_proposal, get_proposal, load_proposals, save_proposals
 from strategy_genome import (
     LAB_NAME,
     RESEARCH_KIND,
     RESEARCH_STRATEGY,
+    env_patch_is_safe,
+    genome_from_dict,
     is_research_proposal,
     research_env_patch,
 )
@@ -31,15 +41,15 @@ LIBRARY_PATH = RESEARCH_DIR / "library.json"
 LAST_RUN_PATH = RESEARCH_DIR / "last_run.json"
 
 LIVE_BLOCKED_REASON = (
-    "Live approval is not on the Lab tab. The research factory cannot deploy. "
-    "Approve records your yes only. Paper observation and live each need a later "
-    "explicit request — this tab never sets DRY_RUN=false or ENABLE_*."
+    "Live unlock is not on the Lab tab. Approve names S21–S24 and turns paper "
+    "on for that slot. This tab never sets DRY_RUN=false. Angel still needs "
+    "Unlock + type LIVE on Live money, then Restart."
 )
 
 PAPER_REMINDER = (
-    "Recorded as approved_paper. That is a queue flag only — no ENABLE_*, "
-    "no paper allowlist, no Angel. Ask to wire a named book if you want it "
-    "on the paper bot. Keep DRY_RUN=true."
+    "Approved. AMISE named the next free slot (S21–S24), wrote paper ENABLE, "
+    "and queued it for Angel after you Unlock. Restart the bot to load RAM. "
+    "Keep DRY_RUN=true until you type LIVE yourself."
 )
 
 
@@ -103,6 +113,7 @@ def research_desk_payload(
         "live_blocked": True,
         "live_blocked_reason": LIVE_BLOCKED_REASON,
         "env_patch_allowed": research_env_patch(),
+        "amise_slots": AMISE_SLOT_BOOKS,
         "champions": lib.get("champions") or {},
         "challengers": lib.get("challengers") or [],
         "discovery": lib.get("discovery") or [],
@@ -119,11 +130,13 @@ def research_desk_payload(
         },
         "pending": pending,
         "decided": decided[:30],
+        "slots": desk_slots_payload(),
         "note": (
             "AI researches. You decide. New strategies found on the last lab run "
             "must beat S16 and S18 after charges, survive walk-forward, and pass "
-            "2×-cost robustness before they appear here. Approve ≠ paper ENABLE. "
-            "Paper ≠ live."
+            "2×-cost robustness before they appear here. Approve names S21–S24 "
+            "and turns that slot's paper ENABLE on. Restart the bot. This tab "
+            "never sets DRY_RUN=false."
         ),
         "last_run_at": lib.get("updated_at_ist") or "",
     }
@@ -153,8 +166,14 @@ def decide_research(
     note: str = "",
     *,
     proposals_path: Path | None = None,
+    env_path: Path | None = None,
+    slots_dir: Path | None = None,
+    state_path: Path | None = None,
+    apply_env: bool = True,
+    queue_live: bool = True,
+    sync_environ: bool = True,
 ) -> dict[str, Any]:
-    """Approve / paper_test / reject / investigate. Never approved_live."""
+    """Approve / paper_test / reject / investigate. Never DRY_RUN=false."""
     raw = str(decision or "").strip().lower()
     if raw in {"approved_live", "live"}:
         return {
@@ -190,7 +209,6 @@ def decide_research(
         mapped = "approved_paper"
     elif raw in {"paper", "paper_test", "paper-test"}:
         mapped = "approved_paper"
-        note = ("paper_test requested — still not ENABLE. " + note).strip()
     elif raw in {"reject", "rejected"}:
         mapped = "rejected"
     else:
@@ -199,18 +217,64 @@ def decide_research(
     kwargs: dict[str, Any] = {"touch_control": False}
     if proposals_path is not None:
         kwargs["path"] = proposals_path
+    if state_path is not None:
+        kwargs["state_path"] = state_path
     p = decide_proposal(proposal_id, mapped, note=note, **kwargs)
-    reminder = PAPER_REMINDER if mapped == "approved_paper" else "Rejected. Archived. Not ENABLE."
+    slot_info: dict[str, Any] = {}
+    env_applied = False
+    control_touched = False
+    reminder = "Rejected. Archived. Not ENABLE."
+    if mapped == "approved_paper":
+        extra = (p.paper.extra if p.paper is not None else None) or {}
+        if not isinstance(extra, dict):
+            extra = {}
+        graw = extra.get("genome")
+        if not isinstance(graw, dict):
+            reminder = (
+                "Approved as a Lab flag only — proposal has no genome, so no S21–S24 slot."
+            )
+        else:
+            genome = genome_from_dict(graw)
+            slot_info = assign_slot(
+                genome,
+                proposal_id=p.id,
+                folder=slots_dir,
+                note=note,
+            )
+            if not slot_info.get("ok"):
+                reminder = str(slot_info.get("error") or "slot assign failed")
+            else:
+                slot = str(slot_info["slot"])
+                patch = slot_info.get("env_patch") or {}
+                if apply_env and env_patch_is_safe(patch):
+                    applied = apply_slot_enable(
+                        slot, env_path=env_path, sync_environ=sync_environ
+                    )
+                    env_applied = bool(applied.get("ok"))
+                    slot_info["env"] = applied
+                approve_strategy_paper(slot, path=state_path)
+                if queue_live:
+                    approve_strategy_live(slot, path=state_path)
+                control_touched = True
+                reminder = (
+                    f"Named {slot}. Paper ENABLE written. Restart the bot to load it. "
+                    "Angel is queued on Live pick — Unlock + type LIVE still required. "
+                    "This tab did not set DRY_RUN=false."
+                )
     return {
         "ok": True,
         "id": p.id,
-        "strategy": p.strategy,
+        "strategy": (slot_info.get("slot") if slot_info.get("ok") else p.strategy),
         "status": p.status,
-        "env_patch": p.env_patch,
-        "env_applied": False,
-        "control_touched": False,
-        "restart_needed": False,
-        "reminder": reminder,
+        "slot": slot_info.get("slot") if slot_info.get("ok") else None,
+        "slot_info": slot_info,
+        "env_patch": (slot_info.get("env_patch") if slot_info.get("ok") else p.env_patch),
+        "env_applied": env_applied,
+        "control_touched": control_touched,
+        "restart_needed": bool(slot_info.get("ok")),
+        "live_unlocked": False,
+        "dry_run_forced": True,
+        "reminder": reminder if mapped == "approved_paper" else "Rejected. Archived. Not ENABLE.",
         "proposal": p.to_dict(),
         "research": research_desk_payload(proposals_path=proposals_path),
     }

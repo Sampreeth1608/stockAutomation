@@ -35,6 +35,10 @@ INTRADAY_RESTORE = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
+    "S21_AMISE",
+    "S22_AMISE",
+    "S23_AMISE",
+    "S24_AMISE",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -45,7 +49,16 @@ INTRADAY_RESTORE = (
 
 # S16 is a same-session book: do not restore yesterday's position overnight.
 SESSION_CLOSE_OVERNIGHT = frozenset(
-    {"S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL"}
+    {
+        "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
+        "S21_AMISE",
+        "S22_AMISE",
+        "S23_AMISE",
+        "S24_AMISE",
+    }
 )
 
 # S4/S13 are multi-day/week holds. Retired S12/S14/S15 last-minute confirm overlapped EOD.
@@ -156,6 +169,10 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        "S21_AMISE",
+        "S22_AMISE",
+        "S23_AMISE",
+        "S24_AMISE",
     } and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
