@@ -67,18 +67,61 @@ def desk_db_candidates() -> list[Path]:
     return out
 
 
+_RESOLVE_CACHE: dict[str, Any] = {"at": 0.0, "path": ""}
+
+
+def _file_mtime(p: Path) -> float:
+    try:
+        return float(p.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _last_tick_epoch(p: Path) -> float:
+    """Newest tick clock in this file. 0 if unreadable / empty (mtime must not win)."""
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(str(p), timeout=1.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=1000")
+        row = conn.execute(
+            "SELECT received_at FROM ticks ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return 0.0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if not row:
+        return 0.0
+    ts = parse_tick_at(str(row["received_at"] or ""))
+    if ts is None:
+        return 0.0
+    return float(ts.timestamp())
+
+
 def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
-    """Pick the ticks.db the bot is actually writing (newest nonempty file)."""
+    """Pick the ticks.db the bot is writing (freshest tick, not file mtime).
+
+    Desk ``init_db`` / WAL on ``~/goldpetal/data/ticks.db`` bumps mtime and
+    used to steal the quote from ``goldpetal-repo`` after ``--restart``.
+    """
     paths = list(candidates) if candidates is not None else desk_db_candidates()
+    use_cache = candidates is None
+    now = time.time()
+    if use_cache and _RESOLVE_CACHE.get("path") and now - float(_RESOLVE_CACHE.get("at") or 0) < 2.0:
+        cached = Path(str(_RESOLVE_CACHE["path"]))
+        if cached.is_file():
+            return cached
     existing = [p for p in paths if p.is_file()]
     if not existing:
-        return paths[0] if paths else DB_PATH
-
-    def mtime(p: Path) -> float:
-        try:
-            return float(p.stat().st_mtime)
-        except OSError:
-            return 0.0
+        chosen = paths[0] if paths else DB_PATH
+        if use_cache:
+            _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
+        return chosen
 
     nonempty: list[Path] = []
     for p in existing:
@@ -88,7 +131,10 @@ def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
         except OSError:
             continue
     pool = nonempty or existing
-    return max(pool, key=mtime)
+    chosen = max(pool, key=lambda p: (_last_tick_epoch(p), _file_mtime(p)))
+    if use_cache:
+        _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
+    return chosen
 
 
 def db_info(db_path: Path) -> dict[str, Any]:

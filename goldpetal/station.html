@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v8: factory abort shows timeout reason; AMISE uses cached trades -->
+<!-- gp-header-v9: quote follows freshest tick db; desk restart must not mark tape dead -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v8</div>
+      <div class="clock" id="clock">IST — · v9</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -559,7 +559,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v8";
+    if (clock) clock.textContent = "IST " + ist + " · v9";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1482,12 +1482,9 @@ function renderDesk(d) {
   lastDesk = d;
   const sess = d.session || {};
   if (sess.ltp != null && sess.ltp !== "") {
-    lastTape = Object.assign({}, lastTape, {
-      ltp: sess.ltp,
-      last_tick_at: sess.last_tick_at || lastTape.last_tick_at,
-      tape_live: (typeof sess.tape_live === "boolean") ? sess.tape_live : lastTape.tape_live,
-      tape_age_sec: (sess.tape_age_sec != null) ? sess.tape_age_sec : lastTape.tape_age_sec,
-    });
+    const next = { ltp: sess.ltp };
+    if (sess.last_tick_at) next.last_tick_at = sess.last_tick_at;
+    lastTape = Object.assign({}, lastTape, next);
     renderQuote(false);
   }
   fillStratSelect();

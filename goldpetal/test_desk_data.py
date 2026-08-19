@@ -70,6 +70,24 @@ def test_json_safe_strips_nan() -> None:
     json.dumps(payload, allow_nan=False)
 
 
+def test_resolve_desk_db_prefers_fresher_tick_not_mtime() -> None:
+    """Desk init_db bumps mtime on a stale file; live bot db must still win."""
+    import os
+
+    with tempfile.TemporaryDirectory() as td:
+        stale = Path(td) / "stale.db"
+        live = Path(td) / "live.db"
+        init_db(stale)
+        init_db(live)
+        _tick(live, day="2026-08-19")
+        time.sleep(0.05)
+        init_db(stale)
+        _tick(stale, day="2026-08-18")
+        os.utime(stale, None)
+        picked = resolve_desk_db(candidates=[stale, live])
+        assert picked == live
+
+
 def test_resolve_desk_db_prefers_newer_nonempty() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -167,6 +185,7 @@ def test_list_signals_limit_keeps_latest() -> None:
 if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
+    test_resolve_desk_db_prefers_fresher_tick_not_mtime()
     test_tape_payload_shows_ticks_without_trades()
     test_tape_freshness_frozen_quote_is_not_live()
     test_tick_feed_stale_during_session()
