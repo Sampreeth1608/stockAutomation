@@ -46,7 +46,12 @@ def test_station_is_the_operator_page() -> None:
     assert "buy qty" not in quote
     assert "sell qty" not in quote
     assert "ticks" not in quote
+    assert "last_tick_at" not in quote
+    assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
+    assert "tape stopped" in quote
+    assert "function goldPetalIsRunning" in html
+    assert "function tapeIsLive" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html

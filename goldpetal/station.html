@@ -51,6 +51,7 @@ button, input, select { font: inherit; }
 .quote { display: flex; align-items: center; gap: .8rem; min-width: 0; }
 .quote .sym { font: 600 12px/1 var(--mono); letter-spacing: .16em; color: var(--muted); }
 .quote .ltp { font: 600 30px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.quote .ltp.stale { color: var(--muted); }
 .quote .meta { font: 12px/1.3 var(--mono); color: var(--muted); }
 .mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
 .mood-box .pill { width: fit-content; }
@@ -531,6 +532,7 @@ function tickClock() {
     weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   $("clock").textContent = "IST " + ist;
   renderSessionLine();
+  renderQuote();
 }
 function hhmmToSec(value) {
   const p = String(value || "09:00").split(":");
@@ -556,6 +558,28 @@ function goldPetalSessionNow() {
   const open = !weekend && cur >= hhmmToSec(openS) && cur <= hhmmToSec(closeS);
   return { open, weekend, openS, closeS };
 }
+function parseTickAt(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return null;
+  let iso = t.includes("T") ? t : t.replace(" ", "T");
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += "+05:30";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+const TAPE_LIVE_MS = 30000;
+function tapeIsLive() {
+  const d = parseTickAt(lastTape.last_tick_at);
+  if (!d) return false;
+  return (Date.now() - d.getTime()) <= TAPE_LIVE_MS;
+}
+function goldPetalIsRunning() {
+  const s = goldPetalSessionNow();
+  if (!s.open) return false;
+  const bot = lastDesk.bot || {};
+  const feed = String(bot.feed_source || "off");
+  const feedOn = !!bot.running || feed === "bot" || feed === "collector";
+  return feedOn && tapeIsLive();
+}
 function renderSessionLine() {
   const el = $("session-line");
   if (!el) return;
@@ -563,11 +587,12 @@ function renderSessionLine() {
   const hours = "Mon–Fri " + s.openS + "–" + s.closeS + " IST";
   const live = lastDesk.live_desk || {};
   const armed = !!live.would_place_real_orders;
-  let line = s.open ? ("Gold Petal running · " + hours) : ("Gold Petal stopped · " + hours);
+  const running = goldPetalIsRunning();
+  let line = running ? ("Gold Petal running · " + hours) : ("Gold Petal stopped · " + hours);
   if (s.weekend) line += " · weekend";
   if (armed) line += " · LIVE ARMED";
   el.textContent = line;
-  el.className = "sub " + (s.open ? "running" : "stopped");
+  el.className = "sub " + (running ? "running" : "stopped");
 }
 function thead(cols) {
   $("grid-head").innerHTML = "<tr>" + cols.map((c) => {
@@ -616,10 +641,12 @@ function allScore() {
 }
 function renderQuote() {
   const ltp = lastTape.ltp;
-  $("ltp").textContent = ltp == null || ltp === "" ? "—" : money(ltp);
-  const bits = [];
-  if (lastTape.last_tick_at) bits.push(String(lastTape.last_tick_at).slice(11, 19));
-  $("quote-meta").textContent = bits.join(" · ") || "waiting for quote";
+  const hasPx = !(ltp == null || ltp === "");
+  $("ltp").textContent = hasPx ? money(ltp) : "—";
+  $("ltp").classList.toggle("stale", hasPx && !tapeIsLive());
+  if (!hasPx) $("quote-meta").textContent = "waiting for quote";
+  else if (!tapeIsLive()) $("quote-meta").textContent = "tape stopped";
+  else $("quote-meta").textContent = "";
   renderMood();
 }
 function moodKind(mood) {
