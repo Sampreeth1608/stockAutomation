@@ -4,17 +4,19 @@
 One research system. Four brains + your approval.
 
   Market state → relationships / factory → strategy manager (fit) →
-  profit guardian → risk snapshot → YOU APPROVE → S21–S24 paper → memory
+  profit guardian → risk snapshot → YOU APPROVE → S21, S22, … paper → memory
 
 Desk ``GET /api/amise`` is read-only (never runs the factory).
-``POST /api/amise/lab`` starts the factory in the background and writes
-Lab pending rows. Approve on Lab names S21–S24 and turns paper ENABLE on.
+``POST /api/amise/lab`` starts the factory in the background (fast path)
+and writes Lab pending rows. Approve on Lab names the next slot (S21,
+then S22, then S25 after S24) and turns paper ENABLE on.
 This module never sets DRY_RUN=false.
 
 CLI:
 
   python3 amise.py --db data/ticks.db
-  python3 amise.py --db data/ticks.db --lab --propose
+  python3 amise.py --db data/ticks.db --lab --propose --fast
+  python3 amise.py --db data/ticks.db --lab --propose --full
 """
 
 from __future__ import annotations
@@ -54,6 +56,16 @@ def auto_lab_hours() -> float:
         return min(72.0, max(1.0, float(raw)))
     except ValueError:
         return 12.0
+
+
+def lab_fast_on() -> bool:
+    """Desk / auto-lab default: light factory. Set AMISE_FAST_LAB=false for weekly depth."""
+    return (os.getenv("AMISE_FAST_LAB") or "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
 
 
 def ensure_mood_gate(*, path: Path | None = None) -> dict[str, Any]:
@@ -124,6 +136,7 @@ def amise_lab_status() -> dict[str, Any]:
         "log": str(LAB_LOG) if LAB_LOG.is_file() else "",
         "auto": auto_lab_on(),
         "auto_hours": auto_lab_hours(),
+        "fast": bool(lock.get("fast")) if lock else lab_fast_on(),
     }
 
 
@@ -147,6 +160,7 @@ def start_amise_lab(
     db: Path | None = None,
     propose: bool = True,
     python: str | None = None,
+    fast: bool | None = None,
 ) -> dict[str, Any]:
     """Background factory. Writes Lab pending only. Never ENABLE. Never DRY_RUN=false."""
     from desk_data import resolve_desk_db
@@ -160,6 +174,7 @@ def start_amise_lab(
     venv = ROOT / "venv" / "bin" / "python"
     if venv.is_file() and python is None:
         py = str(venv)
+    use_fast = lab_fast_on() if fast is None else bool(fast)
     cmd = [
         str(py),
         str(ROOT / "amise.py"),
@@ -169,8 +184,9 @@ def start_amise_lab(
     ]
     if propose:
         cmd.append("--propose")
+    cmd.append("--fast" if use_fast else "--full")
     logf = LAB_LOG.open("a", encoding="utf-8")
-    logf.write(f"\n--- {datetime.now(IST).isoformat(timespec='seconds')} ---\n")
+    logf.write(f"\n--- {datetime.now(IST).isoformat(timespec='seconds')} fast={use_fast} ---\n")
     logf.flush()
     proc = subprocess.Popen(
         cmd,
@@ -187,6 +203,7 @@ def start_amise_lab(
                 "started_at_ist": _now_iso(),
                 "cmd": cmd,
                 "propose": bool(propose),
+                "fast": bool(use_fast),
             },
             indent=2,
         ),
@@ -198,10 +215,14 @@ def start_amise_lab(
         "running": True,
         "pid": proc.pid,
         "propose": bool(propose),
+        "fast": bool(use_fast),
         "note": (
-            "Factory started. Challengers that beat S16+S18 after charges go to Lab. "
-            "You Approve. Does not ENABLE until Approve. Keep DRY_RUN=true."
-        ),
+            "Fast factory started (fewer folds, no recipes/sklearn). "
+            if use_fast
+            else "Full factory started (walk-forward + robustness + sklearn ranks). "
+        )
+        + "Challengers that beat S16+S18 after charges go to Lab. "
+        "You Approve. Does not ENABLE until Approve. Keep DRY_RUN=true.",
     }
 
 
@@ -434,14 +455,15 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "PROFIT GUARDIAN",
             "RISK",
             "YOUR APPROVAL",
-            "S21–S24 PAPER (after Approve)",
+            "S21+ PAPER (after Approve, next free name)",
             "ANGEL (after Unlock + LIVE)",
             "MEMORY",
         ],
         "note": (
             "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
-            "It invents challengers on Run factory / auto lab. You Approve on Lab — "
-            "that names S21–S24 and turns paper ENABLE on. Restart the bot. "
+            "It invents challengers on Run factory / auto lab (fast path on the desk). "
+            "You Approve on Lab — that names the next slot (S21, S22, … S25 after S24) "
+            "and turns paper ENABLE on. Restart the bot. "
             "This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE. "
             "Does not rewrite S13/S16. Keep DRY_RUN=true until you type LIVE."
         ),
@@ -458,6 +480,7 @@ def run_amise(
     minutes: int = 60,
     folds: int = 3,
     memory_path: Path | None = None,
+    fast: bool = False,
 ) -> dict[str, Any]:
     """Full research loop. Factory only if lab=True. Never ENABLE."""
     from desk_data import resolve_desk_db
@@ -472,7 +495,7 @@ def run_amise(
     if lab:
         from backtest_flow_lab import _load_bars
         from flow_lab import FlowParams, session_bars, tape_flags
-        from research_factory import run_research_lab
+        from research_factory import FAST_LAB_KWARGS, run_research_lab
 
         ns = argparse.Namespace(
             db=str(path),
@@ -487,13 +510,22 @@ def run_amise(
         hours, _m30, source = _load_bars(ns)
         hours = session_bars(hours)
         flags = tape_flags(hours)
+        lab_kw: dict[str, Any] = dict(FAST_LAB_KWARGS) if fast else {
+            "n_folds": int(folds),
+            "include_recipes": True,
+            "max_compose": 24,
+            "robustness": True,
+            "sklearn": True,
+        }
+        if not fast:
+            lab_kw["n_folds"] = int(folds)
         lab_payload = run_research_lab(
             hours,
             lots=float(lots),
             fees=bool(fees),
-            n_folds=int(folds),
             params=FlowParams(),
             propose=bool(propose),
+            **lab_kw,
         )
         lab_payload = {
             "source": source,
@@ -504,6 +536,7 @@ def run_amise(
             "challengers": lab_payload.get("challengers") or [],
             "proposed_ids": lab_payload.get("proposed_ids") or [],
             "updated_at_ist": lab_payload.get("updated_at_ist") or _now_iso(),
+            "fast": bool(fast),
         }
     payload = {
         "engine": ENGINE_NAME,
@@ -531,18 +564,21 @@ def run_amise(
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", type=Path, default=Path("data/ticks.db"))
-    ap.add_argument("--lab", action="store_true", help="run research factory (slow)")
+    ap.add_argument("--lab", action="store_true", help="run research factory")
     ap.add_argument("--propose", action="store_true", help="write pending Lab rows (not ENABLE)")
     ap.add_argument("--lots", type=float, default=100.0)
     ap.add_argument("--fees", action="store_true", default=True)
     ap.add_argument("--no-fees", action="store_true")
     ap.add_argument("--minutes", type=int, default=60)
     ap.add_argument("--folds", type=int, default=3)
+    ap.add_argument("--fast", action="store_true", help="lighter desk lab (skip recipes/sklearn/robustness)")
+    ap.add_argument("--full", action="store_true", help="full weekly lab (overrides --fast)")
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
-    print("AMISE — invents challengers, you approve S21–S24. Keep DRY_RUN=true.")
+    use_fast = bool(args.fast) and not bool(args.full)
+    print("AMISE — invents challengers, you approve S21, S22, …. Keep DRY_RUN=true.")
     print("Market state → factory (optional) → fit → guardian → memory → you approve")
-    print("Approve on Lab names a slot and papers it. Never DRY_RUN=false.", flush=True)
+    print("Approve on Lab names the next slot and papers it. Never DRY_RUN=false.", flush=True)
     result = run_amise(
         db=args.db,
         lab=bool(args.lab),
@@ -551,6 +587,7 @@ def main() -> int:
         fees=fees,
         minutes=int(args.minutes),
         folds=int(args.folds),
+        fast=use_fast,
     )
     m = result.get("market") or {}
     print(f"regime={m.get('regime')} mood={m.get('mood')} transition={m.get('transition')}")
@@ -578,7 +615,7 @@ def main() -> int:
         )
     else:
         print("factory skipped (pass --lab to run discovery + validation)")
-    print("You approve on the station AMISE / Lab tabs. Approve → S21–S24 paper. Keep DRY_RUN=true.")
+    print("You approve on the station AMISE / Lab tabs. Approve → next S21+ slot. Keep DRY_RUN=true.")
     return 0
 
 

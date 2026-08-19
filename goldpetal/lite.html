@@ -146,6 +146,13 @@ const SHORT = {
   S20_FADE_HL: "S20 fade low/high",
   S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
 };
+function shortName(name) {
+  const n = String(name || "");
+  if (SHORT[n]) return SHORT[n];
+  const m = n.match(/^S(\d+)_AMISE$/);
+  if (m) return "S" + m[1] + " AMISE";
+  return n;
+}
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
@@ -189,7 +196,7 @@ function render(d) {
     $("books").innerHTML = (live.books || []).map((b) => {
       const name = b.strategy;
       return `<tr>
-        <td>${SHORT[name] || name}</td>
+        <td>${shortName(name)}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
       </tr>`;

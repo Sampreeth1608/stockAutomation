@@ -12,6 +12,7 @@ from ohlcv_lab import LabMetrics
 from proposals import PaperResult, StrategyProposal, add_proposal, get_proposal
 from research_desk import decide_research, research_desk_payload
 from research_factory import (
+    FAST_LAB_KWARGS,
     LAB_NAME,
     gate_failures,
     proposal_from_challenger,
@@ -209,8 +210,17 @@ def test_env_patch_never_enable() -> None:
     assert env_patch_is_safe(patch)
     assert not env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S16": "true"})
     assert env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S21": "true"})
+    assert env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S25": "true"})
     assert not env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S21": "false"})
     assert not env_patch_is_safe({"DRY_RUN": "false"})
+
+
+def test_fast_lab_skips_heavy_ml() -> None:
+    assert FAST_LAB_KWARGS["sklearn"] is False
+    assert FAST_LAB_KWARGS["include_recipes"] is False
+    assert FAST_LAB_KWARGS["robustness"] is False
+    assert FAST_LAB_KWARGS["n_folds"] == 2
+    assert FAST_LAB_KWARGS["max_compose"] == 8
 
 
 def test_gates_reject_thin_and_champion_loss() -> None:
@@ -239,6 +249,7 @@ def test_factory_rejects_short_tape(tmp_path: Path) -> None:
         include_recipes=False,
         max_compose=8,
         robustness=False,
+        sklearn=False,
         propose=True,
         proposals_path=props,
         library_path=lib,
@@ -247,6 +258,7 @@ def test_factory_rejects_short_tape(tmp_path: Path) -> None:
     assert out["counts"]["found"] >= 1
     assert out["counts"]["passed_validation"] == 0
     assert out["proposed_ids"] == []
+    assert out["sklearn_importances"] == []
     assert lib.exists()
     from proposals import load_proposals
 
@@ -427,6 +439,7 @@ def test_not_wired_to_paper_or_live() -> None:
     assert "from flow_lab import" not in genome_head
     assert "S21_AMISE" in ALL_STRATEGY_NAMES
     assert "S24_AMISE" in SLIM_PAPER_STRATEGIES
+    assert "S11_DISCOVERED" not in SLIM_PAPER_STRATEGIES
 
 
 if __name__ == "__main__":
@@ -438,6 +451,7 @@ if __name__ == "__main__":
     test_genome_compile_long_on_hh_hl_bull()
     test_mutate_and_combine()
     test_env_patch_never_enable()
+    test_fast_lab_skips_heavy_ml()
     test_gates_reject_thin_and_champion_loss()
     td = P(tempfile.mkdtemp())
     for name in ("a", "b", "c", "d"):

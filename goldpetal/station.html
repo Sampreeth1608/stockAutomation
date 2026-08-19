@@ -293,8 +293,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="lab-panel" hidden>
         <h2>AI Research Lab — approval station</h2>
-        <p class="hint">The factory can discover, test, improve and <b>propose</b>. Approve names S21–S24 and turns that slot's paper ENABLE on. Restart the bot. This tab never sets DRY_RUN=false. Angel still needs Unlock + type LIVE. Rank is after Angel charges vs paper S16 and S18. Keep <span class="mono">DRY_RUN=true</span>.</p>
-        <div class="ml-banner" id="lab-live-block">Approve papers S21–S24. This tab never sets DRY_RUN=false and never live-unlocks.</div>
+        <p class="hint">The factory can discover, test, improve and <b>propose</b>. Approve names the next AMISE slot (S21, then S22, then S25 after S24) and turns that slot's paper ENABLE on. Restart the bot. This tab never sets DRY_RUN=false. Angel still needs Unlock + type LIVE. Rank is after Angel charges vs paper S16 and S18. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <div class="ml-banner" id="lab-live-block">Approve papers the next S21+ slot. This tab never sets DRY_RUN=false and never live-unlocks.</div>
         <p class="flash" id="flash-lab"></p>
         <div class="row" style="margin-top:.45rem">
           <button class="btn" type="button" id="btn-lab-refresh">Refresh</button>
@@ -312,7 +312,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> to invent challengers (or let auto-lab run). Approve on Lab names S21–S24 and papers them. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> for the fast path (or let auto-lab run). Approve on Lab names the next slot (S21, S22, …) and papers it. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Unlock + LIVE on Live money.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -328,9 +328,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <h2 style="margin-top:1rem">Profit Guardian</h2>
         <div id="amise-guardian"></div>
         <h2 style="margin-top:1rem">Factory / challengers</h2>
-        <p class="hint">Approve on the <a href="/#lab">Lab tab</a>. Approve names S21–S24 and turns paper on. Restart the bot.</p>
+        <p class="hint">Approve on the <a href="/#lab">Lab tab</a>. Approve names the next slot (S21, then S22, then S25 after S24) and turns paper on. Restart the bot.</p>
         <div id="amise-factory"></div>
-        <h2 style="margin-top:1rem">S21–S24 slots</h2>
+        <h2 style="margin-top:1rem">AMISE slots (S21, S22, …)</h2>
         <div id="amise-slots"></div>
         <h2 style="margin-top:1rem">Risk</h2>
         <div id="amise-risk"></div>
@@ -446,7 +446,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 const $ = (id) => document.getElementById(id);
 const PAPER_BOOKS = [
   "S5_MINEDGE", "S8_NET_ZIGZAG",
-  "S11_DISCOVERED", "S13_HHHL_DAY", "S16_HHHL_WICK_1H",   "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL",
+  "S13_HHHL_DAY", "S16_HHHL_WICK_1H",   "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL",
   "S21_AMISE", "S22_AMISE", "S23_AMISE", "S24_AMISE",
 ];
 const SHORT = {
@@ -459,6 +459,13 @@ const SHORT = {
   S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
   S12_HHHL30: "S12 HHHL 30m", S14_WICK30_STRICT: "S14 wick", S15_WICK30_NOWICK: "S15 no-wick",
 };
+function shortName(name) {
+  const n = String(name || "");
+  if (SHORT[n]) return SHORT[n];
+  const m = n.match(/^S(\d+)_AMISE$/);
+  if (m) return "S" + m[1] + " AMISE";
+  return n;
+}
 let watchTab = "open";
 let histReady = false;
 let lastDesk = {};
@@ -545,7 +552,7 @@ function fillStratSelect() {
   names.forEach((k) => {
     const opt = document.createElement("option");
     opt.value = k;
-    opt.textContent = SHORT[k] || k;
+    opt.textContent = shortName(k);
     sel.appendChild(opt);
   });
   if ([...sel.options].some((o) => o.value === current)) sel.value = current;
@@ -622,7 +629,7 @@ function renderFits() {
       line.textContent = "one regime for all books · mood gate picks who may open";
     } else {
       line.textContent = rows.map((f) => {
-        const short = (SHORT[f.strategy] || f.strategy).replace(/ .*/, "") || f.strategy;
+        const short = shortName(f.strategy).replace(/ .*/, "") || f.strategy;
         return short + " " + fitLabel(f);
       }).join(" · ");
     }
@@ -696,7 +703,7 @@ function showMainTab() {
   $("hist-strat").style.visibility = extra ? "hidden" : "visible";
   if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
-  if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve names S21–S24 and papers that slot. Never DRY_RUN=false";
+  if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve names the next S21+ slot and papers it. Never DRY_RUN=false";
   if (watchTab === "amise") $("grid-meta").textContent = "AMISE — regime + fit + factory. Run factory here. Approve on Lab.";
   if (watchTab === "you") $("grid-meta").textContent = "Human capture — records what you see. Does not trade";
 }
@@ -861,7 +868,7 @@ function renderMl() {
     <thead><tr><th>When</th><th>Book</th><th>Decision</th><th>Title</th><th>Note</th></tr></thead>
     <tbody>${decided.slice(0, 20).map((p) => `<tr>
       <td>${esc(String(p.decided_at_ist || "").slice(0, 19))}</td>
-      <td>${esc(SHORT[p.strategy] || p.strategy || "")}</td>
+      <td>${esc(shortName(p.strategy))}</td>
       <td>${esc(p.status || "")}</td>
       <td>${esc(p.title || "")}</td>
       <td>${esc(p.decision_note || "")}</td>
@@ -1017,7 +1024,7 @@ function renderAmise() {
   $("amise-fits").innerHTML = fits.length ? `<table>
     <thead><tr><th>Book</th><th>Stance</th><th class="num">Fit</th><th>Why</th></tr></thead>
     <tbody>${fits.filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL").map((f) => `<tr>
-      <td>${esc(SHORT[f.strategy] || f.strategy)}</td>
+      <td>${esc(shortName(f.strategy))}</td>
       <td class="${f.stance === "stand_down" ? "bad" : (f.stance === "trade" ? "ok" : "")}">${esc(f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold swing" : "trade"))}</td>
       <td class="num">${esc(Math.round(Number(f.weight || 0) * 100))}%</td>
       <td>${esc(f.why || "")}</td>
@@ -1030,7 +1037,7 @@ function renderAmise() {
     ${books.length ? `<table>
       <thead><tr><th>Book</th><th>Status</th><th class="num">n</th><th class="num">PF</th><th class="num">Recent PF</th><th class="num">AC₹</th><th>Note</th></tr></thead>
       <tbody>${books.map((b) => `<tr>
-        <td>${esc(SHORT[b.strategy] || b.strategy)}</td>
+        <td>${esc(shortName(b.strategy))}</td>
         <td class="${gStatusClass(b.status)}">${esc(b.status)}</td>
         <td class="num">${esc(b.n)}</td>
         <td class="num">${esc(b.profit_factor)}</td>
@@ -1050,7 +1057,7 @@ function renderAmise() {
     ${mlStat("Factory", job.running ? "RUNNING" : "idle", job.running ? "warn" : "ok")}
   </div>
   <p class="ml-meta">Last factory run ${esc(fac.last_run_at || job.last_run_at || "none")} · auto ${job.auto ? ("every " + (job.auto_hours || 12) + "h") : "off"} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
-  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. That names S21–S24 and papers them.") : "No pending factory proposals. Click Run factory (slow). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. That names the next S21+ slot and papers it.") : "No pending factory proposals. Click Run factory (fast path). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
   const slotRows = slots.slots || [];
   $("amise-slots").innerHTML = slotRows.length ? `<table>
     <thead><tr><th>Slot</th><th>Genome</th><th>When</th></tr></thead>
@@ -1059,7 +1066,7 @@ function renderAmise() {
       <td>${s.filled ? esc(s.name || s.genome_id) : "empty — waiting for Lab Approve"}</td>
       <td>${esc(String(s.assigned_at_ist || "").slice(0, 19))}</td>
     </tr>`).join("")}</tbody>
-  </table>` : `<p class="hint">S21–S24 fill after you Approve a factory challenger.</p>`;
+  </table>` : `<p class="hint">S21, S22, … fill after you Approve a factory challenger. After S24 the next name is S25.</p>`;
   $("amise-risk").innerHTML = `<div class="ml-card">
     <p class="ml-meta">emergency ${ctl.emergency_off ? "ON" : "clear"} · trading ${ctl.trading_enabled === false ? "held" : "on"} · live ${ctl.live_unlocked ? "unlocked" : "locked"}</p>
     <p class="ml-meta">book ₹ ${esc(cap.total_capital_inr ?? "—")} · day-loss ₹ ${esc(cap.daily_loss_limit_inr ?? "—")} · today ₹ ${esc(cap.today_pnl_inr ?? "—")} ${risk.daily_loss_breached ? "· DAILY LOSS HIT" : ""}</p>
@@ -1245,7 +1252,7 @@ function renderGrid() {
     $("grid-body").innerHTML = rows.map((t) => {
       const pnl = t.pnl_after_tax != null && t.pnl_after_tax !== "" ? t.pnl_after_tax : t.net_pnl;
       return `<tr>
-        <td>${esc(SHORT[t.strategy] || t.strategy || "")}</td>
+        <td>${esc(shortName(t.strategy))}</td>
         <td>${esc(t.side || "")}</td>
         <td>${esc(t.status || "")}</td>
         <td>${esc(String(t.entry_ts || "").slice(0, 19))}</td>
@@ -1272,7 +1279,7 @@ function renderGrid() {
     thead(["time", "book", "action", "pos", "cmp", "reason"]);
     $("grid-body").innerHTML = (h.signals || []).map((s) => `<tr>
       <td>${esc(s.time_label || "")}</td>
-      <td>${esc(SHORT[s.strategy] || s.strategy || "")}</td>
+      <td>${esc(shortName(s.strategy))}</td>
       <td>${esc(s.action || "")}</td>
       <td>${esc(s.position_after || "")}</td>
       <td class="num">${money(s.cmp)}</td>
@@ -1283,7 +1290,7 @@ function renderGrid() {
   if (tab === "score") {
     thead(["book", "closed", "open", "win %", "gross ₹", "fees ₹", "after-tax ₹"]);
     $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
-      <td>${esc(SHORT[r.strategy] || r.strategy || "")}</td>
+      <td>${esc(shortName(r.strategy))}</td>
       <td class="num">${fmt(r.closed, 0)}</td>
       <td class="num">${fmt(r.open, 0)}</td>
       <td class="num">${pct(r.win_rate)}</td>
@@ -1298,7 +1305,7 @@ function renderGrid() {
   thead(["book", "closed", "gross %", "after-tax %", "fee-killed", "after-tax ₹"]);
   const rows = [o].concat(d.books || []).filter((b) => b && (b.strategy === "ALL" || (b.closed || 0) > 0 || (b.open || 0) > 0));
   $("grid-body").innerHTML = rows.map((b) => `<tr>
-    <td>${esc(b.label || SHORT[b.strategy] || b.strategy || "")}</td>
+    <td>${esc(b.label || shortName(b.strategy))}</td>
     <td class="num">${fmt(b.closed, 0)}</td>
     <td class="num">${pct(b.win_rate_gross)}</td>
     <td class="num ${pnlClass((b.win_rate_after_tax || 0) - 50)}">${pct(b.win_rate_after_tax)}</td>
@@ -1340,7 +1347,7 @@ function renderDesk(d) {
       const wr = sc.win_rate != null ? pct(sc.win_rate) : "—";
       const pnl = sc.pnl_after_tax;
       return `<tr>
-        <td>${esc(SHORT[name] || name)}</td>
+        <td>${esc(shortName(name))}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
         <td class="num">${esc(wr)}</td>

@@ -66,6 +66,14 @@ LAST_RUN_PATH = RESEARCH_DIR / "last_run.json"
 MIN_WF_WINS = 2
 MIN_DISCOVERY_N = 12
 MAX_AND = 4
+# Desk / auto-lab: skip recipes, sklearn RF, and 3× robustness. Still beats S16+S18 after charges.
+FAST_LAB_KWARGS: dict[str, Any] = {
+    "n_folds": 2,
+    "include_recipes": False,
+    "max_compose": 8,
+    "robustness": False,
+    "sklearn": False,
+}
 
 
 @dataclass
@@ -683,6 +691,7 @@ def run_research_lab(
     include_recipes: bool = True,
     max_compose: int = 24,
     robustness: bool = True,
+    sklearn: bool = True,
     propose: bool = False,
     proposals_path: Path | None = None,
     library_path: Path | None = None,
@@ -783,7 +792,7 @@ def run_research_lab(
             }
             for s in scores[:20]
         ],
-        "sklearn_importances": sklearn_importances(bars, params=p),
+        "sklearn_importances": sklearn_importances(bars, params=p) if sklearn else [],
         "counts": {
             "found": len(ranked),
             "passed_validation": len(proposed),

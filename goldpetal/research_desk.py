@@ -2,9 +2,9 @@
 
 The factory may write pending proposals. This module is the only place
 the operator records Approve / Paper test / Reject / Investigate.
-Approve names the next AMISE slot (S21–S24), writes paper ENABLE for that
-slot, and paper-allowlists it. It never sets DRY_RUN=false. Angel still
-needs Unlock + LIVE on the desk.
+Approve names the next AMISE slot (S21, S22, … S25 after S24), writes
+paper ENABLE for that slot, and paper-allowlists it. It never sets
+DRY_RUN=false. Angel still needs Unlock + LIVE on the desk.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from amise_slots import (
-    AMISE_SLOT_BOOKS,
+    amise_books_now,
     apply_slot_enable,
     assign_slot,
     desk_slots_payload,
@@ -41,15 +41,15 @@ LIBRARY_PATH = RESEARCH_DIR / "library.json"
 LAST_RUN_PATH = RESEARCH_DIR / "last_run.json"
 
 LIVE_BLOCKED_REASON = (
-    "Live unlock is not on the Lab tab. Approve names S21–S24 and turns paper "
-    "on for that slot. This tab never sets DRY_RUN=false. Angel still needs "
-    "Unlock + type LIVE on Live money, then Restart."
+    "Live unlock is not on the Lab tab. Approve names the next AMISE slot "
+    "(S21, S22, …) and turns paper on for that slot. This tab never sets "
+    "DRY_RUN=false. Angel still needs Unlock + type LIVE on Live money, then Restart."
 )
 
 PAPER_REMINDER = (
-    "Approved. AMISE named the next free slot (S21–S24), wrote paper ENABLE, "
-    "and queued it for Angel after you Unlock. Restart the bot to load RAM. "
-    "Keep DRY_RUN=true until you type LIVE yourself."
+    "Approved. AMISE named the next free slot (S21, then S22, then S25 after "
+    "S24), wrote paper ENABLE, and queued it for Angel after you Unlock. "
+    "Restart the bot to load RAM. Keep DRY_RUN=true until you type LIVE yourself."
 )
 
 
@@ -113,7 +113,7 @@ def research_desk_payload(
         "live_blocked": True,
         "live_blocked_reason": LIVE_BLOCKED_REASON,
         "env_patch_allowed": research_env_patch(),
-        "amise_slots": AMISE_SLOT_BOOKS,
+        "amise_slots": amise_books_now(),
         "champions": lib.get("champions") or {},
         "challengers": lib.get("challengers") or [],
         "discovery": lib.get("discovery") or [],
@@ -134,9 +134,9 @@ def research_desk_payload(
         "note": (
             "AI researches. You decide. New strategies found on the last lab run "
             "must beat S16 and S18 after charges, survive walk-forward, and pass "
-            "2×-cost robustness before they appear here. Approve names S21–S24 "
-            "and turns that slot's paper ENABLE on. Restart the bot. This tab "
-            "never sets DRY_RUN=false."
+            "2×-cost robustness before they appear here. Approve names the next "
+            "slot (S21, S22, …) and turns that slot's paper ENABLE on. Restart "
+            "the bot. This tab never sets DRY_RUN=false."
         ),
         "last_run_at": lib.get("updated_at_ist") or "",
     }
@@ -231,7 +231,7 @@ def decide_research(
         graw = extra.get("genome")
         if not isinstance(graw, dict):
             reminder = (
-                "Approved as a Lab flag only — proposal has no genome, so no S21–S24 slot."
+                "Approved as a Lab flag only — proposal has no genome, so no AMISE slot."
             )
         else:
             genome = genome_from_dict(graw)

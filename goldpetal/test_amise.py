@@ -123,6 +123,8 @@ def test_not_a_paper_book() -> None:
     assert "amise.py" in env
     assert "ENABLE_AMISE=" not in env
     assert "ENABLE_S21=false" in env
+    assert "AMISE_FAST_LAB=true" in env
+    assert "ENABLE_S11=false" in env
     sh = (root / "weekly_amise.sh").read_text(encoding="utf-8")
     assert "amise.py" in sh
     assert "ENABLE" in sh

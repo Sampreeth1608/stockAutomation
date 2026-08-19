@@ -82,6 +82,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S21_AMISE" in paper
     assert "S24_AMISE" in paper
     assert "S13_HHHL_DAY" in paper
+    assert "S11_DISCOVERED" not in paper
     assert "S4_OVERNIGHT" not in paper
     assert "S12_HHHL30" not in paper
     assert "S14_WICK30_STRICT" not in paper

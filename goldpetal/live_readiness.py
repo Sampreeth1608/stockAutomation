@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from control_state import SLIM_PAPER_STRATEGIES, is_live_mode_allowed, load_state
+from control_state import is_live_mode_allowed, load_state, paper_strategy_names
 from operator_desk import OPERATOR_PANEL, OPERATOR_URL
 from live_orders import live_lots, live_lots_for
 from position_safety import read_bot_health
@@ -122,9 +122,9 @@ def apply_desk_books(
 
     Does not change DRY_RUN, does not restart, does not unlock live.
     """
-    from control_state import SLIM_PAPER_STRATEGIES, set_live_approved
+    from control_state import paper_strategy_names, set_live_approved
 
-    known = list(SLIM_PAPER_STRATEGIES)
+    known = list(paper_strategy_names())
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
     live_raw = [str(n).strip() for n in live if str(n).strip() in known]
     live_set = [n for n in live_raw if n in in_set and n not in PAPER_ONLY_BOOKS]
@@ -163,13 +163,14 @@ def apply_panel_enables(
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Write ENABLE_* for known strategies. Unchecked known names become false."""
-    from analytics.env_bridge import STRATEGY_ENABLE, apply_strategy_enables
+    from analytics.env_bridge import apply_strategy_enables, strategy_enable_map
 
-    known = list(STRATEGY_ENABLE.keys())
+    mapping = strategy_enable_map()
+    known = list(mapping.keys())
     want = [
         str(n).strip()
         for n in enabled_names
-        if str(n).strip() in STRATEGY_ENABLE and str(n).strip() not in DESK_FORCE_OFF
+        if str(n).strip() in mapping and str(n).strip() not in DESK_FORCE_OFF
     ]
     res = apply_strategy_enables(want, known=known, path=path)
     res["enabled"] = want
@@ -205,11 +206,11 @@ def desk_snapshot() -> dict[str, Any]:
     from analytics.env_bridge import strategy_enable_snapshot
 
     enables_all = strategy_enable_snapshot()
-    enables = {name: bool(enables_all.get(name)) for name in SLIM_PAPER_STRATEGIES}
     books = [
         {"strategy": name, "live_approved": name in approved}
-        for name in SLIM_PAPER_STRATEGIES
+        for name in paper_strategy_names()
     ]
+    enables = {name: bool(enables_all.get(name)) for name in paper_strategy_names()}
     return {
         "dry_run": dry,
         "live_max_lots": env["live_max_lots"],
@@ -291,7 +292,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     plan = load_capital()
     ram = (health.get("positions") or {}) if isinstance(health.get("positions"), dict) else {}
     books: list[dict[str, Any]] = []
-    for name in SLIM_PAPER_STRATEGIES:
+    for name in paper_strategy_names():
         sb = plan.strategies.get(name)
         paper_lots = int(sb.max_lots) if sb is not None else 0
         on_live = name in approved
@@ -313,7 +314,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     from analytics.env_bridge import strategy_enable_snapshot
 
     enables_all = strategy_enable_snapshot()
-    enables = {name: bool(enables_all.get(name)) for name in SLIM_PAPER_STRATEGIES}
+    enables = {name: bool(enables_all.get(name)) for name in paper_strategy_names()}
     return {
         "operator_panel": OPERATOR_PANEL,
         "operator_url": OPERATOR_URL,

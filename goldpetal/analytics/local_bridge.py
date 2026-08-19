@@ -9,7 +9,6 @@ from typing import Any
 SLIM_STRATEGIES = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
-    "S11_DISCOVERED",
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",

@@ -1,15 +1,17 @@
-"""AMISE challenger slots S21–S24.
+"""AMISE challenger slots S21, S22, S23, … (unbounded).
 
 The factory invents genomes. You Approve on Lab. This module names the
-next free slot (S21_AMISE … S24_AMISE), writes the genome, and turns
-paper ENABLE on. It never sets DRY_RUN=false. Angel still needs Unlock
-+ LIVE on the desk. Empty slots do not trade.
+next free slot after the last one (S21_AMISE, then S22, then S25 after
+S24), writes the genome, and turns paper ENABLE on. It never sets
+DRY_RUN=false. Angel still needs Unlock + LIVE on the desk. Empty slots
+do not trade.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,40 +24,60 @@ ROOT = Path(__file__).resolve().parent
 SLOTS_DIR = ROOT / "data" / "amise" / "slots"
 INDEX_NAME = "index.json"
 
-AMISE_SLOT_BOOKS: tuple[str, ...] = (
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
+FIRST_AMISE_N = 21
+RESERVED_AMISE_N = 24  # always show S21–S24 on the desk, even empty
+SLOT_MAX_N = 999
+SLOT_RE = re.compile(r"^S(\d+)_AMISE$")
+ENABLE_RE = re.compile(r"^ENABLE_S(\d+)$")
+
+
+def slot_name(n: int) -> str:
+    n = int(n)
+    if n < FIRST_AMISE_N:
+        raise ValueError(f"AMISE slots start at S{FIRST_AMISE_N}")
+    return f"S{n}_AMISE"
+
+
+def slot_number(name: str) -> int | None:
+    m = SLOT_RE.fullmatch(str(name or "").strip())
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if n >= FIRST_AMISE_N else None
+
+
+def is_amise_slot(name: str) -> bool:
+    return slot_number(name) is not None
+
+
+def is_amise_enable_key(key: str) -> bool:
+    m = ENABLE_RE.fullmatch(str(key or "").strip().upper())
+    return bool(m and int(m.group(1)) >= FIRST_AMISE_N)
+
+
+def enable_key(slot: str) -> str:
+    n = slot_number(slot)
+    if n is None:
+        raise KeyError(f"not an AMISE slot: {slot}")
+    return f"ENABLE_S{n}"
+
+
+def short_amise(slot: str) -> str:
+    n = slot_number(slot)
+    return f"S{n} AMISE" if n is not None else str(slot or "")
+
+
+# Reserved empty chairs S21–S24 so the desk always has a row next to S20.
+AMISE_SLOT_BOOKS: tuple[str, ...] = tuple(
+    slot_name(i) for i in range(FIRST_AMISE_N, RESERVED_AMISE_N + 1)
 )
-AMISE_ENABLE: dict[str, str] = {
-    "S21_AMISE": "ENABLE_S21",
-    "S22_AMISE": "ENABLE_S22",
-    "S23_AMISE": "ENABLE_S23",
-    "S24_AMISE": "ENABLE_S24",
-}
+AMISE_ENABLE: dict[str, str] = {name: enable_key(name) for name in AMISE_SLOT_BOOKS}
 AMISE_ENABLE_KEYS: frozenset[str] = frozenset(AMISE_ENABLE.values())
-SHORT_AMISE = {
-    "S21_AMISE": "S21 AMISE",
-    "S22_AMISE": "S22 AMISE",
-    "S23_AMISE": "S23 AMISE",
-    "S24_AMISE": "S24 AMISE",
-}
+SHORT_AMISE = {name: short_amise(name) for name in AMISE_SLOT_BOOKS}
 
 
 def _now_iso() -> str:
     return datetime.now(IST).isoformat(timespec="seconds")
-
-
-def is_amise_slot(name: str) -> bool:
-    return str(name or "").strip() in AMISE_SLOT_BOOKS
-
-
-def enable_key(slot: str) -> str:
-    key = AMISE_ENABLE.get(str(slot or "").strip())
-    if not key:
-        raise KeyError(f"not an AMISE slot: {slot}")
-    return key
 
 
 def slots_dir(path: Path | None = None) -> Path:
@@ -115,10 +137,34 @@ def load_slot_genome(slot: str, folder: Path | None = None) -> StrategyGenome | 
     return genome_from_dict(g)
 
 
+def extra_amise_books(folder: Path | None = None) -> tuple[str, ...]:
+    """S25+ that already have a genome (series continuation past S24)."""
+    names: set[str] = set()
+    dest = slots_dir(folder)
+    idx = load_index(folder)
+    for key in idx.get("slots") or {}:
+        n = slot_number(str(key))
+        if n is not None and n > RESERVED_AMISE_N:
+            names.add(slot_name(n))
+    try:
+        for path in dest.glob("S*_AMISE.json"):
+            n = slot_number(path.stem)
+            if n is not None and n > RESERVED_AMISE_N:
+                names.add(slot_name(n))
+    except OSError:
+        pass
+    return tuple(sorted(names, key=lambda s: slot_number(s) or 0))
+
+
+def amise_books_now(folder: Path | None = None) -> tuple[str, ...]:
+    """S21–S24 always, plus any later named slots sitting next to them."""
+    return AMISE_SLOT_BOOKS + extra_amise_books(folder)
+
+
 def allocated_slots(folder: Path | None = None) -> list[str]:
     idx = load_index(folder)
     out: list[str] = []
-    for name in AMISE_SLOT_BOOKS:
+    for name in amise_books_now(folder):
         row = (idx.get("slots") or {}).get(name) or {}
         if row.get("genome_id") or load_slot_genome(name, folder) is not None:
             out.append(name)
@@ -140,14 +186,22 @@ def next_free_slot(folder: Path | None = None, *, genome_id: str = "") -> str | 
     slots = idx.get("slots") or {}
     want = str(genome_id or "").strip()
     if want:
-        for name in AMISE_SLOT_BOOKS:
-            row = slots.get(name) or {}
-            if str(row.get("genome_id") or "") == want:
+        for name, row in slots.items():
+            if not is_amise_slot(str(name)):
+                continue
+            if str((row or {}).get("genome_id") or "") == want:
+                return str(name)
+        for name in amise_books_now(folder):
+            g = load_slot_genome(name, folder)
+            if g is not None and g.genome_id == want:
                 return name
-    for name in AMISE_SLOT_BOOKS:
+    n = FIRST_AMISE_N
+    while n <= SLOT_MAX_N:
+        name = slot_name(n)
         row = slots.get(name) or {}
         if not row.get("genome_id") and load_slot_genome(name, folder) is None:
             return name
+        n += 1
     return None
 
 
@@ -158,14 +212,14 @@ def assign_slot(
     folder: Path | None = None,
     note: str = "",
 ) -> dict[str, Any]:
-    """Write genome into the next free S21–S24 slot (or the same genome_id)."""
+    """Write genome into the next free S21, S22, … slot (or the same genome_id)."""
     g = genome.normalized()
     folder = slots_dir(folder)
     slot = next_free_slot(folder, genome_id=g.genome_id)
     if slot is None:
         return {
             "ok": False,
-            "error": "S21–S24 are full. Reject an old challenger before assigning another.",
+            "error": "AMISE slots S21–S999 are full.",
             "slots": load_index(folder).get("slots") or {},
         }
     payload = {
@@ -225,13 +279,13 @@ def apply_slot_enable(
 def desk_slots_payload(folder: Path | None = None) -> dict[str, Any]:
     idx = load_index(folder)
     rows = []
-    for name in AMISE_SLOT_BOOKS:
+    for name in amise_books_now(folder):
         row = dict((idx.get("slots") or {}).get(name) or {})
         g = load_slot_genome(name, folder)
         rows.append(
             {
                 "slot": name,
-                "short": SHORT_AMISE[name],
+                "short": short_amise(name),
                 "filled": g is not None,
                 "genome_id": row.get("genome_id") or (g.genome_id if g else ""),
                 "name": row.get("name") or (g.name if g else ""),
@@ -244,5 +298,6 @@ def desk_slots_payload(folder: Path | None = None) -> dict[str, Any]:
         "slots": rows,
         "allocated": allocated_slots(folder),
         "free": [r["slot"] for r in rows if not r["filled"]],
+        "next": next_free_slot(folder) or "",
         "updated_at_ist": idx.get("updated_at_ist") or "",
     }

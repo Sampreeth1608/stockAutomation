@@ -1,4 +1,4 @@
-"""AMISE slot books S21–S24 — compiled factory genomes on 1h bars.
+"""AMISE slot books S21, S22, … — compiled factory genomes on 1h bars.
 
 FLIP at the finished hour close. Flatten at MARKET_CLOSE. Paper ENABLE
 is written only after Lab Approve. Not a live unlock. Keep DRY_RUN=true.
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from amise_slots import AMISE_SLOT_BOOKS, load_slot_genome
+from amise_slots import amise_books_now, load_slot_genome
 from flow_lab import FlowBar, FlowParams, build_flow_features
 from research_features import compile_genome
 from s18_ohlc_vol_htf import VolBar, _bar_volume
@@ -187,7 +187,7 @@ def load_amise_slot_books(portfolio, *, slots_dir: Path | None = None) -> list[A
     from strategy_disabled import DisabledStrategy
 
     out: list[Any] = []
-    for name in AMISE_SLOT_BOOKS:
+    for name in amise_books_now(slots_dir):
         genome = load_slot_genome(name, slots_dir)
         if portfolio.is_enabled(name) and genome is not None:
             try:

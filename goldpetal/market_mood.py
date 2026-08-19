@@ -25,22 +25,30 @@ from pathlib import Path
 from typing import Any, Deque, Literal
 from zoneinfo import ZoneInfo
 
-from amise_slots import AMISE_SLOT_BOOKS, is_amise_slot, load_slot_genome, slot_is_fade
+from amise_slots import amise_books_now, is_amise_slot, load_slot_genome, slot_is_fade
 
 IST = ZoneInfo("Asia/Kolkata")
 # Daily/overnight books: show mood, never flatten, skip tick-window entry gate.
 MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT"})
-FIT_BOOKS: tuple[str, ...] = (
+CORE_FIT_BOOKS: tuple[str, ...] = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
-    "S11_DISCOVERED",
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-    *AMISE_SLOT_BOOKS,
 )
+FIT_BOOKS: tuple[str, ...] = CORE_FIT_BOOKS + (
+    "S21_AMISE",
+    "S22_AMISE",
+    "S23_AMISE",
+    "S24_AMISE",
+)
+
+
+def fit_books() -> tuple[str, ...]:
+    return CORE_FIT_BOOKS + amise_books_now()
 Mood = Literal[
     "UNKNOWN",
     "QUIET",
@@ -164,7 +172,7 @@ def _empty(reason: str = "warming_up") -> MoodState:
 
 def _swing_only_fits(why: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for name in FIT_BOOKS:
+    for name in fit_books():
         if name in MOOD_EXEMPT_BOOKS:
             out.append(
                 {
@@ -235,7 +243,7 @@ def book_fits(
     """Strategy Manager: which paper book belongs in this tape. Not an order."""
     side = _preferred_side(direction, mood, regime)
     rows: list[dict[str, Any]] = []
-    for name in FIT_BOOKS:
+    for name in fit_books():
         rows.append(_fit_one(name, mood=mood, regime=regime, preferred_side=side))
     return rows
 
@@ -258,7 +266,6 @@ def _fit_one(
 
     trend_book = name in {
         "S8_NET_ZIGZAG",
-        "S11_DISCOVERED",
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",

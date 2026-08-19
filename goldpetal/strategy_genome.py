@@ -114,17 +114,17 @@ def genome_fingerprint(g: StrategyGenome) -> str:
 
 
 def research_env_patch() -> dict[str, str]:
-    """Pending Lab rows may only force paper. ENABLE_S21..S24 is added on Approve."""
+    """Pending Lab rows may only force paper. ENABLE_S{n} is added on Approve."""
     return {"DRY_RUN": "true"}
 
 
 def env_patch_is_safe(patch: dict[str, str] | None) -> bool:
-    from amise_slots import AMISE_ENABLE_KEYS
+    from amise_slots import is_amise_enable_key
 
     for key in (patch or {}):
         up = str(key).upper()
         val = str(patch[key]).strip().lower()
-        if up in AMISE_ENABLE_KEYS:
+        if is_amise_enable_key(up):
             if val not in {"true", "1", "yes", "y"}:
                 return False
             continue

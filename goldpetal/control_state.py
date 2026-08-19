@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from amise_slots import AMISE_SLOT_BOOKS
+from amise_slots import AMISE_SLOT_BOOKS, amise_books_now
 
 IST = ZoneInfo("Asia/Kolkata")
 CONTROL_DIR = Path(__file__).resolve().parent / "data" / "control"
@@ -198,7 +198,8 @@ def set_live_approved(
 
 
 # Known strategy ids (paper + live). Used for allowlist lock.
-ALL_STRATEGY_NAMES: tuple[str, ...] = (
+# S11 stays in ALL (ML tab / packs) but is off the slim paper path.
+CORE_STRATEGY_NAMES: tuple[str, ...] = (
     "S1_NETDELTA",
     "S2_BALANCE",
     "S3_ML",
@@ -214,18 +215,27 @@ ALL_STRATEGY_NAMES: tuple[str, ...] = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-) + AMISE_SLOT_BOOKS
-
-SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
+)
+CORE_SLIM_PAPER: tuple[str, ...] = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
-    "S11_DISCOVERED",
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-) + AMISE_SLOT_BOOKS
+)
+ALL_STRATEGY_NAMES: tuple[str, ...] = CORE_STRATEGY_NAMES + AMISE_SLOT_BOOKS
+SLIM_PAPER_STRATEGIES: tuple[str, ...] = CORE_SLIM_PAPER + AMISE_SLOT_BOOKS
+
+
+def paper_strategy_names() -> tuple[str, ...]:
+    """Desk / runner paper books: slim core + S21–S24 and any later AMISE slots."""
+    return CORE_SLIM_PAPER + amise_books_now()
+
+
+def all_strategy_names() -> tuple[str, ...]:
+    return CORE_STRATEGY_NAMES + amise_books_now()
 
 
 def set_paper_allowlist(
@@ -247,7 +257,7 @@ def set_paper_allowlist(
         name = str(raw or "").strip()
         if name and name not in allow:
             allow.append(name)
-    universe = known or ALL_STRATEGY_NAMES
+    universe = known or all_strategy_names()
     disabled = [name for name in universe if name not in set(allow)]
     st.force_disabled = disabled
     # Allowed strategies must not remain force-disabled.
