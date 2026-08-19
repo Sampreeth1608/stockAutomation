@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from export_full_ticks import _depth_side
+from amise_timeframes import LabTF, floor_session_bar, parse_tf, tick_in_session, tick_token
 from mtf_bars import floor_bar, load_tick_rows, parse_ts, tick_metrics
 from ohlcv_lab import (
     EXIT_ATR,
@@ -500,8 +501,22 @@ def _msg_from_row(row: Any) -> dict[str, Any]:
     return msg if isinstance(msg, dict) else {}
 
 
-def flow_bars_from_tick_rows(rows: Any, minutes: int) -> list[FlowBar]:
-    """Aggregate websocket / sqlite tick rows into FlowBars (last-tick book snapshot)."""
+def flow_bars_from_tick_rows(
+    rows: Any,
+    minutes: int,
+    *,
+    market_open: str = "09:00",
+    market_close: str = "23:30",
+    session_align: bool = False,
+    session_ticks: bool = False,
+    split_token: bool = False,
+) -> list[FlowBar]:
+    """Aggregate websocket / sqlite tick rows into FlowBars (last-tick book snapshot).
+
+    ``session_align`` floors from MARKET_OPEN so 1h15 is 09:00, 10:15, … .
+    ``session_ticks`` drops weekend / outside-hours ticks (needed for the day bar).
+    ``split_token`` starts a new candle when the Gold Petal token rolls.
+    """
     bars: list[FlowBar] = []
     cur_key: datetime | None = None
     o = h = l = c = None
@@ -513,17 +528,27 @@ def flow_bars_from_tick_rows(rows: Any, minutes: int) -> list[FlowBar]:
     buy_qty: tuple[float, ...] = ()
     sell_px: tuple[float, ...] = ()
     sell_qty: tuple[float, ...] = ()
+    prev_token = ""
+    reset_vol = False
+
+    def _key(ts: datetime) -> datetime:
+        if session_align:
+            return floor_session_bar(
+                ts, int(minutes), market_open=market_open, market_close=market_close
+            )
+        return floor_bar(ts, int(minutes))
 
     def flush(key: datetime) -> None:
         nonlocal o, h, l, c, tbq, tsq, buy5, sell5, oi, vol_close, n
-        nonlocal buy_px, buy_qty, sell_px, sell_qty
+        nonlocal buy_px, buy_qty, sell_px, sell_qty, reset_vol
         if o is None or c is None or h is None or l is None:
             return
-        prev_vol = bars[-1]._vol_close if bars else None  # type: ignore[attr-defined]
+        prev_vol = None if reset_vol else (bars[-1]._vol_close if bars else None)  # type: ignore[attr-defined]
+        reset_vol = False
         bar_vol = 0.0
         if vol_close is not None and prev_vol is not None:
             bar_vol = max(0.0, float(vol_close) - float(prev_vol))
-        elif vol_close is not None and not bars:
+        elif vol_close is not None and (not bars or prev_vol is None):
             bar_vol = float(vol_close)
         b = FlowBar(
             time=key.strftime("%Y-%m-%d %H:%M:%S"),
@@ -553,7 +578,22 @@ def flow_bars_from_tick_rows(rows: Any, minutes: int) -> list[FlowBar]:
         if m["ltp"] is None:
             continue
         ts = parse_ts(row["received_at"] if not isinstance(row, dict) else row.get("received_at") or row.get("time"))
-        key = floor_bar(ts, minutes)
+        if session_ticks and not tick_in_session(
+            ts, market_open=market_open, market_close=market_close
+        ):
+            continue
+        tok = tick_token(row) if split_token else ""
+        if split_token and prev_token and tok and tok != prev_token:
+            if cur_key is not None:
+                flush(cur_key)
+            reset_vol = True
+            o = h = l = c = None
+            n = 0
+            cur_key = None
+            vol_close = None
+        if tok:
+            prev_token = tok
+        key = _key(ts)
         ltp = float(m["ltp"])
         msg = _msg_from_row(row)
         bp, bq, sp, sq = _book_levels(msg)
@@ -584,8 +624,24 @@ def flow_bars_from_tick_rows(rows: Any, minutes: int) -> list[FlowBar]:
     return bars
 
 
-def flow_bars_from_db(db: Path, minutes: int = 60) -> list[FlowBar]:
-    return flow_bars_from_tick_rows(load_tick_rows(db), minutes)
+def flow_bars_from_db(
+    db: Path,
+    minutes: int = 60,
+    **kw: Any,
+) -> list[FlowBar]:
+    return flow_bars_from_tick_rows(load_tick_rows(db), minutes, **kw)
+
+
+def lab_bars_for_tf(tick_rows: Any, tf: LabTF | str | int) -> list[FlowBar]:
+    """Session-aligned bars for one factory rung. Splits on Gold Petal token roll."""
+    spec = tf if isinstance(tf, LabTF) else parse_tf(tf)
+    return flow_bars_from_tick_rows(
+        tick_rows,
+        spec.minutes,
+        session_align=True,
+        session_ticks=True,
+        split_token=True,
+    )
 
 
 def flow_bars_from_full_csv(path: Path, minutes: int = 1) -> list[FlowBar]:

@@ -217,10 +217,11 @@ def start_amise_lab(
         "propose": bool(propose),
         "fast": bool(use_fast),
         "note": (
-            "Factory started: cheap-screen, then 3-fold + recipes + sklearn ranks "
+            "Factory started: all rungs 3m…3h45 plus daily. Same-TF vs S16/S18 "
+            "(daily also vs S13). Cheap-screen, then 3-fold + recipes + sklearn ranks "
             "+ 2×/3× costs + holdout. Skipping those does not make stronger books. "
             "Challengers that pass go to Lab. Filled chairs also get a same-slot "
-            "improve pass from closed trades / tape. You Approve. Does not ENABLE until Approve. "
+            "improve pass on that chair's timeframe. You Approve. Does not ENABLE until Approve. "
             "Keep DRY_RUN=true."
         ),
     }
@@ -425,6 +426,9 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "last_run_at": lab.get("last_run_at") or "",
             "counts": lab.get("counts") or {},
             "champions": lab.get("champions") or {},
+            "champions_by_tf": lab.get("champions_by_tf") or {},
+            "by_tf": lab.get("by_tf") or {},
+            "timeframes": lab.get("timeframes") or [],
             "pending": lab.get("pending") or [],
             "challengers": (lab.get("challengers") or [])[:8],
             "discovery": (lab.get("discovery") or [])[:12],
@@ -461,7 +465,8 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         ],
         "note": (
             "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
-            "It invents challengers on Run factory / auto lab (screen, then strong gates). "
+            "It invents challengers on Run factory / auto lab across 3m…daily "
+            "(same-TF vs S16/S18, daily vs S13; screen, then strong gates). "
             "You Approve on Lab — that names the next slot (S21, S22, … S25 after S24) "
             "or overwrites a filled chair with a stronger genome. "
             "Existing books keep learning from closed trades. Restart the bot. "
@@ -500,7 +505,8 @@ def run_amise(
         from backtest_flow_lab import _load_bars
         from flow_lab import FlowParams, session_bars, tape_flags
         from improve_books import run_improve
-        from research_factory import FAST_LAB_KWARGS, run_research_lab
+        from mtf_bars import load_tick_rows
+        from research_factory import FAST_LAB_KWARGS, FULL_LAB_MAX_DEEP, run_research_lab, run_research_lab_multi
 
         ns = argparse.Namespace(
             db=str(path),
@@ -512,25 +518,52 @@ def run_amise(
             cache_csv=None,
             minutes=int(minutes),
         )
-        hours, _m30, source = _load_bars(ns)
-        hours = session_bars(hours)
-        flags = tape_flags(hours)
         lab_kw: dict[str, Any] = dict(FAST_LAB_KWARGS)
         if not fast:
             lab_kw["n_folds"] = int(folds)
-        lab_payload = run_research_lab(
-            hours,
-            lots=float(lots),
-            fees=bool(fees),
-            params=FlowParams(),
-            propose=bool(propose),
-            **lab_kw,
-        )
+            lab_kw["max_deep"] = FULL_LAB_MAX_DEEP
+        tick_rows: list[Any] = []
+        source = "ticks.db"
+        try:
+            if path.exists():
+                tick_rows = list(load_tick_rows(path))
+        except Exception:
+            tick_rows = []
+        hours: list[Any] = []
+        flags: dict[str, Any] = {}
+        if tick_rows:
+            lab_payload = run_research_lab_multi(
+                tick_rows,
+                lots=float(lots),
+                fees=bool(fees),
+                params=FlowParams(),
+                propose=bool(propose),
+                **lab_kw,
+            )
+            hours = []
+            flags = lab_payload.get("tape") or {}
+            source = "ticks.db-multi-tf"
+        else:
+            hours, _m30, source = _load_bars(ns)
+            hours = session_bars(hours)
+            flags = tape_flags(hours)
+            lab_payload = run_research_lab(
+                hours,
+                lots=float(lots),
+                fees=bool(fees),
+                params=FlowParams(),
+                propose=bool(propose),
+                **lab_kw,
+            )
         lab_payload = {
             "source": source,
             "tape": flags,
             "counts": lab_payload.get("counts") or {},
             "champions": lab_payload.get("champions") or {},
+            "champions_by_tf": lab_payload.get("champions_by_tf") or {},
+            "by_tf": lab_payload.get("by_tf") or {},
+            "timeframes": lab_payload.get("timeframes") or [],
+            "n_skipped": lab_payload.get("n_skipped") or 0,
             "discovery": lab_payload.get("discovery") or [],
             "challengers": lab_payload.get("challengers") or [],
             "proposed_ids": lab_payload.get("proposed_ids") or [],
@@ -539,6 +572,7 @@ def run_amise(
             "strong": True,
             "gates": lab_payload.get("gates") or [],
             "holdout_bars": lab_payload.get("holdout_bars") or 0,
+            "multi_tf": bool(lab_payload.get("multi_tf")),
         }
         if improve:
             improve_payload = run_improve(

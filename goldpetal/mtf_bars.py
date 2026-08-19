@@ -122,7 +122,8 @@ def load_tick_rows(db: Path = DB):
     con.row_factory = sqlite3.Row
     rows = con.execute(
         """
-        SELECT id, received_at, exchange_timestamp, ltp, bp, sp, volume, raw_json
+        SELECT id, received_at, exchange_timestamp, ltp, bp, sp, volume, raw_json,
+               token, symbol
         FROM ticks
         WHERE ltp IS NOT NULL
         ORDER BY received_at ASC, id ASC

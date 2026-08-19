@@ -293,7 +293,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="lab-panel" hidden>
         <h2>AI Research Lab — approval station</h2>
-        <p class="hint">The factory can discover, test, improve and <b>propose</b>. Approve of a <b>new</b> genome names the next AMISE slot (S21, then S22, then S25 after S24). Approve of an <b>improve</b> overwrites that same chair. Existing books keep learning from closed trades. Restart the bot. This tab never sets DRY_RUN=false. Angel still needs Unlock + type LIVE. Rank is after Angel charges vs paper S16 and S18. S13/S16 formulas stay. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">The factory can discover, test, improve and <b>propose</b> on 3m, 5m, 10m, 15m, 30m, 45m, 1h, 1h15…3h45, and the daily bar. Each rung beats S16-style and S18-style on <b>that same bar size</b> (daily also vs S13). Approve of a <b>new</b> genome names the next AMISE slot (S21, then S22, then S25 after S24). Approve of an <b>improve</b> overwrites that same chair. Existing books keep learning from closed trades. Restart the bot. This tab never sets DRY_RUN=false. Angel still needs Unlock + type LIVE. S13/S16 formulas stay. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="lab-live-block">Approve papers a new S21+ slot or updates a filled chair. This tab never sets DRY_RUN=false and never live-unlocks.</div>
         <p class="flash" id="flash-lab"></p>
         <div class="row" style="margin-top:.45rem">
@@ -315,7 +315,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> (cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Unlock + LIVE on Live money.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -926,6 +926,9 @@ function renderLab() {
   </div>`;
   const s16 = champs.S16 || {};
   const s18 = champs.S18 || {};
+  const s13 = champs.S13 || {};
+  const byTf = d.champions_by_tf || {};
+  const tfKeys = Object.keys(byTf);
   const improve = d.improve || {};
   const roster = improve.roster || [];
   const improveHtml = roster.length ? `<table>
@@ -940,13 +943,31 @@ function renderLab() {
   <p class="hint">${esc(improve.note || "")}${improve.last_run_at ? (" Last improve " + improve.last_run_at) : ""}</p>` : `<p class="hint">${esc(improve.note || "Improve roster fills after Refresh.")}</p>`;
   const improveEl = $("lab-improve");
   if (improveEl) improveEl.innerHTML = improveHtml;
-  $("lab-champions").innerHTML = `<div class="ml-compare">
+  $("lab-champions").innerHTML = tfKeys.length ? `<table>
+    <thead><tr><th>TF</th><th>S16 AC₹</th><th>S18 AC₹</th><th>S13 AC₹</th></tr></thead>
+    <tbody>${tfKeys.map((tf) => {
+      const row = byTf[tf] || {};
+      const a = row.S16 || {};
+      const b = row.S18 || {};
+      const c = row.S13 || {};
+      return `<tr>
+        <td>${esc(tf)}</td>
+        <td class="num">${a.after_charges != null ? money(a.after_charges) : "—"}</td>
+        <td class="num">${b.after_charges != null ? money(b.after_charges) : "—"}</td>
+        <td class="num">${c.after_charges != null ? money(c.after_charges) : "—"}</td>
+      </tr>`;
+    }).join("")}</tbody>
+  </table>
+  <p class="hint">Same-TF champions. Daily also lists S13. S13/S16 formulas stay.</p>` : `<div class="ml-compare">
     <div class="ml-box"><b>Champion S16</b>
       <div>n=${esc(s16.n_trades ?? "—")} · AC₹ ${s16.after_charges != null ? money(s16.after_charges) : "—"}</div>
     </div>
     <div class="ml-box"><b>Champion S18</b>
       <div>n=${esc(s18.n_trades ?? "—")} · AC₹ ${s18.after_charges != null ? money(s18.after_charges) : "—"}</div>
     </div>
+    ${s13.after_charges != null ? `<div class="ml-box"><b>Champion S13</b>
+      <div>n=${esc(s13.n_trades ?? "—")} · AC₹ ${money(s13.after_charges)}</div>
+    </div>` : ""}
   </div>`;
   $("lab-pending").innerHTML = pending.length ? pending.map((p) => {
     const paper = p.paper || {};
@@ -1069,6 +1090,15 @@ function renderAmise() {
   </div>`;
   const job = fac.job || {};
   const slots = d.slots || {};
+  const byTf = fac.champions_by_tf || fac.by_tf || {};
+  const tfKeys = Object.keys(byTf);
+  const tfLine = tfKeys.length
+    ? (" · TFs " + tfKeys.map((tf) => {
+        const row = byTf[tf] || {};
+        const skipped = row.skipped ? "skip" : String((row.counts && row.counts.passed_validation) || (row.kept && row.kept.length) || 0);
+        return tf + "=" + skipped;
+      }).join(" "))
+    : "";
   $("amise-factory").innerHTML = `<div class="ml-stats">
     ${mlStat("Found", String(counts.found || 0))}
     ${mlStat("Passed gates", String(counts.passed_validation || 0), counts.passed_validation ? "ok" : "")}
@@ -1076,13 +1106,14 @@ function renderAmise() {
     ${mlStat("Rejected", String(counts.rejected || 0))}
     ${mlStat("Factory", job.running ? "RUNNING" : "idle", job.running ? "warn" : "ok")}
   </div>
-  <p class="ml-meta">Last factory run ${esc(fac.last_run_at || job.last_run_at || "none")} · auto ${job.auto ? ("every " + (job.auto_hours || 12) + "h") : "off"} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
-  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. New genomes take the next S21+ slot; improves overwrite that chair.") : "No pending factory proposals. Click Run factory (screen, then strong gates, then improve existing books). Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  <p class="ml-meta">Last factory run ${esc(fac.last_run_at || job.last_run_at || "none")} · auto ${job.auto ? ("every " + (job.auto_hours || 12) + "h") : "off"} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}${tfLine}</p>
+  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve. New genomes take the next S21+ slot; improves overwrite that chair.") : "No pending factory proposals. Click Run factory (3m…daily, same-TF vs S16/S18, daily vs S13, then improve). Thin tapes correctly propose 0."}</p>`;
   const slotRows = slots.slots || [];
   $("amise-slots").innerHTML = slotRows.length ? `<table>
-    <thead><tr><th>Slot</th><th>Genome</th><th>When</th></tr></thead>
+    <thead><tr><th>Slot</th><th>TF</th><th>Genome</th><th>When</th></tr></thead>
     <tbody>${slotRows.map((s) => `<tr>
       <td>${esc(s.short || s.slot)}</td>
+      <td>${esc(s.timeframe || (s.filled ? "1h" : "—"))}</td>
       <td>${s.filled ? esc(s.name || s.genome_id) : "empty — waiting for Lab Approve"}</td>
       <td>${esc(String(s.assigned_at_ist || "").slice(0, 19))}</td>
     </tr>`).join("")}</tbody>

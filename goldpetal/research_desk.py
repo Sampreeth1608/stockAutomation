@@ -123,6 +123,10 @@ def research_desk_payload(
         "env_patch_allowed": research_env_patch(),
         "amise_slots": amise_books_now(),
         "champions": lib.get("champions") or {},
+        "champions_by_tf": lib.get("champions_by_tf") or {},
+        "by_tf": lib.get("by_tf") or {},
+        "timeframes": lib.get("timeframes") or [],
+        "multi_tf": bool(lib.get("multi_tf")),
         "challengers": lib.get("challengers") or [],
         "discovery": lib.get("discovery") or [],
         "sklearn_importances": lib.get("sklearn_importances") or [],
@@ -141,13 +145,14 @@ def research_desk_payload(
         "slots": desk_slots_payload(),
         "improve": improve,
         "note": (
-            "AI researches. You decide. New strategies must beat S16 and S18 after "
-            "charges with a 10% margin, pass PF/drawdown/both-sides, survive 3-fold "
-            "walk-forward, pass 2× and 3× costs, and pass holdout when the tape is "
-            "long enough. Approve names the next slot (S21, S22, …) and papers it. "
-            "Filled chairs keep learning from closed trades; a stronger genome "
-            "overwrites that same slot after you Approve. S13/S16 formulas stay. "
-            "Restart the bot. This tab never sets DRY_RUN=false."
+            "AI researches. You decide. Each timeframe must beat S16-style and "
+            "S18-style on that same bar size (5m vs 5m, 1h vs 1h). Daily also "
+            "beats S13. Same 10% margin, PF/drawdown, walk-forward, 2× and 3× "
+            "costs, holdout when the tape is long enough. Daily both-sides is "
+            "relaxed. Approve names the next slot (S21, S22, …) and papers it. "
+            "Filled chairs keep learning from closed trades on that chair's TF; "
+            "a stronger genome overwrites that same slot after you Approve. "
+            "S13/S16 formulas stay. Restart the bot. This tab never sets DRY_RUN=false."
         ),
         "last_run_at": lib.get("updated_at_ist") or "",
     }

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from amise_timeframes import LAB_TIMEFRAMES, LabTF, parse_tf
 from backtest_hhhl_candles import make_charge_cfg
 from backtest_ohlcv_lab import MIN_TRADES, _baseline_s16, _days_from_hours, _fill_trade_stats
 from charges import ChargeConfig
@@ -28,6 +29,7 @@ from flow_lab import (
     FlowParams,
     Recipe,
     build_flow_features,
+    lab_bars_for_tf,
     run_factory_book,
     selected_recipes,
     simulate_flow,
@@ -83,7 +85,9 @@ FAST_LAB_KWARGS: dict[str, Any] = {
     "sklearn": True,
     "strong": True,
     "screen_first": True,
+    "max_deep": 4,
 }
+FULL_LAB_MAX_DEEP = 8
 
 
 @dataclass
@@ -204,6 +208,41 @@ def champion_s18(bars: list[FlowBar], *, lots: float, fees: bool) -> LabMetrics 
     )
 
 
+def champion_s13(bars: list[FlowBar], *, lots: float, fees: bool) -> LabMetrics:
+    """S13 daily swing replayed on this tape. Does not change the paper S13 book."""
+    from backtest_hhhl_candles import Candle
+    from s16_hhhl_wick import s16_bar_decision, simulate_s16
+
+    candles = [Candle(b.time, b.open, b.high, b.low, b.close) for b in bars]
+    res = simulate_s16(
+        candles,
+        tf="1d:S13",
+        lots=lots,
+        fees=fees,
+        session_filter=False,
+        min_wick_gap=0.0,
+        decide=lambda a, b: s16_bar_decision(a, b, min_wick_gap=0.0),
+    )
+    return _fill_trade_stats(
+        LabMetrics(
+            name="S13",
+            family="paper",
+            exit_mode="flip",
+            n_trades=res.n_trades,
+            n_long=res.n_long,
+            n_short=res.n_short,
+            after_charges=after_charges_inr(res),
+            expectancy=0.0,
+            profit_factor=0.0,
+            avg_win=0.0,
+            avg_loss=0.0,
+            max_dd=0.0,
+            win_rate=0.0,
+            result=res,
+        )
+    )
+
+
 def _tstat(xs: list[float]) -> tuple[float, float, int]:
     n = len(xs)
     if n < 3:
@@ -301,6 +340,26 @@ def recipe_genome(rec: Recipe, *, flags: dict[str, bool] | None = None) -> Strat
     ).normalized()
 
 
+def stamp_genome_tf(genome: StrategyGenome, tf: str) -> StrategyGenome:
+    """Pin a genome to a factory rung. 1h keeps its composed name."""
+    spec = parse_tf(tf)
+    label = spec.label
+    src = genome.normalized()
+    name = src.name
+    if label != "1h":
+        base = name.split("@", 1)[0]
+        name = f"{base}@{label}"[:80]
+    return replace(src, timeframe=label, name=name, genome_id="").normalized()
+
+
+def cheap_min_trades(min_trades: int) -> int:
+    """Cheap-screen floor. 1h stays at 8; daily / 3h rungs are thinner."""
+    mt = int(min_trades)
+    if mt >= 20:
+        return 8
+    return max(4, mt // 2)
+
+
 def compose_from_discovery(
     scores: list[AtomScore],
     *,
@@ -390,6 +449,7 @@ def run_genome_book(
     decide_fn: Any | None = None,
     tf: str | None = None,
     skip_wf: bool = False,
+    flatten_eod: bool = True,
 ) -> LabMetrics:
     g = genome.normalized()
     p = params or params_from_genome(g)
@@ -398,7 +458,7 @@ def run_genome_book(
     sim_kw: dict[str, Any] = dict(
         lots=lots,
         fees=fees,
-        flatten_eod=True,
+        flatten_eod=bool(flatten_eod),
         params=p,
         decide_fn=decide,
         charge_cfg=charge_cfg,
@@ -487,6 +547,7 @@ def run_robustness(
     lots: float,
     fees: bool,
     params: FlowParams | None = None,
+    flatten_eod: bool = True,
 ) -> Robustness:
     g = genome.normalized()
     p = params or params_from_genome(g)
@@ -506,6 +567,7 @@ def run_robustness(
             decide_fn=decide_fn,
             tf="rob",
             skip_wf=True,
+            flatten_eod=flatten_eod,
         )
         return float(m.after_charges)
 
@@ -549,10 +611,12 @@ def holdout_split(
     return list(bars[:cut]), list(bars[cut:])
 
 
-def _champ_ac(s16: LabMetrics, s18: LabMetrics | None) -> float:
+def _champ_ac(s16: LabMetrics, s18: LabMetrics | None, s13: LabMetrics | None = None) -> float:
     ac = float(s16.after_charges)
     if s18 is not None:
         ac = max(ac, float(s18.after_charges))
+    if s13 is not None:
+        ac = max(ac, float(s13.after_charges))
     return ac
 
 
@@ -567,6 +631,9 @@ def gate_failures(
     holdout: LabMetrics | None = None,
     s16_hold: LabMetrics | None = None,
     s18_hold: LabMetrics | None = None,
+    s13: LabMetrics | None = None,
+    s13_hold: LabMetrics | None = None,
+    require_both_sides: bool = True,
 ) -> list[str]:
     fails: list[str] = []
     if m.n_trades < min_trades:
@@ -577,6 +644,8 @@ def gate_failures(
         fails.append(f"does not beat S16 (AC₹={s16.after_charges:.1f})")
     if s18 is not None and m.after_charges <= s18.after_charges:
         fails.append(f"does not beat S18 (AC₹={s18.after_charges:.1f})")
+    if s13 is not None and m.after_charges <= s13.after_charges:
+        fails.append(f"does not beat S13 (AC₹={s13.after_charges:.1f})")
     if m.wf_folds >= MIN_WF_WINS and m.wf_wins < MIN_WF_WINS:
         fails.append(f"walk-forward {m.stability} < {MIN_WF_WINS}/{m.wf_folds}")
     if rob is not None:
@@ -592,7 +661,7 @@ def gate_failures(
         if regime_fails >= 2:
             fails.append("failed ≥2 market regimes")
     if strong:
-        champ = _champ_ac(s16, s18)
+        champ = _champ_ac(s16, s18, s13)
         if champ > 0 and m.after_charges < champ * BEAT_MULT:
             fails.append(
                 f"need {BEAT_MULT:.0%} margin vs champions (AC₹={champ:.1f}, have {m.after_charges:.1f})"
@@ -601,7 +670,7 @@ def gate_failures(
             fails.append(f"PF {m.profit_factor:.2f} < {MIN_PF}")
         if m.after_charges > 0 and m.max_dd > m.after_charges:
             fails.append(f"drawdown ₹{m.max_dd:.0f} > after-charges")
-        if m.n_trades >= MIN_SIDE * 2 and (m.n_long < MIN_SIDE or m.n_short < MIN_SIDE):
+        if require_both_sides and m.n_trades >= MIN_SIDE * 2 and (m.n_long < MIN_SIDE or m.n_short < MIN_SIDE):
             fails.append("one-sided book (need both long and short sample)")
         if holdout is not None:
             if holdout.n_trades < 5:
@@ -615,6 +684,8 @@ def gate_failures(
                 and holdout.after_charges <= s18_hold.after_charges
             ):
                 fails.append(f"holdout loses to S18 (AC₹={s18_hold.after_charges:.1f})")
+            elif s13_hold is not None and holdout.after_charges <= s13_hold.after_charges:
+                fails.append(f"holdout loses to S13 (AC₹={s13_hold.after_charges:.1f})")
     return fails
 
 
@@ -648,6 +719,10 @@ def evaluate_challenger(
     robustness: bool = True,
     strong: bool = True,
     holdout_bars: list[FlowBar] | None = None,
+    flatten_eod: bool = True,
+    min_trades: int = MIN_TRADES,
+    s13: LabMetrics | None = None,
+    require_both_sides: bool = True,
 ) -> dict[str, Any]:
     g = genome.normalized()
     p = params or params_from_genome(g)
@@ -660,7 +735,7 @@ def evaluate_challenger(
             n_folds=n_folds,
             lots=lots,
             fees=fees,
-            flatten_eod=True,
+            flatten_eod=bool(flatten_eod),
             params=p,
             tf=f"lab:{g.recipe}",
             decide_fn=compile_genome(g),
@@ -669,21 +744,41 @@ def evaluate_challenger(
         m.family = "recipe"
     else:
         m = run_genome_book(
-            bars, g, lots=lots, fees=fees, n_folds=n_folds, params=p
+            bars,
+            g,
+            lots=lots,
+            fees=fees,
+            n_folds=n_folds,
+            params=p,
+            flatten_eod=flatten_eod,
         )
     rob = None
-    if robustness and m.n_trades >= 8 and m.after_charges > 0:
-        rob = run_robustness(bars, g, m, lots=lots, fees=fees, params=p)
+    rob_n = min(8, max(4, int(min_trades)))
+    if robustness and m.n_trades >= rob_n and m.after_charges > 0:
+        rob = run_robustness(
+            bars, g, m, lots=lots, fees=fees, params=p, flatten_eod=flatten_eod
+        )
     hold_m = None
     s16_h = None
     s18_h = None
+    s13_h = None
     hold = list(holdout_bars or [])
     if strong and len(hold) >= MIN_HOLD_BARS:
         hold_m = run_genome_book(
-            hold, g, lots=lots, fees=fees, n_folds=0, params=p, tf="hold", skip_wf=True
+            hold,
+            g,
+            lots=lots,
+            fees=fees,
+            n_folds=0,
+            params=p,
+            tf="hold",
+            skip_wf=True,
+            flatten_eod=flatten_eod,
         )
         s16_h = champion_s16(hold, lots=lots, fees=fees)
-        s18_h = champion_s18(hold, lots=lots, fees=fees)
+        s18_h = champion_s18(hold, lots=lots, fees=fees) if s18 is not None else None
+        if s13 is not None:
+            s13_h = champion_s13(hold, lots=lots, fees=fees)
     fails = gate_failures(
         m,
         s16=s16,
@@ -693,6 +788,10 @@ def evaluate_challenger(
         holdout=hold_m,
         s16_hold=s16_h,
         s18_hold=s18_h,
+        s13=s13,
+        s13_hold=s13_h,
+        min_trades=min_trades,
+        require_both_sides=require_both_sides,
     )
     pub = metrics_public(m) or {}
     if hold_m is not None:
@@ -799,19 +898,37 @@ def run_research_lab(
     proposals_path: Path | None = None,
     library_path: Path | None = None,
     week_id: str = "",
+    timeframe: str = "1h",
+    flatten_eod: bool = True,
+    min_trades: int | None = None,
+    require_both_sides: bool = True,
+    use_s13: bool = False,
+    beat_s18: bool = True,
+    max_deep: int | None = None,
+    write: bool = True,
 ) -> dict[str, Any]:
     """Closed research loop. ``propose=True`` writes pending rows only.
 
     Cheap-screens thin/losing genomes, then runs 3-fold + recipes + robustness
     + extra strength gates on the shortlist. Skipping those gates does not
     produce stronger books — it only lets weaker ones through.
+
+    Champions are same-timeframe: beat S16-style and S18-style on these bars.
+    Daily tapes also beat S13 (S16 replayed on the day). S13/S16 paper formulas
+    stay. ``write=False`` lets the multi-TF runner merge libraries.
     """
+    spec = parse_tf(timeframe)
+    tf = spec.label
+    mt = int(min_trades) if min_trades is not None else spec.min_trades
+    cheap_n = cheap_min_trades(mt)
+    flatten = bool(flatten_eod)
     p = params or FlowParams()
     flags = tape_flags(bars)
     train, hold = holdout_split(bars)
     disc_bars = train or bars
     s16 = champion_s16(bars, lots=lots, fees=fees)
-    s18 = champion_s18(bars, lots=lots, fees=fees)
+    s18 = champion_s18(bars, lots=lots, fees=fees) if beat_s18 else None
+    s13 = champion_s13(bars, lots=lots, fees=fees) if use_s13 else None
     scores = discover_relationships(disc_bars, params=p, flags=flags)
     composed = compose_from_discovery(scores, flags=flags)[:max_compose]
     genomes: list[StrategyGenome] = list(composed)
@@ -826,28 +943,44 @@ def run_research_lab(
     seen: set[str] = set()
     uniq: list[StrategyGenome] = []
     for g in genomes:
+        g = stamp_genome_tf(g, tf)
         if g.genome_id in seen:
             continue
         seen.add(g.genome_id)
         uniq.append(g)
 
-    champ = _champ_ac(s16, s18)
+    champ = _champ_ac(s16, s18, s13)
+    screened: list[tuple[float, StrategyGenome]] = []
     rows: list[dict[str, Any]] = []
     for g in uniq:
-        skip_deep = False
         if screen_first:
             quick = run_genome_book(
-                bars, g, lots=lots, fees=fees, n_folds=0, params=p, tf="pre", skip_wf=True
+                bars,
+                g,
+                lots=lots,
+                fees=fees,
+                n_folds=0,
+                params=p,
+                tf="pre",
+                skip_wf=True,
+                flatten_eod=flatten,
             )
-            cheap_fail = quick.n_trades < 8 or quick.after_charges <= champ
+            cheap_fail = quick.n_trades < cheap_n or quick.after_charges <= champ
             if cheap_fail:
                 fails = gate_failures(
-                    quick, s16=s16, s18=s18, rob=None, strong=False
+                    quick,
+                    s16=s16,
+                    s18=s18,
+                    rob=None,
+                    strong=False,
+                    s13=s13,
+                    min_trades=cheap_n,
+                    require_both_sides=False,
                 )
                 if not fails:
                     fails = [
                         f"screen: n={quick.n_trades} AC₹={quick.after_charges:.1f} "
-                        f"not ahead of champions (AC₹={champ:.1f})"
+                        f"not ahead of same-TF champions (AC₹={champ:.1f})"
                     ]
                 rows.append(
                     {
@@ -859,9 +992,15 @@ def run_research_lab(
                         "supervisor": supervisor_note(g, quick, fails),
                     }
                 )
-                skip_deep = True
-        if skip_deep:
-            continue
+                continue
+            screened.append((float(quick.after_charges), g))
+        else:
+            screened.append((0.0, g))
+    screened.sort(key=lambda x: x[0], reverse=True)
+    if max_deep is not None:
+        screened = screened[: max(0, int(max_deep))]
+
+    for _ac, g in screened:
         rows.append(
             evaluate_challenger(
                 bars,
@@ -875,6 +1014,10 @@ def run_research_lab(
                 robustness=robustness,
                 strong=strong,
                 holdout_bars=hold,
+                flatten_eod=flatten,
+                min_trades=mt,
+                s13=s13,
+                require_both_sides=require_both_sides,
             )
         )
 
@@ -891,6 +1034,26 @@ def run_research_lab(
     proposed = [r for r in ranked if r.get("proposed")]
     rejected = [r for r in ranked if not r.get("proposed")]
     stamp = week_id or datetime.now(IST).strftime("lab-%Y%m%d")
+    champs: dict[str, Any] = {
+        "S16": metrics_public(s16),
+        "S18": metrics_public(s18),
+    }
+    if s13 is not None:
+        champs["S13"] = metrics_public(s13)
+    gates = [
+        f"after-charges beat same-TF S16{' and S18' if beat_s18 else ''}"
+        + (" and S13" if use_s13 else ""),
+        f"{BEAT_MULT:.0%} margin vs best champion",
+        f"PF ≥ {MIN_PF}",
+        "drawdown ≤ after-charges",
+        "both long and short sample" if require_both_sides else "both-sides relaxed (daily)",
+        f"walk-forward ≥ {MIN_WF_WINS} folds",
+        "2× and 3× costs",
+        "1-bar delay + threshold jitter",
+        "holdout last 20% when the tape is long enough",
+        "sklearn feature ranks (research only, not a BUY model)",
+        "session-aligned bars from MARKET_OPEN; token split on rollover",
+    ]
     payload = {
         "updated_at_ist": _now_iso(),
         "lab": LAB_NAME,
@@ -898,10 +1061,10 @@ def run_research_lab(
         "from": bars[0].time if bars else "",
         "to": bars[-1].time if bars else "",
         "tape": flags,
-        "champions": {
-            "S16": metrics_public(s16),
-            "S18": metrics_public(s18),
-        },
+        "timeframe": tf,
+        "flatten_eod": flatten,
+        "min_trades": mt,
+        "champions": champs,
         "discovery": [
             {
                 "name": s.name,
@@ -916,18 +1079,8 @@ def run_research_lab(
         "holdout_bars": len(hold),
         "train_bars": len(disc_bars),
         "strong": bool(strong),
-        "gates": [
-            "after-charges beat S16 and S18",
-            f"{BEAT_MULT:.0%} margin vs best champion",
-            f"PF ≥ {MIN_PF}",
-            "drawdown ≤ after-charges",
-            "both long and short sample",
-            f"walk-forward ≥ {MIN_WF_WINS} folds",
-            "2× and 3× costs",
-            "1-bar delay + threshold jitter",
-            "holdout last 20% when the tape is long enough",
-            "sklearn feature ranks (research only, not a BUY model)",
-        ],
+        "n_deep": len(screened),
+        "gates": gates,
         "counts": {
             "found": len(ranked),
             "passed_validation": len(proposed),
@@ -940,10 +1093,12 @@ def run_research_lab(
         "note": (
             "AI researches. You decide. Skipping folds/recipes/sklearn/robustness "
             "does not make stronger books — it only lets weaker ones through. "
-            "Approve on the Lab tab does not ENABLE a book and never arms live."
+            "Approve on the Lab tab does not ENABLE a book and never arms live. "
+            "Each timeframe beats S16/S18 on that same bar size; daily also beats S13."
         ),
     }
-    write_library(payload, path=library_path or LIBRARY_PATH)
+    if write:
+        write_library(payload, path=library_path or LIBRARY_PATH)
     pending_ids: list[str] = []
     if propose:
         for row in proposed:
@@ -956,13 +1111,188 @@ def run_research_lab(
             pending_ids.append(prop.id)
         payload["proposed_ids"] = pending_ids
         payload["counts"]["awaiting_approval"] = len(pending_ids)
-        write_library(payload, path=library_path or LIBRARY_PATH)
+        if write:
+            write_library(payload, path=library_path or LIBRARY_PATH)
     last = dict(payload)
     last["rejected"] = [
         {"name": (r.get("genome") or {}).get("name"), "fails": r.get("fails")}
         for r in rejected[:20]
     ]
+    if write:
+        dest = LAST_RUN_PATH if library_path is None else (library_path.parent / "last_run.json")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(last, indent=2), encoding="utf-8")
+    return payload
+
+
+def run_research_lab_multi(
+    tick_rows: list[Any],
+    *,
+    lots: float = 100.0,
+    fees: bool = True,
+    n_folds: int = 3,
+    params: FlowParams | None = None,
+    include_recipes: bool = True,
+    max_compose: int = 24,
+    robustness: bool = True,
+    sklearn: bool = True,
+    strong: bool = True,
+    screen_first: bool = True,
+    propose: bool = False,
+    proposals_path: Path | None = None,
+    library_path: Path | None = None,
+    week_id: str = "",
+    max_deep: int | None = None,
+    timeframes: list[Any] | tuple[Any, ...] | None = None,
+) -> dict[str, Any]:
+    """Run the strong lab on every LAB_TIMEFRAME. Same-TF champions; daily vs S13."""
+    if timeframes:
+        specs = [t if isinstance(t, LabTF) else parse_tf(t) for t in timeframes]
+    else:
+        specs = list(LAB_TIMEFRAMES)
+    by_tf: dict[str, Any] = {}
+    challengers: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    proposed_ids: list[str] = []
+    champions_by_tf: dict[str, Any] = {}
+    n_found = 0
+    n_pass = 0
+    n_skip = 0
+    anchor: dict[str, Any] | None = None
+    stamp = week_id or datetime.now(IST).strftime("lab-%Y%m%d")
+    shared: dict[str, Any] = dict(
+        lots=lots,
+        fees=fees,
+        n_folds=n_folds,
+        params=params,
+        include_recipes=include_recipes,
+        max_compose=max_compose,
+        robustness=robustness,
+        sklearn=sklearn,
+        strong=strong,
+        screen_first=screen_first,
+        propose=propose,
+        proposals_path=proposals_path,
+        library_path=library_path,
+        max_deep=max_deep,
+        write=False,
+    )
+    for spec in specs:
+        bars = lab_bars_for_tf(tick_rows, spec)
+        if len(bars) < spec.min_bars:
+            n_skip += 1
+            by_tf[spec.label] = {
+                "ok": False,
+                "skipped": True,
+                "n_bars": len(bars),
+                "min_bars": spec.min_bars,
+                "error": f"need {spec.min_bars} {spec.label} bars, have {len(bars)}",
+            }
+            continue
+        lab = run_research_lab(
+            bars,
+            week_id=f"{stamp}:{spec.label}",
+            timeframe=spec.label,
+            flatten_eod=spec.flatten_eod,
+            min_trades=spec.min_trades,
+            require_both_sides=not spec.daily,
+            use_s13=spec.daily,
+            beat_s18=not spec.daily,
+            **shared,
+        )
+        by_tf[spec.label] = {
+            "ok": True,
+            "skipped": False,
+            "n_bars": len(bars),
+            "n_deep": lab.get("n_deep"),
+            "counts": lab.get("counts") or {},
+            "champions": lab.get("champions") or {},
+            "kept": [
+                {
+                    "name": (r.get("genome") or {}).get("name"),
+                    "genome_id": (r.get("genome") or {}).get("genome_id"),
+                    "after_charges": (r.get("metrics") or {}).get("after_charges"),
+                }
+                for r in (lab.get("challengers") or [])
+            ],
+        }
+        champions_by_tf[spec.label] = lab.get("champions") or {}
+        n_found += int((lab.get("counts") or {}).get("found") or 0)
+        n_pass += int((lab.get("counts") or {}).get("passed_validation") or 0)
+        challengers.extend(lab.get("challengers") or [])
+        rejected.extend(lab.get("rejected") or [])
+        proposed_ids.extend(lab.get("proposed_ids") or [])
+        if spec.label == "1h" or anchor is None:
+            anchor = lab
+    if anchor is None:
+        anchor = {
+            "updated_at_ist": _now_iso(),
+            "lab": LAB_NAME,
+            "n_bars": 0,
+            "from": "",
+            "to": "",
+            "tape": {},
+            "discovery": [],
+            "sklearn_importances": [],
+            "holdout_bars": 0,
+            "train_bars": 0,
+            "strong": bool(strong),
+            "gates": [],
+            "note": "no timeframe had enough bars",
+        }
+    ids: list[str] = []
+    seen_id: set[str] = set()
+    for gid in proposed_ids:
+        if gid and gid not in seen_id:
+            seen_id.add(gid)
+            ids.append(gid)
+    challengers.sort(
+        key=lambda r: float((r.get("metrics") or {}).get("after_charges") or -1e18),
+        reverse=True,
+    )
+    payload = {
+        "updated_at_ist": _now_iso(),
+        "lab": LAB_NAME,
+        "multi_tf": True,
+        "n_bars": anchor.get("n_bars") or 0,
+        "from": anchor.get("from") or "",
+        "to": anchor.get("to") or "",
+        "tape": anchor.get("tape") or {},
+        "timeframes": [s.label for s in specs],
+        "n_timeframes": len(by_tf),
+        "n_skipped": n_skip,
+        "champions": (champions_by_tf.get("1h") or anchor.get("champions") or {}),
+        "champions_by_tf": champions_by_tf,
+        "by_tf": by_tf,
+        "discovery": anchor.get("discovery") or [],
+        "sklearn_importances": anchor.get("sklearn_importances") or [],
+        "holdout_bars": anchor.get("holdout_bars") or 0,
+        "train_bars": anchor.get("train_bars") or 0,
+        "strong": bool(strong),
+        "gates": list(anchor.get("gates") or [])
+        or [
+            "same-TF S16/S18 after charges (daily also vs S13)",
+            f"{BEAT_MULT:.0%} margin, PF, drawdown, walk-forward, 2×/3×, holdout",
+        ],
+        "counts": {
+            "found": n_found,
+            "passed_validation": n_pass,
+            "awaiting_approval": len(ids) if propose else n_pass,
+            "rejected": max(0, n_found - n_pass),
+        },
+        "challengers": challengers,
+        "rejected": rejected[:40],
+        "proposed_ids": ids,
+        "note": (
+            "Factory screened 3m…3h45 plus the daily bar. Each rung beats S16/S18 "
+            "on that same bar size (daily also beats S13). Session bars start at "
+            "MARKET_OPEN; a contract roll starts a new candle. Skipping gates does "
+            "not make stronger books. Approve on Lab does not ENABLE live. "
+            "Keep DRY_RUN=true."
+        ),
+    }
+    write_library(payload, path=library_path or LIBRARY_PATH)
     dest = LAST_RUN_PATH if library_path is None else (library_path.parent / "last_run.json")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(last, indent=2), encoding="utf-8")
+    dest.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     return payload

@@ -20,7 +20,8 @@ from pathlib import Path
 
 from backtest_flow_lab import _load_bars
 from flow_lab import FlowParams, session_bars, tape_flags
-from research_factory import LAB_NAME, run_research_lab
+from mtf_bars import load_tick_rows
+from research_factory import LAB_NAME, run_research_lab, run_research_lab_multi
 
 
 def main() -> None:
@@ -45,6 +46,7 @@ def main() -> None:
     ap.add_argument("--skip-recipes", action="store_true")
     ap.add_argument("--no-robustness", action="store_true")
     ap.add_argument("--fast", action="store_true", help="smaller compose list; same strong gates")
+    ap.add_argument("--all-tf", action="store_true", help="every lab rung 3m…daily vs same-TF S16/S18")
     ap.add_argument("--propose", action="store_true", help="write pending Lab rows (not ENABLE)")
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
@@ -60,24 +62,14 @@ def main() -> None:
         "Discover → compose → backtest → walk-forward → robustness → "
         "REJECT or pending approval. LLM does not BUY."
     )
+    if args.all_tf:
+        print("Multi-TF: 3m…3h45 + daily. Same-TF vs S16/S18; daily vs S13.", flush=True)
     print(
         f"tape book={flags['book']} l1={flags['l1']} oi={flags['oi']} "
         f"volume={flags['volume']} source={source}",
         flush=True,
     )
-    need = max(int(args.lookback), int(args.atr_n)) + 5
-    if len(hours) < need:
-        raise SystemExit(
-            f"need ≥{need} bars (lookback={args.lookback}), got {len(hours)} from {source}"
-        )
-    print(
-        f"lots={args.lots:g} fees={fees} session={session_filter} "
-        f"bars={len(hours)} {hours[0].time}→{hours[-1].time} folds={args.folds}",
-        flush=True,
-    )
-
-    result = run_research_lab(
-        hours,
+    lab_kw = dict(
         lots=float(args.lots),
         fees=fees,
         n_folds=int(args.folds),
@@ -90,6 +82,24 @@ def main() -> None:
         screen_first=True,
         propose=bool(args.propose),
     )
+    if args.all_tf:
+        dbp = Path(args.db)
+        if not dbp.exists():
+            raise SystemExit(f"--all-tf needs ticks.db at {dbp}")
+        tick_rows = list(load_tick_rows(dbp))
+        result = run_research_lab_multi(tick_rows, **lab_kw)
+    else:
+        need = max(int(args.lookback), int(args.atr_n)) + 5
+        if len(hours) < need:
+            raise SystemExit(
+                f"need ≥{need} bars (lookback={args.lookback}), got {len(hours)} from {source}"
+            )
+        print(
+            f"lots={args.lots:g} fees={fees} session={session_filter} "
+            f"bars={len(hours)} {hours[0].time}→{hours[-1].time} folds={args.folds}",
+            flush=True,
+        )
+        result = run_research_lab(hours, **lab_kw)
     counts = result.get("counts") or {}
     champs = result.get("champions") or {}
     s16 = champs.get("S16") or {}

@@ -134,6 +134,8 @@ def test_not_a_paper_book() -> None:
     station = (root / "station.html").read_text(encoding="utf-8")
     assert "lab-improve" in station
     assert "same chair" in station.lower() or "same-slot" in station.lower() or "overwrite" in station.lower()
+    assert "3m" in station
+    assert "daily" in station.lower()
 
 
 if __name__ == "__main__":
