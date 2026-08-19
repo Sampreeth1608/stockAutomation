@@ -106,7 +106,8 @@ def main() -> None:
             f"empty ticks in {args.db}. Cloud ticks.db is often empty — "
             "copy the VM tape. Stay DRY_RUN."
         )
-    print(f"ticks={n}  db={args.db}  lots={args.lots:g}  fees={args.fees}")
+    print(f"ticks={n}  db={args.db}  lots={args.lots:g}  fees={args.fees}", flush=True)
+    print("loading ticks then building 1m bars (can take a few minutes)...", flush=True)
 
     modes = tuple(
         m.strip().lower()
@@ -127,7 +128,9 @@ def main() -> None:
         raise SystemExit("no parent timeframes matched --tfs")
 
     tick_rows = load_tick_rows(args.db)
-    bars_by_min = bars_from_ticks(tick_rows)
+    print(f"loaded {len(tick_rows)} rows", flush=True)
+    bars_by_min = bars_from_ticks(tick_rows, progress=True)
+    print("simulating nested nets...", flush=True)
     results = simulate_all(
         bars_by_min,
         lots=float(args.lots),

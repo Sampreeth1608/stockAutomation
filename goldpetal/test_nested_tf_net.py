@@ -12,6 +12,7 @@ from live_readiness import PAPER_ONLY_BOOKS
 from nested_tf_net import (
     LAB_NAME,
     PARENTS,
+    bars_from_ticks,
     collect_inners,
     enough_inners,
     expected_inner_count,
@@ -448,6 +449,17 @@ def test_ticks_build_session_aligned_15m_inners() -> None:
     assert tbq_n.tbq_net > 0 and tbq_n.bias == 1
     assert tsq_n.tsq_net > 0 and tsq_n.bias == 1
     assert body.book_net > 0
+    rolled = bars_from_ticks(rows)
+    assert len(rolled[1]) == len(ones)
+    by_t = {b.time: b for b in fifteens}
+    for b in rolled[15]:
+        src = by_t.get(b.time)
+        if src is None:
+            continue
+        assert abs(src.open - b.open) < 1e-9
+        assert abs(src.close - b.close) < 1e-9
+        assert abs(src.high - b.high) < 1e-9
+        assert abs(src.low - b.low) < 1e-9
 
 
 def test_simulate_all_modes_on_synthetic_parents() -> None:

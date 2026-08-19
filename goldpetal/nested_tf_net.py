@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Iterable, Mapping
 
-from amise_timeframes import parse_tf
+from amise_timeframes import floor_session_bar, parse_tf
 from backtest_hhhl_candles import Trade, make_charge_cfg
 from backtest_wick_candles import _tf_result_from_trades
 from charges import ChargeConfig, apply_charges_and_tax
@@ -114,17 +114,72 @@ def needed_minutes() -> tuple[int, ...]:
     return tuple(sorted(need))
 
 
-def bars_from_ticks(tick_rows: Any) -> dict[int, list[FlowBar]]:
-    """Session-aligned FlowBars for every parent and inner rung, including 1m."""
-    out: dict[int, list[FlowBar]] = {}
-    for minutes in needed_minutes():
-        out[minutes] = flow_bars_from_tick_rows(
-            tick_rows,
-            minutes,
-            session_align=True,
-            session_ticks=True,
-            split_token=True,
+def rollup_from_1m(ones: list[FlowBar], minutes: int) -> list[FlowBar]:
+    """Fold 1m session bars into a coarser session TF. Last inner keeps TBQ/TSQ."""
+    minutes = int(minutes)
+    if minutes <= 1:
+        return list(ones)
+    buckets: dict[datetime, list[FlowBar]] = {}
+    order: list[datetime] = []
+    for b in ones:
+        key = floor_session_bar(parse_ts(b.time), minutes)
+        chunk = buckets.get(key)
+        if chunk is None:
+            buckets[key] = [b]
+            order.append(key)
+        else:
+            chunk.append(b)
+    out: list[FlowBar] = []
+    for key in order:
+        chunk = buckets[key]
+        last = chunk[-1]
+        out.append(
+            FlowBar(
+                time=key.strftime("%Y-%m-%d %H:%M:%S"),
+                open=float(chunk[0].open),
+                high=max(float(x.high) for x in chunk),
+                low=min(float(x.low) for x in chunk),
+                close=float(last.close),
+                volume=sum(float(x.volume) for x in chunk),
+                n_ticks=sum(float(x.n_ticks) for x in chunk),
+                tbq=float(last.tbq),
+                tsq=float(last.tsq),
+                oi=float(getattr(last, "oi", 0.0) or 0.0),
+                buy5=float(getattr(last, "buy5", 0.0) or 0.0),
+                sell5=float(getattr(last, "sell5", 0.0) or 0.0),
+                buy_px=getattr(last, "buy_px", ()),
+                buy_qty=getattr(last, "buy_qty", ()),
+                sell_px=getattr(last, "sell_px", ()),
+                sell_qty=getattr(last, "sell_qty", ()),
+            )
         )
+    return out
+
+
+def bars_from_ticks(tick_rows: Any, *, progress: bool = False) -> dict[int, list[FlowBar]]:
+    """Session-aligned FlowBars: one 1m pass from ticks, then roll up the other rungs."""
+    def _p(msg: str) -> None:
+        if progress:
+            print(msg, flush=True)
+
+    need = needed_minutes()
+    _p("building 1m bars from ticks (this is the slow pass)...")
+    ones = flow_bars_from_tick_rows(
+        tick_rows,
+        1,
+        session_align=True,
+        session_ticks=True,
+        split_token=True,
+    )
+    _p(f"  1m: {len(ones)} bars")
+    out: dict[int, list[FlowBar]] = {1: ones}
+    for minutes in need:
+        if minutes == 1:
+            continue
+        lab = tf_label(minutes)
+        _p(f"rolling {lab} from 1m...")
+        out[minutes] = rollup_from_1m(ones, minutes)
+        _p(f"  {lab}: {len(out[minutes])} bars")
     return out
 
 
