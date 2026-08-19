@@ -54,7 +54,7 @@ from flow_brain import (
     move_scale,
     scratchy_then_trend_samples,
 )
-from market_mood import MoodDetector, MoodState
+from market_mood import MoodState, classify_samples
 from profit_guardian import classify_status, expectancy, max_drawdown, profit_factor
 from s9_bar_ml import ModelKind, make_estimator
 
@@ -214,14 +214,14 @@ def rich_from_quads(
 
 
 def rich_from_tick_rows(rows: list[Any]) -> list[RichTick]:
-    from export_full_ticks import _depth_side
-    from mtf_bars import _msg, parse_ts, tick_metrics
+    from mtf_bars import parse_ts, tick_metrics
 
     out: list[RichTick] = []
     cum_pv = 0.0
     cum_v = 0.0
     last_day: str | None = None
-    for row in rows:
+    n = len(rows)
+    for i, row in enumerate(rows, 1):
         m = tick_metrics(row)
         ltp = m.get("ltp")
         if ltp is None:
@@ -232,11 +232,6 @@ def rich_from_tick_rows(rows: list[Any]) -> list[RichTick]:
             cum_pv = 0.0
             cum_v = 0.0
         last_day = day
-        msg = _msg(row)
-        buy = _depth_side(msg, "buy")
-        sell = _depth_side(msg, "sell")
-        buy1 = float(buy[0][0] or 0.0) if buy else 0.0
-        sell1 = float(sell[0][0] or 0.0) if sell else 0.0
         ltq = float(m.get("ltq") or 0.0)
         qty = ltq if ltq > 0 else 1.0
         cum_pv += float(ltp) * qty
@@ -251,14 +246,14 @@ def rich_from_tick_rows(rows: list[Any]) -> list[RichTick]:
                 tsq=float(m.get("tsq") or 0.0),
                 buy5=float(m.get("buy5_sum") or 0.0),
                 sell5=float(m.get("sell5_sum") or 0.0),
-                buy1_px=buy1,
-                sell1_px=sell1,
                 oi=float(m.get("oi") or 0.0),
                 ltq=ltq,
                 volume=float(m.get("volume") or 0.0),
                 vwap_px=float(vwap),
             )
         )
+        if n >= 50_000 and i % 50_000 == 0:
+            print(f"  loaded {i}/{n} ticks", flush=True)
     return out
 
 
@@ -333,32 +328,49 @@ def label_tape(
     market_close: str = "23:30",
     decide_every_s: float = 1.0,
     with_mood: bool = True,
+    progress: bool = False,
 ) -> list[NextLabel]:
     """Walk ticks → FLOW_BRAIN state + forward pts at each horizon."""
     if not ticks:
         return []
+    import time as _time
+
     from flow_brain import _in_session
 
     times = np.array([x.t for x in ticks], dtype=float)
     ltps = np.array([x.ltp for x in ticks], dtype=float)
     eng = FlowBrain(decide_every_s=decide_every_s)
-    mood = MoodDetector(window=80) if with_mood else None
+    mood_buf: deque[tuple[float, float, float]] = deque(maxlen=80)
     seq = _Seq()
     last_oi = 0.0
+    last_mood: MoodState | None = None
+    last_mood_t = -1e18
     labels: list[NextLabel] = []
-    for tick in ticks:
+    t0 = _time.monotonic()
+    n_ticks = len(ticks)
+    for i, tick in enumerate(ticks, 1):
         seq.push_tick(tick.ltp)
-        if mood is not None:
-            mood.update(tick.ltp, tick.tbq, tick.tsq)
+        if with_mood:
+            mood_buf.append((tick.ltp, tick.tbq, tick.tsq))
         if session_filter and not _in_session(tick.dt, market_open, market_close):
             eng.buf.clear()
             continue
         snap = eng.push(tick.t, tick.ltp, tick.tbq, tick.tsq)
         if snap is None:
+            if progress and n_ticks >= 50_000 and i % 50_000 == 0:
+                print(
+                    f"  labeling {i}/{n_ticks} ticks labels={len(labels)}  "
+                    f"{_time.monotonic() - t0:.0f}s",
+                    flush=True,
+                )
             continue
         seq.push_state(snap.state)
         seq_ret, seq_up, seq_bull = seq.feats()
-        st_mood: MoodState | None = mood.last if mood is not None else None
+        st_mood: MoodState | None = last_mood
+        if with_mood and (snap.t - last_mood_t) >= 2.0:
+            last_mood = classify_samples(list(mood_buf), gate=False, flatten=False)
+            last_mood_t = snap.t
+            st_mood = last_mood
         oi_chg = (tick.oi - last_oi) if tick.oi and last_oi else 0.0
         if tick.oi:
             last_oi = tick.oi
@@ -406,6 +418,12 @@ def label_tape(
                 fwd=fwd,
             )
         )
+        if progress and n_ticks >= 50_000 and i % 50_000 == 0:
+            print(
+                f"  labeling {i}/{n_ticks} ticks labels={len(labels)}  "
+                f"{_time.monotonic() - t0:.0f}s",
+                flush=True,
+            )
     return labels
 
 
@@ -1010,7 +1028,10 @@ def run_lab(
     model_horizon: int = 60,
 ) -> dict[str, Any]:
     labels = label_tape(
-        ticks, session_filter=session_filter, with_mood=with_mood
+        ticks,
+        session_filter=session_filter,
+        with_mood=with_mood,
+        progress=len(ticks) >= 20_000,
     )
     fee_be = 0.0
     if labels:
