@@ -65,7 +65,7 @@ def main() -> None:
     ap.add_argument(
         "--pack",
         default="all",
-        help="v1, confirm10, hold_opp, quality, desk, or all (default all)",
+        help="v1, confirm10, c10_hold, hold_opp, quality, desk, desk_nonet, desk_nohtf, or all",
     )
     args = ap.parse_args()
 
@@ -81,9 +81,9 @@ def main() -> None:
     print("LONG  = price up + buy flow up + expanding")
     print("SHORT = price down + sell flow up + expanding")
     print("Skip absorption (flow without price).")
-    print("Packs add confirm / min-hold / no-flip / persist / quality / desk.")
-    print("desk = confirm10 + no-flip + S8 net + HTF agree-if-set + S5 25/10.")
-    print("548k tape: v1 7.1% −₹30L; confirm10 22.4% −₹25k; old desk 0 trades.")
+    print("Packs: v1, confirm10, c10_hold, hold_opp, quality, desk, desk_nonet, desk_nohtf.")
+    print("desk = confirm10 + no-flip + S8 net + HTF agree-if-set + 25/10.")
+    print("548k: v1 7.1% −₹30L; confirm10 22.4% −₹25k; desk 2t 100% +₹484 (n=2 not a go).")
     print("v1 is the 8k-trade unfiltered tape. Rank after charges, tax excluded.")
     print("Not S7_HOURLY. Not S16. ENABLE_FLOW_BRAIN stays false. Stay DRY_RUN.")
     print()
@@ -125,6 +125,14 @@ def main() -> None:
             f"fees₹={rec['fees']:.1f} after_charges₹={rec['after_charges']:.1f}",
             flush=True,
         )
+        if rec["trades"] and rec["trades"] <= 12:
+            for tr in result.trades:
+                print(
+                    f"    {tr.side} {tr.entry_time} -> {tr.exit_time} "
+                    f"{tr.entry_px:.1f}->{tr.exit_px:.1f} "
+                    f"gross₹={tr.gross_pnl_inr:.1f} fees₹={tr.fees_inr:.1f}",
+                    flush=True,
+                )
 
     print()
     print("=== after Angel charges, tax excluded ===")
@@ -169,10 +177,13 @@ def main() -> None:
             )
     print()
     write_outputs(results, args.out_dir)
+    thin = [r for r in rows_out if 0 < r["trades"] < 20]
+    if thin:
+        names = ", ".join(f"{r['pack']}={r['trades']}t" for r in thin)
+        print(f"thin sample (n<20): {names}. Not a go.")
     print(
         "Stay DRY_RUN. ENABLE_FLOW_BRAIN stays false. Do not live-unlock. "
-        "This is not S7_HOURLY and not S16. 3 trades at 100% that still "
-        "lose after fees is not a go."
+        "This is not S7_HOURLY and not S16. 2 trades at 100% / +₹484 is not a go."
     )
 
 

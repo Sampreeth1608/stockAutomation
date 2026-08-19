@@ -527,10 +527,9 @@ GATE_PACKS: dict[str, FlowGates] = {
         persist_until_opposite=True,
     ),
     "desk": FlowGates(
-        # 548k VM tape: confirm10 was 76 trades / 22.4% WR / −₹25k.
-        # Full AND (14% IMB + rising + required S19 1m + 20pt expected + 50pt TP)
-        # took 0 trades. Desk is confirm10 + no-flip + S8 net sign + HTF
-        # agree-if-set + S5 fee cover at real ~3pt BE + 25/10 TP/SL.
+        # 548k VM: confirm10 76t / 22.4% / −₹25k. AND-stack 0 trades.
+        # Retune: confirm10 + no-flip + S8 net + HTF agree-if-set + 25/10.
+        # Next tape: 2 LONG / 100% / +₹484.5 after charges. n=2 is not a go.
         name="desk",
         decide_every_s=2.0,
         confirm_s=10.0,
@@ -545,6 +544,67 @@ GATE_PACKS: dict[str, FlowGates] = {
         require_s19_agree=True,
         require_s16_agree=True,
         block_s20_against=True,
+        fee_cover=True,
+        min_edge_pts=5.0,
+        edge_safety=1.25,
+        tp_pts=25.0,
+        sl_pts=10.0,
+        book_drop_min_pct=0.25,
+        book_drop_persist=1,
+        protect_profit_pts=8.0,
+    ),
+    "c10_hold": FlowGates(
+        # confirm10 + no-flip only. Isolates hold_opp's no-flip on the 76-trade loop.
+        name="c10_hold",
+        decide_every_s=2.0,
+        confirm_s=10.0,
+        min_hold_s=60.0,
+        cooldown_s=30.0,
+        require_expanding=False,
+        persist_until_opposite=True,
+        allow_flip=False,
+    ),
+    "desk_nonet": FlowGates(
+        # desk without S8 NET sign. If this blows up, NET was the 2-trade filter.
+        name="desk_nonet",
+        decide_every_s=2.0,
+        confirm_s=10.0,
+        min_hold_s=60.0,
+        cooldown_s=30.0,
+        min_flow_imb=0.18,
+        min_price_pts=2.0,
+        require_expanding=False,
+        allow_flip=False,
+        persist_until_opposite=True,
+        require_net_sign=False,
+        require_s19_agree=True,
+        require_s16_agree=True,
+        block_s20_against=True,
+        fee_cover=True,
+        min_edge_pts=5.0,
+        edge_safety=1.25,
+        tp_pts=25.0,
+        sl_pts=10.0,
+        book_drop_min_pct=0.25,
+        book_drop_persist=1,
+        protect_profit_pts=8.0,
+    ),
+    "desk_nohtf": FlowGates(
+        # desk without S16/S19/S20 1m agree. If this stays ~2 trades, NET+fee is the cut.
+        name="desk_nohtf",
+        decide_every_s=2.0,
+        confirm_s=10.0,
+        min_hold_s=60.0,
+        cooldown_s=30.0,
+        min_flow_imb=0.18,
+        min_price_pts=2.0,
+        require_expanding=False,
+        allow_flip=False,
+        persist_until_opposite=True,
+        require_net_sign=True,
+        require_s19_agree=False,
+        require_s16_agree=False,
+        block_s20_against=False,
         fee_cover=True,
         min_edge_pts=5.0,
         edge_safety=1.25,
@@ -651,7 +711,16 @@ def manage_open(
     return None, streak
 
 
-GATE_PACK_ORDER = ("v1", "confirm10", "hold_opp", "quality", "desk")
+GATE_PACK_ORDER = (
+    "v1",
+    "confirm10",
+    "c10_hold",
+    "hold_opp",
+    "quality",
+    "desk",
+    "desk_nonet",
+    "desk_nohtf",
+)
 
 
 def classify_message(brain: FlowBrain, now: datetime, ltp: float, message: dict[str, Any]) -> FlowState | None:

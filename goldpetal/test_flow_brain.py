@@ -402,6 +402,9 @@ def test_desk_fewer_trades_higher_winrate_than_v1() -> None:
     assert "desk" in GATE_PACKS
     assert GATE_PACKS["desk"].require_s19_1m is False
     assert GATE_PACKS["desk"].allow_flip is False
+    assert GATE_PACKS["c10_hold"].allow_flip is False
+    assert GATE_PACKS["desk_nonet"].require_net_sign is False
+    assert GATE_PACKS["desk_nohtf"].require_s19_agree is False
     assert v1.n_trades > 1
     assert desk.n_trades < v1.n_trades
     assert desk.n_trades >= 1
