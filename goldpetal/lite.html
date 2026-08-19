@@ -323,9 +323,19 @@ async function loadMood() {
     const el = $("mood-line");
     if (!el) return;
     const mode = d.gate_on ? (d.flatten_on ? "GATE+FLATTEN" : "GATE ON") : "observe only";
-    el.textContent = (d.label || d.mood || "mood") + " · " + mode
+    el.textContent = (d.label || d.mood || "mood") +
+      (d.regime ? " · " + d.regime : "") +
+      " · " + mode
       + (d.reason ? " · " + d.reason : "")
       + " · not a paper book";
+    const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
+    if (fits.length) {
+      el.textContent += " · " + fits.map((f) => {
+        const w = Math.round(Number(f.weight || 0) * 100);
+        const st = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
+        return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
+      }).join(" · ");
+    }
   } catch (e) {
     const el = $("mood-line");
     if (el) el.textContent = "mood unavailable · " + String(e.message || e);
