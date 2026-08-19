@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v6: live LTP means running; history must not mark tape dead -->
+<!-- gp-header-v7: LTP from /api/desk; mood gate seeds from ticks so BREAKOUT cannot open new shorts -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -172,13 +172,13 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div class="ltp" id="ltp">—</div>
         <div class="meta" id="quote-meta">waiting for quote</div>
       </div>
-      <div class="mood-box" id="mood-box" title="One tape read for all books. MOOD_GATE is on: unfit books do not open. Not a paper book.">
+      <div class="mood-box" id="mood-box" title="One tape read for all books. MOOD_GATE is on: unfit books do not open. Held 1h shorts stay until the next hour close (MOOD_FLATTEN is off). S13/S4 ignore this tick window. Not a paper book.">
         <span class="pill" id="mood-pill">mood warming up</span>
         <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · observe only</div>
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v6</div>
+      <div class="clock" id="clock">IST — · v7</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -544,7 +544,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v6";
+    if (clock) clock.textContent = "IST " + ist + " · v7";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1465,6 +1465,16 @@ function renderGrid() {
 }
 function renderDesk(d) {
   lastDesk = d;
+  const sess = d.session || {};
+  if (sess.ltp != null && sess.ltp !== "") {
+    lastTape = Object.assign({}, lastTape, {
+      ltp: sess.ltp,
+      last_tick_at: sess.last_tick_at || lastTape.last_tick_at,
+      tape_live: (typeof sess.tape_live === "boolean") ? sess.tape_live : lastTape.tape_live,
+      tape_age_sec: (sess.tape_age_sec != null) ? sess.tape_age_sec : lastTape.tape_age_sec,
+    });
+    renderQuote(false);
+  }
   fillStratSelect();
   const live = d.live_desk || {};
   const bot = d.bot || {};

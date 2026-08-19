@@ -340,6 +340,15 @@ def run_once(
         f"mood_gate={mood_det.last.gate_on} mood_flatten={mood_det.last.flatten_on}",
         flush=True,
     )
+    try:
+        seeded_mood = mood_det.seed_from_db()
+        print(
+            f"Mood seed n={seeded_mood.n_samples} mood={seeded_mood.mood} "
+            f"regime={seeded_mood.regime} {seeded_mood.label}",
+            flush=True,
+        )
+    except Exception as exc:
+        logger.warning("mood seed skipped: %s", exc)
     print(
         f"S1       : netΔ 30-min [{'ON' if portfolio.is_enabled(strategy_s1.name) else 'OFF'}]",
         flush=True,
@@ -1310,359 +1319,31 @@ def run_once(
 
     def emit_s16_if_changed(now: datetime, message: dict) -> None:
         """S16: 1h close-vs-prev HH/LL or wick — FLIP at the finished hour close."""
-        strategy = strategy_s16
-        if not _strategy_active(strategy.name):
-            return
-        if latest["cmp"] is None:
-            return
-        prev = strategy.position
-        result = strategy.on_tick(now, float(latest["cmp"]), message)
-        skip = getattr(strategy, "last_skip", None)
-        if result is None and state["tick_count"] % 50 == 0:
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
-                f"pos={strategy.position} skip={skip} {strategy.bar_debug}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        planned = wick_record_actions(prev, result)
-        if not planned:
-            return
-        enter_action = planned[-1][0]
-        if enter_action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(
-                strategy.name, regime_det.last.regime, side=enter_action
-            )
-            if not ok_enter:
-                strategy.position = "flat"
-                strategy.entry_price = None
-                if hasattr(strategy, "release_decision_lock"):
-                    strategy.release_decision_lock()
-                planned = [p for p in planned if p[0] == "CLOSE"]
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                    f"ENTRY BLOCKED ({why}) — next 1h close | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                if not planned:
-                    return
-        if (
-            strategy.position != "flat"
-            and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and enter_action != "CLOSE"
-        ):
-            from strategy import SignalResult as _SR
-
-            strategy.position = "flat"
-            strategy.entry_price = None
-            result = _SR(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                prev_net_delta=result.prev_net_delta,
-                reason=f"regime_flatten {regime_det.last.regime}: {regime_det.last.reason}",
-            )
-            planned = [("CLOSE", "flat")]
-        fill_px = (
-            float(strategy.entry_price)
-            if strategy.entry_price is not None
-            else float(latest["cmp"])
-        )
-        for action, pos_after in planned:
-            reason = result.reason
-            if action == "CLOSE" and len(planned) > 1:
-                reason = f"FLIP close {prev} | {result.reason}"
-            _record_signal(
-                time_label=now.isoformat(timespec="seconds"),
-                action=action,
-                position_after=pos_after,
-                reason=reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                strategy=strategy.name,
-                cmp=fill_px,
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                f"regime={regime_det.last.regime} CMP={fill_px} "
-                f"=> {action} (pos={pos_after}) | {reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
+        emit_hour_book(strategy_s16, now, message)
 
     def emit_s18_if_changed(now: datetime, message: dict) -> None:
         """S18: 1h OHLC+vol+yesterday pack — FLIP at the finished hour close. Paper only."""
-        strategy = strategy_s18
-        if not _strategy_active(strategy.name):
-            return
-        if latest["cmp"] is None:
-            return
-        prev = strategy.position
-        result = strategy.on_tick(now, float(latest["cmp"]), message)
-        skip = getattr(strategy, "last_skip", None)
-        if result is None and state["tick_count"] % 50 == 0:
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
-                f"pos={strategy.position} skip={skip} {strategy.bar_debug}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        planned = wick_record_actions(prev, result)
-        if not planned:
-            return
-        enter_action = planned[-1][0]
-        if enter_action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(
-                strategy.name, regime_det.last.regime, side=enter_action
-            )
-            if not ok_enter:
-                strategy.position = "flat"
-                strategy.entry_price = None
-                if hasattr(strategy, "release_decision_lock"):
-                    strategy.release_decision_lock()
-                planned = [p for p in planned if p[0] == "CLOSE"]
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                    f"ENTRY BLOCKED ({why}) — next 1h close | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                if not planned:
-                    return
-        if (
-            strategy.position != "flat"
-            and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and enter_action != "CLOSE"
-        ):
-            from strategy import SignalResult as _SR
-
-            strategy.position = "flat"
-            strategy.entry_price = None
-            result = _SR(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                prev_net_delta=result.prev_net_delta,
-                reason=f"regime_flatten {regime_det.last.regime}: {result.reason}",
-            )
-            planned = [("CLOSE", "flat")]
-        fill_px = (
-            float(strategy.entry_price)
-            if strategy.entry_price is not None
-            else float(latest["cmp"])
-        )
-        for action, pos_after in planned:
-            reason = result.reason
-            if action == "CLOSE" and len(planned) > 1:
-                reason = f"FLIP close {prev} | {result.reason}"
-            _record_signal(
-                time_label=now.isoformat(timespec="seconds"),
-                action=action,
-                position_after=pos_after,
-                reason=reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                strategy=strategy.name,
-                cmp=fill_px,
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                f"regime={regime_det.last.regime} CMP={fill_px} "
-                f"=> {action} (pos={pos_after}) | {reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
+        emit_hour_book(strategy_s18, now, message)
 
     def emit_s19_if_changed(now: datetime, message: dict) -> None:
         """S19: 1h aligned body+close — FLIP at the finished hour close. Paper only."""
-        strategy = strategy_s19
-        if not _strategy_active(strategy.name):
-            return
-        if latest["cmp"] is None:
-            return
-        prev = strategy.position
-        result = strategy.on_tick(now, float(latest["cmp"]), message)
-        skip = getattr(strategy, "last_skip", None)
-        if result is None and state["tick_count"] % 50 == 0:
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
-                f"pos={strategy.position} skip={skip} {strategy.bar_debug}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        planned = wick_record_actions(prev, result)
-        if not planned:
-            return
-        enter_action = planned[-1][0]
-        if enter_action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(
-                strategy.name, regime_det.last.regime, side=enter_action
-            )
-            if not ok_enter:
-                strategy.position = "flat"
-                strategy.entry_price = None
-                if hasattr(strategy, "release_decision_lock"):
-                    strategy.release_decision_lock()
-                planned = [p for p in planned if p[0] == "CLOSE"]
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                    f"ENTRY BLOCKED ({why}) — next 1h close | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                if not planned:
-                    return
-        if (
-            strategy.position != "flat"
-            and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and enter_action != "CLOSE"
-        ):
-            from strategy import SignalResult as _SR
-
-            strategy.position = "flat"
-            strategy.entry_price = None
-            result = _SR(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                prev_net_delta=result.prev_net_delta,
-                reason=f"regime_flatten {regime_det.last.regime}: {result.reason}",
-            )
-            planned = [("CLOSE", "flat")]
-        fill_px = (
-            float(strategy.entry_price)
-            if strategy.entry_price is not None
-            else float(latest["cmp"])
-        )
-        for action, pos_after in planned:
-            reason = result.reason
-            if action == "CLOSE" and len(planned) > 1:
-                reason = f"FLIP close {prev} | {result.reason}"
-            _record_signal(
-                time_label=now.isoformat(timespec="seconds"),
-                action=action,
-                position_after=pos_after,
-                reason=reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                strategy=strategy.name,
-                cmp=fill_px,
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                f"regime={regime_det.last.regime} CMP={fill_px} "
-                f"=> {action} (pos={pos_after}) | {reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
+        emit_hour_book(strategy_s19, now, message)
 
     def emit_s20_if_changed(now: datetime, message: dict) -> None:
         """S20: 1h fade HL — buy bounced low / short rejected high. Paper only."""
-        strategy = strategy_s20
-        if not _strategy_active(strategy.name):
-            return
-        if latest["cmp"] is None:
-            return
-        prev = strategy.position
-        result = strategy.on_tick(now, float(latest["cmp"]), message)
-        skip = getattr(strategy, "last_skip", None)
-        if result is None and state["tick_count"] % 50 == 0:
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} idle "
-                f"pos={strategy.position} skip={skip} {strategy.bar_debug}"
-            )
-            print(line, flush=True)
-            logger.info(line)
-        planned = wick_record_actions(prev, result)
-        if not planned:
-            return
-        enter_action = planned[-1][0]
-        if enter_action in {"BUY", "SHORT"}:
-            ok_enter, why = _may_enter(
-                strategy.name, regime_det.last.regime, side=enter_action
-            )
-            if not ok_enter:
-                strategy.position = "flat"
-                strategy.entry_price = None
-                if hasattr(strategy, "release_decision_lock"):
-                    strategy.release_decision_lock()
-                planned = [p for p in planned if p[0] == "CLOSE"]
-                line = (
-                    f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                    f"ENTRY BLOCKED ({why}) — next 1h close | "
-                    f"{result.reason}"
-                )
-                print(line, flush=True)
-                logger.info(line)
-                if not planned:
-                    return
-        if (
-            strategy.position != "flat"
-            and portfolio.should_flatten(strategy.name, regime_det.last.regime)
-            and enter_action != "CLOSE"
-        ):
-            from strategy import SignalResult as _SR
-
-            strategy.position = "flat"
-            strategy.entry_price = None
-            result = _SR(
-                action="CLOSE",
-                position_after="flat",
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                prev_net_delta=result.prev_net_delta,
-                reason=f"regime_flatten {regime_det.last.regime}: {result.reason}",
-            )
-            planned = [("CLOSE", "flat")]
-        fill_px = (
-            float(strategy.entry_price)
-            if strategy.entry_price is not None
-            else float(latest["cmp"])
-        )
-        for action, pos_after in planned:
-            reason = result.reason
-            if action == "CLOSE" and len(planned) > 1:
-                reason = f"FLIP close {prev} | {result.reason}"
-            _record_signal(
-                time_label=now.isoformat(timespec="seconds"),
-                action=action,
-                position_after=pos_after,
-                reason=reason,
-                price_delta=result.price_delta,
-                net=result.net,
-                net_delta=result.net_delta,
-                strategy=strategy.name,
-                cmp=fill_px,
-            )
-            line = (
-                f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
-                f"regime={regime_det.last.regime} CMP={fill_px} "
-                f"=> {action} (pos={pos_after}) | {reason}"
-            )
-            print(line, flush=True)
-            logger.info(line)
+        emit_hour_book(strategy_s20, now, message)
 
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
-        """1h FLIP books (S18 family + AMISE slots). Mood gate applies via _may_enter."""
+        """1h FLIP books. Mood gate via _may_enter. Block does not flatten a hold."""
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
             return
+        if int(getattr(mood_det.last, "n_samples", 0) or 0) < 8:
+            return
         prev = strategy.position
+        prev_entry = getattr(strategy, "entry_price", None)
+        prev_date = getattr(strategy, "entry_date", None)
         result = strategy.on_tick(now, float(latest["cmp"]), message)
         skip = getattr(strategy, "last_skip", None)
         if result is None and state["tick_count"] % 50 == 0:
@@ -1681,11 +1362,12 @@ def run_once(
                 strategy.name, regime_det.last.regime, side=enter_action
             )
             if not ok_enter:
-                strategy.position = "flat"
-                strategy.entry_price = None
+                strategy.position = prev
+                strategy.entry_price = prev_entry
+                if hasattr(strategy, "entry_date"):
+                    strategy.entry_date = prev_date
                 if hasattr(strategy, "release_decision_lock"):
                     strategy.release_decision_lock()
-                planned = [p for p in planned if p[0] == "CLOSE"]
                 line = (
                     f"[{now.isoformat(timespec='seconds')}] {strategy.name} "
                     f"ENTRY BLOCKED ({why}) — next 1h close | "
@@ -1693,8 +1375,7 @@ def run_once(
                 )
                 print(line, flush=True)
                 logger.info(line)
-                if not planned:
-                    return
+                return
         if (
             strategy.position != "flat"
             and portfolio.should_flatten(strategy.name, regime_det.last.regime)

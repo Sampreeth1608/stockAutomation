@@ -199,6 +199,7 @@ def desk_payload() -> dict[str, Any]:
     sess["tape_live"] = bool(tape.get("tape_live"))
     sess["tape_age_sec"] = tape.get("tape_age_sec")
     sess["last_tick_at"] = tape.get("last_tick_at") or ""
+    sess["ltp"] = tape.get("ltp")
     sess["goldpetal_running"] = bool(sess.get("open")) and feed_on and bool(tape.get("tape_live"))
     return {
         "bot": bot,

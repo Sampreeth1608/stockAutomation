@@ -151,6 +151,73 @@ def test_streaming_detector() -> None:
     assert d.last.direction == "down"
 
 
+def test_warming_up_stands_down_and_blocks_shorts() -> None:
+    st = classify_samples([], gate=True)
+    assert st.mood == "UNKNOWN"
+    assert st.allow_short is False
+    assert st.allow_long is False
+    s18 = st.fit_for("S18_OHLC_VOL_HTF")
+    assert s18 is not None and s18["stance"] == "stand_down"
+    s19 = st.fit_for("S19_BODY_CLOSE_1H")
+    assert s19 is not None and s19["stance"] == "stand_down"
+    blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
+    assert blocked and "stand_down" in why
+    blocked19, _ = mood_blocks_entry(st, "SHORT", strategy="S19_BODY_CLOSE_1H")
+    assert blocked19 is True
+    skipped, skip_why = mood_blocks_entry(st, "SHORT", strategy="S13_HHHL_DAY")
+    assert skipped is False and skip_why == "mood_exempt"
+
+
+def test_rise_start_blocks_hour_book_shorts() -> None:
+    st = classify_samples(_rise(), gate=True)
+    assert st.mood == "RISE_START"
+    assert st.regime == "BREAKOUT"
+    for name in (
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+        "S16_HHHL_WICK_1H",
+        "S8_NET_ZIGZAG",
+    ):
+        blocked, why = mood_blocks_entry(st, "SHORT", strategy=name)
+        assert blocked, (name, why)
+        assert "prefers_long" in why or "block_short" in why, why
+
+
+def test_seed_from_db_blocks_short_on_rise() -> None:
+    import tempfile
+
+    from storage import init_db, save_tick
+
+    from market_mood import snapshot_mood
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        px, tbq, tsq = 15300.0, 5000.0, 8000.0
+        for i in range(24):
+            px += 4.0
+            tbq += 80.0
+            tsq -= 20.0
+            save_tick(
+                {
+                    "last_traded_price": int(px * 100),
+                    "total_buy_quantity": tbq,
+                    "total_sell_quantity": tsq,
+                },
+                symbol="GOLDPETAL",
+                token="1",
+                received_at=f"2026-08-19T11:{i:02d}:00+05:30",
+                db_path=db,
+            )
+        det = MoodDetector(window=80)
+        st = det.seed_from_db(db)
+        snap = snapshot_mood(db)
+        assert st.mood == snap.mood == "RISE_START"
+        assert st.n_samples >= 8
+        blocked, _why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
+        assert blocked is True
+
+
 def test_mood_gate_defaults_on() -> None:
     os.environ.pop("MOOD_GATE", None)
     from market_mood import mood_gate_on
@@ -188,6 +255,9 @@ def test_not_a_paper_book() -> None:
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert "mood_blocks_entry" in runner
     assert "MOOD_FLATTEN" in runner
+    assert "seed_from_db" in runner
+    assert "ENTRY BLOCKED" in runner
+    assert "strategy.position = prev" in runner
     assert "AMISE" not in ALL_STRATEGY_NAMES
     assert "MARKET_STATE" not in ALL_STRATEGY_NAMES
 
@@ -202,6 +272,9 @@ if __name__ == "__main__":
     test_burst_stands_down_intraday()
     test_quiet_and_burst()
     test_streaming_detector()
+    test_warming_up_stands_down_and_blocks_shorts()
+    test_rise_start_blocks_hour_book_shorts()
+    test_seed_from_db_blocks_short_on_rise()
     test_mood_gate_defaults_on()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")

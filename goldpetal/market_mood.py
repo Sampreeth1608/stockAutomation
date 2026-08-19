@@ -153,8 +153,8 @@ def _empty(reason: str = "warming_up") -> MoodState:
         range_pts=0.0,
         imb=0.0,
         imb_delta=0.0,
-        allow_long=True,
-        allow_short=True,
+        allow_long=False,
+        allow_short=False,
         flatten_long=False,
         flatten_short=False,
         label="mood warming up",
@@ -165,12 +165,12 @@ def _empty(reason: str = "warming_up") -> MoodState:
         regime="UNKNOWN",
         transition="warming up",
         confidence=0.0,
-        fits=_swing_only_fits("warming up"),
+        fits=_swing_only_fits("warming up", warming=True),
     )
     return st
 
 
-def _swing_only_fits(why: str) -> list[dict[str, Any]]:
+def _swing_only_fits(why: str, *, warming: bool = False) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for name in fit_books():
         if name in MOOD_EXEMPT_BOOKS:
@@ -181,6 +181,16 @@ def _swing_only_fits(why: str) -> list[dict[str, Any]]:
                     "stance": "hold_swing",
                     "preferred_side": "none",
                     "why": "daily swing — tick regime does not dump",
+                }
+            )
+        elif warming:
+            out.append(
+                {
+                    "strategy": name,
+                    "weight": 0.12,
+                    "stance": "stand_down",
+                    "preferred_side": "none",
+                    "why": why,
                 }
             )
         else:
@@ -460,11 +470,13 @@ def classify_samples(
     allow_short = True
     flatten_long = False
     flatten_short = False
-    if mood in {"FALL_START", "COOL"} and direction == "down":
+    if mood == "FALL_START" or (mood == "COOL" and direction == "down"):
         allow_long = False
+    if mood == "RISE_START" or (mood == "COOL" and direction == "up"):
+        allow_short = False
+    if mood in {"FALL_START", "COOL"} and direction == "down":
         flatten_long = True
     if mood in {"RISE_START", "COOL"} and direction == "up":
-        allow_short = False
         flatten_short = True
     if mood == "BURST":
         allow_long = False
@@ -590,12 +602,24 @@ class MoodDetector:
         self.last = classify_samples(list(self._buf), prev_regime=prev)
         return self.last
 
+    def seed_from_db(self, db: Path | None = None) -> MoodState:
+        """Match the desk snapshot so restart catch-up sees the live regime."""
+        samples = tick_mood_samples(db, limit=self.window)
+        self._buf.clear()
+        self._buf.extend(samples)
+        self.last = classify_samples(list(self._buf))
+        return self.last
 
-def snapshot_mood(db: Path | None = None, *, limit: int = 240) -> MoodState:
+
+def tick_mood_samples(
+    db: Path | None = None, *, limit: int = 80
+) -> list[tuple[float, float, float]]:
     from desk_data import resolve_desk_db
     from storage import connect, init_db
 
     path = db or resolve_desk_db()
+    if not Path(path).is_file():
+        return []
     init_db(path)
     with connect(path) as conn:
         rows = list(
@@ -606,14 +630,18 @@ def snapshot_mood(db: Path | None = None, *, limit: int = 240) -> MoodState:
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (int(limit),),
+                (max(8, int(limit)),),
             )
         )
     rows.reverse()
-    samples = [
+    return [
         (float(r["ltp"]), float(r["bp"] or 0.0), float(r["sp"] or 0.0))
         for r in rows
     ]
+
+
+def snapshot_mood(db: Path | None = None, *, limit: int = 240) -> MoodState:
+    samples = tick_mood_samples(db, limit=limit)
     return classify_samples(samples)
 
 
@@ -625,7 +653,8 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
     d["note"] = (
         "One market state for all books, plus a fit per book. "
         "Gate is on: a book that does not fit will not open. "
-        "MOOD_FLATTEN=true is required to dump opens. "
+        "Held 1h shorts stay until the next hour close unless MOOD_FLATTEN=true. "
+        "S13/S4 ignore this tick window. "
         "Does not ENABLE. Does not change S13/S16 formulas. "
         "Does not auto-replace a champion. Keep DRY_RUN=true."
     )
