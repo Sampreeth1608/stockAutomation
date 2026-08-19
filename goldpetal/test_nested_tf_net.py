@@ -21,6 +21,7 @@ from nested_tf_net import (
     simulate_all,
     simulate_nested,
     tf_label,
+    worksheet_rows,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -75,6 +76,37 @@ def test_inner_rungs_match_user_stack() -> None:
         "3h",
         "1d",
     ]
+    names = " ".join(worksheet_rows())
+    for need in (
+        "15m:vol:1m",
+        "15m:vol:3m",
+        "15m:vol:5m",
+        "30m:vol:15m",
+        "45m:vol:15m",
+        "1h:vol:5m",
+        "1h:vol:30m",
+        "1h15:vol:15m",
+        "2h:vol:1h",
+        "3h:vol:1h",
+        "1d:vol:5m",
+        "1d:vol:3h",
+    ):
+        assert need in names
+
+
+def test_per_inner_vol_rows_exist_for_every_parent() -> None:
+    bars = {m: [] for m in (1, 3, 5, 15, 30, 45, 60, 75, 120, 180, 1440)}
+    results = simulate_all(bars, modes=("vol",), per_inner=True, fees=False)
+    names = {r.tf for r in results}
+    assert "15m:vol" in names
+    assert "15m:vol:5m" in names
+    assert "30m:vol:15m" in names
+    assert "1h:vol:5m" in names
+    assert "1h15:vol:15m" in names
+    assert "2h:vol:1h" in names
+    assert "3h:vol:1h" in names
+    assert "1d:vol:5m" in names
+    assert "1d:vol:3h" in names
 
 
 def _window_bars() -> tuple[list[FlowBar], dict[int, list[FlowBar]]]:
@@ -533,6 +565,7 @@ def test_not_wired_to_paper_or_live() -> None:
 
 if __name__ == "__main__":
     test_inner_rungs_match_user_stack()
+    test_per_inner_vol_rows_exist_for_every_parent()
     test_15m_1015_has_15_1m_5_3m_3_5m()
     test_bullish_inner_net_goes_long_next_15m()
     test_bearish_inner_net_goes_short_next()

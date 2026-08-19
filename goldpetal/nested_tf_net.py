@@ -499,3 +499,13 @@ def inner_recipe_line(parent_min: int) -> str:
         n = expected_inner_count(parent_min, minutes)
         parts.append(f"{n}×{tf_label(minutes)}")
     return ", ".join(parts)
+
+
+def worksheet_rows(parents: Iterable[tuple[str, int]] = PARENTS) -> list[str]:
+    """Every parent×inner pair, same rule as 3×5m inside 15m."""
+    out: list[str] = []
+    for label, minutes in parents:
+        for im in inner_minutes_for(minutes):
+            n = expected_inner_count(minutes, im)
+            out.append(f"{label}:vol:{tf_label(im)}  ({n}×{tf_label(im)} → next {label})")
+    return out

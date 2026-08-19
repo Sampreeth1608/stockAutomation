@@ -26,7 +26,17 @@ from nested_tf_net import (
     inner_recipe_line,
     simulate_all,
     tf_label,
+    worksheet_rows,
 )
+
+
+def _is_per_inner(name: str) -> bool:
+    return str(name).count(":") == 2
+
+
+def _mode_of(name: str) -> str:
+    parts = str(name).split(":")
+    return parts[1] if len(parts) > 1 else ""
 
 
 def _print_table(results: list[Any], title: str) -> None:
@@ -105,6 +115,10 @@ def main() -> None:
     print("  15m volume total 1401; volume net −767 → next 15m DOWN")
     print("  Row 15m:vol:5m is that net. Row 15m:vol mixes 1m+3m+5m.")
     print()
+    print("Same worksheet on every parent (signed inner volume → next parent):")
+    for line in worksheet_rows():
+        print(f"  {line}")
+    print()
     print("Inner recipe (session-aligned from 09:00 IST):")
     for label, minutes in PARENTS:
         print(f"  {label:>4}  {inner_recipe_line(minutes)}")
@@ -151,9 +165,49 @@ def main() -> None:
         parents=parents,
         per_inner=not args.no_per_inner,
     )
+    vol_inner = [
+        r
+        for r in results
+        if _is_per_inner(r.tf) and _mode_of(r.tf) == "vol"
+    ]
+    body_inner = [
+        r
+        for r in results
+        if _is_per_inner(r.tf) and _mode_of(r.tf) == "sum"
+    ]
+    tbq_inner = [
+        r
+        for r in results
+        if _is_per_inner(r.tf) and _mode_of(r.tf) == "tbq"
+    ]
+    tsq_inner = [
+        r
+        for r in results
+        if _is_per_inner(r.tf) and _mode_of(r.tf) == "tsq"
+    ]
+    if vol_inner:
+        _print_table(
+            vol_inner,
+            "signed VOLUME net of inners → next parent  (your 1401 vs −767 rule, all TFs)",
+        )
+    if body_inner:
+        _print_table(
+            body_inner,
+            "signed BODY net of inners → next parent  (C−O, all TFs)",
+        )
+    if tbq_inner:
+        _print_table(
+            tbq_inner,
+            "signed TBQ net of inners → next parent  (same rule, all TFs)",
+        )
+    if tsq_inner:
+        _print_table(
+            tsq_inner,
+            "signed TSQ net of inners → next parent  (same rule, all TFs)",
+        )
     _print_table(
         results,
-        "nested inner net → next parent  (after charges, tax excluded)",
+        "all rows  (mixed + per-inner; after charges, tax excluded)",
     )
     write_outputs(results, args.out_dir)
     print(
