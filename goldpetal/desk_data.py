@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import math
+import sqlite3
+import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
 from live_orders import recent_orders
 from paper_report import summarize_trades
-from storage import DB_PATH, build_trades, connect, init_db, latest_signals, latest_ticks
+from storage import build_trades, latest_signals, latest_ticks, set_db_path
+import storage as _storage
 from charges import paper_lots
+
+IST = ZoneInfo("Asia/Kolkata")
+TAPE_LIVE_SEC = 30
 
 _TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": [], "error": "", "db": ""}
 _TRADE_LOCK = threading.Lock()
@@ -38,14 +46,47 @@ def json_safe(obj: Any) -> Any:
     return obj
 
 
+def bot_live_ticks_db() -> Path | None:
+    """ticks.db beside the running run_strategy.py / collect_ticks.py process."""
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-af", "run_strategy.py|collect_ticks.py"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    for line in (proc.stdout or "").splitlines():
+        if "pgrep" in line or "control_panel" in line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        cmd = parts[1]
+        if "run_strategy.py" not in cmd and "collect_ticks.py" not in cmd:
+            continue
+        try:
+            pid = int(parts[0])
+            cwd = Path(f"/proc/{pid}/cwd").resolve()
+        except (ValueError, OSError):
+            continue
+        db = cwd / "data" / "ticks.db"
+        if db.is_file():
+            return db
+    return None
+
+
 def desk_db_candidates() -> list[Path]:
     root = Path(__file__).resolve().parent
     home = Path.home()
     out: list[Path] = []
     seen: set[Path] = set()
+    bot_db = bot_live_ticks_db()
     for raw in (
+        *((bot_db,) if bot_db is not None else ()),
         root / "data" / "ticks.db",
-        DB_PATH,
+        _storage.DB_PATH,
         Path.cwd() / "data" / "ticks.db",
         home / "goldpetal-repo" / "goldpetal" / "data" / "ticks.db",
         home / "goldpetal" / "data" / "ticks.db",
@@ -61,18 +102,61 @@ def desk_db_candidates() -> list[Path]:
     return out
 
 
+_RESOLVE_CACHE: dict[str, Any] = {"at": 0.0, "path": ""}
+
+
+def _file_mtime(p: Path) -> float:
+    try:
+        return float(p.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _last_tick_epoch(p: Path) -> float:
+    """Newest tick clock in this file. 0 if unreadable / empty (mtime must not win)."""
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(str(p), timeout=1.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=1000")
+        row = conn.execute(
+            "SELECT received_at FROM ticks ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return 0.0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if not row:
+        return 0.0
+    ts = parse_tick_at(str(row["received_at"] or ""))
+    if ts is None:
+        return 0.0
+    return float(ts.timestamp())
+
+
 def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
-    """Pick the ticks.db the bot is actually writing (newest nonempty file)."""
+    """Live bot ticks.db if the runner is up; else the file with the freshest tick."""
     paths = list(candidates) if candidates is not None else desk_db_candidates()
+    use_cache = candidates is None
+    now = time.time()
+    bot_db = None if candidates is not None else bot_live_ticks_db()
+    if use_cache and bot_db is not None and bot_db.is_file():
+        _RESOLVE_CACHE.update({"at": now, "path": str(bot_db)})
+        return bot_db
+    if use_cache and _RESOLVE_CACHE.get("path") and now - float(_RESOLVE_CACHE.get("at") or 0) < 2.0:
+        cached = Path(str(_RESOLVE_CACHE["path"]))
+        if cached.is_file():
+            return cached
     existing = [p for p in paths if p.is_file()]
     if not existing:
-        return paths[0] if paths else DB_PATH
-
-    def mtime(p: Path) -> float:
-        try:
-            return float(p.stat().st_mtime)
-        except OSError:
-            return 0.0
+        chosen = paths[0] if paths else _storage.DB_PATH
+        if use_cache:
+            _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
+        return chosen
 
     nonempty: list[Path] = []
     for p in existing:
@@ -82,7 +166,67 @@ def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
         except OSError:
             continue
     pool = nonempty or existing
-    return max(pool, key=mtime)
+    chosen = max(pool, key=lambda p: (_last_tick_epoch(p), _file_mtime(p)))
+    if use_cache:
+        _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
+    return chosen
+
+
+def _same_db(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return str(a) == str(b)
+
+
+def quarantine_stale_ticks_dbs(
+    live: Path, *, candidates: list[Path] | None = None
+) -> list[str]:
+    """Rename leftover ticks.db files so the desk cannot read them. Live file stays."""
+    moved: list[str] = []
+    live_ep = _last_tick_epoch(live) if live.is_file() else 0.0
+    for raw in list(candidates) if candidates is not None else desk_db_candidates():
+        p = Path(raw)
+        if not p.is_file() or _same_db(p, live):
+            continue
+        other_ep = _last_tick_epoch(p)
+        if live_ep > 0 and other_ep > live_ep:
+            continue
+        dest = p.with_name(p.name + ".stale")
+        if dest.exists():
+            dest = p.with_name(p.name + f".stale-{int(time.time())}")
+        try:
+            p.rename(dest)
+            moved.append(f"{p} -> {dest}")
+        except OSError:
+            continue
+        for side in (p.with_name(p.name + "-wal"), p.with_name(p.name + "-shm")):
+            if not side.is_file():
+                continue
+            side_dest = Path(str(dest) + side.name[len(p.name) :])
+            try:
+                side.rename(side_dest)
+                moved.append(f"{side} -> {side_dest}")
+            except OSError:
+                pass
+    if moved:
+        _RESOLVE_CACHE.update({"at": 0.0, "path": ""})
+        reset_trade_cache()
+    return moved
+
+
+def bind_live_ticks_db(*, candidates: list[Path] | None = None) -> dict[str, Any]:
+    """Desk + storage use the bot db. Stale copies are renamed off the candidate list."""
+    live = resolve_desk_db(candidates=candidates)
+    moved = quarantine_stale_ticks_dbs(live, candidates=candidates)
+    set_db_path(live)
+    _RESOLVE_CACHE.update({"at": time.time(), "path": str(live)})
+    return {
+        "ok": True,
+        "live": str(live),
+        "bot_cwd_db": str(bot_live_ticks_db() or ""),
+        "quarantined": moved,
+    }
 
 
 def db_info(db_path: Path) -> dict[str, Any]:
@@ -99,14 +243,82 @@ def reset_trade_cache() -> None:
     _TRADE_CACHE.update({"at": 0.0, "rows": [], "error": "", "db": ""})
 
 
+def parse_tick_at(raw: str) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
+def tape_freshness(*, last_tick_at: str = "", now: datetime | None = None) -> dict[str, Any]:
+    """True when the last saved tick is within TAPE_LIVE_SEC of now (IST)."""
+    clock = now or datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=IST)
+    else:
+        clock = clock.astimezone(IST)
+    ts = parse_tick_at(last_tick_at)
+    if ts is None:
+        return {"last_tick_at": last_tick_at or "", "tape_age_sec": None, "tape_live": False}
+    age = max(0.0, (clock - ts).total_seconds())
+    return {
+        "last_tick_at": last_tick_at or "",
+        "tape_age_sec": round(age, 1),
+        "tape_live": age <= TAPE_LIVE_SEC,
+    }
+
+
+def tick_feed_stale(
+    *,
+    idle_sec: float,
+    market_open: bool,
+    got_tick: bool,
+    watchdog_sec: float = 45.0,
+    first_tick_grace_sec: float = 90.0,
+) -> bool:
+    """Hung Angel socket: process alive, no ticks during the Gold Petal session."""
+    if not market_open:
+        return False
+    limit = float(first_tick_grace_sec if not got_tick else watchdog_sec)
+    return float(idle_sec) >= limit
+
+
+def last_tick_snapshot(*, db_path: Path | None = None, now: datetime | None = None) -> dict[str, Any]:
+    db = db_path or resolve_desk_db()
+    try:
+        meta = _last_tick_meta(db)
+    except Exception:
+        meta = {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+    fresh = tape_freshness(last_tick_at=str(meta.get("last_tick_at") or ""), now=now)
+    return {**meta, **fresh}
+
+
 def _last_tick_meta(db_path: Path) -> dict[str, Any]:
-    init_db(db_path)
-    with connect(db_path) as conn:
+    empty = {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+    if not Path(db_path).is_file():
+        return empty
+    conn = sqlite3.connect(str(db_path), timeout=2.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=2000")
         row = conn.execute(
             "SELECT id, received_at, ltp FROM ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
+    except Exception:
+        return empty
+    finally:
+        conn.close()
     if not row:
-        return {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+        return empty
     return {
         "tick_count": int(row["id"] or 0),
         "ltp": row["ltp"],
@@ -130,6 +342,8 @@ def tape_payload(
         "tick_count": 0,
         "ltp": None,
         "last_tick_at": "",
+        "tape_live": False,
+        "tape_age_sec": None,
         "error": "",
     }
     try:
@@ -138,7 +352,7 @@ def tape_payload(
             row_to_dict(r) for r in latest_signals(limit=signal_limit, db_path=db)
         ]
         payload["live_orders"] = recent_orders(limit=40)
-        payload.update(_last_tick_meta(db))
+        payload.update(last_tick_snapshot(db_path=db))
     except Exception as exc:
         payload["error"] = str(exc)
     return payload

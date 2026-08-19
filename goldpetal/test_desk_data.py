@@ -12,6 +12,7 @@ from desk_data import (
     json_safe,
     reset_trade_cache,
     resolve_desk_db,
+    tape_freshness,
     tape_payload,
 )
 from storage import init_db, list_signals, save_signal, save_tick
@@ -69,6 +70,24 @@ def test_json_safe_strips_nan() -> None:
     json.dumps(payload, allow_nan=False)
 
 
+def test_resolve_desk_db_prefers_fresher_tick_not_mtime() -> None:
+    """Desk init_db bumps mtime on a stale file; live bot db must still win."""
+    import os
+
+    with tempfile.TemporaryDirectory() as td:
+        stale = Path(td) / "stale.db"
+        live = Path(td) / "live.db"
+        init_db(stale)
+        init_db(live)
+        _tick(live, day="2026-08-19")
+        time.sleep(0.05)
+        init_db(stale)
+        _tick(stale, day="2026-08-18")
+        os.utime(stale, None)
+        picked = resolve_desk_db(candidates=[stale, live])
+        assert picked == live
+
+
 def test_resolve_desk_db_prefers_newer_nonempty() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -82,6 +101,38 @@ def test_resolve_desk_db_prefers_newer_nonempty() -> None:
         assert picked == new
 
 
+def test_quarantine_stale_ticks_db() -> None:
+    from desk_data import quarantine_stale_ticks_dbs
+
+    with tempfile.TemporaryDirectory() as td:
+        live = Path(td) / "live.db"
+        stale = Path(td) / "stale.db"
+        init_db(live)
+        init_db(stale)
+        _tick(live, day="2026-08-19")
+        _tick(stale, day="2026-08-18")
+        moved = quarantine_stale_ticks_dbs(live, candidates=[live, stale])
+        assert live.is_file()
+        assert not stale.is_file()
+        assert (Path(td) / "stale.db.stale").is_file()
+        assert moved
+
+
+def test_set_db_path_redirects_package_default() -> None:
+    from storage import _PACKAGE_DB, _effective_db, set_db_path
+    import storage as st
+
+    with tempfile.TemporaryDirectory() as td:
+        live = Path(td) / "ticks.db"
+        init_db(live)
+        old = st.DB_PATH
+        try:
+            set_db_path(live)
+            assert _effective_db(_PACKAGE_DB) == live
+        finally:
+            set_db_path(old)
+
+
 def test_tape_payload_shows_ticks_without_trades() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Path(td) / "ticks.db"
@@ -93,6 +144,30 @@ def test_tape_payload_shows_ticks_without_trades() -> None:
         assert tape["tick_count"] >= 1
         assert tape["ltp"] is not None
         assert str(db) in tape["db_path"]
+        assert "tape_live" in tape
+
+
+def test_tape_freshness_frozen_quote_is_not_live() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    now = datetime(2026, 8, 19, 11, 23, 3, tzinfo=ist)
+    stale = tape_freshness(last_tick_at="2026-08-19T10:23:34+05:30", now=now)
+    assert stale["tape_live"] is False
+    assert stale["tape_age_sec"] > 3500
+    live = tape_freshness(last_tick_at="2026-08-19T11:22:50+05:30", now=now)
+    assert live["tape_live"] is True
+
+
+def test_tick_feed_stale_during_session() -> None:
+    from desk_data import tick_feed_stale
+
+    assert tick_feed_stale(idle_sec=3600, market_open=True, got_tick=True) is True
+    assert tick_feed_stale(idle_sec=10, market_open=True, got_tick=True) is False
+    assert tick_feed_stale(idle_sec=3600, market_open=False, got_tick=True) is False
+    assert tick_feed_stale(idle_sec=60, market_open=True, got_tick=False) is False
+    assert tick_feed_stale(idle_sec=90, market_open=True, got_tick=False) is True
 
 
 def test_history_payload_has_closed_trade_and_ticks() -> None:
@@ -142,7 +217,12 @@ def test_list_signals_limit_keeps_latest() -> None:
 if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
+    test_resolve_desk_db_prefers_fresher_tick_not_mtime()
+    test_quarantine_stale_ticks_db()
+    test_set_db_path_redirects_package_default()
     test_tape_payload_shows_ticks_without_trades()
+    test_tape_freshness_frozen_quote_is_not_live()
+    test_tick_feed_stale_during_session()
     test_history_payload_has_closed_trade_and_ticks()
     test_list_signals_limit_keeps_latest()
     print("ALL test_desk_data OK")

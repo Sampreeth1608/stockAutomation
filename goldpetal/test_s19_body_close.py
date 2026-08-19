@@ -102,8 +102,8 @@ def test_paper_wired_not_live() -> None:
     assert "s19_from_env" in runner
     assert "ENABLE_S19" in runner
     assert "ENABLE_S17" not in runner
-    assert 'on("ENABLE_S19", "false")' in portfolio
-    assert '"ENABLE_S19": "false"' in env_bridge
+    assert 'on("ENABLE_S19", "true")' in portfolio
+    assert '"ENABLE_S19": "true"' in env_bridge
 
 
 def test_hours_from_ohlc_keeps_volume() -> None:

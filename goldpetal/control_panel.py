@@ -184,14 +184,29 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
 def desk_payload() -> dict[str, Any]:
     """Light snapshot for the HTML desk (no trade rebuild, no tick count)."""
     from analytics.bot_ops import bot_status
+    from desk_data import last_tick_snapshot
+    from human_capture import session_status
 
     bot = dict(bot_status(lite=True))
     bot.pop("log_tail", None)
+    sess = dict(session_status())
+    try:
+        tape = last_tick_snapshot()
+    except Exception:
+        tape = {"tape_live": False, "tape_age_sec": None, "last_tick_at": ""}
+    feed = str(bot.get("feed_source") or "off")
+    feed_on = bool(bot.get("running")) or feed in {"bot", "collector"}
+    sess["tape_live"] = bool(tape.get("tape_live"))
+    sess["tape_age_sec"] = tape.get("tape_age_sec")
+    sess["last_tick_at"] = tape.get("last_tick_at") or ""
+    sess["ltp"] = tape.get("ltp")
+    sess["goldpetal_running"] = bool(sess.get("open")) and feed_on and bool(tape.get("tape_live"))
     return {
         "bot": bot,
         "live_desk": desk_snapshot(),
         "state": load_state().to_dict(),
         "capital": capital_snapshot(),
+        "session": sess,
     }
 
 
@@ -206,7 +221,8 @@ class ControlHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         if extra_headers:
             for k, v in extra_headers.items():
                 self.send_header(k, v)
@@ -815,6 +831,17 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
+    from desk_data import bind_live_ticks_db
+
+    bound = bind_live_ticks_db()
+    print(
+        f"ticks db {bound.get('live')}  "
+        f"bot={bound.get('bot_cwd_db') or 'not running'}  "
+        f"quarantined={len(bound.get('quarantined') or [])}",
+        flush=True,
+    )
+    for row in bound.get("quarantined") or []:
+        print(f"  stale {row}", flush=True)
     load_state()
     load_capital()
     try:
