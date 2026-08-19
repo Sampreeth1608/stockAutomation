@@ -169,6 +169,7 @@ def run_once(
     strategy_s4: HhhlDayOvernightStrategy,
     strategy_s5: MinEdgeStrategy,
     strategy_s6: MinEdgeStrategy,
+    strategy_fb,
     strategy_s8: NetZigzagStrategy,
     zigzag_rec,
     strategy_s9: StateS9Strategy,
@@ -395,6 +396,12 @@ def run_once(
         flush=True,
     )
     print(
+        f"FLOW     : ENABLE_FLOW_BRAIN paper tick LTP+TBQ+TSQ pressure "
+        f"[{'ON' if portfolio.is_enabled(strategy_fb.name) else 'OFF'}] "
+        f"{strategy_fb.status_line}",
+        flush=True,
+    )
+    print(
         f"S8       : ALIGN E/H/X models (default fat_tp_flip@50t) "
         f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
         f"{strategy_s8.status_line}",
@@ -499,6 +506,7 @@ def run_once(
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
         strategy_s6.name: strategy_s6,
+        strategy_fb.name: strategy_fb,
         strategy_s9.name: strategy_s9,
         strategy_s10.name: strategy_s10,
         strategy_s11.name: strategy_s11,
@@ -1345,6 +1353,58 @@ def run_once(
         """S20: 1h fade HL — buy bounced low / short rejected high. Paper only."""
         emit_hour_book(strategy_s20, now, message)
 
+    def emit_flow_brain_if_changed(now: datetime, message: dict) -> None:
+        """FLOW_BRAIN: tick LTP+TBQ+TSQ pressure. Always feed ticks. Paper only. Not S7_HOURLY."""
+        if not _strategy_active(strategy_fb.name):
+            return
+        if latest["cmp"] is None:
+            return
+        prev = strategy_fb.position
+        prev_entry = getattr(strategy_fb, "entry_price", None)
+        result = strategy_fb.on_tick(now, float(latest["cmp"]), message)
+        planned = wick_record_actions(prev, result)
+        if not planned:
+            return
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = _may_enter(
+                strategy_fb.name, regime_det.last.regime, side=enter_action
+            )
+            if not ok_enter:
+                strategy_fb.position = prev
+                strategy_fb.entry_price = prev_entry
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy_fb.name} "
+                    f"ENTRY BLOCKED ({why}) | {result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                return
+        fill_px = float(latest["cmp"])
+        for action, pos_after in planned:
+            reason = result.reason
+            if action == "CLOSE" and len(planned) > 1:
+                reason = f"FLIP close {prev} | {result.reason}"
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy_fb.name,
+                cmp=fill_px,
+            )
+        line = (
+            f"[{now.isoformat(timespec='seconds')}] {strategy_fb.name} "
+            f"regime={regime_det.last.regime} CMP={fill_px} "
+            f"=> {enter_action} (pos={strategy_fb.position}) | {result.reason}"
+        )
+        print(line, flush=True)
+        logger.info(line)
+
+
     def emit_you_if_pending(now: datetime, message: dict) -> None:
         """You-tab MARKET click. Not a paper book. Live only if already armed."""
         del message
@@ -1541,7 +1601,7 @@ def run_once(
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "
-                    f"s6={strategy_s6.position} s8={strategy_s8.position}"
+                    f"s6={strategy_s6.position} fb={strategy_fb.position} s8={strategy_s8.position}"
                     f"/{strategy_s8.bias} s9={strategy_s9.position}"
                     f"/{strategy_s9.last_label} s10={strategy_s10.position}"
                     f"/{strategy_s10.bias} s11={strategy_s11.position} "
@@ -1562,6 +1622,7 @@ def run_once(
                         "positions": {
                             "S4": strategy_s4.position,
                             "S5": strategy_s5.position,
+                            "FLOW": strategy_fb.position,
                             "S8": strategy_s8.position,
                             "S13": strategy_s13.position,
                             "S16": strategy_s16.position,
@@ -1588,6 +1649,8 @@ def run_once(
             emit_s5_if_changed(now, message)
             # S6: min 30 points expected move
             emit_s6_if_changed(now, message)
+            # FLOW_BRAIN: tick LTP+TBQ+TSQ pressure (paper only, ENABLE default false)
+            emit_flow_brain_if_changed(now, message)
             # S8: NET zigzag (unchanged)
             emit_s8_if_changed(now, message)
             # S9: 27-state bar machine
@@ -1859,6 +1922,10 @@ def main() -> None:
     strategy_s4 = _load("S4_OVERNIGHT", s4_swing_from_env)
     strategy_s5 = _load("S5_MINEDGE", minedge_from_env)
     strategy_s6 = _load("S6_MIN30", min30_from_env)
+    strategy_fb = _load(
+        "FLOW_BRAIN",
+        _optional_book("FLOW_BRAIN", "strategy_flow_brain", "flow_brain_from_env"),
+    )
     strategy_s8 = _load("S8_NET_ZIGZAG", net_zigzag_from_env)
     zigzag_rec = recorder_from_env()
     if portfolio.is_enabled("S8_NET_ZIGZAG") and hasattr(strategy_s8, "cfg"):
@@ -1893,6 +1960,7 @@ def main() -> None:
     print(f"S4_OVERNIGHT: {strategy_s4.status_line}", flush=True)
     print(f"S5_MINEDGE: {strategy_s5.status_line}", flush=True)
     print(f"S6_MIN30: {strategy_s6.status_line}", flush=True)
+    print(f"FLOW_BRAIN: {strategy_fb.status_line}", flush=True)
     print(f"S8_NET_ZIGZAG: {strategy_s8.status_line}", flush=True)
     print(f"S8 retune recorder: {zigzag_rec.db_path} enabled={zigzag_rec.enabled}", flush=True)
     print(f"S9_STATE30: {strategy_s9.status_line}", flush=True)
@@ -1909,7 +1977,7 @@ def main() -> None:
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
         f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
-        f"S20 off, AMISE S21+ after Lab Approve)",
+        f"FLOW_BRAIN off, S20 off, AMISE S21+ after Lab Approve)",
         flush=True,
     )
 
@@ -1930,6 +1998,7 @@ def main() -> None:
                 strategy_s4,
                 strategy_s5,
                 strategy_s6,
+                strategy_fb,
                 strategy_s8,
                 zigzag_rec,
                 strategy_s9,
@@ -1961,6 +2030,7 @@ def main() -> None:
             f"(s1={strategy_s1.position} s2={strategy_s2.position} "
             f"s3={strategy_s3.position} s4={strategy_s4.position} "
             f"s5={strategy_s5.position} s6={strategy_s6.position} "
+            f"fb={strategy_fb.position} "
             f"s8={strategy_s8.position}/{strategy_s8.bias} "
             f"s9={strategy_s9.position}/{strategy_s9.last_label} "
             f"s10={strategy_s10.position}/{strategy_s10.bias} "

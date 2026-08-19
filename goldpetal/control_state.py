@@ -206,6 +206,7 @@ CORE_STRATEGY_NAMES: tuple[str, ...] = (
     "S4_OVERNIGHT",
     "S5_MINEDGE",
     "S6_MIN30",
+    "FLOW_BRAIN",
     "S8_NET_ZIGZAG",
     "S9_STATE30",
     "S10_LEGACY30",

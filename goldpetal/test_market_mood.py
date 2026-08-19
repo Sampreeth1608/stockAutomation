@@ -107,6 +107,8 @@ def test_quiet_stands_down_trend_books() -> None:
     assert s8 is not None and s8["stance"] == "stand_down"
     s16 = st.fit_for("S16_HHHL_WICK_1H")
     assert s16 is not None and s16["stance"] == "stand_down"
+    fb = st.fit_for("FLOW_BRAIN")
+    assert fb is not None and fb["stance"] == "stand_down"
     s13 = st.fit_for("S13_HHHL_DAY")
     assert s13 is not None and s13["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
