@@ -33,10 +33,10 @@ def _print_table(results: list[Any], title: str) -> None:
     print()
     print(f"=== {title} ===")
     print(
-        f"{'row':>16}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
+        f"{'row':>18}  {'bars':>6}  {'trades':>6}  {'L/S':>7}  "
         f"{'ac_win%':>7}  {'gross₹':>10}  {'fees₹':>10}  {'after_charges₹':>14}"
     )
-    print("-" * 98)
+    print("-" * 102)
     ranked = sorted(
         results,
         key=lambda r: (after_charges_inr(r), r.n_trades),
@@ -47,7 +47,7 @@ def _print_table(results: list[Any], title: str) -> None:
         wr = 100.0 * after_charges_win_rate(r)
         ac = after_charges_inr(r)
         print(
-            f"{r.tf:>16}  {r.n_bars:6d}  {n:6d}  "
+            f"{r.tf:>18}  {r.n_bars:6d}  {n:6d}  "
             f"{r.n_long:3d}/{r.n_short:<3d}  {wr:6.1f}%  "
             f"{r.gross_pnl_inr:10.1f}  {r.fees_inr:10.1f}  {ac:14.1f}"
         )
@@ -73,6 +73,11 @@ def main() -> None:
         help="comma list of parents e.g. 15m,1h,1d (default: all)",
     )
     ap.add_argument(
+        "--no-per-inner",
+        action="store_true",
+        help="only mixed-inner rows (15m:vol), skip 15m:vol:5m style rows",
+    )
+    ap.add_argument(
         "--out-dir",
         type=Path,
         default=Path("data/backtests/nested_tf_net"),
@@ -85,13 +90,20 @@ def main() -> None:
     print(LAB_NAME)
     print(FORMULA)
     print()
-    print("Modes (same inner stack; positive → long next parent, negative → short):")
+    print("Modes (positive → long next parent, negative → short):")
     print("  sum   body net  Σ(close − open)")
-    print("  vol   volume net  Σ(volume × sign(close − open))  = up-volume − down-volume")
-    print("  tbq   TBQ net     Σ(TBQ × sign(close − open))")
-    print("  tsq   TSQ net     Σ(TSQ × sign(close − open))")
+    print("  vol   volume net  red inner volume is negative, green is positive")
+    print("  tbq   TBQ net     same sign stack")
+    print("  tsq   TSQ net     same sign stack")
     print("  book  snapshot    Σ(TBQ − TSQ) at each inner close")
     print("  vote  count       green inner bars − red inner bars")
+    print()
+    print("Example — 3×5m inside one 15m:")
+    print("  1st 5m  C−O=−8  vol=595  signed vol=−595")
+    print("  2nd 5m  C−O=−5  vol=489  signed vol=−489")
+    print("  3rd 5m  C−O=+5  vol=317  signed vol=+317")
+    print("  15m volume total 1401; volume net −767 → next 15m DOWN")
+    print("  Row 15m:vol:5m is that net. Row 15m:vol mixes 1m+3m+5m.")
     print()
     print("Inner recipe (session-aligned from 09:00 IST):")
     for label, minutes in PARENTS:
@@ -137,6 +149,7 @@ def main() -> None:
         fees=bool(args.fees),
         modes=modes,
         parents=parents,
+        per_inner=not args.no_per_inner,
     )
     _print_table(
         results,

@@ -5,13 +5,12 @@ Example: 15m 10:15–10:30 holds 15×1m, 5×3m, 3×5m. If that net is
 positive the *next* 15m is bullish (long); if negative, bearish (short).
 Same stack on 30m, 45m, 1h, 1h15, 2h, 3h, and the session day.
 
-Inner net (each inner bar, all inner TFs):
-  body = sum(close − open)
-  vol  = volume net = sum(volume × sign(close − open))  (up-vol − down-vol)
-  tbq  = TBQ net    = sum(TBQ × sign(close − open))     (same stack)
-  tsq  = TSQ net    = sum(TSQ × sign(close − open))     (same stack)
-  book = sum(TBQ − TSQ) at each inner close
-  vote = green bars minus red bars
+Inner net of one inner TF at a time (example: 3×5m inside one 15m):
+  each inner: signed volume = +volume if C>O, −volume if C<O
+  volume total = 595+489+317 = 1401
+  volume net   = −595−489+317 = −767 → next 15m DOWN
+  body net     = (C−O) of those same inners
+``15m:vol:5m`` is that 5m-inside-15m net. ``15m:vol`` still mixes 1m+3m+5m.
 
 ``sum`` uses body. ``vol`` / ``tbq`` / ``tsq`` use that signed net.
 ``book`` uses TBQ−TSQ. ``vote`` uses the green/red count.
@@ -56,15 +55,16 @@ PARENTS: tuple[tuple[str, int], ...] = (
 
 INNER_MINUTES: tuple[int, ...] = (1, 3, 5, 15, 30, 45, 60, 75, 120, 180)
 MODES: tuple[str, ...] = ("sum", "vol", "tbq", "tsq", "book", "vote")
+PER_INNER_MODES: frozenset[str] = frozenset({"sum", "vol", "tbq", "tsq"})
 SESSION_MINUTES = 14 * 60 + 30  # 09:00–23:30 IST
 
 FORMULA = (
-    "Finished parent bar → net inner candles that tile it "
-    "(15m: 15×1m + 5×3m + 3×5m; same idea on 30m/45m/1h/1h15/2h/3h/day) "
-    "→ body (C−O), volume net (up-vol − down-vol), TBQ net, TSQ net, "
-    "TBQ−TSQ book. Positive net = bullish next parent (long); negative = "
-    "bearish (short); zero skip. Fill at parent close, exit next parent "
-    "close. Intraday no overnight. Research only."
+    "Finished parent bar → net inner candles that tile it. "
+    "15m example: 3×5m insides. Unsigned volume may be 1401 while "
+    "signed volume net is −595 −489 +317 = −767 → next 15m DOWN. "
+    "Same stack on 30m/45m/1h/1h15/2h/3h/day, also 1m/3m insides, "
+    "body (C−O), TBQ, TSQ. Positive net = long next parent; negative = "
+    "short. Fill at parent close, exit next close. Research only."
 )
 
 
@@ -230,6 +230,7 @@ class NestedNet:
     counts: dict[str, int]
     body_net: float
     vol_net: float
+    vol_total: float
     tbq_net: float
     tsq_net: float
     book_net: float
@@ -270,6 +271,7 @@ def score_nested(
 ) -> NestedNet:
     body = 0.0
     vol_net = 0.0
+    vol_total = 0.0
     tbq_net = 0.0
     tsq_net = 0.0
     book = 0.0
@@ -288,6 +290,7 @@ def score_nested(
             tsq = float(b.tsq or 0.0)
             bk = tbq - tsq
             body += bd
+            vol_total += vol
             vol_net += s * vol
             tbq_net += s * tbq
             tsq_net += s * tsq
@@ -315,6 +318,7 @@ def score_nested(
         counts=counts,
         body_net=body,
         vol_net=vol_net,
+        vol_total=vol_total,
         tbq_net=tbq_net,
         tsq_net=tsq_net,
         book_net=book,
@@ -324,8 +328,12 @@ def score_nested(
     )
 
 
-def enough_inners(parent_min: int, collected: Mapping[str, list[FlowBar]]) -> bool:
-    specs = inner_minutes_for(parent_min)
+def enough_inners(
+    parent_min: int,
+    collected: Mapping[str, list[FlowBar]],
+    inner_min: int | None = None,
+) -> bool:
+    specs = (int(inner_min),) if inner_min is not None else inner_minutes_for(parent_min)
     if not specs:
         return False
     for minutes in specs:
@@ -336,6 +344,16 @@ def enough_inners(parent_min: int, collected: Mapping[str, list[FlowBar]]) -> bo
         if exp > 0 and len(bars) < max(1, (exp + 1) // 2):
             return False
     return True
+
+
+def collected_for_inner(
+    collected: Mapping[str, list[FlowBar]],
+    inner_min: int | None,
+) -> dict[str, list[FlowBar]]:
+    if inner_min is None:
+        return dict(collected)
+    lab = tf_label(inner_min)
+    return {lab: list(collected.get(lab, []))}
 
 
 def next_is_adjacent(parent: FlowBar, nxt: FlowBar, parent_min: int) -> bool:
@@ -353,6 +371,7 @@ def simulate_nested(
     tf: str,
     parent_min: int,
     mode: str = "sum",
+    inner_min: int | None = None,
     lots: float = 1.0,
     fees: bool = False,
     charge_cfg: ChargeConfig | None = None,
@@ -362,7 +381,10 @@ def simulate_nested(
     trades: list[Trade] = []
     label = tf_label(parent_min) if not tf else tf
     mode_key = str(mode or "sum").strip().lower()
-    row_name = f"{label}:{mode_key}"
+    if inner_min is None:
+        row_name = f"{label}:{mode_key}"
+    else:
+        row_name = f"{label}:{mode_key}:{tf_label(inner_min)}"
 
     for i in range(len(parents) - 1):
         parent = parents[i]
@@ -370,7 +392,8 @@ def simulate_nested(
         if not next_is_adjacent(parent, nxt, parent_min):
             continue
         collected = collect_inners(parent, parent_min, bars_by_min)
-        if not enough_inners(parent_min, collected):
+        collected = collected_for_inner(collected, inner_min)
+        if not enough_inners(parent_min, collected, inner_min=inner_min):
             continue
         net = score_nested(
             collected,
@@ -421,6 +444,7 @@ def simulate_all(
     fees: bool = False,
     modes: Iterable[str] = MODES,
     parents: Iterable[tuple[str, int]] = PARENTS,
+    per_inner: bool = True,
     charge_cfg: ChargeConfig | None = None,
 ) -> list[Any]:
     cfg = charge_cfg or make_charge_cfg(fees=fees, lots=lots)
@@ -436,11 +460,27 @@ def simulate_all(
                     tf=label,
                     parent_min=minutes,
                     mode=mode,
+                    inner_min=None,
                     lots=lots,
                     fees=fees,
                     charge_cfg=cfg,
                 )
             )
+            if per_inner and str(mode).strip().lower() in PER_INNER_MODES:
+                for im in inner_minutes_for(minutes):
+                    results.append(
+                        simulate_nested(
+                            series,
+                            bars_by_min,
+                            tf=label,
+                            parent_min=minutes,
+                            mode=mode,
+                            inner_min=im,
+                            lots=lots,
+                            fees=fees,
+                            charge_cfg=cfg,
+                        )
+                    )
     return results
 
 

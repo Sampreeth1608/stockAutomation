@@ -399,6 +399,44 @@ def test_volume_tbq_tsq_use_same_signed_net() -> None:
     assert tsq.bias == -1
 
 
+def test_5m_inside_15m_volume_net_is_down() -> None:
+    """User worksheet: 1401 total volume, signed net −767 → next 15m down."""
+    fives = [
+        _b("2026-08-10 10:15:00", 15483.0, 15483.0, 15475.0, 15475.0, vol=595.0),
+        _b("2026-08-10 10:20:00", 15477.0, 15477.0, 15472.0, 15472.0, vol=489.0),
+        _b("2026-08-10 10:25:00", 15472.0, 15477.0, 15470.0, 15477.0, vol=317.0),
+    ]
+    parents = [
+        _b("2026-08-10 10:15:00", 15483.0, 15483.0, 15470.0, 15477.0, vol=1401.0),
+        _b("2026-08-10 10:30:00", 15477.0, 15477.0, 15400.0, 15410.0, vol=800.0),
+    ]
+    net = score_nested(
+        {"5m": fives},
+        parent="15m",
+        parent_time=parents[0].time,
+        mode="vol",
+    )
+    assert net.vol_total == 1401.0
+    assert net.vol_net == -767.0
+    assert net.body_net == -8.0
+    assert net.bias == -1
+    assert net.side == "SHORT"
+    r = simulate_nested(
+        parents,
+        {5: fives, 15: parents},
+        tf="15m",
+        parent_min=15,
+        mode="vol",
+        inner_min=5,
+        fees=False,
+    )
+    assert r.n_trades == 1
+    assert r.tf == "15m:vol:5m"
+    assert r.trades[0].side == "SHORT"
+    assert r.trades[0].entry_px == 15477.0
+    assert r.trades[0].exit_px == 15410.0
+
+
 def test_ticks_build_session_aligned_15m_inners() -> None:
     start = datetime(2026, 8, 10, 10, 15, 0, tzinfo=IST)
     rows = []
@@ -470,6 +508,7 @@ def test_simulate_all_modes_on_synthetic_parents() -> None:
         fees=False,
         modes=("sum", "vol", "tbq", "tsq"),
         parents=(("15m", 15),),
+        per_inner=False,
     )
     assert len(results) == 4
     for r in results:
@@ -501,6 +540,7 @@ if __name__ == "__main__":
     test_zero_net_skips()
     test_vote_uses_inner_direction_count()
     test_volume_tbq_tsq_use_same_signed_net()
+    test_5m_inside_15m_volume_net_is_down()
     test_ticks_build_session_aligned_15m_inners()
     test_simulate_all_modes_on_synthetic_parents()
     test_not_wired_to_paper_or_live()
