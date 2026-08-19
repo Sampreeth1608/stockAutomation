@@ -188,7 +188,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "8501" in sh
     assert "streamlit run analytics/app.py" not in sh.split("pkill")[0]
     assert "Save strategies" in sh
-    assert "gp-header-v5" in sh
+    assert "gp-header-v" in sh
+    assert "old station.html on disk" not in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
     assert "Save strategies" in station
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")

@@ -36,11 +36,11 @@ wait_up() {
     code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" || true)"
     if [[ "${code:-}" == "200" ]] && grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
       echo "station UP  pid=$(pgrep -f 'control_panel.py' | head -n1)  $PWD  http://127.0.0.1:${PORT}/"
-      if grep -q "gp-header-v5" /tmp/gp-desk-get.html 2>/dev/null; then
-        echo "header gp-header-v5 (light polls; clock shows · v5)"
+      hdr="$(grep -o 'gp-header-v[0-9]*' /tmp/gp-desk-get.html 2>/dev/null | head -n1 || true)"
+      if [[ -n "${hdr:-}" ]]; then
+        echo "header ${hdr} (clock must show · ${hdr#gp-header-} after Cmd+Shift+R)"
       else
-        echo "WARNING: old station.html on disk — Chrome will still say running at 10:23"
-        echo "copy origin/cursor/desk-session-header-a4b2 goldpetal/station.html then --restart"
+        echo "WARNING: station.html has no gp-header-v* — copy station.html from origin/cursor/desk-session-header-a4b2"
       fi
       return 0
     fi
