@@ -39,7 +39,7 @@ from desk_data import (
     tape_payload,
 )
 from control_state import (
-    SLIM_PAPER_STRATEGIES,
+    paper_strategy_names,
     entries_blocked,
     is_live_mode_allowed,
     load_state,
@@ -139,7 +139,7 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
     closed_sorted = list(reversed(closed))[:trade_limit]
     trades = closed_sorted + open_t[: max(0, trade_limit - len(closed_sorted))]
 
-    strat_names = SLIM_PAPER_STRATEGIES
+    strat_names = paper_strategy_names()
     scoreboard = [summarize_trades(all_trades, s) for s in strat_names]
     scoreboard.append(summarize_trades(all_trades, None))
 

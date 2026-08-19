@@ -5,7 +5,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from amise_slots import AMISE_ENABLE, AMISE_SLOT_BOOKS
+from amise_slots import (
+    AMISE_ENABLE,
+    AMISE_SLOT_BOOKS,
+    FIRST_AMISE_N,
+    allocated_slots,
+    enable_key,
+    is_amise_slot,
+    slot_name,
+)
 from regime import Regime
 
 
@@ -99,10 +107,19 @@ class PortfolioConfig:
     def is_enabled(self, strategy: str) -> bool:
         return strategy in self.enabled
 
+    def _in_regime(self, strategy: str, regime: Regime) -> bool:
+        allowed = self.allowed.get(regime, set())
+        if strategy in allowed:
+            return True
+        # S25+ share S21's regime map so a new named slot can trade the same day.
+        if is_amise_slot(strategy):
+            return "S21_AMISE" in allowed
+        return False
+
     def allows(self, strategy: str, regime: Regime) -> bool:
         if strategy not in self.enabled:
             return False
-        return strategy in self.allowed.get(regime, set())
+        return self._in_regime(strategy, regime)
 
     def should_flatten(self, strategy: str, regime: Regime) -> bool:
         """True if open position should be closed because regime no longer fits."""
@@ -110,15 +127,17 @@ class PortfolioConfig:
             return False
         if strategy not in self.enabled:
             return True
-        return strategy not in self.allowed.get(regime, set())
+        return not self._in_regime(strategy, regime)
 
 
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S5, S8, S11, S13, S16, S18 (S4 off — Angel/ticks daily
-    swing pick was S13). S18 stays paper-only. S19/S20 are wired but ENABLE
-    defaults off until an after-charges tape beats S16/S18 (1h) or S13 (1d).
+    Slim paper default: S5, S8, S13, S16, S18 (S4 off — Angel/ticks daily
+    swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
+    false) — AMISE factory holds the research ML. S18 stays paper-only.
+    S19/S20 are wired but ENABLE defaults off until an after-charges tape
+    beats S16/S18 (1h) or S13 (1d). AMISE slots S21+ ENABLE after Lab Approve.
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -142,7 +161,7 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S9_STATE30")
     if on("ENABLE_S10", "false"):
         enabled.add("S10_LEGACY30")
-    if on("ENABLE_S11", "true"):
+    if on("ENABLE_S11", "false"):
         enabled.add("S11_DISCOVERED")
     if on("ENABLE_S13", "true"):
         enabled.add("S13_HHHL_DAY")
@@ -157,12 +176,25 @@ def portfolio_from_env() -> PortfolioConfig:
     for name, key in AMISE_ENABLE.items():
         if on(key, "false"):
             enabled.add(name)
+    for name in allocated_slots():
+        if on(enable_key(name), "false"):
+            enabled.add(name)
+    for key, val in list(os.environ.items()):
+        if not key.startswith("ENABLE_S") or key in AMISE_ENABLE.values():
+            continue
+        try:
+            n = int(key.replace("ENABLE_S", "", 1))
+        except ValueError:
+            continue
+        if n < FIRST_AMISE_N:
+            continue
+        if str(val or "").strip().lower() in {"1", "true", "yes", "y"}:
+            enabled.add(slot_name(n))
 
     if not enabled:
         enabled = {
             "S5_MINEDGE",
             "S8_NET_ZIGZAG",
-            "S11_DISCOVERED",
             "S13_HHHL_DAY",
             "S16_HHHL_WICK_1H",
             "S18_OHLC_VOL_HTF",

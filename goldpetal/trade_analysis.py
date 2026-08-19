@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from charges import ignore_fees_enabled
-from control_state import SLIM_PAPER_STRATEGIES
+from control_state import paper_strategy_names
 
 SHORT = {
     "S4_OVERNIGHT": "S4 HHHL swing",
@@ -203,7 +203,7 @@ def analyze_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     overall = _summarize(trades, strategy=None)
     overall["label"] = "All books"
     overall["guess"] = "Every enabled book guesses on the same ticks. Their fees add; their edges do not."
-    books = [_summarize(trades, strategy=name) for name in SLIM_PAPER_STRATEGIES]
+    books = [_summarize(trades, strategy=name) for name in paper_strategy_names()]
     closed = [t for t in trades if str(t.get("status", "")).startswith("CLOSED")]
     return {
         "overall": overall,

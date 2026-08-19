@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from amise_slots import is_amise_slot
+
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
 HEALTH_PATH = ROOT / "data" / "control" / "bot_health.json"
@@ -162,18 +164,14 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
     strategy_obj.position = open_pos.side  # type: ignore[assignment]
     if hasattr(strategy_obj, "entry_price"):
         strategy_obj.entry_price = open_pos.entry_price
-    if name in {
+    if (name in {
         "S4_OVERNIGHT",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
-        "S21_AMISE",
-        "S22_AMISE",
-        "S23_AMISE",
-        "S24_AMISE",
-    } and open_pos.time_label:
+    } or is_amise_slot(name)) and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
     if hasattr(strategy_obj, "_save_state"):
@@ -226,7 +224,7 @@ def startup_reconcile(
             continue
         obj = strategies.get(name)
 
-        if name in SESSION_CLOSE_OVERNIGHT and str(open_pos.time_label)[:10] != today:
+        if (name in SESSION_CLOSE_OVERNIGHT or is_amise_slot(name)) and str(open_pos.time_label)[:10] != today:
             closes.append(
                 {
                     "strategy": name,
@@ -319,7 +317,7 @@ def intraday_open_for_flatten(strategies: dict[str, Any]) -> list[dict[str, Any]
     """Which loaded intraday strategies currently hold a RAM position."""
     out: list[dict[str, Any]] = []
     for name, obj in strategies.items():
-        if name not in INTRADAY_RESTORE:
+        if name not in INTRADAY_RESTORE and not is_amise_slot(name):
             continue
         if name in EOD_FLATTEN_SKIP:
             continue

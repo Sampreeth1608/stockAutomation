@@ -77,6 +77,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
     assert "S10_LEGACY30" not in p.enabled
+    assert "S11_DISCOVERED" not in p.enabled
 
     os.environ["ENABLE_S8"] = "true"
     p8 = portfolio_from_env()
@@ -92,6 +93,14 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     p10 = portfolio_from_env()
     assert "S10_LEGACY30" not in p10.enabled
     os.environ.pop("ENABLE_S10", None)
+
+    os.environ["ENABLE_S25"] = "true"
+    p25 = portfolio_from_env()
+    assert "S25_AMISE" in p25.enabled
+    assert p25.allows("S25_AMISE", "TREND")
+    assert p25.allows("S25_AMISE", "CHOP")
+    assert not p25.allows("S25_AMISE", "WIDE_SPREAD")
+    os.environ.pop("ENABLE_S25", None)
 
 
 if __name__ == "__main__":

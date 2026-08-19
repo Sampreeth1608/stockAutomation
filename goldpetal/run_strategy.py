@@ -33,7 +33,6 @@ from position_safety import (
 from strategy import BarSnapshot, PressureStrategy
 from strategy_balance import BalanceStrategy, balance_from_env
 from strategy_ml import MLStrategy, ml_strategy_from_env
-from strategy_discovered import DiscoveredStrategy, discovered_from_env
 from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
 from strategy_net_zigzag import (
     NetZigzagStrategy,
@@ -173,7 +172,7 @@ def run_once(
     strategy_s9: StateS9Strategy,
     s9_journal,
     strategy_s10: NetZigzagStrategy,
-    strategy_s11: DiscoveredStrategy,
+    strategy_s11,
     strategy_s13: HhhlDayOvernightStrategy,
     strategy_s16: S16HhhlWickStrategy,
     strategy_s18: S18OhlcVolHtfStrategy,
@@ -2050,7 +2049,12 @@ def main() -> None:
     strategy_s9 = _load("S9_STATE30", state_s9_from_env)
     s9_journal = s9_journal_from_env()
     strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
-    strategy_s11 = _load("S11_DISCOVERED", discovered_from_env)
+    def _s11_factory():
+        from strategy_discovered import discovered_from_env
+
+        return discovered_from_env()
+
+    strategy_s11 = _load("S11_DISCOVERED", _s11_factory)
     strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
     strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
     strategy_s18 = _load("S18_OHLC_VOL_HTF", s18_from_env)
@@ -2081,8 +2085,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S11/S13/S16/S18 — S4 off, S18 paper only, "
-        f"S19/S20 off, S21–S24 AMISE after Lab Approve)",
+        f"(slim default S5/S8/S13/S16/S18 — S4 off, S11 off, S18 paper only, "
+        f"S19/S20 off, AMISE S21+ after Lab Approve)",
         flush=True,
     )
 

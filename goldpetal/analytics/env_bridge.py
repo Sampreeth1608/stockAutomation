@@ -9,7 +9,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = ROOT / ".env"
 
-# Only these keys may be written from the desk.
+_AMISE_ENABLE_RE = re.compile(r"^ENABLE_S(\d+)$")
+
+
+def env_key_allowed(key: str) -> bool:
+    if key in ALLOWED_ENV_KEYS:
+        return True
+    m = _AMISE_ENABLE_RE.fullmatch(str(key or "").strip())
+    return bool(m and int(m.group(1)) >= 21)
+
+
+# Only these keys may be written from the desk (plus ENABLE_S{n} for n≥21).
 ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
     {
         "ENABLE_S1",
@@ -113,7 +123,7 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S8": "true",
     "ENABLE_S9": "false",
     "ENABLE_S10": "false",
-    "ENABLE_S11": "true",
+    "ENABLE_S11": "false",
     "ENABLE_S12": "false",
     "ENABLE_S13": "true",
     "ENABLE_S14": "false",
@@ -241,7 +251,7 @@ def write_env_updates(
     clean: dict[str, str] = {}
     for key, raw in updates.items():
         key = str(key).strip()
-        if key not in ALLOWED_ENV_KEYS:
+        if not env_key_allowed(key):
             skipped[key] = "not_whitelisted"
             continue
         try:
@@ -276,10 +286,19 @@ def write_env_updates(
     return {"ok": True, "applied": applied, "skipped": skipped, "path": str(path)}
 
 
+def strategy_enable_map() -> dict[str, str]:
+    from amise_slots import amise_books_now, enable_key
+
+    out = dict(STRATEGY_ENABLE)
+    for name in amise_books_now():
+        out[name] = enable_key(name)
+    return out
+
+
 def strategy_enable_snapshot(path: Path | None = None) -> dict[str, bool]:
     env = read_env(path)
     out: dict[str, bool] = {}
-    for name, key in STRATEGY_ENABLE.items():
+    for name, key in strategy_enable_map().items():
         default = SLIM_ENABLE_DEFAULTS.get(key, "false")
         raw = env.get(key, default).strip().lower()
         out[name] = raw in {"1", "true", "yes", "y"}
@@ -293,11 +312,12 @@ def apply_strategy_enables(
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Set ENABLE_* true for names in enabled_names; false for other known slim strategies."""
-    known = known or list(STRATEGY_ENABLE.keys())
+    mapping = strategy_enable_map()
+    known = known or list(mapping.keys())
     want = {str(n).strip() for n in enabled_names}
     updates: dict[str, str] = {}
     for name in known:
-        key = STRATEGY_ENABLE.get(name)
+        key = mapping.get(name)
         if not key:
             continue
         updates[key] = "true" if name in want else "false"

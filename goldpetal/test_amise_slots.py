@@ -1,4 +1,4 @@
-"""AMISE S21–S24 slots — paper after Lab Approve. Never DRY_RUN=false."""
+"""AMISE S21, S22, … slots — paper after Lab Approve. Never DRY_RUN=false."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ from pathlib import Path
 
 from amise_slots import (
     AMISE_SLOT_BOOKS,
+    amise_books_now,
     assign_slot,
     load_slot_genome,
     next_free_slot,
     slot_env_patch,
 )
-from control_state import ALL_STRATEGY_NAMES, SLIM_PAPER_STRATEGIES
+from analytics.env_bridge import write_env_updates
+from control_state import ALL_STRATEGY_NAMES, SLIM_PAPER_STRATEGIES, paper_strategy_names
 from live_readiness import PAPER_ONLY_BOOKS
 from strategy_amise import AmiseSlotStrategy, vol_to_flow
-from strategy_genome import StrategyGenome
+from strategy_genome import StrategyGenome, env_patch_is_safe
 from s18_ohlc_vol_htf import VolBar
 
 
@@ -47,18 +49,34 @@ def test_assign_fills_s21_then_s22(tmp_path: Path) -> None:
     assert same["slot"] == "S21_AMISE"
 
 
-def test_slots_full(tmp_path: Path) -> None:
+def test_fifth_assign_is_s25(tmp_path: Path) -> None:
     for i, name in enumerate(("a", "b", "c", "d")):
         assign_slot(
-            StrategyGenome(name=name, entry_long=("hh",), entry_short=("lh",), params={"rvol": 1.0 + i}).normalized(),
+            StrategyGenome(
+                name=name, entry_long=("hh",), entry_short=("lh",), params={"rvol": 1.0 + i}
+            ).normalized(),
             folder=tmp_path,
         )
-    assert next_free_slot(tmp_path) is None
+    assert next_free_slot(tmp_path) == "S25_AMISE"
     extra = assign_slot(
         StrategyGenome(name="e", entry_long=("vol_up",), entry_short=("vol_up",)).normalized(),
         folder=tmp_path,
     )
-    assert extra["ok"] is False
+    assert extra["ok"] is True
+    assert extra["slot"] == "S25_AMISE"
+    assert extra["env_patch"] == {"DRY_RUN": "true", "ENABLE_S25": "true"}
+    assert extra["env_patch"]["DRY_RUN"] != "false"
+    assert "S25_AMISE" in amise_books_now(tmp_path)
+
+
+def test_enable_s25_is_whitelisted(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text("DRY_RUN=true\n", encoding="utf-8")
+    assert env_patch_is_safe({"DRY_RUN": "true", "ENABLE_S25": "true"})
+    res = write_env_updates({"DRY_RUN": "true", "ENABLE_S25": "true"}, path=env)
+    assert res["ok"] is True
+    assert res["applied"]["ENABLE_S25"] == "true"
+    assert "DRY_RUN=false" not in env.read_text(encoding="utf-8")
 
 
 def test_slot_strategy_flips_on_hh_hl() -> None:
@@ -79,7 +97,10 @@ def test_names_are_paper_slots_not_the_engine() -> None:
         assert name in SLIM_PAPER_STRATEGIES
         assert name not in PAPER_ONLY_BOOKS
     assert "AMISE" not in ALL_STRATEGY_NAMES
+    assert "S11_DISCOVERED" not in SLIM_PAPER_STRATEGIES
+    assert "S11_DISCOVERED" not in paper_strategy_names()
     assert slot_env_patch("S21_AMISE") == {"DRY_RUN": "true", "ENABLE_S21": "true"}
+    assert slot_env_patch("S25_AMISE") == {"DRY_RUN": "true", "ENABLE_S25": "true"}
 
 
 if __name__ == "__main__":
@@ -89,8 +110,10 @@ if __name__ == "__main__":
     td = P(tempfile.mkdtemp())
     (td / "a").mkdir()
     (td / "b").mkdir()
+    (td / "c").mkdir()
     test_assign_fills_s21_then_s22(td / "a")
-    test_slots_full(td / "b")
+    test_fifth_assign_is_s25(td / "b")
+    test_enable_s25_is_whitelisted(td / "c")
     test_slot_strategy_flips_on_hh_hl()
     test_names_are_paper_slots_not_the_engine()
     print("ALL test_amise_slots OK")

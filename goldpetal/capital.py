@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from control_state import CONTROL_DIR, SLIM_PAPER_STRATEGIES, ensure_control_dir
+from control_state import CONTROL_DIR, ensure_control_dir, paper_strategy_names
 
 IST = ZoneInfo("Asia/Kolkata")
 CAPITAL_PATH = CONTROL_DIR / "capital.json"
@@ -30,7 +30,6 @@ DEFAULT_STRATEGIES = (
     "S8_NET_ZIGZAG",
     "S9_STATE30",
     "S10_LEGACY30",
-    "S11_DISCOVERED",
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
@@ -42,7 +41,7 @@ DEFAULT_STRATEGIES = (
     "S24_AMISE",
 )
 
-_HUNDRED_LOT = set(SLIM_PAPER_STRATEGIES)
+_HUNDRED_LOT = set(paper_strategy_names())
 
 
 @dataclass
@@ -136,11 +135,12 @@ def load_capital(path: Path | None = None) -> CapitalPlan:
     from charges import paper_lots
 
     paper_n = int(paper_lots())
-    for name in DEFAULT_STRATEGIES:
+    hundred = set(paper_strategy_names())
+    for name in list(DEFAULT_STRATEGIES) + list(hundred):
         if name not in strategies:
-            lots = paper_n if name in _HUNDRED_LOT else 10
+            lots = paper_n if name in hundred else 10
             strategies[name] = StrategyBudget(strategy=name, max_lots=lots)
-    need_total = paper_n * len(_HUNDRED_LOT)
+    need_total = paper_n * max(len(hundred), 1)
     return CapitalPlan(
         total_capital_inr=float(raw.get("total_capital_inr", 500_000)),
         cash_reserve_pct=float(raw.get("cash_reserve_pct", 20)),

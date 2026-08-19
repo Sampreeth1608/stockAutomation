@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from control_state import SLIM_PAPER_STRATEGIES
+from control_state import paper_strategy_names
 from live_orders import recent_orders
 from paper_report import summarize_trades
 from storage import DB_PATH, build_trades, connect, init_db, latest_signals, latest_ticks
@@ -166,7 +166,7 @@ def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, An
         rows: list[dict[str, Any]] = []
         err = ""
         try:
-            for name in SLIM_PAPER_STRATEGIES:
+            for name in paper_strategy_names():
                 rows.extend(
                     build_trades(
                         strategy=name,
@@ -206,7 +206,7 @@ def history_payload(
     closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
     closed_rev = list(reversed(closed))
     all_rows, _ = all_trades_cached(db_path=db)
-    scoreboard = [summarize_trades(all_rows, s) for s in SLIM_PAPER_STRATEGIES]
+    scoreboard = [summarize_trades(all_rows, s) for s in paper_strategy_names()]
     scoreboard.append(summarize_trades(all_rows, None))
     err = str(tape.get("error") or "") or trade_err
     return {
