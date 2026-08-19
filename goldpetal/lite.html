@@ -105,13 +105,19 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
-    <h2>You — capture</h2>
-    <p class="hint">Records what you would do, only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Does not trade. Full tape: <a href="/#you">station You tab</a>.</p>
+    <h2>You — trade</h2>
+    <p class="hint">Records LTP/TBQ/TSQ/ticks/candles while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Angel only after Paper off + LIVE + Unlock + type YOU. Learn on the <a href="/#you">station You tab</a>.</p>
     <p class="hint" id="you-ltp-line">LTP …</p>
+    <p class="hint" id="you-live-line">Angel: recorded only</p>
     <div class="row">
+      <label class="chk"><input type="checkbox" id="you-send"/> Send to Angel</label>
+      <input id="you-word" placeholder="YOU" autocomplete="off"/>
+    </div>
+    <div class="row" style="margin-top:.35rem">
       <button class="btn ok" type="button" data-you="buy">BUY</button>
       <button class="btn danger" type="button" data-you="short">SHORT</button>
       <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
+      <button class="btn" type="button" data-you="close">CLOSE</button>
     </div>
     <p class="hint" id="you-sum">No captures yet.</p>
     <p class="flash" id="flash-you"></p>
@@ -302,24 +308,45 @@ loadLab().catch(() => {});
 async function loadYou() {
   const d = await api("/api/capture");
   const s = (d && d.summary) || {};
-  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—") +
-    ((d.session && d.session.open) ? " · session open" : " · market closed");
+  const live = (d && d.live) || {};
+  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—")
+    + ((d.session && d.session.open) ? " · session open" : " · market closed")
+    + (d.tape_now && d.tape_now.tbq != null ? (" · TBQ " + d.tape_now.tbq + " TSQ " + d.tape_now.tsq) : "");
   $("you-sum").textContent = "captured " + (s.n || 0) +
     " · BUY " + (s.n_buy || 0) +
     " · SHORT " + (s.n_short || 0) +
     " · NO TRADE " + (s.n_no_trade || 0);
+  const liveLine = $("you-live-line");
+  if (liveLine) liveLine.textContent = live.why || "Angel: recorded only";
   const open = !!(d.session && d.session.open);
-  document.querySelectorAll("button[data-you]").forEach((b) => { b.disabled = !open; });
+  const pos = String(((live.position) || {}).side || "flat");
+  document.querySelectorAll("button[data-you]").forEach((b) => {
+    if (b.dataset.you === "close") b.disabled = !(open || pos !== "flat");
+    else b.disabled = !open;
+  });
   if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
 }
 document.querySelectorAll("button[data-you]").forEach((btn) => {
   btn.onclick = () => {
+    const send = !!( $("you-send") && $("you-send").checked ) && btn.dataset.you !== "no_trade";
+    const word = ($("you-word") && $("you-word").value) || "";
+    if (send && !window.confirm("Send this " + btn.dataset.you.toUpperCase() + " to Angel? Real money.")) return;
     api("/api/capture", {
       method: "POST",
-      body: JSON.stringify({ action: btn.dataset.you, confidence: 3 }),
+      body: JSON.stringify({
+        action: btn.dataset.you,
+        confidence: 3,
+        place: send,
+        confirm: send ? word.trim() : "",
+      }),
     }).then((res) => {
       const rec = res.recorded || {};
-      flash("flash-you", "Recorded " + String(rec.action || btn.dataset.you).toUpperCase() + " — not an order");
+      let msg = "Recorded " + String(rec.action || btn.dataset.you).toUpperCase();
+      if (rec.places_order) msg += " — queued for Angel";
+      else if (send) msg += " — not sent (" + ((rec.order && rec.order.error) || "blocked") + ")";
+      else msg += " — tape stored";
+      flash("flash-you", msg);
+      if ($("you-word")) $("you-word").value = "";
       return loadYou();
     }).catch((e) => flash("flash-you", String(e.message || e), true));
   };

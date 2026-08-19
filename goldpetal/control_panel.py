@@ -771,9 +771,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/capture":
-                from human_capture import capture_desk_payload, record_human
+                from human_capture import capture_desk_payload, mark_example_order, record_human
+                from you_trade import map_capture_action, request_you_order
 
                 action = str(data.get("action") or "")
+                place = bool(data.get("place") or data.get("send") or data.get("live"))
+                confirm = str(data.get("confirm") or "")
                 try:
                     rec = record_human(
                         action,
@@ -783,16 +786,45 @@ class ControlHandler(BaseHTTPRequestHandler):
                 except (ValueError, RuntimeError) as exc:
                     self._send(*_json_bytes({"error": str(exc)}, 400))
                     return
+                order = None
+                mapped = map_capture_action(rec.get("action") or action)
+                if place and mapped:
+                    order = request_you_order(
+                        mapped,
+                        confirm=confirm,
+                        example_id=str(rec.get("id") or ""),
+                        entry_px=rec.get("entry_px"),
+                    )
+                    rec["places_order"] = bool(order.get("queued"))
+                    rec["live"] = bool(order.get("queued"))
+                    rec["order"] = order
+                    mark_example_order(
+                        str(rec.get("id") or ""),
+                        queued=bool(order.get("queued")),
+                        order=order,
+                    )
                 payload = capture_desk_payload(settle=False)
                 payload["recorded"] = {
                     "id": rec.get("id"),
                     "action": rec.get("action"),
                     "entry_px": rec.get("entry_px"),
                     "vs_coded": rec.get("vs_coded"),
-                    "places_order": False,
+                    "places_order": bool(rec.get("places_order")),
+                    "live": bool(rec.get("live")),
+                    "order": order,
                 }
                 payload["ok"] = True
                 self._send(*_json_bytes(payload))
+                return
+            if path == "/api/capture/learn":
+                from you_learn import propose_mimic
+
+                try:
+                    res = propose_mimic()
+                except (ValueError, RuntimeError) as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/s11/activate":
                 pack_path = str(data.get("pack_path") or data.get("path") or "")

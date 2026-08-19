@@ -94,6 +94,29 @@ def test_gates_block_without_approval(monkeypatch_paths=None) -> None:
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
+def test_you_manual_live_without_book_approval() -> None:
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "false"
+        os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
+        os.environ["LIVE_LOTS"] = "1"
+        os.environ["LIVE_MAX_LOTS"] = "1"
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(True, path=state)
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        you = broker.place_signal(strategy="YOU_MANUAL", action="BUY", price=7200.0)
+        assert you.ok and you.transaction == "BUY"
+        assert api.calls
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
 def test_place_buy_short_close_reverse() -> None:
     td, state, orders = _tmp_state()
     try:
@@ -181,6 +204,8 @@ if __name__ == "__main__":
     print("ok null_broker")
     test_gates_block_without_approval()
     print("ok gates_block")
+    test_you_manual_live_without_book_approval()
+    print("ok you_manual")
     test_place_buy_short_close_reverse()
     print("ok place_flow")
     test_seed_positions_and_emergency()

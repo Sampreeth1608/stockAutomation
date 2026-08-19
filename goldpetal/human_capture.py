@@ -1,9 +1,10 @@
-"""Human trade capture — record what YOU see. Does not trade.
+"""Human trade capture — record what YOU see, then optionally send live.
 
 Manual entries use timing, context, and a skip filter that coded rules
-do not have. Press BUY / SHORT / NO TRADE; we store the tape around the
-click (recent 1m candles, 30s ticks, book, OI, VWAP) and fill 5s–5m
-outcomes from ticks. No ENABLE. No Angel. Learning ≠ deploy.
+do not have. Press BUY / SHORT / NO TRADE / CLOSE; we store the tape
+around the click (1m/3m/5m/15m/1h candles, recent ticks with LTP/TBQ/TSQ,
+book, OI, VWAP) and fill 5s–5m outcomes from ticks. Angel only if live is
+already armed and you type YOU — see you_trade. No ENABLE. Learning ≠ deploy.
 """
 
 from __future__ import annotations
@@ -28,10 +29,18 @@ CAPTURE_DIR = ROOT / "data" / "human_capture"
 EXAMPLES_PATH = CAPTURE_DIR / "examples.json"
 HORIZONS_SEC: tuple[int, ...] = (5, 10, 30, 60, 300)
 HORIZON_LABEL = {5: "5s", 10: "10s", 30: "30s", 60: "1m", 300: "5m"}
-LOOKBACK_1M = 50
-LOOKBACK_TICK_SEC = 30
-RECENT_TICK_LIMIT = 12000
-ACTIONS = frozenset({"buy", "short", "no_trade"})
+LOOKBACK_1M = 80
+LOOKBACK_TICK_SEC = 120
+RECENT_TICK_LIMIT = 16000
+TICK_WINDOW = 120
+ACTIONS = frozenset({"buy", "short", "no_trade", "close"})
+TF_PACK: tuple[tuple[str, int, int], ...] = (
+    ("1m", 1, 80),
+    ("3m", 3, 40),
+    ("5m", 5, 40),
+    ("15m", 15, 20),
+    ("1h", 60, 16),
+)
 DEFAULT_MARKET_OPEN = "09:00"
 DEFAULT_MARKET_CLOSE = "23:30"
 
@@ -193,7 +202,7 @@ def recent_tick_rows(db: Path, *, limit: int = RECENT_TICK_LIMIT) -> list[Any]:
         rows = list(
             conn.execute(
                 """
-                SELECT received_at, ltp, volume, bp, sp, raw_json
+                SELECT id, received_at, ltp, volume, bp, sp, raw_json
                 FROM ticks
                 WHERE ltp IS NOT NULL
                 ORDER BY id DESC
@@ -286,12 +295,21 @@ def snapshot_market(
     last_ts = _parse_ts(str(last["received_at"] or "")) if last is not None else None
     clock = last_ts or now
 
-    cutoff_30 = clock - timedelta(seconds=LOOKBACK_TICK_SEC)
-    ticks_30: list[dict[str, Any]] = []
+    cutoff_ticks = clock - timedelta(seconds=LOOKBACK_TICK_SEC)
+    ticks_win: list[dict[str, Any]] = []
     ltp_then: float | None = None
+    first_id = None
+    last_id = None
     for row in rows:
+        try:
+            rid = int(row["id"])
+        except (KeyError, TypeError, ValueError):
+            rid = None
+        if rid is not None:
+            first_id = rid if first_id is None else min(first_id, rid)
+            last_id = rid if last_id is None else max(last_id, rid)
         ts = _parse_ts(str(row["received_at"] or ""))
-        if ts is None or ts < cutoff_30:
+        if ts is None or ts < cutoff_ticks:
             continue
         m = tick_metrics(row)
         px = m.get("ltp")
@@ -299,48 +317,71 @@ def snapshot_market(
             continue
         if ltp_then is None:
             ltp_then = float(px)
-        ticks_30.append(
+        ticks_win.append(
             {
+                "id": rid,
                 "time": m.get("time"),
                 "ltp": round(float(px), 2),
                 "tbq": round(float(m.get("tbq") or 0), 2),
                 "tsq": round(float(m.get("tsq") or 0), 2),
+                "ltq": round(float(m.get("ltq") or 0), 2),
                 "oi": round(float(m.get("oi") or 0), 2) if m.get("oi") is not None else None,
+                "volume": round(float(m.get("volume") or 0), 2) if m.get("volume") is not None else None,
+                "buy5": round(float(m.get("buy5_sum") or 0), 2),
+                "sell5": round(float(m.get("sell5_sum") or 0), 2),
             }
         )
     vel = None
     if ltp is not None and ltp_then is not None and LOOKBACK_TICK_SEC:
         vel = (float(ltp) - float(ltp_then)) / float(LOOKBACK_TICK_SEC)
 
-    bars_1m = build_rich_bars(rows, "1m", 1) if rows else []
-    bars_5m = build_rich_bars(rows, "5m", 5) if rows else []
-    bars_1h = build_rich_bars(rows, "1h", 60) if rows else []
-    use_1m = bars_1m[-LOOKBACK_1M:]
-    packed_1m = [
-        _bar_row(b, use_1m[i - 1] if i else (bars_1m[-LOOKBACK_1M - 1] if len(bars_1m) > LOOKBACK_1M else None))
-        for i, b in enumerate(use_1m)
-    ]
-    last_1m = packed_1m[-1] if packed_1m else None
-    last_1h = None
+    packed_tf: dict[str, list[dict[str, Any]]] = {}
+    last_tf: dict[str, Any] = {}
+    for tf_name, minutes, keep in TF_PACK:
+        bars = build_rich_bars(rows, tf_name, minutes) if rows else []
+        use = bars[-keep:]
+        packed = []
+        for i, b in enumerate(use):
+            prev = use[i - 1] if i else (bars[-keep - 1] if len(bars) > keep else None)
+            packed.append(_bar_row(b, prev))
+        packed_tf[tf_name] = packed
+        last_tf[tf_name] = packed[-1] if packed else None
+    packed_1m = packed_tf.get("1m") or []
+    last_1m = last_tf.get("1m")
+    last_1h = last_tf.get("1h")
     prev_1h = None
-    if bars_1h:
-        prev = bars_1h[-2] if len(bars_1h) >= 2 else None
-        last_1h = _bar_row(bars_1h[-1], prev)
-        if prev is not None and len(bars_1h) >= 3:
-            prev_1h = _bar_row(prev, bars_1h[-3])
-        elif prev is not None:
-            prev_1h = _bar_row(prev, None)
+    bars_1h_pack = packed_tf.get("1h") or []
+    if len(bars_1h_pack) >= 2:
+        prev_1h = bars_1h_pack[-2]
+    use_1m = packed_1m
+    last_tick_full = None
+    if last is not None:
+        lm = tick_metrics(last)
+        last_tick_full = {
+            "id": int(last["id"]) if "id" in last.keys() and last["id"] is not None else None,
+            "time": lm.get("time"),
+            "ltp": round(float(lm["ltp"]), 2) if lm.get("ltp") is not None else None,
+            "tbq": round(float(lm.get("tbq") or 0), 2),
+            "tsq": round(float(lm.get("tsq") or 0), 2),
+            "ltq": round(float(lm.get("ltq") or 0), 2),
+            "oi": lm.get("oi"),
+            "volume": lm.get("volume"),
+            "buy5": round(float(lm.get("buy5_sum") or 0), 2),
+            "sell5": round(float(lm.get("sell5_sum") or 0), 2),
+            "net": round(float(lm.get("net") or 0), 2),
+            "imb_pct": lm.get("imb_pct"),
+        }
 
     session_vwap = None
-    if use_1m:
+    if packed_1m:
         tpv = 0.0
         vol = 0.0
-        day = use_1m[-1].time[:10]
-        for b in use_1m:
-            if b.time[:10] != day:
+        day = str(packed_1m[-1].get("time") or "")[:10]
+        for b in packed_1m:
+            if str(b.get("time") or "")[:10] != day:
                 continue
-            typical = (float(b.high) + float(b.low) + float(b.close)) / 3.0
-            bar_vol = _bar_vol(b)
+            typical = (float(b["high"]) + float(b["low"]) + float(b["close"])) / 3.0
+            bar_vol = float(b.get("volume") or 0)
             tpv += typical * bar_vol
             vol += bar_vol
         if vol > 1e-12:
@@ -379,6 +420,13 @@ def snapshot_market(
         "n_ticks_loaded": len(rows),
         "ltp": round(float(ltp), 2) if ltp is not None else None,
         "last_tick_at": str(last["received_at"]) if last is not None else "",
+        "last_tick": last_tick_full,
+        "tape_span": {
+            "first_id": first_id,
+            "last_id": last_id,
+            "n": len(rows),
+            "window_sec": LOOKBACK_TICK_SEC,
+        },
         "tbq": tbq,
         "tsq": tsq,
         "imb": round(signed_imb(tbq, tsq), 4),
@@ -399,11 +447,19 @@ def snapshot_market(
             if ltp is not None and session_vwap is not None
             else None
         ),
-        "ticks_30s": ticks_30[-80:],
-        "n_ticks_30s": len(ticks_30),
-        "bars_1m": packed_1m,
+        "ticks": ticks_win[-TICK_WINDOW:],
+        "ticks_30s": ticks_win[-80:],
+        "n_ticks_30s": len(ticks_win),
+        "n_ticks_window": len(ticks_win),
+        "bars_1m": packed_tf.get("1m") or [],
+        "bars_3m": packed_tf.get("3m") or [],
+        "bars_5m": packed_tf.get("5m") or [],
+        "bars_15m": packed_tf.get("15m") or [],
+        "bars_1h": packed_tf.get("1h") or [],
         "last_1m": last_1m,
-        "last_5m": _bar_row(bars_5m[-1], bars_5m[-2] if len(bars_5m) >= 2 else None) if bars_5m else None,
+        "last_3m": last_tf.get("3m"),
+        "last_5m": last_tf.get("5m"),
+        "last_15m": last_tf.get("15m"),
         "last_1h": last_1h,
         "prev_1h": prev_1h,
         "coded": {
@@ -427,6 +483,8 @@ def _vs_coded(action: str, coded: dict[str, Any]) -> str:
         if coded.get("h1_short"):
             return "you_short_rule_also"
         return "you_short_rule_missed"
+    if action == "close":
+        return "you_closed"
     if coded.get("h1_long") or coded.get("h1_short"):
         return "you_skipped_rule_would_take"
     return "you_skipped_rule_quiet"
@@ -441,6 +499,8 @@ def record_human(
     path: Path = EXAMPLES_PATH,
     snapshot: dict[str, Any] | None = None,
     now: datetime | None = None,
+    places_order: bool = False,
+    live: bool = False,
 ) -> dict[str, Any]:
     act = str(action or "").strip().lower().replace("-", "_").replace(" ", "_")
     if act in {"long", "buy_long"}:
@@ -449,10 +509,12 @@ def record_human(
         act = "short"
     if act in {"skip", "pass", "hold", "no"}:
         act = "no_trade"
+    if act in {"flatten", "square", "exit"}:
+        act = "close"
     if act not in ACTIONS:
-        raise ValueError("action must be buy, short, or no_trade")
+        raise ValueError("action must be buy, short, no_trade, or close")
     sess = session_status(now)
-    if not sess["open"]:
+    if not sess["open"] and act != "close":
         raise RuntimeError(
             "market closed — capture only Mon–Fri "
             f"{sess['open_hhmm']}–{sess['close_hhmm']} IST"
@@ -479,14 +541,33 @@ def record_human(
         "session": sess,
         "outcomes": {},
         "settled": False,
-        "places_order": False,
+        "places_order": bool(places_order),
         "paper": False,
-        "live": False,
+        "live": bool(live),
     }
     items = load_examples(path)
     items.insert(0, example)
     save_examples(items[:2000], path=path)
     return example
+
+
+def mark_example_order(
+    example_id: str,
+    *,
+    queued: bool,
+    order: dict[str, Any] | None = None,
+    path: Path = EXAMPLES_PATH,
+) -> None:
+    items = load_examples(path)
+    for ex in items:
+        if str(ex.get("id") or "") != str(example_id):
+            continue
+        ex["places_order"] = bool(queued)
+        ex["live"] = bool(queued)
+        if order is not None:
+            ex["order"] = order
+        break
+    save_examples(items, path=path)
 
 
 def _horizon_iso(entry_at: str, sec: int) -> str | None:
@@ -564,7 +645,7 @@ def settle_open(
 
 
 def _win(ex: dict[str, Any], horizon: str = "1m") -> bool | None:
-    if ex.get("action") == "no_trade":
+    if ex.get("action") in {"no_trade", "close"}:
         return None
     mark = (ex.get("outcomes") or {}).get(horizon) or {}
     pts = mark.get("taken_pts")
@@ -579,6 +660,7 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
     buys = [r for r in rows if r.get("action") == "buy"]
     shorts = [r for r in rows if r.get("action") == "short"]
     skips = [r for r in rows if r.get("action") == "no_trade"]
+    closes = [r for r in rows if r.get("action") == "close"]
     taken = buys + shorts
 
     def wr(group: list[dict[str, Any]], horizon: str) -> float | None:
@@ -595,6 +677,7 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
         "you_short_rule_missed": 0,
         "you_skipped_rule_would_take": 0,
         "you_skipped_rule_quiet": 0,
+        "you_closed": 0,
     }
     for r in rows:
         key = str(r.get("vs_coded") or "")
@@ -605,6 +688,7 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
         "n_buy": len(buys),
         "n_short": len(shorts),
         "n_no_trade": len(skips),
+        "n_close": len(closes),
         "n_taken": len(taken),
         "win_rate_1m": wr(taken, "1m"),
         "win_rate_5m": wr(taken, "5m"),
@@ -613,7 +697,8 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
         "note": (
             "NO TRADE is the selection filter. Coded 1h rule is naive "
             "HH+HC+volume-up — the thing your brain is usually stricter than. "
-            "This store does not ENABLE a book and does not send Angel orders."
+            "Tape (LTP/TBQ/TSQ/candles/ticks) is always stored. Angel only if "
+            "you type YOU after live is armed. This store does not ENABLE a book."
         ),
     }
 
@@ -632,6 +717,8 @@ def example_public(ex: dict[str, Any]) -> dict[str, Any]:
         "vs_coded": ex.get("vs_coded"),
         "hhmm": snap.get("hhmm"),
         "ltp": snap.get("ltp"),
+        "tbq": snap.get("tbq"),
+        "tsq": snap.get("tsq"),
         "imb": snap.get("imb"),
         "bid1": snap.get("bid1"),
         "ask1": snap.get("ask1"),
@@ -640,12 +727,17 @@ def example_public(ex: dict[str, Any]) -> dict[str, Any]:
         "vwap_gap": snap.get("vwap_gap"),
         "ltp_velocity_30s": snap.get("ltp_velocity_30s"),
         "last_1m": last_1m,
+        "last_5m": snap.get("last_5m") or {},
         "last_1h": last_1h,
+        "last_tick": snap.get("last_tick") or {},
         "coded": ex.get("coded"),
         "outcomes": ex.get("outcomes") or {},
         "settled": bool(ex.get("settled")),
+        "places_order": bool(ex.get("places_order")),
+        "live": bool(ex.get("live")),
         "n_bars_1m": len(snap.get("bars_1m") or []),
         "n_ticks_30s": snap.get("n_ticks_30s") or 0,
+        "n_ticks_window": snap.get("n_ticks_window") or snap.get("n_ticks_30s") or 0,
     }
 
 
@@ -664,20 +756,56 @@ def capture_desk_payload(
     items = load_examples(path)
     ltp = latest_ltp(db_path)
     sess = session_status()
+    tape_now: dict[str, Any] = {"ltp": ltp, "tbq": None, "tsq": None}
+    try:
+        from storage import latest_ticks
+
+        rows = latest_ticks(limit=1, db_path=db_path)
+        if rows:
+            m = tick_metrics(rows[0])
+            tape_now = {
+                "ltp": m.get("ltp") if m.get("ltp") is not None else ltp,
+                "tbq": m.get("tbq"),
+                "tsq": m.get("tsq"),
+                "oi": m.get("oi"),
+                "buy5": m.get("buy5_sum"),
+                "sell5": m.get("sell5_sum"),
+                "time": m.get("time"),
+            }
+            if tape_now["ltp"] is not None:
+                ltp = tape_now["ltp"]
+    except Exception:
+        pass
+    try:
+        from you_trade import you_live_status
+
+        live = you_live_status()
+    except Exception as exc:
+        live = {"would_place": False, "why": str(exc), "dry_run": True}
+    try:
+        from you_learn import learn_status
+
+        learn = learn_status(items)
+    except Exception as exc:
+        learn = {"ready": False, "note": str(exc)}
     return {
         "ok": True,
         "ts_ist": _now_iso(),
-        "places_order": False,
-        "live_blocked": True,
+        "places_order": bool(live.get("would_place")),
+        "live_blocked": not bool(live.get("would_place")),
         "ltp": ltp,
+        "tape_now": tape_now,
         "db_path": str(db_path),
         "session": sess,
+        "live": live,
+        "learn": learn,
         "summary": capture_summary(items),
         "recent": [example_public(x) for x in items[:40]],
         "note": (
-            "Press BUY / SHORT / NO TRADE only while Gold Petal is open "
+            "Press BUY / SHORT / NO TRADE / CLOSE while Gold Petal is open "
             f"(Mon–Fri {sess['open_hhmm']}–{sess['close_hhmm']} IST). "
-            "We store candles, book, OI, and 30s of LTP — not a one-line rule. "
-            "Does not paper. Does not live. Keep DRY_RUN=true."
+            "Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks. "
+            "Angel only after Paper off + LIVE + Unlock + Restart, then type YOU on the click. "
+            "Learn my style writes a Lab proposal. Never ENABLE from this tab."
         ),
     }
