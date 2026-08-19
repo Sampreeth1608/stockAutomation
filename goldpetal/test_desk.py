@@ -54,8 +54,10 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v12" in html
-    assert " · v12" in html
+    assert "gp-header-v13" in html
+    assert " · v13" in html
+    assert "whole day" in html
+    assert "30m" in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
     hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
@@ -129,6 +131,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "ML / S11 + S18" in html
     assert "Research Lab" in html
     assert "You — trade" in html
+    assert "whole day" in html
+    assert "30m" in html
     assert "/#you" in html
     assert "/api/mood" in html
     assert "id=\"mood-line\"" in html
@@ -178,6 +182,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "amise_desk_payload" in text
     assert "/api/capture" in text
     assert "/api/capture/learn" in text
+    assert "after_new_example" in text
+    assert "maybe_auto_paper" in text
     assert "request_you_order" in text
     assert "/api/mood" in text
     assert "mood_desk_payload" in text

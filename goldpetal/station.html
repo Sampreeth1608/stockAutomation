@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v12: You tab records tape + optional Angel after YOU -->
+<!-- gp-header-v13: You sittings 30m–day; mimic auto-papers after knowledge is good -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v12</div>
+      <div class="clock" id="clock">IST — · v13</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -188,7 +188,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </div>
   <div class="you-strip" id="you-strip">
     <b>You</b>
-    <span class="hint" id="you-strip-hint">Records LTP/TBQ/TSQ/ticks/candles while Gold Petal is open. Angel only after LIVE + Unlock + type YOU.</span>
+    <span class="hint" id="you-strip-hint">Sit 30m, 1h, 3h, or the whole day. Records the tape. Angel only after LIVE + Unlock + type YOU. Mimic papers itself when knowledge is good.</span>
     <span class="mono" id="you-strip-ltp">LTP —</span>
     <button class="btn ok" type="button" data-you="buy">BUY</button>
     <button class="btn danger" type="button" data-you="short">SHORT</button>
@@ -348,8 +348,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="you-panel" hidden>
         <h2>You — trade and teach</h2>
-        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks — then marks 5s / 10s / 30s / 1m / 5m. Tick history stays in ticks.db. NO TRADE is as important as BUY. This tab never ENABLES a book and never sets DRY_RUN=false.</p>
-        <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. Type YOU to send a real Angel order after live is armed.</div>
+        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Sit 30 minutes, 1 hour, 3 hours, or the whole day — all count. Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks — then marks 5s / 10s / 30s / 1m / 5m. When knowledge is good the mimic papers itself in those hours. This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE.</p>
+        <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. Type YOU to send a real Angel order after live is armed. Mimic auto-papers after enough sittings — never DRY_RUN=false.</div>
         <p class="flash" id="flash-you"></p>
         <div class="ml-card">
           <h3>This tape</h3>
@@ -566,7 +566,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v12";
+    if (clock) clock.textContent = "IST " + ist + " · v13";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1275,7 +1275,7 @@ function applyYouSession(d) {
   }
   const banner = $("you-session-banner");
   if (banner) {
-    banner.textContent = (sess.label || "session") + " — never ENABLES a book. Type YOU to send Angel after live is armed.";
+    banner.textContent = (sess.label || "session") + " — 30m / 1h / 3h / whole day sittings. Type YOU to send Angel after live is armed. Mimic papers itself when knowledge is good.";
     banner.className = "ml-banner" + (open ? " ok" : "");
   }
   const liveLine = $("you-live-line");
@@ -1296,14 +1296,29 @@ function renderYou() {
   const learn = d.learn || {};
   const learnEl = $("you-learn");
   if (learnEl) {
+    const hours = learn.hours || {};
+    const buckets = learn.session_buckets || {};
+    const deploy = learn.deploy || {};
+    const sitLabel = buckets["30m"] || buckets["1h"] || buckets["3h"] || buckets["day"]
+      ? ((buckets["30m"] || 0) + "×30m · " + (buckets["1h"] || 0) + "×1h · " + (buckets["3h"] || 0) + "×3h · " + (buckets["day"] || 0) + "×day")
+      : "—";
+    const knowledge = learn.knowledge_good ? "good — papers itself" : "building";
+    const slotBit = deploy.slot
+      ? `<p class="hint">${esc("Named " + deploy.slot + (deploy.restart_needed ? " — type RESTART on Engine to load it." : " papering in your hours."))}</p>`
+      : "";
     learnEl.innerHTML = `<div class="ml-card">
       <h3>Learn my style</h3>
       <div class="ml-stats">
         ${mlStat("Ready", learn.ready ? "yes" : "not yet", learn.ready ? "ok" : "warn")}
+        ${mlStat("Knowledge", knowledge, learn.knowledge_good ? "ok" : "warn")}
+        ${mlStat("Sittings", String(learn.n_sessions != null ? learn.n_sessions : "—"))}
+        ${mlStat("Hours", hours.label || "—")}
         ${mlStat("Need BUY/SHORT", String(learn.need_taken != null ? learn.need_taken : "—"))}
         ${mlStat("Need NO TRADE", String(learn.need_skips != null ? learn.need_skips : "—"))}
+        ${mlStat("Sittings mix", sitLabel)}
       </div>
-      <p class="hint">${esc(learn.note || "Click Learn my style when the counts fill. Approve the mimic on Lab — paper only.")}</p>
+      <p class="hint">${esc(learn.note || "Sit 30m, 1h, 3h, or the whole day. When knowledge is good the mimic papers itself in those hours. Never DRY_RUN=false.")}</p>
+      ${slotBit}
     </div>`;
   }
   const stripLtp = $("you-strip-ltp");
@@ -1391,13 +1406,15 @@ async function recordYou(action) {
   if (rec.places_order) msg += " — queued for Angel";
   else if (send) msg += " — recorded, not sent (" + (order.error || "live blocked") + ")";
   else msg += " — tape stored, not an order";
+  const run = res.learn_run || {};
+  if (run.deployed && run.slot) msg += " — mimic papering " + run.slot + ", type RESTART";
   flash("flash-you", msg, !!(send && !rec.places_order));
   flash("flash-you-strip", msg, !!(send && !rec.places_order));
   renderYou();
 }
 async function learnYou() {
   const res = await api("/api/capture/learn", { method: "POST", body: JSON.stringify({}) });
-  flash("flash-you", res.reminder || res.error || "Learn submitted");
+  flash("flash-you", res.note || res.reminder || res.error || "Learn submitted");
   loadLab().catch(() => {});
   return loadYou();
 }

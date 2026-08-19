@@ -106,7 +106,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 
   <section class="card">
     <h2>You — trade</h2>
-    <p class="hint">Records LTP/TBQ/TSQ/ticks/candles while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Angel only after Paper off + LIVE + Unlock + type YOU. Learn on the <a href="/#you">station You tab</a>.</p>
+    <p class="hint">Sit 30m, 1h, 3h, or the whole day. Records LTP/TBQ/TSQ/ticks/candles while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Angel only after Paper off + LIVE + Unlock + type YOU. When knowledge is good the mimic papers itself in those hours (never DRY_RUN=false). Learn on the <a href="/#you">station You tab</a>.</p>
     <p class="hint" id="you-ltp-line">LTP …</p>
     <p class="hint" id="you-live-line">Angel: recorded only</p>
     <div class="row">
@@ -312,10 +312,15 @@ async function loadYou() {
   $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—")
     + ((d.session && d.session.open) ? " · session open" : " · market closed")
     + (d.tape_now && d.tape_now.tbq != null ? (" · TBQ " + d.tape_now.tbq + " TSQ " + d.tape_now.tsq) : "");
+  const learn = (d && d.learn) || {};
+  const hours = learn.hours || {};
   $("you-sum").textContent = "captured " + (s.n || 0) +
     " · BUY " + (s.n_buy || 0) +
     " · SHORT " + (s.n_short || 0) +
-    " · NO TRADE " + (s.n_no_trade || 0);
+    " · NO TRADE " + (s.n_no_trade || 0) +
+    " · sittings " + (learn.n_sessions || 0) +
+    (hours.label ? (" · " + hours.label) : "") +
+    (learn.knowledge_good ? " · mimic papers itself" : "");
   const liveLine = $("you-live-line");
   if (liveLine) liveLine.textContent = live.why || "Angel: recorded only";
   const open = !!(d.session && d.session.open);

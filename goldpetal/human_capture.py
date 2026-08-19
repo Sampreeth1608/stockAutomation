@@ -3,8 +3,11 @@
 Manual entries use timing, context, and a skip filter that coded rules
 do not have. Press BUY / SHORT / NO TRADE / CLOSE; we store the tape
 around the click (1m/3m/5m/15m/1h candles, recent ticks with LTP/TBQ/TSQ,
-book, OI, VWAP) and fill 5s–5m outcomes from ticks. Angel only if live is
-already armed and you type YOU — see you_trade. No ENABLE. Learning ≠ deploy.
+book, OI, VWAP) and fill 5s–5m outcomes from ticks. Sittings of 30m, 1h,
+3h, or the whole day all count. Angel only if live is already armed and
+you type YOU — see you_trade. This module never sets DRY_RUN=false.
+Learning may paper-ENABLE a mimic after knowledge is good; live still
+needs Unlock + LIVE.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ TF_PACK: tuple[tuple[str, int, int], ...] = (
 )
 DEFAULT_MARKET_OPEN = "09:00"
 DEFAULT_MARKET_CLOSE = "23:30"
+YOU_SESSION_GAP_MIN = 45
 
 _lock = threading.Lock()
 
@@ -490,6 +494,24 @@ def _vs_coded(action: str, coded: dict[str, Any]) -> str:
     return "you_skipped_rule_quiet"
 
 
+def _you_session_id(items: list[dict[str, Any]], now: datetime) -> str:
+    """Same sitting if the last click was today and within YOU_SESSION_GAP_MIN."""
+    clock = _aware(now)
+    for ex in items:
+        if ex.get("action") == "close":
+            continue
+        prev = _parse_ts(str(ex.get("created_at_ist") or ex.get("entry_at") or ""))
+        if prev is None:
+            continue
+        gap = (clock - prev).total_seconds()
+        if clock.date() == prev.date() and 0 <= gap <= YOU_SESSION_GAP_MIN * 60:
+            sid = str(ex.get("you_session_id") or "").strip()
+            if sid:
+                return sid
+        break
+    return uuid.uuid4().hex[:8]
+
+
 def record_human(
     action: str,
     *,
@@ -525,9 +547,12 @@ def record_human(
     if ltp is None:
         raise RuntimeError("no LTP on the tape — start the feed first")
     coded = snap.get("coded") or {}
+    clock = _now() if now is None else _aware(now)
+    items = load_examples(path)
     example = {
         "id": uuid.uuid4().hex[:10],
-        "created_at_ist": _now_iso() if now is None else _aware(now).isoformat(timespec="seconds"),
+        "you_session_id": _you_session_id(items, clock),
+        "created_at_ist": clock.isoformat(timespec="seconds"),
         "action": act,
         "confidence": conf,
         "note": str(note or "")[:400],
@@ -545,7 +570,6 @@ def record_human(
         "paper": False,
         "live": bool(live),
     }
-    items = load_examples(path)
     items.insert(0, example)
     save_examples(items[:2000], path=path)
     return example
@@ -698,7 +722,8 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
             "NO TRADE is the selection filter. Coded 1h rule is naive "
             "HH+HC+volume-up — the thing your brain is usually stricter than. "
             "Tape (LTP/TBQ/TSQ/candles/ticks) is always stored. Angel only if "
-            "you type YOU after live is armed. This store does not ENABLE a book."
+            "you type YOU after live is armed. 30m / 1h / 3h / whole-day sittings "
+            "all count. This store does not set DRY_RUN=false."
         ),
     }
 
@@ -709,6 +734,7 @@ def example_public(ex: dict[str, Any]) -> dict[str, Any]:
     last_1h = snap.get("last_1h") or {}
     return {
         "id": ex.get("id"),
+        "you_session_id": ex.get("you_session_id"),
         "created_at_ist": ex.get("created_at_ist"),
         "action": ex.get("action"),
         "confidence": ex.get("confidence"),
@@ -783,9 +809,27 @@ def capture_desk_payload(
     except Exception as exc:
         live = {"would_place": False, "why": str(exc), "dry_run": True}
     try:
-        from you_learn import learn_status
+        from you_learn import deploy_status, learn_status, maybe_auto_paper
 
         learn = learn_status(items)
+        deployed = deploy_status()
+        if deployed.get("slot"):
+            learn["deploy"] = deployed
+        if settle and path == EXAMPLES_PATH and learn.get("knowledge_good"):
+            try:
+                dep = maybe_auto_paper(examples_path=path)
+                learn = dict(dep.get("learn") or learn)
+                if dep.get("slot") or deployed.get("slot"):
+                    learn["deploy"] = {
+                        **deployed,
+                        "slot": dep.get("slot") or deployed.get("slot"),
+                        "deployed": bool(dep.get("deployed")),
+                        "already": bool(dep.get("already")),
+                        "restart_needed": bool(dep.get("restart_needed")),
+                        "note": dep.get("note") or learn.get("note"),
+                    }
+            except Exception as exc:
+                learn["deploy_error"] = str(exc)
     except Exception as exc:
         learn = {"ready": False, "note": str(exc)}
     return {
@@ -805,7 +849,8 @@ def capture_desk_payload(
             "Press BUY / SHORT / NO TRADE / CLOSE while Gold Petal is open "
             f"(Mon–Fri {sess['open_hhmm']}–{sess['close_hhmm']} IST). "
             "Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks. "
+            "Sit 30m, 1h, 3h, or the whole day — all count. "
             "Angel only after Paper off + LIVE + Unlock + Restart, then type YOU on the click. "
-            "Learn my style writes a Lab proposal. Never ENABLE from this tab."
+            "When knowledge is good the mimic papers itself in your hours. Never DRY_RUN=false."
         ),
     }

@@ -109,9 +109,36 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
             market_close=self.market_close,
         )
 
+    def _you_hours(self) -> tuple[int | None, int | None, int]:
+        """Sitting window learned from You-tab clicks. None = whole Gold Petal session."""
+        p = self.genome.params or {}
+        if "you_open_min" not in p or "you_close_min" not in p:
+            return None, None, int(p.get("you_hours_mask") or 0)
+        return int(p["you_open_min"]), int(p["you_close_min"]), int(p.get("you_hours_mask") or 0)
+
+    def _in_you_hours(self, now: datetime) -> bool:
+        lo, hi, _mask = self._you_hours()
+        if lo is None or hi is None:
+            return True
+        t = now.hour * 60 + now.minute
+        return lo <= t < hi
+
+    def _bar_clock(self, cur: VolBar) -> datetime:
+        try:
+            return datetime.strptime(cur.time[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST)
+        except ValueError:
+            return datetime.now(IST)
+
     def _session_flatten_why(self, now: datetime) -> str | None:
         if self.holds_overnight:
             return None
+        lo, hi, _mask = self._you_hours()
+        if hi is not None and self.position != "flat":
+            t = now.hour * 60 + now.minute
+            if t >= hi:
+                return f"you hours end {hi // 60:02d}:{hi % 60:02d}"
+            if lo is not None and t < lo:
+                return f"preopen leftover before you hours {lo // 60:02d}:{lo % 60:02d}"
         return super()._session_flatten_why(now)
 
     def _already_decided_close(self, closed_key: datetime) -> bool:
@@ -298,6 +325,9 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
         )
         if want not in {"long", "short"}:
             self.last_skip = why
+            return None
+        if not self._in_you_hours(self._bar_clock(cur)):
+            self.last_skip = "outside_you_hours"
             return None
         return self._flip_to(want, cur, why)
 

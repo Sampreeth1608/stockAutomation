@@ -804,6 +804,22 @@ class ControlHandler(BaseHTTPRequestHandler):
                         order=order,
                     )
                 payload = capture_desk_payload(settle=False)
+                try:
+                    from you_learn import after_new_example
+
+                    learn_run = after_new_example()
+                    payload["learn_run"] = {
+                        "proposed": bool(learn_run.get("proposed")),
+                        "deployed": bool(learn_run.get("deployed")),
+                        "already": bool(learn_run.get("already")),
+                        "slot": learn_run.get("slot"),
+                        "note": learn_run.get("note"),
+                        "proposal_id": learn_run.get("proposal_id"),
+                    }
+                    if learn_run.get("learn"):
+                        payload["learn"] = learn_run["learn"]
+                except Exception as exc:
+                    payload["learn_run"] = {"error": str(exc)}
                 payload["recorded"] = {
                     "id": rec.get("id"),
                     "action": rec.get("action"),
@@ -812,18 +828,30 @@ class ControlHandler(BaseHTTPRequestHandler):
                     "places_order": bool(rec.get("places_order")),
                     "live": bool(rec.get("live")),
                     "order": order,
+                    "you_session_id": rec.get("you_session_id"),
                 }
                 payload["ok"] = True
                 self._send(*_json_bytes(payload))
                 return
             if path == "/api/capture/learn":
-                from you_learn import propose_mimic
+                from you_learn import maybe_auto_paper, propose_mimic
 
                 try:
                     res = propose_mimic()
                 except (ValueError, RuntimeError) as exc:
                     self._send(*_json_bytes({"error": str(exc)}, 400))
                     return
+                if res.get("ok"):
+                    try:
+                        dep = maybe_auto_paper()
+                        res["deploy"] = dep
+                        res["deployed"] = bool(dep.get("deployed"))
+                        res["already"] = bool(dep.get("already"))
+                        res["slot"] = dep.get("slot")
+                        if dep.get("note"):
+                            res["reminder"] = dep.get("note")
+                    except Exception as exc:
+                        res["deploy_error"] = str(exc)
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/s11/activate":

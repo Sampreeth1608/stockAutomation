@@ -90,6 +90,7 @@ def test_record_buy_does_not_trade(tmp_path: Path) -> None:
         now=OPEN,
     )
     assert rec["action"] == "buy"
+    assert rec["you_session_id"]
     assert rec["places_order"] is False
     assert rec["paper"] is False
     assert rec["live"] is False
@@ -199,6 +200,21 @@ def test_record_close_after_hours(tmp_path: Path) -> None:
     assert rec["vs_coded"] == "you_closed"
 
 
+def test_session_id_groups_sittings(tmp_path: Path) -> None:
+    db = tmp_path / "ticks.db"
+    store = tmp_path / "examples.json"
+    _tape(db, 8)
+    snap = snapshot_market(db, tick_limit=40)
+    a = record_human("buy", db=db, path=store, snapshot=snap, now=OPEN)
+    b = record_human("no_trade", db=db, path=store, snapshot=snap, now=OPEN + timedelta(minutes=10))
+    c = record_human("buy", db=db, path=store, snapshot=snap, now=OPEN + timedelta(hours=2))
+    assert a["you_session_id"]
+    assert a["you_session_id"] == b["you_session_id"]
+    assert c["you_session_id"] != a["you_session_id"]
+    pub = example_public(a)
+    assert pub["you_session_id"] == a["you_session_id"]
+
+
 def test_not_a_paper_book() -> None:
     root = Path(__file__).resolve().parent
     src = (root / "human_capture.py").read_text(encoding="utf-8")
@@ -224,7 +240,7 @@ if __name__ == "__main__":
     import tempfile
 
     td = Path(tempfile.mkdtemp())
-    for name in ("a", "b", "c", "d", "e", "f"):
+    for name in ("a", "b", "c", "d", "e", "f", "g"):
         (td / name).mkdir(exist_ok=True)
     test_record_buy_does_not_trade(td / "a")
     test_no_trade_is_the_filter(td / "b")
@@ -232,5 +248,6 @@ if __name__ == "__main__":
     test_summary_counts_skips(td / "d")
     test_refuses_when_market_closed(td / "e")
     test_record_close_after_hours(td / "f")
+    test_session_id_groups_sittings(td / "g")
     test_not_a_paper_book()
     print("ALL test_human_capture OK")
