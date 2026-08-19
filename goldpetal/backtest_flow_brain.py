@@ -4,7 +4,7 @@
 Not S7_HOURLY. Not S16. Not live.
 
   python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees
-  python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees --pack quality
+  python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees --pack desk
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def main() -> None:
     ap.add_argument(
         "--pack",
         default="all",
-        help="v1, confirm10, hold_opp, quality, or all (default all)",
+        help="v1, confirm10, hold_opp, quality, desk, or all (default all)",
     )
     args = ap.parse_args()
 
@@ -81,7 +81,8 @@ def main() -> None:
     print("LONG  = price up + buy flow up + expanding")
     print("SHORT = price down + sell flow up + expanding")
     print("Skip absorption (flow without price).")
-    print("Packs add confirm / min-hold / no-flip / persist / quality floors.")
+    print("Packs add confirm / min-hold / no-flip / persist / quality / desk.")
+    print("desk reuses S5 fee-cover, S8 NET/IMB/book-drop/TP, S16/S19 1m, S20 fade-block.")
     print("v1 is the 8k-trade unfiltered tape. Rank after charges, tax excluded.")
     print("Not S7_HOURLY. Not S16. ENABLE_FLOW_BRAIN stays false. Stay DRY_RUN.")
     print()

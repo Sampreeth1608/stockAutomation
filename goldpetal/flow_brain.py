@@ -17,9 +17,9 @@ Expansion = price response growing AND flow imbalance growing.
 Decay     = the opposite.
 
 Trade only continuation+expansion. Flatten on decay / opposite / EOD.
-Gate packs (confirm / min-hold / no-flip / persist / quality) sit on
-top of that state so the book is not a scratch machine. Fill at LTP.
-Rank after Angel charges, tax excluded.
+Gate packs sit on top of that state. The desk pack reuses S5 fee-cover,
+S8 NET/IMB/book-drop, S16/S19 1m structure, and S20 fade-block.
+Fill at LTP. Rank after Angel charges, tax excluded.
 
 ENABLE_FLOW_BRAIN defaults false. Paper-only. Stay DRY_RUN. Not live.
 """
@@ -31,9 +31,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from backtest_hhhl_candles import Trade, make_charge_cfg
+from backtest_hhhl_candles import Candle, Trade, make_charge_cfg
 from backtest_wick_candles import _tf_result_from_trades
 from charges import ChargeConfig, apply_charges_and_tax
+from edge import PointATR, fee_break_even_points
+from quality_filters import s8_quality_ok
+from s16_hhhl_wick import s16_bar_decision
+from s18_ohlc_vol_htf import VolBar
+from s19_body_close import s19_bar_decision
+from s20_fade_hl import fade_bounce_decision
+from strategy_s8_align import net_imbalance
 
 BOOK = "FLOW_BRAIN"
 LAB_NAME = BOOK
@@ -44,8 +51,10 @@ FORMULA = (
     "and both are expanding. SHORT the mirror. No trade on absorption "
     "(flow without price). Gate packs: confirm N seconds, min-hold, "
     "cooldown, no-flip, persist until opposite, min flow/price/ATR. "
-    "v1 is the unfiltered 8k-trade tape. Fill at LTP. Flatten session "
-    "close. Not S7_HOURLY. Not S16. Not live."
+    "v1 is the unfiltered 8k-trade tape. desk pack adds S5 fee-cover, "
+    "S8 NET+rising IMB%+book-drop+TP/SL, S19 1m body+close, S16 1m "
+    "agreement, S20 fade-block. Fill at LTP. Flatten session close. "
+    "Not S7_HOURLY. Not S16 paper. Not live."
 )
 
 BULL_CONT = "bull_cont"
@@ -110,6 +119,15 @@ class FlowState:
     scale: Scale
     want: Want | None
     why: str
+    net: float = 0.0
+    imb_pct: float = 0.0
+    imb_rising: bool = False
+    expected_pts: float = 0.0
+    s19_1m: Want | None = None
+    s16_1m: Want | None = None
+    s20_1m: Want | None = None
+    tbq_drop_pct: float = 0.0
+    tsq_drop_pct: float = 0.0
 
 
 class FlowBrain:
@@ -139,6 +157,19 @@ class FlowBrain:
         self._prev_close: float | None = None
         self.tr: deque[float] = deque(maxlen=self.atr_bars)
         self.last: FlowState | None = None
+        self._pattr = PointATR(window=100)
+        self._gate_prev_tbq: float | None = None
+        self._gate_prev_tsq: float | None = None
+        self._gate_prev_imb: float | None = None
+        self._m_key: int | None = None
+        self._m_o: float | None = None
+        self._m_h: float | None = None
+        self._m_l: float | None = None
+        self._m_c: float | None = None
+        self._closed_1m: deque[Candle] = deque(maxlen=8)
+        self.s19_1m: Want | None = None
+        self.s16_1m: Want | None = None
+        self.s20_1m: Want | None = None
 
     def _atr(self) -> float:
         if not self.tr:
@@ -166,6 +197,58 @@ class FlowBrain:
         self._minute_key = key
         self._min_h = self._min_l = ltp
 
+    def _reset_session_state(self) -> None:
+        self.tr.clear()
+        self._minute_key = None
+        self._prev_close = None
+        self._pattr = PointATR(window=100)
+        self._gate_prev_tbq = None
+        self._gate_prev_tsq = None
+        self._gate_prev_imb = None
+        self._m_key = None
+        self._m_o = self._m_h = self._m_l = self._m_c = None
+        self._closed_1m.clear()
+        self.s19_1m = self.s16_1m = self.s20_1m = None
+
+    def _as_vol(self, c: Candle) -> VolBar:
+        return VolBar(time=c.time, open=c.open, high=c.high, low=c.low, close=c.close)
+
+    def _roll_htf_minute(self, t: float, ltp: float) -> None:
+        key = int(t // 60)
+        if self._m_key is None:
+            self._m_key = key
+            self._m_o = self._m_h = self._m_l = self._m_c = float(ltp)
+            return
+        if key == self._m_key:
+            assert self._m_h is not None and self._m_l is not None
+            self._m_h = max(self._m_h, ltp)
+            self._m_l = min(self._m_l, ltp)
+            self._m_c = float(ltp)
+            return
+        if (
+            self._m_o is not None
+            and self._m_h is not None
+            and self._m_l is not None
+            and self._m_c is not None
+        ):
+            cur = Candle(
+                time=datetime.fromtimestamp(self._m_key * 60).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                open=self._m_o,
+                high=self._m_h,
+                low=self._m_l,
+                close=self._m_c,
+            )
+            if self._closed_1m:
+                prev = self._closed_1m[-1]
+                self.s19_1m, _ = s19_bar_decision(self._as_vol(prev), self._as_vol(cur))
+                self.s16_1m, _ = s16_bar_decision(prev, cur, min_wick_gap=0.0)
+                self.s20_1m, _ = fade_bounce_decision(prev, cur)
+            self._closed_1m.append(cur)
+        self._m_key = key
+        self._m_o = self._m_h = self._m_l = self._m_c = float(ltp)
+
     def _at(self, t_target: float) -> tuple[float, float, float, float] | None:
         found: tuple[float, float, float, float] | None = None
         for row in self.buf:
@@ -186,14 +269,14 @@ class FlowBrain:
             _pt, _pl, pb, ps = self.buf[-1]
             if tbq + tsq + 1 < 0.45 * (pb + ps) and (pb + ps) > 1000:
                 self.buf.clear()
-                self.tr.clear()
-                self._minute_key = None
-                self._prev_close = None
+                self._reset_session_state()
         self.buf.append((t, ltp, tbq, tsq))
         cut = t - self.keep_s
         while self.buf and self.buf[0][0] < cut:
             self.buf.popleft()
         self._roll_minute(t, ltp)
+        self._roll_htf_minute(t, ltp)
+        expected = self._pattr.update(ltp)
         if t - self._last_decide < self.decide_every_s:
             return None
         if len(self.buf) < 8:
@@ -244,6 +327,17 @@ class FlowBrain:
             why = "bear_cont+expand"
         elif st in {ABSORB_BUY, ABSORB_SELL}:
             why = st
+        net, imb_pct = net_imbalance(tbq, tsq)
+        if self._gate_prev_imb is None:
+            imb_rising = False
+        else:
+            imb_rising = imb_pct > self._gate_prev_imb + 1e-9
+        tbq_drop_pct = 0.0
+        tsq_drop_pct = 0.0
+        if self._gate_prev_tbq is not None and tbq < self._gate_prev_tbq:
+            tbq_drop_pct = (self._gate_prev_tbq - tbq) / max(self._gate_prev_tbq, 1e-9) * 100.0
+        if self._gate_prev_tsq is not None and tsq < self._gate_prev_tsq:
+            tsq_drop_pct = (self._gate_prev_tsq - tsq) / max(self._gate_prev_tsq, 1e-9) * 100.0
         snap = FlowState(
             t=t,
             ltp=ltp,
@@ -264,7 +358,19 @@ class FlowBrain:
             scale=scale,
             want=want,
             why=why,
+            net=net,
+            imb_pct=imb_pct,
+            imb_rising=imb_rising,
+            expected_pts=float(expected or 0.0),
+            s19_1m=self.s19_1m,
+            s16_1m=self.s16_1m,
+            s20_1m=self.s20_1m,
+            tbq_drop_pct=tbq_drop_pct,
+            tsq_drop_pct=tsq_drop_pct,
         )
+        self._gate_prev_tbq = float(tbq)
+        self._gate_prev_tsq = float(tsq)
+        self._gate_prev_imb = float(imb_pct)
         self.last = snap
         return snap
 
@@ -289,6 +395,21 @@ class FlowGates:
     allow_flip: bool = True
     persist_until_opposite: bool = False
     keep_s: float = 180.0
+    require_net_sign: bool = False
+    min_imb_pct: float = 0.0
+    require_rising_imb_level: bool = False
+    require_s19_1m: bool = False
+    require_s16_agree: bool = False
+    block_s20_against: bool = False
+    fee_cover: bool = False
+    min_edge_pts: float = 20.0
+    edge_safety: float = 1.25
+    lots: float = 100.0
+    tp_pts: float = 0.0
+    sl_pts: float = 0.0
+    book_drop_min_pct: float = 0.0
+    book_drop_persist: int = 1
+    protect_profit_pts: float = 25.0
 
     def brain(self) -> FlowBrain:
         return FlowBrain(
@@ -300,12 +421,17 @@ class FlowGates:
         )
 
 
-def gated_want(snap: FlowState, g: FlowGates) -> Want | None:
+def gated_want(
+    snap: FlowState,
+    g: FlowGates,
+    *,
+    lots: float | None = None,
+) -> Want | None:
     """Apply quality gates to a continuation want.
 
     v1 keeps the engine's expanding-only want. Confirm/persist packs drop
     the acceleration flicker (5s vs 10s equalizes in a steady trend) and
-    trade continuation that still clears the floors.
+    trade continuation that still clears the floors. desk adds S5/S8/S16/S19/S20.
     """
     if g.require_expanding:
         want = snap.want
@@ -329,6 +455,33 @@ def gated_want(snap: FlowState, g: FlowGates) -> Want | None:
         if want == "long" and snap.imb_vel < 0:
             return None
         if want == "short" and snap.imb_vel > 0:
+            return None
+    if g.require_net_sign:
+        if want == "long" and snap.net <= 0:
+            return None
+        if want == "short" and snap.net >= 0:
+            return None
+    if g.min_imb_pct > 0 or g.require_rising_imb_level:
+        rising = snap.imb_rising if g.require_rising_imb_level else None
+        ok, _why = s8_quality_ok(
+            snap.imb_pct,
+            min_imb_pct=float(g.min_imb_pct) if g.min_imb_pct > 0 else 0.0,
+            rising=rising if g.require_rising_imb_level else None,
+        )
+        if not ok:
+            return None
+    if g.require_s19_1m:
+        if snap.s19_1m is None or snap.s19_1m != want:
+            return None
+    if g.require_s16_agree and snap.s16_1m is not None and snap.s16_1m != want:
+        return None
+    if g.block_s20_against and snap.s20_1m is not None and snap.s20_1m != want:
+        return None
+    if g.fee_cover:
+        n = float(lots if lots is not None else g.lots)
+        be = fee_break_even_points(snap.ltp, force_fees=True, lots=n)
+        req = max(float(g.min_edge_pts), be * float(g.edge_safety))
+        if float(snap.expected_pts or 0.0) < req:
             return None
     return want
 
@@ -369,6 +522,35 @@ GATE_PACKS: dict[str, FlowGates] = {
         allow_flip=False,
         persist_until_opposite=True,
     ),
+    "desk": FlowGates(
+        name="desk",
+        decide_every_s=5.0,
+        min_flow_imb=0.20,
+        min_price_pts=3.0,
+        confirm_s=12.0,
+        min_hold_s=60.0,
+        cooldown_s=90.0,
+        min_scale="small",
+        min_atr=5.0,
+        require_imb_vel=True,
+        require_expanding=False,
+        allow_flip=False,
+        persist_until_opposite=True,
+        require_net_sign=True,
+        min_imb_pct=14.0,
+        require_rising_imb_level=True,
+        require_s19_1m=True,
+        require_s16_agree=True,
+        block_s20_against=True,
+        fee_cover=True,
+        min_edge_pts=20.0,
+        edge_safety=1.25,
+        tp_pts=50.0,
+        sl_pts=28.0,
+        book_drop_min_pct=0.25,
+        book_drop_persist=1,
+        protect_profit_pts=25.0,
+    ),
 }
 
 
@@ -399,7 +581,65 @@ def after_charges_win_rate(result: Any) -> float:
     return wins / n
 
 
-GATE_PACK_ORDER = ("v1", "confirm10", "hold_opp", "quality")
+def s5_targets(g: FlowGates | None, snap: FlowState) -> tuple[float, float]:
+    """S5: target = max(tp_floor, expected×0.85); stop = max(min_edge×0.4, expected×0.45)."""
+    if g is None:
+        return 0.0, 0.0
+    exp = float(snap.expected_pts or 0.0)
+    tp = float(g.tp_pts)
+    sl = float(g.sl_pts)
+    if g.fee_cover:
+        if tp > 0:
+            tp = max(tp, exp * 0.85)
+        sl = max(float(g.min_edge_pts) * 0.4, exp * 0.45)
+    return tp, sl
+
+
+def open_pnl_pts(side: str, entry_px: float, ltp: float) -> float:
+    if side in {"LONG", "long"}:
+        return float(ltp) - float(entry_px)
+    return float(entry_px) - float(ltp)
+
+
+def manage_open(
+    *,
+    side: str,
+    snap: FlowState,
+    entry_px: float,
+    held: float,
+    min_hold: float,
+    g: FlowGates | None,
+    drop_streak: int,
+    tp_pts: float | None = None,
+    sl_pts: float | None = None,
+) -> tuple[str | None, int]:
+    """S5 TP/SL and S8 book-drop+protect. None means keep managing via want/kill."""
+    if g is None:
+        return None, 0
+    move = open_pnl_pts(side, entry_px, snap.ltp)
+    tp = float(g.tp_pts if tp_pts is None else tp_pts)
+    sl = float(g.sl_pts if sl_pts is None else sl_pts)
+    if tp > 0 and move >= tp:
+        return "tp", 0
+    if sl > 0 and move <= -sl:
+        return "sl", 0
+    drop_need = float(g.book_drop_min_pct)
+    if drop_need <= 0 or held < min_hold:
+        return None, 0
+    protect = float(g.protect_profit_pts)
+    if protect > 0 and move >= protect:
+        return None, 0
+    drop_pct = snap.tbq_drop_pct if side in {"LONG", "long"} else snap.tsq_drop_pct
+    if drop_pct >= drop_need:
+        streak = drop_streak + 1
+    else:
+        streak = 0
+    if streak >= max(1, int(g.book_drop_persist)):
+        return "book_drop", 0
+    return None, streak
+
+
+GATE_PACK_ORDER = ("v1", "confirm10", "hold_opp", "quality", "desk")
 
 
 def classify_message(brain: FlowBrain, now: datetime, ltp: float, message: dict[str, Any]) -> FlowState | None:
@@ -502,9 +742,12 @@ def simulate_flow_brain(
     n_decisions = 0
     pending_want: Want | None = None
     pending_since = 0.0
+    drop_streak = 0
+    entry_tp = 0.0
+    entry_sl = 0.0
 
     def close_now(dt: datetime, px: float) -> None:
-        nonlocal side, entry_px, entry_time, entry_t, last_exit_t, pending_want, pending_since
+        nonlocal side, entry_px, entry_time, entry_t, last_exit_t, pending_want, pending_since, drop_streak
         assert side is not None
         trades.append(
             _close_px(
@@ -521,11 +764,22 @@ def simulate_flow_brain(
         side = None
         pending_want = None
         pending_since = 0.0
+        drop_streak = 0
 
     def take_want(snap: FlowState) -> Want | None:
         if g is None:
             return snap.want
-        return gated_want(snap, g)
+        return gated_want(snap, g, lots=lots)
+
+    def fill(new_side: str, snap: FlowState, when: datetime) -> None:
+        nonlocal side, entry_px, entry_time, entry_t, entry_tp, entry_sl, pending_want, pending_since
+        side = new_side
+        entry_px = snap.ltp
+        entry_time = when.strftime("%Y-%m-%d %H:%M:%S")
+        entry_t = snap.t
+        entry_tp, entry_sl = s5_targets(g, snap)
+        pending_want = None
+        pending_since = 0.0
 
     for dt, ltp, tbq, tsq in samples:
         last_dt, last_px = dt, float(ltp)
@@ -546,27 +800,49 @@ def simulate_flow_brain(
         want = take_want(snap)
         if side == "LONG":
             held = t - entry_t
+            managed, drop_streak = manage_open(
+                side=side,
+                snap=snap,
+                entry_px=entry_px,
+                held=held,
+                min_hold=hold,
+                g=g,
+                drop_streak=drop_streak,
+                tp_pts=entry_tp,
+                sl_pts=entry_sl,
+            )
+            if managed is not None:
+                close_now(dt, snap.ltp)
+                continue
             opposite = raw_want == "short" or want == "short"
             if opposite and held >= hold:
                 close_now(dt, snap.ltp)
                 if allow_flip and want == "short":
-                    side = "SHORT"
-                    entry_px = snap.ltp
-                    entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    entry_t = t
+                    fill("SHORT", snap, dt)
             elif kill_long(snap, persist) and held >= hold:
                 close_now(dt, snap.ltp)
             continue
         if side == "SHORT":
             held = t - entry_t
+            managed, drop_streak = manage_open(
+                side=side,
+                snap=snap,
+                entry_px=entry_px,
+                held=held,
+                min_hold=hold,
+                g=g,
+                drop_streak=drop_streak,
+                tp_pts=entry_tp,
+                sl_pts=entry_sl,
+            )
+            if managed is not None:
+                close_now(dt, snap.ltp)
+                continue
             opposite = raw_want == "long" or want == "long"
             if opposite and held >= hold:
                 close_now(dt, snap.ltp)
                 if allow_flip and want == "long":
-                    side = "LONG"
-                    entry_px = snap.ltp
-                    entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    entry_t = t
+                    fill("LONG", snap, dt)
             elif kill_short(snap, persist) and held >= hold:
                 close_now(dt, snap.ltp)
             continue
@@ -586,19 +862,9 @@ def simulate_flow_brain(
             if t - pending_since < confirm_s:
                 continue
         if want == "long":
-            side = "LONG"
-            entry_px = snap.ltp
-            entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-            entry_t = t
-            pending_want = None
-            pending_since = 0.0
+            fill("LONG", snap, dt)
         elif want == "short":
-            side = "SHORT"
-            entry_px = snap.ltp
-            entry_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-            entry_t = t
-            pending_want = None
-            pending_since = 0.0
+            fill("SHORT", snap, dt)
 
     if side is not None and last_dt is not None:
         close_now(last_dt, last_px)

@@ -20,6 +20,8 @@ from flow_brain import (
     gated_want,
     kill_long,
     kill_short,
+    manage_open,
+    s5_targets,
 )
 from strategy import Position, SignalResult
 
@@ -52,6 +54,9 @@ class FlowBrainLiveStrategy:
         self._last_exit_t = -1e18
         self._pending_want: str | None = None
         self._pending_since = 0.0
+        self._drop_streak = 0
+        self._entry_tp = 0.0
+        self._entry_sl = 0.0
         self.last_skip: str | None = None
         self.last_state = ""
         self.last_want: str | None = None
@@ -61,8 +66,9 @@ class FlowBrainLiveStrategy:
         snap = self.brain.last
         extra = (
             f"st={snap.state} imb5={snap.flow_imb_5s:+.2f} "
-            f"dLTP5={snap.d_ltp_5s:+.1f} exp={int(snap.expanding)} "
-            f"atr={snap.atr:.1f}"
+            f"imb%={snap.imb_pct:.1f} dLTP5={snap.d_ltp_5s:+.1f} "
+            f"exp={int(snap.expanding)} atr={snap.atr:.1f} "
+            f"s19={snap.s19_1m or '-'}"
             if snap
             else "warming"
         )
@@ -84,6 +90,8 @@ class FlowBrainLiveStrategy:
         self._entry_t = snap.t
         self._pending_want = None
         self._pending_since = 0.0
+        self._drop_streak = 0
+        self._entry_tp, self._entry_sl = s5_targets(self.gates, snap)
         self.last_skip = None
         return SignalResult(
             action=action,
@@ -101,6 +109,7 @@ class FlowBrainLiveStrategy:
         self._last_exit_t = snap.t
         self._pending_want = None
         self._pending_since = 0.0
+        self._drop_streak = 0
         self.last_skip = snap.why
         return SignalResult(
             action="CLOSE",
@@ -122,6 +131,7 @@ class FlowBrainLiveStrategy:
                 self.entry_price = None
                 self._last_exit_t = now.timestamp()
                 self._pending_want = None
+                self._drop_streak = 0
                 self.last_skip = "session_flatten"
                 return SignalResult(
                     action="CLOSE",
@@ -148,6 +158,19 @@ class FlowBrainLiveStrategy:
 
         if self.position == "long":
             held = t - self._entry_t
+            managed, self._drop_streak = manage_open(
+                side="LONG",
+                snap=snap,
+                entry_px=float(self.entry_price or snap.ltp),
+                held=held,
+                min_hold=self.min_hold_s,
+                g=self.gates,
+                drop_streak=self._drop_streak,
+                tp_pts=self._entry_tp,
+                sl_pts=self._entry_sl,
+            )
+            if managed is not None:
+                return self._close(snap, f"{managed} long {snap.why}")
             opposite = raw_want == "short" or want == "short"
             if opposite and held >= self.min_hold_s:
                 closed = self._close(snap, f"opp short {snap.why}")
@@ -161,6 +184,19 @@ class FlowBrainLiveStrategy:
 
         if self.position == "short":
             held = t - self._entry_t
+            managed, self._drop_streak = manage_open(
+                side="SHORT",
+                snap=snap,
+                entry_px=float(self.entry_price or snap.ltp),
+                held=held,
+                min_hold=self.min_hold_s,
+                g=self.gates,
+                drop_streak=self._drop_streak,
+                tp_pts=self._entry_tp,
+                sl_pts=self._entry_sl,
+            )
+            if managed is not None:
+                return self._close(snap, f"{managed} short {snap.why}")
             opposite = raw_want == "long" or want == "long"
             if opposite and held >= self.min_hold_s:
                 closed = self._close(snap, f"opp long {snap.why}")

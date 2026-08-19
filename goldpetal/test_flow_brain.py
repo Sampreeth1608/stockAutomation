@@ -290,6 +290,119 @@ def test_quality_fewer_trades_higher_winrate_than_v1() -> None:
     assert q_wr > v_wr
 
 
+def test_s8_net_sign_blocks_long_when_net_negative() -> None:
+    ltp, tbq, tsq = 100.0, 1_000.0, 80_000.0
+    samples: list[tuple[datetime, float, float, float]] = []
+    t0 = datetime(2026, 8, 17, 10, 0, 0)
+    for i in range(80):
+        ltp += 1.4
+        tbq += 400
+        tsq += 8
+        samples.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
+    blocked = simulate_flow_brain(
+        samples,
+        lots=1,
+        fees=False,
+        session_filter=False,
+        gates=FlowGates(
+            name="net",
+            min_hold_s=1.0,
+            cooldown_s=0.0,
+            require_expanding=False,
+            require_net_sign=True,
+        ),
+    )
+    raw = simulate_flow_brain(
+        samples,
+        lots=1,
+        fees=False,
+        session_filter=False,
+        gates=FlowGates(
+            name="raw",
+            min_hold_s=1.0,
+            cooldown_s=0.0,
+            require_expanding=False,
+        ),
+    )
+    assert raw.n_trades >= 1
+    assert blocked.n_trades == 0
+
+
+def test_s19_1m_required_waits_for_aligned_minute() -> None:
+    samples = _bull_expanding()
+    gated = simulate_flow_brain(
+        samples,
+        lots=1,
+        fees=False,
+        session_filter=False,
+        gates=FlowGates(
+            name="s19",
+            min_hold_s=1.0,
+            cooldown_s=0.0,
+            require_expanding=False,
+            require_s19_1m=True,
+        ),
+    )
+    assert gated.n_trades == 0
+
+
+def test_s5_fee_cover_blocks_tiny_expected() -> None:
+    samples = _bull_expanding()
+    gated = simulate_flow_brain(
+        samples,
+        lots=1,
+        fees=False,
+        session_filter=False,
+        gates=FlowGates(
+            name="fee",
+            min_hold_s=1.0,
+            cooldown_s=0.0,
+            require_expanding=False,
+            fee_cover=True,
+            min_edge_pts=10_000.0,
+            edge_safety=1.0,
+        ),
+    )
+    assert gated.n_trades == 0
+
+
+def test_s5_tp_exits_in_profit() -> None:
+    samples = _bull_then_weak()
+    r = simulate_flow_brain(
+        samples,
+        lots=1,
+        fees=False,
+        session_filter=False,
+        gates=FlowGates(
+            name="tp",
+            min_hold_s=1.0,
+            cooldown_s=0.0,
+            require_expanding=False,
+            persist_until_opposite=True,
+            allow_flip=False,
+            tp_pts=40.0,
+        ),
+    )
+    assert r.n_trades >= 1
+    assert r.trades[0].gross_pnl_inr >= 39.0
+    assert r.trades[0].exit_time < samples[-1][0].strftime("%Y-%m-%d %H:%M:%S")
+
+
+def test_desk_fewer_trades_higher_winrate_than_v1() -> None:
+    samples = _scratchy_then_trend()
+    v1 = simulate_flow_brain(
+        samples, lots=1, fees=True, session_filter=False, gates=GATE_PACKS["v1"]
+    )
+    desk = simulate_flow_brain(
+        samples, lots=1, fees=True, session_filter=False, gates=GATE_PACKS["desk"]
+    )
+    assert "desk" in GATE_PACKS
+    assert v1.n_trades > 1
+    assert desk.n_trades < v1.n_trades
+    assert desk.n_trades >= 1
+    assert after_charges_win_rate(desk) > after_charges_win_rate(v1)
+
+
 def test_live_confirm_blocks_buy() -> None:
     strat = FlowBrainLiveStrategy(
         min_hold_s=1.0,
@@ -345,6 +458,11 @@ if __name__ == "__main__":
     test_no_flip_does_not_reverse()
     test_persist_does_not_exit_on_mild_decay()
     test_quality_fewer_trades_higher_winrate_than_v1()
+    test_s8_net_sign_blocks_long_when_net_negative()
+    test_s19_1m_required_waits_for_aligned_minute()
+    test_s5_fee_cover_blocks_tiny_expected()
+    test_s5_tp_exits_in_profit()
+    test_desk_fewer_trades_higher_winrate_than_v1()
     test_live_confirm_blocks_buy()
     test_wired_enable_off_not_slim_not_s16()
     print("flow brain tests ok")
