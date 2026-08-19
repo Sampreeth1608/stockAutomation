@@ -75,6 +75,10 @@ EOD_FLATTEN_SKIP = frozenset(
 )
 
 
+def _holds_overnight(obj: Any | None) -> bool:
+    return bool(getattr(obj, "holds_overnight", False))
+
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
@@ -224,7 +228,11 @@ def startup_reconcile(
             continue
         obj = strategies.get(name)
 
-        if (name in SESSION_CLOSE_OVERNIGHT or is_amise_slot(name)) and str(open_pos.time_label)[:10] != today:
+        if (
+            (name in SESSION_CLOSE_OVERNIGHT or is_amise_slot(name))
+            and not _holds_overnight(obj)
+            and str(open_pos.time_label)[:10] != today
+        ):
             closes.append(
                 {
                     "strategy": name,
@@ -319,7 +327,7 @@ def intraday_open_for_flatten(strategies: dict[str, Any]) -> list[dict[str, Any]
     for name, obj in strategies.items():
         if name not in INTRADAY_RESTORE and not is_amise_slot(name):
             continue
-        if name in EOD_FLATTEN_SKIP:
+        if name in EOD_FLATTEN_SKIP or _holds_overnight(obj):
             continue
         pos = getattr(obj, "position", "flat")
         if pos in {"long", "short"}:

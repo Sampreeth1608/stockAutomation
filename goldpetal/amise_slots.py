@@ -312,6 +312,7 @@ def desk_slots_payload(folder: Path | None = None) -> dict[str, Any]:
                 "genome_id": row.get("genome_id") or (g.genome_id if g else ""),
                 "name": row.get("name") or (g.name if g else ""),
                 "direction": row.get("direction") or (g.direction if g else ""),
+                "timeframe": row.get("timeframe") or (g.timeframe if g else ""),
                 "assigned_at_ist": row.get("assigned_at_ist") or "",
             }
         )

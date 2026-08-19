@@ -328,6 +328,9 @@ def run_once(
         strategy_s13.set_contract(contract)
     if hasattr(strategy_s4, "set_contract"):
         strategy_s4.set_contract(contract)
+    for slot in amise_slots:
+        if hasattr(slot, "set_contract"):
+            slot.set_contract(contract)
     print(f"Interval : {interval} minutes", flush=True)
     print(
         f"Portfolio: enabled={sorted(portfolio.enabled)} "
@@ -1868,6 +1871,9 @@ def run_once(
                         strategy_s13.set_contract(fresh)
                     if hasattr(strategy_s4, "set_contract"):
                         strategy_s4.set_contract(fresh)
+                    for slot in amise_slots:
+                        if hasattr(slot, "set_contract"):
+                            slot.set_contract(fresh)
                     if str(fresh.get("token")) != str(token):
                         state["roll_reconnect"] = True
                         print(

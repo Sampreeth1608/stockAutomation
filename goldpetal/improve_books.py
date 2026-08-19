@@ -260,6 +260,10 @@ def improve_amise_slot(
     slots_folder: Path | None,
     holdout_bars: list[Any] | None,
     closed_n: int = 0,
+    flatten_eod: bool = True,
+    min_trades: int = 20,
+    s13: Any = None,
+    require_both_sides: bool = True,
 ) -> dict[str, Any]:
     from research_factory import (
         evaluate_challenger,
@@ -277,7 +281,14 @@ def improve_amise_slot(
             "note": "no genome in this chair yet",
         }
     parent = run_genome_book(
-        bars, current, lots=lots, fees=fees, n_folds=0, skip_wf=True, tf="improve-parent"
+        bars,
+        current,
+        lots=lots,
+        fees=fees,
+        n_folds=0,
+        skip_wf=True,
+        tf="improve-parent",
+        flatten_eod=flatten_eod,
     )
     parent_ac = float(parent.after_charges)
     bar = _self_bar(parent_ac)
@@ -287,7 +298,14 @@ def improve_amise_slot(
     for scale in MUTATE_SCALES:
         g = mutate_genome(current, scale=scale)
         quick = run_genome_book(
-            bars, g, lots=lots, fees=fees, n_folds=0, skip_wf=True, tf="improve-screen"
+            bars,
+            g,
+            lots=lots,
+            fees=fees,
+            n_folds=0,
+            skip_wf=True,
+            tf="improve-screen",
+            flatten_eod=flatten_eod,
         )
         q_ac = float(quick.after_charges)
         if q_ac < bar:
@@ -310,6 +328,10 @@ def improve_amise_slot(
             robustness=True,
             strong=strong,
             holdout_bars=holdout_bars,
+            flatten_eod=flatten_eod,
+            min_trades=min_trades,
+            s13=s13,
+            require_both_sides=require_both_sides,
         )
         m_ac = float((row.get("metrics") or {}).get("after_charges") or 0.0)
         fails = list(row.get("fails") or [])
@@ -394,7 +416,10 @@ def run_improve(
     out_path: Path | None = None,
 ) -> dict[str, Any]:
     """Improve pass. ``propose=True`` writes pending rows only."""
-    from research_factory import champion_s16, champion_s18, holdout_split
+    from amise_timeframes import parse_tf
+    from flow_lab import lab_bars_for_tf
+    from mtf_bars import load_tick_rows
+    from research_factory import champion_s13, champion_s16, champion_s18, holdout_split
 
     del library_path  # reserved; factory library stays the factory's
     hour_gate = _fit_hour_gates(db)
@@ -418,14 +443,62 @@ def run_improve(
     if not skip_amise:
         tape = list(bars or [])
         slots = allocated_slots(slots_folder)
-        if tape and slots:
-            _train, hold = holdout_split(tape)
-            s16 = champion_s16(tape, lots=lots, fees=fees)
-            s18m = champion_s18(tape, lots=lots, fees=fees)
+        tick_rows: list[Any] = []
+        if db is not None:
+            try:
+                dbp = Path(db)
+                if dbp.exists():
+                    tick_rows = list(load_tick_rows(dbp))
+            except Exception:
+                tick_rows = []
+        if slots:
             for slot in slots:
+                current = load_slot_genome(slot, slots_folder)
+                if current is None:
+                    amise_rows.append(
+                        {
+                            "slot": slot,
+                            "status": "empty",
+                            "proposed": False,
+                            "note": "no genome in this chair yet",
+                        }
+                    )
+                    continue
+                spec = parse_tf(current.timeframe)
+                if tick_rows:
+                    slot_tape = lab_bars_for_tf(tick_rows, spec)
+                elif spec.label == "1h" and tape:
+                    slot_tape = tape
+                else:
+                    amise_rows.append(
+                        {
+                            "slot": slot,
+                            "status": "no_tape",
+                            "proposed": False,
+                            "timeframe": spec.label,
+                            "note": f"no {spec.label} bars to improve this chair",
+                        }
+                    )
+                    continue
+                if len(slot_tape) < spec.min_bars:
+                    amise_rows.append(
+                        {
+                            "slot": slot,
+                            "status": "thin_tape",
+                            "proposed": False,
+                            "timeframe": spec.label,
+                            "n_bars": len(slot_tape),
+                            "note": f"need {spec.min_bars} {spec.label} bars, have {len(slot_tape)}",
+                        }
+                    )
+                    continue
+                _train, hold = holdout_split(slot_tape)
+                s16 = champion_s16(slot_tape, lots=lots, fees=fees)
+                s18m = champion_s18(slot_tape, lots=lots, fees=fees) if not spec.daily else None
+                s13m = champion_s13(slot_tape, lots=lots, fees=fees) if spec.daily else None
                 closed_n = len(_closed_trades(slot, db)) if db is not None else 0
                 row = improve_amise_slot(
-                    tape,
+                    slot_tape,
                     slot,
                     s16=s16,
                     s18=s18m,
@@ -439,26 +512,22 @@ def run_improve(
                     slots_folder=slots_folder,
                     holdout_bars=hold,
                     closed_n=closed_n,
+                    flatten_eod=spec.flatten_eod,
+                    min_trades=spec.min_trades,
+                    s13=s13m,
+                    require_both_sides=not spec.daily,
                 )
+                row["timeframe"] = spec.label
                 amise_rows.append(row)
                 if row.get("proposal_id"):
                     proposed_ids.append(str(row["proposal_id"]))
-        elif not slots:
+        else:
             amise_rows.append(
                 {
                     "slot": "",
                     "status": "none",
                     "proposed": False,
                     "note": "No filled AMISE chairs yet. Approve a factory challenger first.",
-                }
-            )
-        else:
-            amise_rows.append(
-                {
-                    "slot": "",
-                    "status": "no_tape",
-                    "proposed": False,
-                    "note": "Need 1h bars to score AMISE genome mutations.",
                 }
             )
     payload = {

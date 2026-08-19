@@ -257,6 +257,7 @@ def test_fast_lab_keeps_strong_gates() -> None:
     assert FAST_LAB_KWARGS["n_folds"] == 3
     assert FAST_LAB_KWARGS["strong"] is True
     assert FAST_LAB_KWARGS["screen_first"] is True
+    assert FAST_LAB_KWARGS["max_deep"] == 4
 
 
 def test_gates_reject_thin_and_champion_loss() -> None:
@@ -487,6 +488,98 @@ def test_ml_hides_research_and_refuses_pending(tmp_path: Path) -> None:
     assert any(x.get("id") == p.id for x in desk.get("pending") or [])
 
 
+def test_gates_daily_s13_and_relax_sides() -> None:
+    s16 = _m(n=10, ac=100)
+    s13 = _m(n=8, ac=400)
+    win = _m(n=8, ac=500, wf=2, n_long=8, n_short=0)
+    fails = gate_failures(
+        win,
+        s16=s16,
+        s18=None,
+        rob=None,
+        s13=s13,
+        min_trades=6,
+        require_both_sides=False,
+        strong=False,
+    )
+    assert fails == []
+    oneside_strong = gate_failures(
+        win,
+        s16=s16,
+        s18=None,
+        rob=None,
+        s13=s13,
+        min_trades=6,
+        require_both_sides=False,
+    )
+    assert not any("one-sided" in x for x in oneside_strong)
+    lose = _m(n=8, ac=300, wf=2)
+    fails = gate_failures(
+        lose, s16=s16, s18=None, rob=None, s13=s13, min_trades=6, require_both_sides=False
+    )
+    assert any("S13" in x for x in fails)
+
+
+def test_lab_stamps_15m_and_daily_flags(tmp_path: Path) -> None:
+    from research_factory import stamp_genome_tf
+
+    g = StrategyGenome(name="demo-breakout", entry_long=("hh",), entry_short=("lh",)).normalized()
+    one = stamp_genome_tf(g, "1h")
+    assert one.name == "demo-breakout"
+    assert one.timeframe == "1h"
+    m15 = stamp_genome_tf(g, "15m")
+    assert "@15m" in m15.name
+    assert m15.genome_id != one.genome_id
+    bars = _uptrend(40)
+    lib = tmp_path / "library.json"
+    out = run_research_lab(
+        bars,
+        lots=100.0,
+        fees=True,
+        n_folds=2,
+        params=FlowParams(lookback=5, atr_n=3),
+        include_recipes=False,
+        max_compose=4,
+        robustness=False,
+        sklearn=False,
+        propose=False,
+        library_path=lib,
+        week_id="lab-15m",
+        timeframe="15m",
+        flatten_eod=True,
+        min_trades=20,
+    )
+    assert out["timeframe"] == "15m"
+    assert out["flatten_eod"] is True
+    rows = (out.get("rejected") or []) + (out.get("challengers") or [])
+    assert rows
+    assert all((r.get("genome") or {}).get("timeframe") == "15m" for r in rows)
+    daily = run_research_lab(
+        bars,
+        lots=100.0,
+        fees=True,
+        n_folds=2,
+        params=FlowParams(lookback=5, atr_n=3),
+        include_recipes=False,
+        max_compose=4,
+        robustness=False,
+        sklearn=False,
+        propose=False,
+        library_path=tmp_path / "lib-d.json",
+        week_id="lab-1d",
+        timeframe="1d",
+        flatten_eod=False,
+        min_trades=6,
+        require_both_sides=False,
+        use_s13=True,
+        beat_s18=False,
+    )
+    assert daily["flatten_eod"] is False
+    assert daily["min_trades"] == 6
+    assert (daily.get("champions") or {}).get("S13") is not None
+    assert (daily.get("champions") or {}).get("S18") is None
+
+
 def test_not_wired_to_paper_or_live() -> None:
     root = Path(__file__).resolve().parent
     for n in [LAB_NAME, RESEARCH_STRATEGY]:
@@ -527,11 +620,13 @@ if __name__ == "__main__":
     test_fast_lab_keeps_strong_gates()
     test_gates_reject_thin_and_champion_loss()
     test_strong_gates_need_margin_pf_3x_and_both_sides()
+    test_gates_daily_s13_and_relax_sides()
     test_holdout_split_needs_long_tape()
     td = P(tempfile.mkdtemp())
     for name in ("a", "b", "c", "d"):
         (td / name).mkdir()
     test_factory_rejects_short_tape(td / "a")
+    test_lab_stamps_15m_and_daily_flags(td / "a")
     test_proposal_and_lab_approve_assigns_s21(td / "b")
     test_lab_reject_does_not_assign(td / "d")
     test_ml_hides_research_and_refuses_pending(td / "c")

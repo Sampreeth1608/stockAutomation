@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# AMISE loop. Default: invent challengers, improve existing books, write Lab pending.
-# Approve on the Lab tab names the next slot (S21, S22, …) or overwrites a filled
-# chair. Never ENABLE from this script. Never DRY_RUN=false. Weekly is --full.
+# AMISE loop. Default: invent challengers on 3m…daily, improve existing books,
+# write Lab pending. Same-TF vs S16/S18; daily also vs S13. Approve on the Lab
+# tab names the next slot (S21, S22, …) or overwrites a filled chair. Never
+# ENABLE from this script. Never DRY_RUN=false. Weekly is --full.
 #
 #   ./weekly_amise.sh              # --lab --propose --full  (includes improve)
 #   ./weekly_amise.sh --observe    # memory only
