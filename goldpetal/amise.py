@@ -1,35 +1,69 @@
 #!/usr/bin/env python3
 """AMISE — Adaptive Market Intelligence & Strategy Engine.
 
-One research system. Four brains + your approval. Not a paper book.
+One research system. Four brains + your approval.
 
   Market state → relationships / factory → strategy manager (fit) →
-  profit guardian → risk snapshot → YOU APPROVE → paper (later) → memory
+  profit guardian → risk snapshot → YOU APPROVE → S21–S24 paper → memory
 
 Desk ``GET /api/amise`` is read-only (never runs the factory).
-CLI runs the loop:
+``POST /api/amise/lab`` starts the factory in the background and writes
+Lab pending rows. Approve on Lab names S21–S24 and turns paper ENABLE on.
+This module never sets DRY_RUN=false.
+
+CLI:
 
   python3 amise.py --db data/ticks.db
   python3 amise.py --db data/ticks.db --lab --propose
-
---lab is slow (walk-forward + robustness). --propose writes Lab pending
-rows only. Never ENABLE_*. Never DRY_RUN=false. S13/S16 formulas unchanged.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from amise_slots import desk_slots_payload
+
 IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
 AMISE_DIR = ROOT / "data" / "amise"
 MEMORY_PATH = AMISE_DIR / "memory.json"
+LAB_LOCK = AMISE_DIR / "lab.lock"
+LAB_LOG = AMISE_DIR / "lab.log"
 ENGINE_NAME = "AMISE"
+
+
+def auto_lab_on() -> bool:
+    return (os.getenv("AMISE_AUTO_LAB") or "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+
+
+def auto_lab_hours() -> float:
+    raw = (os.getenv("AMISE_AUTO_LAB_HOURS") or "12").strip()
+    try:
+        return min(72.0, max(1.0, float(raw)))
+    except ValueError:
+        return 12.0
+
+
+def ensure_mood_gate(*, path: Path | None = None) -> dict[str, Any]:
+    """Turn MOOD_GATE on so fit actually picks who may open. Never DRY_RUN=false."""
+    from analytics.env_bridge import write_env_updates
+
+    res = write_env_updates({"MOOD_GATE": "true"}, path=path)
+    if res.get("ok"):
+        os.environ["MOOD_GATE"] = "true"
+    return res
 
 
 def _now_iso() -> str:
@@ -55,6 +89,126 @@ def write_memory(payload: dict[str, Any], path: Path | None = None) -> Path:
 
 def load_memory(path: Path | None = None) -> dict[str, Any]:
     return _read_json(path or MEMORY_PATH)
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError, PermissionError):
+        return False
+
+
+def amise_lab_status() -> dict[str, Any]:
+    AMISE_DIR.mkdir(parents=True, exist_ok=True)
+    lock = _read_json(LAB_LOCK)
+    pid = int(lock.get("pid") or 0)
+    running = _pid_alive(pid)
+    if lock and not running:
+        try:
+            LAB_LOCK.unlink()
+        except OSError:
+            pass
+        lock = {}
+    last = ""
+    mem = load_memory()
+    last = str((mem.get("lab") or {}).get("updated_at_ist") or mem.get("updated_at_ist") or "")
+    return {
+        "ok": True,
+        "running": running,
+        "pid": pid if running else None,
+        "started_at_ist": lock.get("started_at_ist") or "",
+        "last_run_at": last,
+        "log": str(LAB_LOG) if LAB_LOG.is_file() else "",
+        "auto": auto_lab_on(),
+        "auto_hours": auto_lab_hours(),
+    }
+
+
+def auto_lab_due(*, now: datetime | None = None) -> bool:
+    if not auto_lab_on():
+        return False
+    st = amise_lab_status()
+    if st.get("running"):
+        return False
+    last = _parse_ts(str(st.get("last_run_at") or ""))
+    now = now or datetime.now(IST)
+    if last is None:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=IST)
+    return (now - last.astimezone(IST)) >= timedelta(hours=auto_lab_hours())
+
+
+def start_amise_lab(
+    *,
+    db: Path | None = None,
+    propose: bool = True,
+    python: str | None = None,
+) -> dict[str, Any]:
+    """Background factory. Writes Lab pending only. Never ENABLE. Never DRY_RUN=false."""
+    from desk_data import resolve_desk_db
+
+    st = amise_lab_status()
+    if st.get("running"):
+        return {**st, "started_new": False, "note": "factory already running"}
+    AMISE_DIR.mkdir(parents=True, exist_ok=True)
+    path = db or resolve_desk_db()
+    py = python or os.getenv("PYTHON") or "python3"
+    venv = ROOT / "venv" / "bin" / "python"
+    if venv.is_file() and python is None:
+        py = str(venv)
+    cmd = [
+        str(py),
+        str(ROOT / "amise.py"),
+        "--db",
+        str(path),
+        "--lab",
+    ]
+    if propose:
+        cmd.append("--propose")
+    logf = LAB_LOG.open("a", encoding="utf-8")
+    logf.write(f"\n--- {datetime.now(IST).isoformat(timespec='seconds')} ---\n")
+    logf.flush()
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(ROOT),
+        stdout=logf,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    LAB_LOCK.write_text(
+        json.dumps(
+            {
+                "pid": proc.pid,
+                "started_at_ist": _now_iso(),
+                "cmd": cmd,
+                "propose": bool(propose),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "started_new": True,
+        "running": True,
+        "pid": proc.pid,
+        "propose": bool(propose),
+        "note": (
+            "Factory started. Challengers that beat S16+S18 after charges go to Lab. "
+            "You Approve. Does not ENABLE until Approve. Keep DRY_RUN=true."
+        ),
+    }
+
+
+def maybe_start_auto_lab() -> dict[str, Any]:
+    if not auto_lab_due():
+        return {"ok": True, "started_new": False, "due": False, **amise_lab_status()}
+    return start_amise_lab(propose=True)
 
 
 def _parse_ts(raw: str) -> datetime | None:
@@ -253,7 +407,9 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "pending": lab.get("pending") or [],
             "challengers": (lab.get("challengers") or [])[:8],
             "discovery": (lab.get("discovery") or [])[:12],
+            "job": amise_lab_status(),
         },
+        "slots": desk_slots_payload(),
         "guardian": guardian,
         "risk": {
             "capital": risk,
@@ -278,15 +434,16 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "PROFIT GUARDIAN",
             "RISK",
             "YOUR APPROVAL",
-            "PAPER (later explicit yes)",
+            "S21–S24 PAPER (after Approve)",
+            "ANGEL (after Unlock + LIVE)",
             "MEMORY",
         ],
         "note": (
-            "AMISE is the research system, not a book. It does not ENABLE, "
-            "does not combine S8+S16 into one order, does not rewrite S13/S16, "
-            "and cannot guarantee rising profits. Champion stays until a "
-            "challenger beats S16 and S18 after charges, walk-forward, 2× costs, "
-            "and you click Approve. Keep DRY_RUN=true."
+            "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
+            "It invents challengers on Run factory / auto lab. You Approve on Lab — "
+            "that names S21–S24 and turns paper ENABLE on. Restart the bot. "
+            "This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE. "
+            "Does not rewrite S13/S16. Keep DRY_RUN=true until you type LIVE."
         ),
     }
 
@@ -383,9 +540,9 @@ def main() -> int:
     ap.add_argument("--folds", type=int, default=3)
     args = ap.parse_args()
     fees = bool(args.fees) and not bool(args.no_fees)
-    print("AMISE — research system, not a paper book, not live")
+    print("AMISE — invents challengers, you approve S21–S24. Keep DRY_RUN=true.")
     print("Market state → factory (optional) → fit → guardian → memory → you approve")
-    print("Does not ENABLE. Keep DRY_RUN=true.", flush=True)
+    print("Approve on Lab names a slot and papers it. Never DRY_RUN=false.", flush=True)
     result = run_amise(
         db=args.db,
         lab=bool(args.lab),
@@ -421,7 +578,7 @@ def main() -> int:
         )
     else:
         print("factory skipped (pass --lab to run discovery + validation)")
-    print("You approve on the station AMISE / Lab tabs. Paper ≠ live.")
+    print("You approve on the station AMISE / Lab tabs. Approve → S21–S24 paper. Keep DRY_RUN=true.")
     return 0
 
 

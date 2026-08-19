@@ -20,6 +20,10 @@ SHORT = {
     "S18_OHLC_VOL_HTF": "S18 OHLC+vol+day",
     "S19_BODY_CLOSE_1H": "S19 body+close 1h",
     "S20_FADE_HL": "S20 fade low/high",
+    "S21_AMISE": "S21 AMISE",
+    "S22_AMISE": "S22 AMISE",
+    "S23_AMISE": "S23 AMISE",
+    "S24_AMISE": "S24 AMISE",
 }
 
 WHAT_IT_GUESSES = {
@@ -35,6 +39,10 @@ WHAT_IT_GUESSES = {
     "S18_OHLC_VOL_HTF": "Wait for the 1h to finish. Base AND: green/red + close vs prev + HH/LL + volume up + close vs yesterday. Learner may change that pack from ticks (OHLC, volume, TBQ/TSQ, n_ticks). FLIP. Flatten at close. Paper only, not live.",
     "S19_BODY_CLOSE_1H": "Wait for the 1h to finish. LONG = green and C>prevC. SHORT = red and C<prevC. Mixed / doji / equal close: hold. FLIP only on the opposite aligned hour. Flatten at close. Paper-wired but ENABLE_S19 defaults off — 100-lot + fees 1h backtest lost after charges vs S16/S18. Not live.",
     "S20_FADE_HL": "Wait for the 1h to finish. LONG = lower low (not also HH) and green — buy the bounced low. SHORT = higher high (not also LL) and red — sell/short the rejected high. Inside / outside / knife / chase: hold. FLIP at that close. Flatten at close. Same formula scored on 30m/2h/4h/1d in the backtest. Paper-wired but ENABLE_S20 defaults off until a tape beats S16/S18 or S13 after charges. Not live.",
+    "S21_AMISE": "AMISE challenger slot. Genome comes from Lab Approve (must beat S16+S18 after charges, walk-forward, 2× costs). 1h FLIP, flatten at close. Paper ENABLE on Approve. Angel still needs Unlock + LIVE. Mood gate picks when it may open.",
+    "S22_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
+    "S23_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
+    "S24_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
 }
 
 

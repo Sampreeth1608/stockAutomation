@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from amise_slots import allocated_slots
 from control_state import SLIM_PAPER_STRATEGIES
 
 GUARDIAN_BOOKS: tuple[str, ...] = tuple(
     n
     for n in SLIM_PAPER_STRATEGIES
-    if n not in {"S19_BODY_CLOSE_1H", "S20_FADE_HL"}
+    if n not in {"S19_BODY_CLOSE_1H", "S20_FADE_HL"} and not n.endswith("_AMISE")
 )
 
 
@@ -146,7 +147,11 @@ def scan_guardian(
             kwargs["db_path"] = db
         rows = build_trades(**kwargs)
     books: list[dict[str, Any]] = []
-    for name in GUARDIAN_BOOKS:
+    names = list(GUARDIAN_BOOKS)
+    for name in allocated_slots():
+        if name not in names:
+            names.append(name)
+    for name in names:
         closed = [
             t
             for t in rows

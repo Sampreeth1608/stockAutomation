@@ -78,6 +78,10 @@ class StrategyGenome:
 
 def genome_from_dict(raw: dict[str, Any] | None) -> StrategyGenome:
     row = dict(raw or {})
+    if "no_trade" in row:
+        no_trade = tuple(row.get("no_trade") or ())
+    else:
+        no_trade = ("spread_wide", "rvol_extreme")
     return StrategyGenome(
         name=str(row.get("name") or "unnamed"),
         genome_id=str(row.get("genome_id") or ""),
@@ -85,7 +89,7 @@ def genome_from_dict(raw: dict[str, Any] | None) -> StrategyGenome:
         timeframe=str(row.get("timeframe") or "1h"),
         entry_long=tuple(row.get("entry_long") or ()),
         entry_short=tuple(row.get("entry_short") or ()),
-        no_trade=tuple(row.get("no_trade") or ("spread_wide", "rvol_extreme")),
+        no_trade=no_trade,
         exit=str(row.get("exit") or EXIT_FLIP),
         params={str(k): float(v) for k, v in (row.get("params") or {}).items()},
         source=str(row.get("source") or "compose"),
@@ -110,16 +114,23 @@ def genome_fingerprint(g: StrategyGenome) -> str:
 
 
 def research_env_patch() -> dict[str, str]:
-    """The only env the lab may write. Never ENABLE_* / live unlock."""
+    """Pending Lab rows may only force paper. ENABLE_S21..S24 is added on Approve."""
     return {"DRY_RUN": "true"}
 
 
 def env_patch_is_safe(patch: dict[str, str] | None) -> bool:
+    from amise_slots import AMISE_ENABLE_KEYS
+
     for key in (patch or {}):
         up = str(key).upper()
+        val = str(patch[key]).strip().lower()
+        if up in AMISE_ENABLE_KEYS:
+            if val not in {"true", "1", "yes", "y"}:
+                return False
+            continue
         if any(up.startswith(p) for p in FORBIDDEN_ENV_PREFIXES):
             return False
-        if up == "DRY_RUN" and str(patch[key]).strip().lower() not in {
+        if up == "DRY_RUN" and val not in {
             "true",
             "1",
             "yes",

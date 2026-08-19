@@ -151,6 +151,18 @@ def test_streaming_detector() -> None:
     assert d.last.direction == "down"
 
 
+def test_mood_gate_defaults_on() -> None:
+    os.environ.pop("MOOD_GATE", None)
+    from market_mood import mood_gate_on
+
+    assert mood_gate_on() is True
+    os.environ["MOOD_GATE"] = "false"
+    try:
+        assert mood_gate_on() is False
+    finally:
+        os.environ.pop("MOOD_GATE", None)
+
+
 def test_not_a_paper_book() -> None:
     root = Path(__file__).resolve().parent
     assert "MARKET_MOOD" not in ALL_STRATEGY_NAMES
@@ -170,7 +182,7 @@ def test_not_a_paper_book() -> None:
     panel = (root / "control_panel.py").read_text(encoding="utf-8")
     assert "/api/mood" in panel
     env = (root / ".env.example").read_text(encoding="utf-8")
-    assert "MOOD_GATE=false" in env
+    assert "MOOD_GATE=true" in env
     assert "MOOD_FLATTEN=false" in env
     assert "MOOD_FIT_MIN=0.40" in env
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
@@ -190,5 +202,6 @@ if __name__ == "__main__":
     test_burst_stands_down_intraday()
     test_quiet_and_burst()
     test_streaming_detector()
+    test_mood_gate_defaults_on()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")

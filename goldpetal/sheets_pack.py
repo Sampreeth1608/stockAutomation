@@ -59,6 +59,10 @@ STRATEGIES = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
+    "S21_AMISE",
+    "S22_AMISE",
+    "S23_AMISE",
+    "S24_AMISE",
 )
 
 SCORE_FIELDS = [

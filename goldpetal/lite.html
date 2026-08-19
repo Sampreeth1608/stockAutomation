@@ -48,7 +48,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <h1>Gold Petal</h1>
   <p class="hint">Compact controls. <a href="/">Trading station</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <a href="/full#why">Why win rate is low</a> · <a href="/full#s14-calc">S14 calculation</a></p>
   <div class="pills" id="pills"></div>
-  <p class="hint" id="mood-line">mood … · one tape read for all books · observe only until MOOD_GATE=true</p>
+  <p class="hint" id="mood-line">mood … · one tape read for all books · MOOD_GATE on: unfit books do not open</p>
 
   <section class="card">
     <h2>Stop / go</h2>
@@ -144,6 +144,7 @@ const SHORT = {
   S18_OHLC_VOL_HTF: "S18 OHLC+vol+day",
   S19_BODY_CLOSE_1H: "S19 body+close 1h",
   S20_FADE_HL: "S20 fade low/high",
+  S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
 };
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from amise_slots import AMISE_ENABLE, AMISE_SLOT_BOOKS
 from regime import Regime
 
 
@@ -27,6 +28,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        *AMISE_SLOT_BOOKS,
     },
     # S8/S10 bar-zigzag paper path had no regime filter in MTF sim — allow in CHOP too.
     # S5 has its own ATR/fee gate — keep it eligible in CHOP/QUIET so a smooth
@@ -41,6 +43,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        *AMISE_SLOT_BOOKS,
     },
     "QUIET": {
         "S1_NETDELTA",
@@ -57,6 +60,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        *AMISE_SLOT_BOOKS,
     },
     "WIDE_SPREAD": set(),
     "UNKNOWN": {
@@ -75,6 +79,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        *AMISE_SLOT_BOOKS,
     },
 }
 
@@ -149,6 +154,9 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S19_BODY_CLOSE_1H")
     if on("ENABLE_S20", "false"):
         enabled.add("S20_FADE_HL")
+    for name, key in AMISE_ENABLE.items():
+        if on(key, "false"):
+            enabled.add(name)
 
     if not enabled:
         enabled = {

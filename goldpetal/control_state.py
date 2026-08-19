@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from amise_slots import AMISE_SLOT_BOOKS
+
 IST = ZoneInfo("Asia/Kolkata")
 CONTROL_DIR = Path(__file__).resolve().parent / "data" / "control"
 STATE_PATH = CONTROL_DIR / "state.json"
@@ -212,7 +214,7 @@ ALL_STRATEGY_NAMES: tuple[str, ...] = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-)
+) + AMISE_SLOT_BOOKS
 
 SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
     "S5_MINEDGE",
@@ -223,7 +225,7 @@ SLIM_PAPER_STRATEGIES: tuple[str, ...] = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-)
+) + AMISE_SLOT_BOOKS
 
 
 def set_paper_allowlist(

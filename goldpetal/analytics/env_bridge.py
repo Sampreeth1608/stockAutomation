@@ -30,7 +30,13 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "ENABLE_S18",
         "ENABLE_S19",
         "ENABLE_S20",
+        "ENABLE_S21",
+        "ENABLE_S22",
+        "ENABLE_S23",
+        "ENABLE_S24",
         "DRY_RUN",
+        "MOOD_GATE",
+        "MOOD_FLATTEN",
         "LIVE_MAX_LOTS",
         "LIVE_LOTS",
         "S11_PACK_PATH",
@@ -91,6 +97,10 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S18_OHLC_VOL_HTF": "ENABLE_S18",
     "S19_BODY_CLOSE_1H": "ENABLE_S19",
     "S20_FADE_HL": "ENABLE_S20",
+    "S21_AMISE": "ENABLE_S21",
+    "S22_AMISE": "ENABLE_S22",
+    "S23_AMISE": "ENABLE_S23",
+    "S24_AMISE": "ENABLE_S24",
 }
 
 SLIM_ENABLE_DEFAULTS: dict[str, str] = {
@@ -112,6 +122,10 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S18": "true",
     "ENABLE_S19": "false",
     "ENABLE_S20": "false",
+    "ENABLE_S21": "false",
+    "ENABLE_S22": "false",
+    "ENABLE_S23": "false",
+    "ENABLE_S24": "false",
 }
 
 
@@ -141,6 +155,8 @@ def _validate_value(key: str, value: str) -> str:
         "DRY_RUN",
         "IGNORE_FEES",
         "FLATTEN_ON_BAD_REGIME",
+        "MOOD_GATE",
+        "MOOD_FLATTEN",
         "S12_NO_FLIP",
         "S12_ALLOW_LONG",
         "S12_ALLOW_SHORT",
