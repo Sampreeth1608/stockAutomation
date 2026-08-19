@@ -59,6 +59,16 @@ def _now_iso() -> str:
     return _now().isoformat(timespec="seconds")
 
 
+def _iso_ms(dt: datetime | None = None) -> str:
+    return _aware(dt or _now()).isoformat(timespec="milliseconds")
+
+
+def _lag_ms(click: datetime, tape: datetime | None) -> int | None:
+    if tape is None:
+        return None
+    return int((_aware(click) - tape).total_seconds() * 1000)
+
+
 def _aware(now: datetime) -> datetime:
     if now.tzinfo is None:
         return now.replace(tzinfo=IST)
@@ -206,7 +216,7 @@ def recent_tick_rows(db: Path, *, limit: int = RECENT_TICK_LIMIT) -> list[Any]:
         rows = list(
             conn.execute(
                 """
-                SELECT id, received_at, ltp, volume, bp, sp, raw_json
+                SELECT id, received_at, exchange_timestamp, ltp, volume, bp, sp, raw_json
                 FROM ticks
                 WHERE ltp IS NOT NULL
                 ORDER BY id DESC
@@ -284,22 +294,56 @@ def _naive_short(row: dict[str, Any] | None) -> bool:
     return bool(row.get("bear") and row.get("ll") and row.get("lc") and row.get("vol_up"))
 
 
+def _tick_public(row: Any) -> dict[str, Any]:
+    """One tape print with IST received time + exchange ts. Not an order."""
+    m = tick_metrics(row)
+    try:
+        rid = int(row["id"]) if row["id"] is not None else None
+    except (KeyError, TypeError, ValueError):
+        rid = None
+    exch = None
+    try:
+        keys = set(row.keys()) if hasattr(row, "keys") else set()
+        if "exchange_timestamp" in keys and row["exchange_timestamp"] is not None:
+            exch = int(row["exchange_timestamp"])
+    except (TypeError, ValueError, IndexError):
+        pass
+    px = m.get("ltp")
+    return {
+        "id": rid,
+        "received_at": str(row["received_at"] or ""),
+        "exchange_ts": exch,
+        "time": m.get("time"),
+        "ltp": round(float(px), 2) if px is not None else None,
+        "tbq": round(float(m.get("tbq") or 0), 2),
+        "tsq": round(float(m.get("tsq") or 0), 2),
+        "ltq": round(float(m.get("ltq") or 0), 2),
+        "oi": round(float(m.get("oi") or 0), 2) if m.get("oi") is not None else None,
+        "volume": round(float(m.get("volume") or 0), 2) if m.get("volume") is not None else None,
+        "buy5": round(float(m.get("buy5_sum") or 0), 2),
+        "sell5": round(float(m.get("sell5_sum") or 0), 2),
+        "net": round(float(m.get("net") or 0), 2),
+        "imb_pct": m.get("imb_pct"),
+    }
+
+
 def snapshot_market(
     db: Path | None = None,
     *,
     tick_limit: int = RECENT_TICK_LIMIT,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Market state at click time. Not an order."""
+    """Market state at the instant you press BUY / SHORT / CLOSE. Not an order."""
     path = db or resolve_desk_db()
     rows = recent_tick_rows(path, limit=tick_limit)
-    now = _now()
+    click = _aware(now) if now is not None else _now()
     last = rows[-1] if rows else None
     last_m = tick_metrics(last) if last is not None else {}
     ltp = float(last_m["ltp"]) if last_m.get("ltp") is not None else latest_ltp(path)
     last_ts = _parse_ts(str(last["received_at"] or "")) if last is not None else None
-    clock = last_ts or now
+    tape_clock = last_ts or click
 
-    cutoff_ticks = clock - timedelta(seconds=LOOKBACK_TICK_SEC)
+    cutoff_ticks = tape_clock - timedelta(seconds=LOOKBACK_TICK_SEC)
     ticks_win: list[dict[str, Any]] = []
     ltp_then: float | None = None
     first_id = None
@@ -315,26 +359,13 @@ def snapshot_market(
         ts = _parse_ts(str(row["received_at"] or ""))
         if ts is None or ts < cutoff_ticks:
             continue
-        m = tick_metrics(row)
-        px = m.get("ltp")
+        stamped = _tick_public(row)
+        px = stamped.get("ltp")
         if px is None:
             continue
         if ltp_then is None:
             ltp_then = float(px)
-        ticks_win.append(
-            {
-                "id": rid,
-                "time": m.get("time"),
-                "ltp": round(float(px), 2),
-                "tbq": round(float(m.get("tbq") or 0), 2),
-                "tsq": round(float(m.get("tsq") or 0), 2),
-                "ltq": round(float(m.get("ltq") or 0), 2),
-                "oi": round(float(m.get("oi") or 0), 2) if m.get("oi") is not None else None,
-                "volume": round(float(m.get("volume") or 0), 2) if m.get("volume") is not None else None,
-                "buy5": round(float(m.get("buy5_sum") or 0), 2),
-                "sell5": round(float(m.get("sell5_sum") or 0), 2),
-            }
-        )
+        ticks_win.append(stamped)
     vel = None
     if ltp is not None and ltp_then is not None and LOOKBACK_TICK_SEC:
         vel = (float(ltp) - float(ltp_then)) / float(LOOKBACK_TICK_SEC)
@@ -348,6 +379,8 @@ def snapshot_market(
         for i, b in enumerate(use):
             prev = use[i - 1] if i else (bars[-keep - 1] if len(bars) > keep else None)
             packed.append(_bar_row(b, prev))
+        if packed:
+            packed[-1] = dict(packed[-1], forming=True, tf=tf_name)
         packed_tf[tf_name] = packed
         last_tf[tf_name] = packed[-1] if packed else None
     packed_1m = packed_tf.get("1m") or []
@@ -357,24 +390,7 @@ def snapshot_market(
     bars_1h_pack = packed_tf.get("1h") or []
     if len(bars_1h_pack) >= 2:
         prev_1h = bars_1h_pack[-2]
-    use_1m = packed_1m
-    last_tick_full = None
-    if last is not None:
-        lm = tick_metrics(last)
-        last_tick_full = {
-            "id": int(last["id"]) if "id" in last.keys() and last["id"] is not None else None,
-            "time": lm.get("time"),
-            "ltp": round(float(lm["ltp"]), 2) if lm.get("ltp") is not None else None,
-            "tbq": round(float(lm.get("tbq") or 0), 2),
-            "tsq": round(float(lm.get("tsq") or 0), 2),
-            "ltq": round(float(lm.get("ltq") or 0), 2),
-            "oi": lm.get("oi"),
-            "volume": lm.get("volume"),
-            "buy5": round(float(lm.get("buy5_sum") or 0), 2),
-            "sell5": round(float(lm.get("sell5_sum") or 0), 2),
-            "net": round(float(lm.get("net") or 0), 2),
-            "imb_pct": lm.get("imb_pct"),
-        }
+    last_tick_full = _tick_public(last) if last is not None else None
 
     session_vwap = None
     if packed_1m:
@@ -419,11 +435,13 @@ def snapshot_market(
     )
 
     return {
-        "captured_at_ist": _now_iso(),
+        "clicked_at_ist": _iso_ms(click),
+        "captured_at_ist": _iso_ms(click),
         "db_path": str(path),
         "n_ticks_loaded": len(rows),
         "ltp": round(float(ltp), 2) if ltp is not None else None,
         "last_tick_at": str(last["received_at"]) if last is not None else "",
+        "tape_lag_ms": _lag_ms(click, last_ts),
         "last_tick": last_tick_full,
         "tape_span": {
             "first_id": first_id,
@@ -473,8 +491,9 @@ def snapshot_market(
             "m1_long": coded_1m_long,
             "m1_short": coded_1m_short,
         },
-        "weekday": clock.strftime("%A"),
-        "hhmm": clock.strftime("%H:%M"),
+        "weekday": click.strftime("%A"),
+        "hhmm": click.strftime("%H:%M"),
+        "hhmmss": click.strftime("%H:%M:%S"),
     }
 
 
@@ -500,7 +519,7 @@ def _you_session_id(items: list[dict[str, Any]], now: datetime) -> str:
     for ex in items:
         if ex.get("action") == "close":
             continue
-        prev = _parse_ts(str(ex.get("created_at_ist") or ex.get("entry_at") or ""))
+        prev = _parse_ts(str(ex.get("clicked_at_ist") or ex.get("created_at_ist") or ex.get("entry_at") or ""))
         if prev is None:
             continue
         gap = (clock - prev).total_seconds()
@@ -542,24 +561,37 @@ def record_human(
             f"{sess['open_hhmm']}–{sess['close_hhmm']} IST"
         )
     conf = max(1, min(5, int(confidence or 3)))
-    snap = snapshot if snapshot is not None else snapshot_market(db)
+    clock = _now() if now is None else _aware(now)
+    items = load_examples(path)
+    snap = dict(snapshot if snapshot is not None else snapshot_market(db, now=clock))
     ltp = snap.get("ltp")
     if ltp is None:
         raise RuntimeError("no LTP on the tape — start the feed first")
     coded = snap.get("coded") or {}
-    clock = _now() if now is None else _aware(now)
-    items = load_examples(path)
+    clicked = _iso_ms(clock)
+    last_tick_at = str(snap.get("last_tick_at") or "")
+    last_ts = _parse_ts(last_tick_at)
+    lag = snap.get("tape_lag_ms")
+    if lag is None:
+        lag = _lag_ms(clock, last_ts)
+    snap["clicked_at_ist"] = clicked
+    snap["captured_at_ist"] = clicked
+    snap["tape_lag_ms"] = lag
+    snap["weekday"] = clock.strftime("%A")
+    snap["hhmm"] = clock.strftime("%H:%M")
+    snap["hhmmss"] = clock.strftime("%H:%M:%S")
     example = {
         "id": uuid.uuid4().hex[:10],
         "you_session_id": _you_session_id(items, clock),
-        "created_at_ist": clock.isoformat(timespec="seconds"),
+        "created_at_ist": clicked,
+        "clicked_at_ist": clicked,
         "action": act,
         "confidence": conf,
         "note": str(note or "")[:400],
         "entry_px": float(ltp),
-        "entry_at": snap.get("last_tick_at") or (
-            _now_iso() if now is None else _aware(now).isoformat(timespec="seconds")
-        ),
+        "entry_at": clicked,
+        "last_tick_at": last_tick_at,
+        "tape_lag_ms": lag,
         "vs_coded": _vs_coded(act, coded),
         "coded": coded,
         "snapshot": snap,
@@ -721,7 +753,8 @@ def capture_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
         "note": (
             "NO TRADE is the selection filter. Coded 1h rule is naive "
             "HH+HC+volume-up — the thing your brain is usually stricter than. "
-            "Tape (LTP/TBQ/TSQ/candles/ticks) is always stored. Angel only if "
+            "Tape (LTP/TBQ/TSQ/candles/ticks) is always stored with the exact "
+            "click timestamp and last-tick time. Angel only if "
             "you type YOU after live is armed. 30m / 1h / 3h / whole-day sittings "
             "all count. This store does not set DRY_RUN=false."
         ),
@@ -735,7 +768,11 @@ def example_public(ex: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": ex.get("id"),
         "you_session_id": ex.get("you_session_id"),
+        "clicked_at_ist": ex.get("clicked_at_ist") or ex.get("created_at_ist"),
         "created_at_ist": ex.get("created_at_ist"),
+        "last_tick_at": ex.get("last_tick_at") or snap.get("last_tick_at"),
+        "tape_lag_ms": ex.get("tape_lag_ms") if ex.get("tape_lag_ms") is not None else snap.get("tape_lag_ms"),
+        "hhmmss": snap.get("hhmmss"),
         "action": ex.get("action"),
         "confidence": ex.get("confidence"),
         "note": ex.get("note"),
@@ -836,7 +873,8 @@ def capture_desk_payload(
         "note": (
             "Press BUY / SHORT / NO TRADE / CLOSE while Gold Petal is open "
             f"(Mon–Fri {sess['open_hhmm']}–{sess['close_hhmm']} IST). "
-            "Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks. "
+            "Every click stores the exact IST timestamp, last tick time, lag, "
+            "LTP, TBQ, TSQ, book, OI, 1m–1h candles (with bar times), and recent ticks. "
             "Sit 30m, 1h, 3h, or the whole day — all count. "
             "Angel only after Paper off + LIVE + Unlock + Restart, then type YOU on the click. "
             "Press Let it trade when you want the mimic to paper in your hours, "

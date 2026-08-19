@@ -91,6 +91,17 @@ def test_record_buy_does_not_trade(tmp_path: Path) -> None:
     )
     assert rec["action"] == "buy"
     assert rec["you_session_id"]
+    assert rec["clicked_at_ist"]
+    assert "." in str(rec["clicked_at_ist"])
+    assert rec["tape_lag_ms"] is not None
+    assert rec["last_tick_at"]
+    ticks = snap.get("ticks") or []
+    assert ticks
+    assert ticks[-1].get("received_at")
+    assert ticks[-1].get("ltp") is not None
+    last_1m = snap.get("last_1m") or {}
+    assert last_1m.get("time")
+    assert snap.get("hhmmss")
     assert rec["places_order"] is False
     assert rec["paper"] is False
     assert rec["live"] is False
@@ -112,6 +123,9 @@ def test_record_buy_does_not_trade(tmp_path: Path) -> None:
     pub = example_public(rec)
     assert pub["n_bars_1m"] >= 1
     assert pub["bid1"] == snap["bid1"]
+    assert pub["clicked_at_ist"]
+    assert pub["last_tick_at"]
+    assert pub["tape_lag_ms"] is not None
 
 
 def test_no_trade_is_the_filter(tmp_path: Path) -> None:

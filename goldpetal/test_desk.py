@@ -54,8 +54,10 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v14" in html
-    assert " · v14" in html
+    assert "gp-header-v15" in html
+    assert " · v15" in html
+    assert "exact IST click time" in html
+    assert "tape_lag_ms" in html
     assert "Let it trade" in html
     assert "You vs mimic" in html
     assert "/api/capture/go" in html

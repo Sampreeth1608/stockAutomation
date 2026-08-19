@@ -91,7 +91,7 @@ def _now_iso() -> str:
 
 
 def _ex_dt(ex: dict[str, Any]) -> datetime | None:
-    return _parse_ts(str(ex.get("created_at_ist") or ex.get("entry_at") or ""))
+    return _parse_ts(str(ex.get("clicked_at_ist") or ex.get("created_at_ist") or ex.get("entry_at") or ""))
 
 
 def duration_bucket(sec: float) -> str:

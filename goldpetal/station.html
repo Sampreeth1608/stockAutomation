@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v14: You teach, Let it trade button, compare You vs mimic -->
+<!-- gp-header-v15: You click timestamps + ticks/candles at press -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v14</div>
+      <div class="clock" id="clock">IST — · v15</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -348,7 +348,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="you-panel" hidden>
         <h2>You — trade and teach</h2>
-        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Sit 30 minutes, 1 hour, 3 hours, or the whole day — all count. Every click teaches. When you want the mimic to try, press <b>Let it trade</b> (paper in your hours). Compare You vs mimic below. Keep sitting if you want to teach more, then Learn my style and Let it trade again. This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE.</p>
+        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Sit 30 minutes, 1 hour, 3 hours, or the whole day — all count. Every BUY / SHORT / NO TRADE / CLOSE stores the <b>exact IST click time</b>, last tick time, lag, LTP/TBQ/TSQ, book, OI, 1m–1h candles, and recent ticks. When you want the mimic to try, press <b>Let it trade</b> (paper in your hours). Compare You vs mimic below. Keep sitting if you want to teach more, then Learn my style and Let it trade again. This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE.</p>
         <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. Type YOU to send Angel after live is armed. Let it trade starts paper only.</div>
         <p class="flash" id="flash-you"></p>
         <div class="ml-card">
@@ -568,7 +568,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v14";
+    if (clock) clock.textContent = "IST " + ist + " · v15";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1382,7 +1382,7 @@ function renderYou() {
     const act = String(r.action || "").toUpperCase();
     return `<div class="ml-card">
       <h3>${esc(act)} @ ${r.entry_px != null ? money(r.entry_px) : "—"} · conf ${esc(r.confidence)}</h3>
-      <p class="ml-meta">${esc(String(r.created_at_ist || "").slice(0, 19))} · ${esc(vsLabel(r.vs_coded))} · 1m bars ${esc(r.n_bars_1m)} · ticks ${esc(r.n_ticks_window || r.n_ticks_30s)} · TBQ ${r.tbq != null ? r.tbq : "—"} / TSQ ${r.tsq != null ? r.tsq : "—"} · bid ${r.bid1 != null ? r.bid1 : "—"} / ask ${r.ask1 != null ? r.ask1 : "—"}${r.live ? " · LIVE" : ""}</p>
+      <p class="ml-meta">click ${esc(String(r.clicked_at_ist || r.created_at_ist || "").slice(11, 23) || String(r.created_at_ist || "").slice(0, 19))} IST · tape ${esc(String(r.last_tick_at || (r.last_tick && r.last_tick.time) || "").slice(11, 23) || String(r.last_tick_at || "").slice(0, 19))} · lag ${r.tape_lag_ms != null ? (r.tape_lag_ms + "ms") : "—"} · ${esc(vsLabel(r.vs_coded))} · 1m ${(r.last_1m && r.last_1m.time) ? esc(String(r.last_1m.time).slice(11, 19)) : "—"} · bars ${esc(r.n_bars_1m)} · ticks ${esc(r.n_ticks_window || r.n_ticks_30s)} · TBQ ${r.tbq != null ? r.tbq : "—"} / TSQ ${r.tsq != null ? r.tsq : "—"}${r.live ? " · LIVE" : ""}</p>
       <div class="ml-stats">
         ${mlStat("30s", m1 && o["30s"] && o["30s"].taken_pts != null ? (o["30s"].taken_pts + " pts") : "…")}
         ${mlStat("1m", m1.taken_pts != null ? (m1.taken_pts + " pts") : "…", pnlClass(m1.taken_pts))}
@@ -1431,6 +1431,7 @@ async function recordYou(action) {
   const rec = res.recorded || {};
   const order = rec.order || {};
   let msg = "Recorded " + String(rec.action || action).toUpperCase() + " @ " + (rec.entry_px != null ? rec.entry_px : "—");
+  if (rec.clicked_at_ist) msg += " · click " + String(rec.clicked_at_ist).slice(11, 23);
   if (rec.places_order) msg += " — queued for Angel";
   else if (send) msg += " — recorded, not sent (" + (order.error || "live blocked") + ")";
   else msg += " — tape stored, not an order";

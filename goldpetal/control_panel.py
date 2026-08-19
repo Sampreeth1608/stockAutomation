@@ -829,6 +829,8 @@ class ControlHandler(BaseHTTPRequestHandler):
                     "live": bool(rec.get("live")),
                     "order": order,
                     "you_session_id": rec.get("you_session_id"),
+                    "clicked_at_ist": rec.get("clicked_at_ist"),
+                    "tape_lag_ms": rec.get("tape_lag_ms"),
                 }
                 payload["ok"] = True
                 self._send(*_json_bytes(payload))
