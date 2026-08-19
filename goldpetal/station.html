@@ -99,9 +99,9 @@ input[type=number], input[type=text], input[type=date], select {
   padding: .38rem .5rem; font: 13px var(--mono); }
 input[type=number], input[type=text] { width: 6.4rem; }
 input[type=date] { width: 11.2rem; }
-#dl-panel, #ml-panel, #lab-panel, #you-panel { padding: .85rem 1rem 1.1rem; }
-#dl-panel[hidden], #ml-panel[hidden], #lab-panel[hidden], #you-panel[hidden], #grid-wrap[hidden] { display: none !important; }
-.pane h2, #dl-panel h2, #ml-panel h2, #lab-panel h2, #you-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
+#dl-panel, #ml-panel, #lab-panel, #you-panel, #amise-panel { padding: .85rem 1rem 1.1rem; }
+#dl-panel[hidden], #ml-panel[hidden], #lab-panel[hidden], #you-panel[hidden], #amise-panel[hidden], #grid-wrap[hidden] { display: none !important; }
+.pane h2, #dl-panel h2, #ml-panel h2, #lab-panel h2, #you-panel h2, #amise-panel h2 { margin: 0 0 .45rem; font: 600 12px/1.2 var(--serif); letter-spacing: .12em;
   text-transform: uppercase; color: var(--gold); }
 textarea { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
   padding: .4rem .5rem; font: 13px var(--font); width: 100%; min-height: 2.5rem; resize: vertical; }
@@ -121,7 +121,7 @@ textarea { background: #fff; color: var(--text); border: 1px solid var(--line); 
 .ml-box b { display: block; font: 600 10px/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: .2rem; }
 pre.env { margin: .4rem 0 0; padding: .45rem .55rem; background: var(--head); border: 1px solid var(--line);
   border-radius: 8px; font: 11px/1.4 var(--mono); overflow: auto; max-height: 8rem; white-space: pre-wrap; }
-#ml-badge, #lab-badge, #you-badge { font: 600 11px/1 var(--mono); color: var(--gold); margin-left: .15rem; }
+#ml-badge, #lab-badge, #you-badge, #amise-badge { font: 600 11px/1 var(--mono); color: var(--gold); margin-left: .15rem; }
 @media (max-width: 900px) {
   .ml-stats, .ml-compare { grid-template-columns: 1fr 1fr; }
 }
@@ -231,6 +231,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="why">Edge</button>
           <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
+          <button class="tab" type="button" data-tab="amise">AMISE<span id="amise-badge"></span></button>
           <button class="tab" type="button" data-tab="you">You · capture<span id="you-badge"></span></button>
           <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
@@ -308,6 +309,30 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div id="lab-passed"></div>
         <h2 style="margin-top:1rem">Recent lab decisions</h2>
         <div id="lab-decided"></div>
+      </div>
+      <div class="scroll" id="amise-panel" hidden>
+        <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. It does not ENABLE a book, does not rewrite S13/S16, and cannot guarantee rising profits. Factory runs on the VM (<span class="mono">python3 amise.py --db data/ticks.db --lab</span>). This tab is observe + approval queue. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <div class="ml-banner" id="amise-live-block">This tab never sets DRY_RUN=false, never writes ENABLE_*, never live-unlocks.</div>
+        <p class="flash" id="flash-amise"></p>
+        <div class="row" style="margin-top:.45rem">
+          <button class="btn" type="button" id="btn-amise-refresh">Refresh</button>
+          <span class="mono" id="amise-meta"></span>
+        </div>
+        <div id="amise-pipeline"></div>
+        <h2 style="margin-top:1rem">Market state</h2>
+        <div id="amise-market"></div>
+        <h2 style="margin-top:1rem">Strategy manager — who fits this regime</h2>
+        <div id="amise-fits"></div>
+        <h2 style="margin-top:1rem">Profit Guardian</h2>
+        <div id="amise-guardian"></div>
+        <h2 style="margin-top:1rem">Factory / challengers</h2>
+        <p class="hint">Approve on the <a href="/#lab">Lab tab</a>. Approve ≠ paper ENABLE.</p>
+        <div id="amise-factory"></div>
+        <h2 style="margin-top:1rem">Risk</h2>
+        <div id="amise-risk"></div>
+        <h2 style="margin-top:1rem">Similar-state memory</h2>
+        <div id="amise-memory"></div>
       </div>
       <div class="scroll" id="you-panel" hidden>
         <h2>Human trade capture</h2>
@@ -437,6 +462,7 @@ let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_clos
 let lastWhy = null;
 let lastMl = null;
 let lastLab = null;
+let lastAmise = null;
 let lastYou = null;
 let lastMood = { mood: "UNKNOWN", label: "mood warming up", gate_on: false, flatten_on: false };
 let mlRestartNeeded = false;
@@ -655,16 +681,18 @@ function mlStat(label, value, cls) {
   return `<div class="ml-stat"><b>${esc(label)}</b><span class="${cls || ""}">${value}</span></div>`;
 }
 function showMainTab() {
-  const extra = watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "you";
+  const extra = watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "amise" || watchTab === "you";
   $("grid-wrap").hidden = extra;
   $("dl-panel").hidden = watchTab !== "dl";
   $("ml-panel").hidden = watchTab !== "ml";
   $("lab-panel").hidden = watchTab !== "lab";
+  $("amise-panel").hidden = watchTab !== "amise";
   $("you-panel").hidden = watchTab !== "you";
   $("hist-strat").style.visibility = extra ? "hidden" : "visible";
   if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
   if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — AI proposes, you decide. Never ENABLE from this tab";
+  if (watchTab === "amise") $("grid-meta").textContent = "AMISE — research system. Observe + approval. Never ENABLE from this tab";
   if (watchTab === "you") $("grid-meta").textContent = "Human capture — records what you see. Does not trade";
 }
 function rangeQs() {
@@ -943,6 +971,96 @@ async function loadLab() {
   setLabBadge(((lastLab.pending || []).length) || 0);
   if (watchTab === "lab") renderLab();
 }
+function setAmiseBadge(n) {
+  const el = $("amise-badge");
+  if (!el) return;
+  el.textContent = n ? " (" + n + ")" : "";
+}
+function gStatusClass(s) {
+  const x = String(s || "");
+  if (x === "DETERIORATING") return "bad";
+  if (x === "WATCH" || x === "THIN") return "warn";
+  if (x === "HEALTHY") return "ok";
+  return "";
+}
+function renderAmise() {
+  const d = lastAmise || {};
+  const mkt = d.market || {};
+  const mgr = d.manager || {};
+  const g = d.guardian || {};
+  const fac = d.factory || {};
+  const risk = d.risk || {};
+  const cap = risk.capital || {};
+  const ctl = risk.control || {};
+  const mem = d.memory || {};
+  const sim = mem.similar || {};
+  const counts = fac.counts || {};
+  const pending = fac.pending || [];
+  setAmiseBadge((pending.length || 0) + (d.alerts || 0));
+  $("amise-meta").textContent = (d.ts_ist || "") + " · " + (d.note || "").slice(0, 80);
+  $("amise-pipeline").innerHTML = `<div class="ml-card">
+    <h3>Pipeline</h3>
+    <p class="ml-meta">${esc((d.pipeline || []).join(" → "))}</p>
+    <p class="hint">${esc(d.note || "")}</p>
+  </div>`;
+  $("amise-market").innerHTML = `<div class="ml-card">
+    <h3>${esc(mkt.label || mkt.mood || "mood")}</h3>
+    <p class="ml-meta">${esc(mkt.regime || "UNKNOWN")} · ${esc(mkt.transition || "")} · ${mkt.gate_on ? "GATE ON" : "observe only"}</p>
+    <p class="hint">${esc(mkt.reason || "")}</p>
+  </div>`;
+  const fits = mgr.fits || mkt.fits || [];
+  $("amise-fits").innerHTML = fits.length ? `<table>
+    <thead><tr><th>Book</th><th>Stance</th><th class="num">Fit</th><th>Why</th></tr></thead>
+    <tbody>${fits.filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL").map((f) => `<tr>
+      <td>${esc(SHORT[f.strategy] || f.strategy)}</td>
+      <td class="${f.stance === "stand_down" ? "bad" : (f.stance === "trade" ? "ok" : "")}">${esc(f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold swing" : "trade"))}</td>
+      <td class="num">${esc(Math.round(Number(f.weight || 0) * 100))}%</td>
+      <td>${esc(f.why || "")}</td>
+    </tr>`).join("")}</tbody>
+  </table>` : `<p class="hint">Mood warming up — need ticks.</p>`;
+  const books = g.books || [];
+  $("amise-guardian").innerHTML = `<div class="ml-card">
+    <h3>Portfolio ${esc(g.portfolio_status || "—")}</h3>
+    <p class="hint">${esc(g.note || "")}</p>
+    ${books.length ? `<table>
+      <thead><tr><th>Book</th><th>Status</th><th class="num">n</th><th class="num">PF</th><th class="num">Recent PF</th><th class="num">AC₹</th><th>Note</th></tr></thead>
+      <tbody>${books.map((b) => `<tr>
+        <td>${esc(SHORT[b.strategy] || b.strategy)}</td>
+        <td class="${gStatusClass(b.status)}">${esc(b.status)}</td>
+        <td class="num">${esc(b.n)}</td>
+        <td class="num">${esc(b.profit_factor)}</td>
+        <td class="num">${esc(b.recent_pf)}</td>
+        <td class="num ${pnlClass(b.pnl_after_charges)}">${money(b.pnl_after_charges)}</td>
+        <td>${esc(b.note || "")}</td>
+      </tr>`).join("")}</tbody>
+    </table>` : `<p class="hint">No closed paper trades yet.</p>`}
+  </div>`;
+  $("amise-factory").innerHTML = `<div class="ml-stats">
+    ${mlStat("Found", String(counts.found || 0))}
+    ${mlStat("Passed gates", String(counts.passed_validation || 0), counts.passed_validation ? "ok" : "")}
+    ${mlStat("Awaiting you", String(pending.length), pending.length ? "warn" : "ok")}
+    ${mlStat("Rejected", String(counts.rejected || 0))}
+  </div>
+  <p class="ml-meta">Last factory run ${esc(fac.last_run_at || "none")} · champions S16 AC₹ ${esc((fac.champions || {}).S16 && (fac.champions.S16.after_charges != null) ? fac.champions.S16.after_charges : "—")} · S18 AC₹ ${esc((fac.champions || {}).S18 && (fac.champions.S18.after_charges != null) ? fac.champions.S18.after_charges : "—")}</p>
+  <p class="hint">${pending.length ? (pending.length + " Lab proposal(s) waiting — open the Lab tab to Approve / Reject.") : "No pending factory proposals. Two weeks of ticks often yields 0 — that is the gate working."}</p>`;
+  $("amise-risk").innerHTML = `<div class="ml-card">
+    <p class="ml-meta">emergency ${ctl.emergency_off ? "ON" : "clear"} · trading ${ctl.trading_enabled === false ? "held" : "on"} · live ${ctl.live_unlocked ? "unlocked" : "locked"}</p>
+    <p class="ml-meta">book ₹ ${esc(cap.total_capital_inr ?? "—")} · day-loss ₹ ${esc(cap.daily_loss_limit_inr ?? "—")} · today ₹ ${esc(cap.today_pnl_inr ?? "—")} ${risk.daily_loss_breached ? "· DAILY LOSS HIT" : ""}</p>
+  </div>`;
+  const a5 = sim.after_5m || {};
+  const a30 = sim.after_30m || {};
+  $("amise-memory").innerHTML = `<div class="ml-card">
+    <p class="ml-meta">${esc(mem.updated_at_ist || "no CLI run yet")} · similar n=${esc(sim.n ?? "—")} · regime ${esc(sim.regime || "—")}</p>
+    <p class="hint">${esc(sim.note || mem.note || "Run python3 amise.py --db data/ticks.db on the VM to fill similar-state memory.")}</p>
+    ${a5.n ? `<p class="ml-meta">After 5m (n=${esc(a5.n)}): up ${esc(a5.up_pct)}% · flat ${esc(a5.flat_pct)}% · down ${esc(a5.down_pct)}%</p>` : ""}
+    ${a30.n ? `<p class="ml-meta">After 30m (n=${esc(a30.n)}): up ${esc(a30.up_pct)}% · flat ${esc(a30.flat_pct)}% · down ${esc(a30.down_pct)}%</p>` : ""}
+  </div>`;
+}
+async function loadAmise() {
+  lastAmise = await api("/api/amise");
+  setAmiseBadge(((lastAmise.awaiting_you || 0) + (lastAmise.alerts || 0)));
+  if (watchTab === "amise") renderAmise();
+}
 function vsLabel(k) {
   return ({
     you_buy_rule_also: "BUY you took, naive 1h rule also fired",
@@ -1090,7 +1208,7 @@ async function loadPack(path, alreadySafe) {
   await loadDesk();
 }
 function renderGrid() {
-  if (watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "you") return;
+  if (watchTab === "dl" || watchTab === "ml" || watchTab === "lab" || watchTab === "amise" || watchTab === "you") return;
   const h = Object.assign({}, lastTape, lastHist);
   const tab = watchTab;
   const strat = $("hist-strat").value;
@@ -1277,12 +1395,14 @@ document.querySelectorAll("#tabs .tab").forEach((btn) => {
     if (watchTab === "why" && !lastWhy) loadWhy().catch(() => {});
     if (watchTab === "ml") loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
     if (watchTab === "lab") loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
+    if (watchTab === "amise") loadAmise().catch((e) => flash("flash-amise", String(e.message || e), true));
     if (watchTab === "you") loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
   };
 });
 $("ml-filter").onchange = () => { if (lastMl) renderMl(); };
 $("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 $("btn-lab-refresh").onclick = () => loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
+$("btn-amise-refresh").onclick = () => loadAmise().catch((e) => flash("flash-amise", String(e.message || e), true));
 $("btn-you-refresh").onclick = () => loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-you]");
@@ -1419,6 +1539,11 @@ if (location.hash === "#lab") {
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "lab"));
   showMainTab();
 }
+if (location.hash === "#amise") {
+  watchTab = "amise";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "amise"));
+  showMainTab();
+}
 if (location.hash === "#you") {
   watchTab = "you";
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "you"));
@@ -1431,6 +1556,7 @@ loadHistory().catch(() => {});
 setTimeout(() => loadWhy().catch(() => {}), 400);
 loadMl().catch(() => {});
 loadLab().catch(() => {});
+loadAmise().catch(() => {});
 loadYou().catch(() => {});
 loadMood().catch(() => {});
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
@@ -1439,6 +1565,7 @@ setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 12000);
 setInterval(() => { if (!typing()) loadWhy().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 20000);
+setInterval(() => { if (!typing() && watchTab === "amise") loadAmise().catch(() => {}); }, 15000);
 setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 8000);
 setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 4000);
 </script>

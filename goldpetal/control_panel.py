@@ -392,7 +392,26 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(payload)
                 self._send(status, body, ctype)
                 return
-            if path == "/api/s11/pack":
+            if path == "/api/amise":
+                try:
+                    from amise import amise_desk_payload
+
+                    payload = amise_desk_payload()
+                except Exception as exc:
+                    payload = {
+                        "ok": False,
+                        "engine": "AMISE",
+                        "error": str(exc),
+                        "live_blocked": True,
+                        "enable_blocked": True,
+                        "note": (
+                            "Desk still runs. AMISE is research-only. "
+                            "Does not ENABLE. Keep DRY_RUN=true."
+                        ),
+                    }
+                status, body, ctype = _json_bytes(payload)
+                self._send(status, body, ctype)
+                return
                 raw = ((qs.get("path") or [""])[0] or "").strip()
                 status, body, ctype = _json_bytes(pack_summary(raw))
                 self._send(status, body, ctype)

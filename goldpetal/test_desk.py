@@ -21,6 +21,7 @@ def test_station_is_the_operator_page() -> None:
     assert "Downloads" in html
     assert 'data-tab="ml"' in html
     assert 'data-tab="lab"' in html
+    assert 'data-tab="amise"' in html
     assert 'data-tab="you"' in html
     assert 'id="you-strip"' in html
     assert "You · capture" in html
@@ -40,6 +41,9 @@ def test_station_is_the_operator_page() -> None:
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
+    assert "/api/amise" in html
+    assert "AMISE" in html
+    assert "Profit Guardian" in html
     assert "RESEARCH_FACTORY" not in html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S18_OHLC_VOL_HTF" in html
     assert "S19_BODY_CLOSE_1H" in html
@@ -100,7 +104,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "MOOD_GATE" in html
     assert "Mon–Fri 09:00–23:30" in html
     assert "/#lab" in html
-    assert "/#lab" in html
+    assert "/#amise" in html
+    assert "AMISE" in html
     assert "after charges" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
@@ -138,6 +143,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/desk" in text
     assert "/api/ml" in text
     assert "/api/research" in text
+    assert "/api/amise" in text
+    assert "amise_desk_payload" in text
     assert "/api/capture" in text
     assert "/api/mood" in text
     assert "mood_desk_payload" in text
