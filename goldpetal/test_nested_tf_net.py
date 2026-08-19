@@ -32,10 +32,11 @@ def _b(
     l: float,
     c: float,
     *,
+    vol: float = 100.0,
     tbq: float = 0.0,
     tsq: float = 0.0,
 ) -> FlowBar:
-    return FlowBar(t, o, h, l, c, 100.0, 2.0, tbq, tsq)
+    return FlowBar(t, o, h, l, c, vol, 2.0, tbq, tsq)
 
 
 def _tick(t: datetime, px: float, tbq: float, tsq: float, vol: float) -> dict:
@@ -138,6 +139,9 @@ def test_15m_1015_has_15_1m_5_3m_3_5m() -> None:
         collected, parent="15m", parent_time=parents[0].time, mode="sum"
     )
     assert net.body_net > 0
+    assert net.vol_net > 0
+    assert net.tbq_net > 0
+    assert net.tsq_net > 0
     assert net.book_net > 0
     assert net.bias == 1
     assert net.side == "LONG"
@@ -335,6 +339,65 @@ def test_vote_uses_inner_direction_count() -> None:
     assert body.bias == -1
 
 
+def test_volume_tbq_tsq_use_same_signed_net() -> None:
+    """Heavy volume / TBQ / TSQ on the red inner flips that metric bearish."""
+    t0 = datetime(2026, 8, 10, 10, 15, 0)
+    ones: list[FlowBar] = []
+    for i in range(10):
+        ts = t0 + timedelta(minutes=i)
+        ones.append(
+            _b(
+                ts.strftime("%Y-%m-%d %H:%M:%S"),
+                100.0 + i,
+                101.0 + i,
+                100.0 + i,
+                101.0 + i,
+                vol=1.0,
+                tbq=10.0,
+                tsq=10.0,
+            )
+        )
+    for i in range(5):
+        ts = t0 + timedelta(minutes=10 + i)
+        ones.append(
+            _b(
+                ts.strftime("%Y-%m-%d %H:%M:%S"),
+                110.0 - i,
+                110.0 - i,
+                109.0 - i,
+                109.0 - i,
+                vol=20.0,
+                tbq=400.0,
+                tsq=400.0,
+            )
+        )
+    collected = {"1m": ones, "3m": [], "5m": []}
+    body = score_nested(
+        collected, parent="15m", parent_time="2026-08-10 10:15:00", mode="sum"
+    )
+    vol = score_nested(
+        collected, parent="15m", parent_time="2026-08-10 10:15:00", mode="vol"
+    )
+    tbq = score_nested(
+        collected, parent="15m", parent_time="2026-08-10 10:15:00", mode="tbq"
+    )
+    tsq = score_nested(
+        collected, parent="15m", parent_time="2026-08-10 10:15:00", mode="tsq"
+    )
+    # 10 green × +1 body, 5 red × −1 → body still net green
+    assert body.body_net > 0
+    assert body.bias == 1
+    # volume net = 10×1 − 5×20 = −90
+    assert vol.vol_net == 10.0 - 100.0
+    assert vol.bias == -1
+    # TBQ net = 10×10 − 5×400 = −1900
+    assert tbq.tbq_net == 100.0 - 2000.0
+    assert tbq.bias == -1
+    # TSQ net = same stack as TBQ here
+    assert tsq.tsq_net == 100.0 - 2000.0
+    assert tsq.bias == -1
+
+
 def test_ticks_build_session_aligned_15m_inners() -> None:
     start = datetime(2026, 8, 10, 10, 15, 0, tzinfo=IST)
     rows = []
@@ -368,10 +431,23 @@ def test_ticks_build_session_aligned_15m_inners() -> None:
     assert len(collected["1m"]) == 15
     assert len(collected["3m"]) == 5
     assert len(collected["5m"]) == 3
-    net = score_nested(
+    body = score_nested(
         collected, parent="15m", parent_time=parent.time, mode="sum"
     )
-    assert net.bias == 1
+    vol_n = score_nested(
+        collected, parent="15m", parent_time=parent.time, mode="vol"
+    )
+    tbq_n = score_nested(
+        collected, parent="15m", parent_time=parent.time, mode="tbq"
+    )
+    tsq_n = score_nested(
+        collected, parent="15m", parent_time=parent.time, mode="tsq"
+    )
+    assert body.bias == 1
+    assert vol_n.vol_net > 0 and vol_n.bias == 1
+    assert tbq_n.tbq_net > 0 and tbq_n.bias == 1
+    assert tsq_n.tsq_net > 0 and tsq_n.bias == 1
+    assert body.book_net > 0
 
 
 def test_simulate_all_modes_on_synthetic_parents() -> None:
@@ -380,11 +456,13 @@ def test_simulate_all_modes_on_synthetic_parents() -> None:
         bars_by_min,
         lots=1.0,
         fees=False,
-        modes=("sum",),
+        modes=("sum", "vol", "tbq", "tsq"),
         parents=(("15m", 15),),
     )
-    assert len(results) == 1
-    assert results[0].n_trades >= 1
+    assert len(results) == 4
+    for r in results:
+        assert r.n_trades >= 1
+        assert r.trades[0].side == "LONG"
 
 
 def test_not_wired_to_paper_or_live() -> None:
@@ -410,6 +488,7 @@ if __name__ == "__main__":
     test_skip_overnight_intraday()
     test_zero_net_skips()
     test_vote_uses_inner_direction_count()
+    test_volume_tbq_tsq_use_same_signed_net()
     test_ticks_build_session_aligned_15m_inners()
     test_simulate_all_modes_on_synthetic_parents()
     test_not_wired_to_paper_or_live()

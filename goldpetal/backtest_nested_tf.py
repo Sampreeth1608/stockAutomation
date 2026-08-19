@@ -64,8 +64,8 @@ def main() -> None:
     ap.add_argument("--fees", action="store_true", help="Angel fees; rank tax excluded")
     ap.add_argument(
         "--modes",
-        default="sum,vote,book",
-        help="comma list: sum (body), vote (green/red), book (TBQ−TSQ)",
+        default="sum,vol,tbq,tsq,book,vote",
+        help="comma list: sum (body), vol (up-vol−down-vol), tbq, tsq, book (TBQ−TSQ), vote",
     )
     ap.add_argument(
         "--tfs",
@@ -84,6 +84,14 @@ def main() -> None:
 
     print(LAB_NAME)
     print(FORMULA)
+    print()
+    print("Modes (same inner stack; positive → long next parent, negative → short):")
+    print("  sum   body net  Σ(close − open)")
+    print("  vol   volume net  Σ(volume × sign(close − open))  = up-volume − down-volume")
+    print("  tbq   TBQ net     Σ(TBQ × sign(close − open))")
+    print("  tsq   TSQ net     Σ(TSQ × sign(close − open))")
+    print("  book  snapshot    Σ(TBQ − TSQ) at each inner close")
+    print("  vote  count       green inner bars − red inner bars")
     print()
     print("Inner recipe (session-aligned from 09:00 IST):")
     for label, minutes in PARENTS:

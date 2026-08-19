@@ -5,13 +5,17 @@ Example: 15m 10:15–10:30 holds 15×1m, 5×3m, 3×5m. If that net is
 positive the *next* 15m is bullish (long); if negative, bearish (short).
 Same stack on 30m, 45m, 1h, 1h15, 2h, 3h, and the session day.
 
-Inner net:
-  body = sum(close − open) across every inner bar of every inner TF
-  book = sum(TBQ − TSQ) at each inner close (this repo's ``net``)
+Inner net (each inner bar, all inner TFs):
+  body = sum(close − open)
+  vol  = volume net = sum(volume × sign(close − open))  (up-vol − down-vol)
+  tbq  = TBQ net    = sum(TBQ × sign(close − open))     (same stack)
+  tsq  = TSQ net    = sum(TSQ × sign(close − open))     (same stack)
+  book = sum(TBQ − TSQ) at each inner close
   vote = green bars minus red bars
 
-``sum`` uses body, book as tiebreak. ``book`` uses book, body as
-tiebreak. ``vote`` uses the green/red count, book votes as tiebreak.
+``sum`` uses body. ``vol`` / ``tbq`` / ``tsq`` use that signed net.
+``book`` uses TBQ−TSQ. ``vote`` uses the green/red count.
+Tiebreak is body, then book.
 
 Body sums of tiling OHLC inners equal the parent body (counted once
 per inner TF). Book snapshots and the green/red vote do not telescope
@@ -51,15 +55,16 @@ PARENTS: tuple[tuple[str, int], ...] = (
 )
 
 INNER_MINUTES: tuple[int, ...] = (1, 3, 5, 15, 30, 45, 60, 75, 120, 180)
-MODES: tuple[str, ...] = ("sum", "vote", "book")
+MODES: tuple[str, ...] = ("sum", "vol", "tbq", "tsq", "book", "vote")
 SESSION_MINUTES = 14 * 60 + 30  # 09:00–23:30 IST
 
 FORMULA = (
     "Finished parent bar → net inner candles that tile it "
     "(15m: 15×1m + 5×3m + 3×5m; same idea on 30m/45m/1h/1h15/2h/3h/day) "
-    "→ body (C−O) and book (TBQ−TSQ). Positive net = bullish next parent "
-    "(long); negative = bearish (short); zero skip. Fill at parent close, "
-    "exit next parent close. Intraday no overnight. Research only."
+    "→ body (C−O), volume net (up-vol − down-vol), TBQ net, TSQ net, "
+    "TBQ−TSQ book. Positive net = bullish next parent (long); negative = "
+    "bearish (short); zero skip. Fill at parent close, exit next parent "
+    "close. Intraday no overnight. Research only."
 )
 
 
@@ -169,6 +174,9 @@ class NestedNet:
     n_inners: int
     counts: dict[str, int]
     body_net: float
+    vol_net: float
+    tbq_net: float
+    tsq_net: float
     book_net: float
     vote_body: int
     vote_book: int
@@ -191,6 +199,13 @@ def _sign(value: float) -> int:
     return 0
 
 
+def _first_nonzero(*vals: float) -> float:
+    for v in vals:
+        if v != 0:
+            return float(v)
+    return 0.0
+
+
 def score_nested(
     collected: Mapping[str, list[FlowBar]],
     *,
@@ -199,6 +214,9 @@ def score_nested(
     mode: str = "sum",
 ) -> NestedNet:
     body = 0.0
+    vol_net = 0.0
+    tbq_net = 0.0
+    tsq_net = 0.0
     book = 0.0
     vote_body = 0
     vote_book = 0
@@ -209,24 +227,31 @@ def score_nested(
         n += len(bars)
         for b in bars:
             bd = float(b.close) - float(b.open)
-            bk = float(b.tbq) - float(b.tsq)
+            s = _sign(bd)
+            vol = float(b.volume or 0.0)
+            tbq = float(b.tbq or 0.0)
+            tsq = float(b.tsq or 0.0)
+            bk = tbq - tsq
             body += bd
+            vol_net += s * vol
+            tbq_net += s * tbq
+            tsq_net += s * tsq
             book += bk
-            vote_body += _sign(bd)
+            vote_body += s
             vote_book += _sign(bk)
     key = str(mode or "sum").strip().lower()
     if key == "vote":
-        raw = float(vote_body)
-        if raw == 0:
-            raw = float(vote_book)
+        raw = _first_nonzero(float(vote_body), float(vote_book), body, book)
     elif key == "book":
-        raw = book
-        if raw == 0:
-            raw = body
+        raw = _first_nonzero(book, body, vol_net)
+    elif key == "vol":
+        raw = _first_nonzero(vol_net, body, book)
+    elif key == "tbq":
+        raw = _first_nonzero(tbq_net, body, book)
+    elif key == "tsq":
+        raw = _first_nonzero(tsq_net, body, book)
     else:
-        raw = body
-        if raw == 0:
-            raw = book
+        raw = _first_nonzero(body, book, vol_net)
     return NestedNet(
         parent=parent,
         parent_time=parent_time,
@@ -234,6 +259,9 @@ def score_nested(
         n_inners=n,
         counts=counts,
         body_net=body,
+        vol_net=vol_net,
+        tbq_net=tbq_net,
+        tsq_net=tsq_net,
         book_net=book,
         vote_body=vote_body,
         vote_book=vote_book,
