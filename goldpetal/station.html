@@ -46,10 +46,13 @@ button, input, select { font: inherit; }
   padding-left: .7rem; border-left: 3px solid #c9a45a; }
 .brand h1 { margin: 0; font: 600 18px/1.15 var(--serif); letter-spacing: .01em; color: var(--gold); }
 .brand .sub { color: var(--muted); font: 500 12px/1.25 var(--mono); }
-.quote { display: flex; align-items: baseline; gap: .8rem; min-width: 0; }
+.quote { display: flex; align-items: center; gap: .8rem; min-width: 0; }
 .quote .sym { font: 600 12px/1 var(--mono); letter-spacing: .16em; color: var(--muted); }
 .quote .ltp { font: 600 30px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
 .quote .meta { font: 12px/1.3 var(--mono); color: var(--muted); }
+.mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
+.mood-box .pill { width: fit-content; }
+.mood-box .hint { margin: 0; font: 11px/1.35 var(--mono); color: var(--muted); }
 .top-right { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
 .clock { font: 500 12px/1 var(--mono); color: var(--muted); margin-right: .35rem; }
 .pill { font: 500 11px/1 var(--mono); padding: .28rem .5rem; border-radius: 999px;
@@ -154,8 +157,14 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     </div>
     <div class="quote">
       <div class="sym">GOLD</div>
-      <div class="ltp" id="ltp">—</div>
-      <div class="meta" id="quote-meta">waiting for ticks</div>
+      <div>
+        <div class="ltp" id="ltp">—</div>
+        <div class="meta" id="quote-meta">waiting for ticks</div>
+      </div>
+      <div class="mood-box" id="mood-box" title="One tape read for all books. Observe only until MOOD_GATE=true. Not a paper book.">
+        <span class="pill" id="mood-pill">mood warming up</span>
+        <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · observe only</div>
+      </div>
     </div>
     <div class="top-right">
       <div class="clock" id="clock">IST —</div>
@@ -419,6 +428,7 @@ let lastWhy = null;
 let lastMl = null;
 let lastLab = null;
 let lastYou = null;
+let lastMood = { mood: "UNKNOWN", label: "mood warming up", gate_on: false, flatten_on: false };
 let mlRestartNeeded = false;
 
 function esc(s) {
@@ -522,7 +532,47 @@ function renderQuote() {
   if (tick.bp != null && tick.bp !== "") bits.push("buy qty " + tick.bp);
   if (tick.sp != null && tick.sp !== "") bits.push("sell qty " + tick.sp);
   bits.push((lastTape.tick_count || 0) + " ticks");
+  if (lastMood && lastMood.mood && lastMood.mood !== "UNKNOWN") bits.push("mood " + lastMood.mood);
   $("quote-meta").textContent = bits.join(" · ") || "waiting for ticks";
+  renderMood();
+}
+function moodKind(mood) {
+  const m = String(mood || "").toUpperCase();
+  if (m === "FALL_START" || m === "BURST") return "bad";
+  if (m === "RISE_START" || m === "HEAT") return "ok";
+  if (m === "COOL" || m === "UNKNOWN") return "warn";
+  return "";
+}
+function renderMood(d) {
+  if (d) lastMood = d;
+  const pill = $("mood-pill");
+  const hint = $("mood-hint");
+  if (!pill) return;
+  const mood = lastMood.mood || "UNKNOWN";
+  pill.className = "pill " + moodKind(mood);
+  pill.textContent = lastMood.label || mood;
+  const mode = lastMood.gate_on
+    ? (lastMood.flatten_on ? "GATE+FLATTEN" : "GATE ON")
+    : "observe only";
+  const bits = [mode];
+  if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
+  if (lastMood.reason) bits.push(lastMood.reason);
+  if (hint) hint.textContent = bits.join(" · ");
+  pill.title = bits.join(" · ");
+}
+async function loadMood() {
+  try {
+    renderMood(await api("/api/mood"));
+    renderQuote();
+  } catch (e) {
+    renderMood({
+      mood: "UNKNOWN",
+      label: "mood unavailable",
+      reason: String(e.message || e),
+      gate_on: false,
+      flatten_on: false,
+    });
+  }
 }
 function renderKpis() {
   const all = allScore();
@@ -1338,6 +1388,7 @@ setTimeout(() => loadWhy().catch(() => {}), 400);
 loadMl().catch(() => {});
 loadLab().catch(() => {});
 loadYou().catch(() => {});
+loadMood().catch(() => {});
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 12000);
@@ -1345,6 +1396,7 @@ setInterval(() => { if (!typing()) loadWhy().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 8000);
+setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 4000);
 </script>
 </body>
 </html>

@@ -20,6 +20,7 @@ from export_full_ticks import _depth_side
 from live_orders import broker_from_session
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
+from market_mood import MoodDetector, mood_blocks_entry, mood_wants_flatten
 from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
 from control_state import entries_blocked, is_live_mode_allowed, load_state
 from position_safety import (
@@ -179,6 +180,7 @@ def run_once(
     strategy_s20: S20FadeHlStrategy,
     portfolio,
     regime_det: RegimeDetector,
+    mood_det: MoodDetector,
     stop_flag: dict,
 ) -> None:
     init_db()
@@ -243,6 +245,11 @@ def run_once(
         """Portfolio regime + control-panel emergency/capital/ML gates for new entries."""
         if not portfolio.allows(strategy_name, regime):
             return False, f"regime={regime}"
+        blocked, mood_why = mood_blocks_entry(
+            mood_det.last, side, strategy=strategy_name
+        )
+        if blocked:
+            return False, mood_why
         return allow_new_entry(
             strategy_name, features=_entry_features(strategy_name, side)
         )
@@ -323,7 +330,8 @@ def run_once(
     print(f"Interval : {interval} minutes", flush=True)
     print(
         f"Portfolio: enabled={sorted(portfolio.enabled)} "
-        f"flatten_on_bad_regime={portfolio.flatten_when_blocked}",
+        f"flatten_on_bad_regime={portfolio.flatten_when_blocked} "
+        f"mood_gate={mood_det.last.gate_on} mood_flatten={mood_det.last.flatten_on}",
         flush=True,
     )
     print(
@@ -487,6 +495,7 @@ def run_once(
     print("=================================", flush=True)
 
     eod_closed: set[tuple[str, str]] = set()
+    mood_flat_done: set[tuple[str, str]] = set()
 
     correlation_id = f"goldpetal_strategy_{int(time.time())}"
     token_list = [{"exchangeType": exchange_type, "tokens": [token]}]
@@ -723,6 +732,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
 
+        if result.action in {"BUY", "SHORT"}:
+            blocked, mood_why = mood_blocks_entry(
+                mood_det.last, result.action, strategy=strategy_s3.name
+            )
+            if blocked:
+                strategy_s3.position = pos_before
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy_s3.name} "
+                    f"ENTRY BLOCKED ({mood_why})"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                return
+
         action = result.action
         _record_signal(
             time_label=now.isoformat(timespec="seconds"),
@@ -784,6 +807,20 @@ def run_once(
 
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
+
+        if result.action in {"BUY", "SHORT"}:
+            blocked, mood_why = mood_blocks_entry(
+                mood_det.last, result.action, strategy=strategy_s11.name
+            )
+            if blocked:
+                strategy_s11.position = pos_before
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy_s11.name} "
+                    f"ENTRY BLOCKED ({mood_why})"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                return
 
         action = result.action
         _record_signal(
@@ -1634,10 +1671,13 @@ def run_once(
             latest["message"] = message
 
             if latest["cmp"] is not None:
+                bp_m = float(latest["bp"] or 0.0) if latest.get("bp") is not None else 0.0
+                sp_m = float(latest["sp"] or 0.0) if latest.get("sp") is not None else 0.0
                 regime_det.update(
                     float(latest["cmp"]),
                     _spread_bps(message, float(latest["cmp"])),
                 )
+                mood_det.update(float(latest["cmp"]), bp_m, sp_m)
 
             state["tick_count"] += 1
             tick_count = state["tick_count"]
@@ -1662,6 +1702,7 @@ def run_once(
                     f"[{received_at}] ticks={tick_count} "
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"regime={rs.regime} "
+                    f"mood={mood_det.last.mood} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "
@@ -1803,6 +1844,39 @@ def run_once(
                         }
                     )
 
+            # Optional mood flatten (MOOD_GATE + MOOD_FLATTEN). Never dumps S13/S4.
+            if mood_det.last.gate_on and mood_det.last.flatten_on:
+                day_key = now.astimezone(IST).strftime("%Y-%m-%d")
+                for name, obj in strat_map.items():
+                    if name in {"S13_HHHL_DAY", "S4_OVERNIGHT"}:
+                        continue
+                    pos = str(getattr(obj, "position", "flat") or "flat")
+                    want, why = mood_wants_flatten(
+                        mood_det.last, pos, strategy=name
+                    )
+                    key = (day_key, name)
+                    if not want or key in mood_flat_done:
+                        continue
+                    obj.position = "flat"
+                    if hasattr(obj, "entry_price"):
+                        obj.entry_price = None
+                    ts = now.isoformat(timespec="seconds")
+                    _record_signal(
+                        time_label=ts,
+                        action="CLOSE",
+                        position_after="flat",
+                        reason=f"mood_flatten {why}",
+                        price_delta=None,
+                        net=0.0,
+                        net_delta=None,
+                        strategy=name,
+                        cmp=latest.get("cmp"),
+                    )
+                    mood_flat_done.add(key)
+                    line = f"[{ts}] [MOOD] CLOSE {name} was_{pos} {why}"
+                    print(line, flush=True)
+                    logger.info(line)
+
             if state.pop("roll_reconnect", False):
                 try:
                     sws.close()
@@ -1884,6 +1958,7 @@ def main() -> None:
     strategy_s19 = _load("S19_BODY_CLOSE_1H", s19_from_env)
     strategy_s20 = _load("S20_FADE_HL", s20_from_env)
     regime_det = RegimeDetector(window=60)
+    mood_det = MoodDetector(window=80)
     init_db()
     if portfolio.is_enabled("S1_NETDELTA"):
         _seed_strategy_from_db(strategy_s1)
@@ -1938,6 +2013,7 @@ def main() -> None:
                 strategy_s20,
                 portfolio,
                 regime_det,
+                mood_det,
                 stop_flag,
             )
         except SystemExit:

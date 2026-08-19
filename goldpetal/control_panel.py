@@ -371,6 +371,27 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes(capture_desk_payload())
                 self._send(status, body, ctype)
                 return
+            if path == "/api/mood":
+                try:
+                    from market_mood import mood_desk_payload
+
+                    payload = mood_desk_payload()
+                except Exception as exc:
+                    payload = {
+                        "ok": False,
+                        "mood": "UNKNOWN",
+                        "label": "mood unavailable",
+                        "reason": str(exc),
+                        "gate_on": False,
+                        "flatten_on": False,
+                        "note": (
+                            "Desk still runs. Mood is observe-only until MOOD_GATE=true. "
+                            "Not a paper book. Keep DRY_RUN=true."
+                        ),
+                    }
+                status, body, ctype = _json_bytes(payload)
+                self._send(status, body, ctype)
+                return
             if path == "/api/s11/pack":
                 raw = ((qs.get("path") or [""])[0] or "").strip()
                 status, body, ctype = _json_bytes(pack_summary(raw))

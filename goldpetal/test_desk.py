@@ -26,6 +26,11 @@ def test_station_is_the_operator_page() -> None:
     assert "You · capture" in html
     assert "Human trade capture" in html
     assert "/api/capture" in html
+    assert "/api/mood" in html
+    assert 'id="mood-pill"' in html
+    assert "fall starting" in html
+    assert "MOOD_GATE" in html
+    assert "observe only" in html
     assert "NO TRADE" in html
     assert "Does not place an order" in html
     assert "you_skipped_rule_would_take" in html
@@ -88,6 +93,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Research Lab" in html
     assert "You — capture" in html
     assert "/#you" in html
+    assert "/api/mood" in html
+    assert "id=\"mood-line\"" in html
+    assert "MOOD_GATE" in html
     assert "Mon–Fri 09:00–23:30" in html
     assert "/#lab" in html
     assert "/#lab" in html
@@ -129,6 +137,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/ml" in text
     assert "/api/research" in text
     assert "/api/capture" in text
+    assert "/api/mood" in text
+    assert "mood_desk_payload" in text
     assert "record_human" in text
     assert "decide_research" in text
     assert "/api/s11/activate" in text
