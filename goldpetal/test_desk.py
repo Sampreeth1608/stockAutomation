@@ -50,8 +50,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" in quote
-    assert "function goldPetalIsRunning" in html
-    assert "function tapeIsLive" in html
+    assert "gp-header-v3" in html
+    assert "function tapeAgeSec" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
@@ -178,7 +178,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
     assert "session_status" in text
-    assert '"session": session_status()' in text
+    assert "goldpetal_running" in text
+    assert "last_tick_snapshot" in text
     assert "default=8501" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
     assert "control_panel.py" in sh
@@ -201,6 +202,9 @@ def test_desk_payload_includes_session() -> None:
     assert sess["close_hhmm"]
     assert "now_ist" in sess
     assert "label" in sess
+    assert "tape_live" in sess
+    assert "goldpetal_running" in sess
+    assert isinstance(sess["goldpetal_running"], bool)
 
 
 def test_streamlit_cannot_write() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -22,6 +23,7 @@ from portfolio import portfolio_from_env
 from regime import RegimeDetector
 from market_mood import MoodDetector, mood_blocks_entry, mood_wants_flatten
 from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
+from desk_data import tick_feed_stale
 from control_state import entries_blocked, is_live_mode_allowed, load_state
 from position_safety import (
     emit_startup_closes,
@@ -62,6 +64,8 @@ IST = ZoneInfo("Asia/Kolkata")
 SUBSCRIBE_MODE = 3
 DEFAULT_INTERVAL_MINUTES = 30
 RECONNECT_DELAY_SEC = 5
+TICK_WATCHDOG_SEC = float(os.getenv("TICK_WATCHDOG_SEC", "45") or 45)
+TICK_FIRST_GRACE_SEC = float(os.getenv("TICK_FIRST_GRACE_SEC", "90") or 90)
 DEFAULT_MARKET_OPEN = "09:00"
 DEFAULT_MARKET_CLOSE = "23:30"
 
@@ -221,6 +225,7 @@ def run_once(
         "tick_count": 0,
     }
     closed = {"done": False}
+    feed_watch = {"t": time.monotonic(), "got": False, "stop": False}
 
     def _entry_features(strategy_name: str, side: str = "") -> dict:
         from quality_filters import tick_features
@@ -1754,6 +1759,8 @@ def run_once(
                     state["next_bar_at"] = _next_boundary(now, interval)
                 return
 
+            feed_watch["t"] = time.monotonic()
+            feed_watch["got"] = True
             received_at = now.isoformat(timespec="seconds")
             save_tick(message, symbol=symbol, token=token, received_at=received_at)
 
@@ -1994,6 +2001,7 @@ def run_once(
             logger.exception("Error while handling tick")
 
     def on_open(_wsapp):
+        feed_watch["t"] = time.monotonic()
         logger.info("WebSocket open — strategy subscribed to %s", symbol)
         print(f"WebSocket open — subscribed to {symbol}", flush=True)
         sws.subscribe(correlation_id, SUBSCRIBE_MODE, token_list)
@@ -2024,9 +2032,46 @@ def run_once(
     sws.on_error = on_error
     sws.on_close = on_close
 
+    def _tick_watchdog() -> None:
+        while (
+            not feed_watch["stop"]
+            and not closed["done"]
+            and not stop_flag.get("stop")
+        ):
+            time.sleep(5)
+            idle = time.monotonic() - float(feed_watch["t"])
+            if not tick_feed_stale(
+                idle_sec=idle,
+                market_open=is_market_open(),
+                got_tick=bool(feed_watch["got"]),
+                watchdog_sec=TICK_WATCHDOG_SEC,
+                first_tick_grace_sec=TICK_FIRST_GRACE_SEC,
+            ):
+                continue
+            msg = (
+                f"TICK WATCHDOG: no tick for {idle:.0f}s during session — reconnect"
+            )
+            print(msg, flush=True)
+            logger.warning(msg)
+            write_bot_health(
+                {
+                    "event": "tick_watchdog",
+                    "idle_sec": round(idle),
+                    "runner": "run_strategy",
+                }
+            )
+            try:
+                sws.close()
+            except Exception as exc:
+                print(f"TICK WATCHDOG close failed: {exc}", flush=True)
+            return
+
+    watch_th = threading.Thread(target=_tick_watchdog, name="tick-watchdog", daemon=True)
+    watch_th.start()
     try:
         sws.connect()
     finally:
+        feed_watch["stop"] = True
         logger.info("connect() returned/finished. closed=%s", closed["done"])
         print(f"connect() finished. closed={closed['done']}", flush=True)
 

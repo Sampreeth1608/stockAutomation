@@ -4,6 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
+<meta http-equiv="Cache-Control" content="no-store"/>
+<!-- gp-header-v3: running only with a live tape; no last-print clock under LTP -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -567,10 +569,22 @@ function parseTickAt(raw) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 const TAPE_LIVE_MS = 30000;
+function tapeAgeSec() {
+  const raw = lastTape.last_tick_at || (lastDesk.session || {}).last_tick_at || "";
+  const d = parseTickAt(raw);
+  if (!d) {
+    const age = (lastTape.tape_age_sec != null) ? lastTape.tape_age_sec
+      : (lastDesk.session || {}).tape_age_sec;
+    return (age == null || age === "") ? null : Number(age);
+  }
+  return (Date.now() - d.getTime()) / 1000;
+}
 function tapeIsLive() {
-  const d = parseTickAt(lastTape.last_tick_at);
-  if (!d) return false;
-  return (Date.now() - d.getTime()) <= TAPE_LIVE_MS;
+  const age = tapeAgeSec();
+  if (age != null && Number.isFinite(age)) return age <= (TAPE_LIVE_MS / 1000);
+  if (typeof lastTape.tape_live === "boolean") return lastTape.tape_live;
+  if (typeof (lastDesk.session || {}).tape_live === "boolean") return lastDesk.session.tape_live;
+  return false;
 }
 function goldPetalIsRunning() {
   const s = goldPetalSessionNow();
