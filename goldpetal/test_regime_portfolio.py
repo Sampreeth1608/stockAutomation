@@ -54,6 +54,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S4", None)
     os.environ.pop("ENABLE_S5", None)
     os.environ.pop("ENABLE_S6", None)
+    os.environ.pop("ENABLE_S7", None)
     os.environ.pop("ENABLE_S8", None)
     os.environ.pop("ENABLE_S9", None)
     os.environ.pop("ENABLE_S10", None)
@@ -74,6 +75,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S18_OHLC_VOL_HTF" in p.enabled
     assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled
+    assert "S7_FLOW_BRAIN" not in p.enabled
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
     assert "S10_LEGACY30" not in p.enabled

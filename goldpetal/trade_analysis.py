@@ -29,6 +29,8 @@ SHORT = {
 WHAT_IT_GUESSES = {
     "S4_OVERNIGHT": "Old S13 HH/LL on the day candle, last 15m. Holds the trend across days/weeks until opposite HH+green / LL+red. FLIP. Never next-open.",
     "S5_MINEDGE": "Depth imbalance vs expected move. Waits until expected points can cover Angel fees (S5_COVER_FEES), even when IGNORE_FEES is on.",
+    "S6_MIN30": "Depth imbalance vs a 30-point expected-move floor.",
+    "S7_FLOW_BRAIN": "Tick LTP + TBQ + TSQ pressure. LONG when price and buy-flow expand together. SHORT the sell-flow mirror. No trade on absorption. Exit on decay. Paper-wired, ENABLE_S7 defaults false. Not S16. Not live.",
     "S8_NET_ZIGZAG": "Order-book NET zigzags. Needs a strong rising imbalance (default 14%) and a target that can cover fees.",
     "S11_DISCOVERED": "Auto-discovered rules. They are paper hypotheses, not proven edge.",
     "S12_HHHL30": "30m higher-high / lower-low, last-minute confirm. Skips wick-only fakeouts (close must finish beyond the prior high/low).",

@@ -26,7 +26,7 @@ RESTART_CONFIRM_WORD = "RESTART"
 # S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
 DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
-    {"S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL"}
+    {"S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL", "S7_FLOW_BRAIN"}
 )
 
 
