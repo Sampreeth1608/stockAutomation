@@ -49,16 +49,16 @@ def test_station_is_the_operator_page() -> None:
     assert "last_tick_at" not in quote
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
-    assert "tape stopped" in quote
-    assert "gp-header-v10" in html
-    assert " · v10" in html
+    assert "tape stopped" not in quote
+    assert "gp-header-v11" in html
+    assert " · v11" in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
     hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
     assert "tape_live" not in hist
     desk_fn = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "tape_live" not in desk_fn
-    assert "tape dead" in html
+    assert "tape dead" not in html
     assert "function tapeAgeSec" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
