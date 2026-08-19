@@ -28,6 +28,8 @@ def test_station_is_the_operator_page() -> None:
     assert "/api/capture" in html
     assert "/api/mood" in html
     assert 'id="mood-pill"' in html
+    assert 'id="fit-strip"' in html
+    assert "stand down" in html
     assert "fall starting" in html
     assert "MOOD_GATE" in html
     assert "observe only" in html

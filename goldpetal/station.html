@@ -28,7 +28,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 var(--font); letter-spacing: .01em;
   font-feature-settings: "ss01", "kern"; -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
-.station { display: grid; grid-template-rows: 62px auto minmax(0,1fr) 32px; height: 100%; }
+.station { display: grid; grid-template-rows: 62px auto auto minmax(0,1fr) 32px; height: 100%; }
 .you-strip {
   display: flex; flex-wrap: wrap; align-items: center; gap: .45rem;
   padding: .4rem 1.1rem; background: #fbf8f1; border-bottom: 1px solid #ead3a8;
@@ -53,6 +53,12 @@ button, input, select { font: inherit; }
 .mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
 .mood-box .pill { width: fit-content; }
 .mood-box .hint { margin: 0; font: 11px/1.35 var(--mono); color: var(--muted); }
+.fit-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .35rem;
+  padding: .28rem 1.1rem; background: #f7f4ee; border-bottom: 1px solid var(--line);
+  font: 11px/1.3 var(--mono); color: var(--muted);
+}
+.fit-strip b { font: 600 11px/1 var(--serif); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
 .top-right { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
 .clock { font: 500 12px/1 var(--mono); color: var(--muted); margin-right: .35rem; }
 .pill { font: 500 11px/1 var(--mono); padding: .28rem .5rem; border-radius: 999px;
@@ -171,6 +177,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div id="pills"></div>
     </div>
   </header>
+  <div class="fit-strip" id="fit-strip">
+    <b>Fit</b>
+    <span id="fit-line">one regime for all books · observe only until MOOD_GATE=true</span>
+  </div>
   <div class="you-strip" id="you-strip">
     <b>You</b>
     <span class="hint" id="you-strip-hint">Records only while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Does not place an order.</span>
@@ -191,7 +201,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="scroll">
         <table>
           <thead>
-            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR%</th><th class="num">₹</th></tr>
+            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR%</th><th class="num">₹</th><th>Fit</th></tr>
           </thead>
           <tbody id="books"></tbody>
         </table>
@@ -550,15 +560,48 @@ function renderMood(d) {
   if (!pill) return;
   const mood = lastMood.mood || "UNKNOWN";
   pill.className = "pill " + moodKind(mood);
-  pill.textContent = lastMood.label || mood;
+  const regime = lastMood.regime && lastMood.regime !== "UNKNOWN" ? lastMood.regime : mood;
+  pill.textContent = (lastMood.label || mood) + (lastMood.transition ? " · " + lastMood.transition : "");
   const mode = lastMood.gate_on
     ? (lastMood.flatten_on ? "GATE+FLATTEN" : "GATE ON")
     : "observe only";
-  const bits = [mode];
+  const bits = [mode, regime];
   if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
   if (lastMood.reason) bits.push(lastMood.reason);
   if (hint) hint.textContent = bits.join(" · ");
   pill.title = bits.join(" · ");
+  renderFits();
+}
+function fitFor(name) {
+  const rows = lastMood.fits || [];
+  return rows.find((r) => r.strategy === name) || null;
+}
+function fitLabel(f) {
+  if (!f) return "—";
+  const w = Number(f.weight);
+  const pct = Number.isFinite(w) ? Math.round(w * 100) + "%" : "";
+  const stance = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
+  return (pct ? pct + " " : "") + stance;
+}
+function renderFits() {
+  const line = $("fit-line");
+  const rows = lastMood.fits || [];
+  if (line) {
+    if (!rows.length) {
+      line.textContent = "one regime for all books · observe only until MOOD_GATE=true";
+    } else {
+      line.textContent = rows.map((f) => {
+        const short = (SHORT[f.strategy] || f.strategy).replace(/ .*/, "") || f.strategy;
+        return short + " " + fitLabel(f);
+      }).join(" · ");
+    }
+  }
+  document.querySelectorAll("[data-fit]").forEach((el) => {
+    const f = fitFor(el.dataset.fit);
+    el.textContent = fitLabel(f);
+    el.title = (f && f.why) || "";
+    el.className = "num" + (f && f.stance === "stand_down" ? " bad" : (f && f.stance === "trade" ? " ok" : ""));
+  });
 }
 async function loadMood() {
   try {
@@ -1164,8 +1207,9 @@ function renderDesk(d) {
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
         <td class="num">${esc(wr)}</td>
         <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
+        <td class="num" data-fit="${esc(name)}">${esc(fitLabel(fitFor(name)))}</td>
       </tr>`;
-    }).join("") || `<tr><td colspan="5">no books</td></tr>`;
+    }).join("") || `<tr><td colspan="6">no books</td></tr>`;
     $("paper-only").checked = live.dry_run !== false;
     $("live-max").value = live.live_max_lots || 1;
     const cap = d.capital || {};

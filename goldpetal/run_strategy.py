@@ -1703,6 +1703,7 @@ def run_once(
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"regime={rs.regime} "
                     f"mood={mood_det.last.mood} "
+                    f"regime={mood_det.last.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
                     f"s4={strategy_s4.position} s5={strategy_s5.position} "

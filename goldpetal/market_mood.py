@@ -1,20 +1,24 @@
-"""Shared Gold Petal market mood — one brain in front of the books.
+"""Shared Gold Petal market state — one brain in front of the books.
 
-Books are not "wrong." They each see a thin rule (1h close, 30m zigzag, depth).
-None of them is the skip filter you use: heat, cooldown, sudden burst, quiet,
-fall-start. Copying that into every strategy would make them all trade the
-same and all lose together when the mood read is late.
+AMISE slice 1: Market State + Strategy Manager fit.
+The tape is classified once. Every paper book reads the same regime and a
+fit score (trade / stand down / hold swing). Copying "if falling then short"
+into every formula would make them all trade the same.
 
-This module classifies the tape once. The desk always shows it. Paper books
-do not change until MOOD_GATE=true (default false). Flattening opens needs
-MOOD_FLATTEN=true as well. Learning ≠ deploy. Keep DRY_RUN=true.
+Desk always shows state + fit. Paper does not change until MOOD_GATE=true
+(default false). Flattening opens needs MOOD_FLATTEN=true. S13/S4 skip the
+tick-window gate and are never dumped. Not a paper book. Do not ENABLE.
+Does not change S13/S16 formulas. Keep DRY_RUN=true.
+
+Not built here: relationship factory, auto challengers, combining books into
+one order, or a profit-printer. Learning ≠ deploy. You approve.
 """
 
 from __future__ import annotations
 
 import os
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Deque, Literal
@@ -23,6 +27,16 @@ from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
 # Daily/overnight books: show mood, never flatten, skip tick-window entry gate.
 MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT"})
+FIT_BOOKS: tuple[str, ...] = (
+    "S5_MINEDGE",
+    "S8_NET_ZIGZAG",
+    "S11_DISCOVERED",
+    "S13_HHHL_DAY",
+    "S16_HHHL_WICK_1H",
+    "S18_OHLC_VOL_HTF",
+    "S19_BODY_CLOSE_1H",
+    "S20_FADE_HL",
+)
 Mood = Literal[
     "UNKNOWN",
     "QUIET",
@@ -32,6 +46,46 @@ Mood = Literal[
     "FALL_START",
     "RISE_START",
 ]
+Regime = Literal[
+    "UNKNOWN",
+    "CALM",
+    "RANGE",
+    "ACCUMULATION",
+    "BREAKOUT",
+    "BREAKDOWN",
+    "TRENDING",
+    "EXHAUSTION",
+    "COOLDOWN",
+    "BURST",
+]
+Stance = Literal["trade", "stand_down", "hold_swing"]
+
+
+def mood_gate_on() -> bool:
+    return (os.getenv("MOOD_GATE") or "false").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def mood_flatten_on() -> bool:
+    return (os.getenv("MOOD_FLATTEN") or "false").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def mood_fit_min() -> float:
+    raw = (os.getenv("MOOD_FIT_MIN") or "0.40").strip()
+    try:
+        return min(0.95, max(0.05, float(raw)))
+    except ValueError:
+        return 0.40
+
+
+def _imb(tbq: float, tsq: float) -> float:
+    tot = float(tbq) + float(tsq)
+    if tot <= 1e-12:
+        return 0.0
+    return (float(tbq) - float(tsq)) / tot
+
+
+def _clip(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, float(x)))
 
 
 @dataclass
@@ -52,30 +106,34 @@ class MoodState:
     n_samples: int
     gate_on: bool
     flatten_on: bool
+    regime: Regime = "UNKNOWN"
+    transition: str = ""
+    direction_score: float = 0.0
+    trend_strength: float = 0.0
+    momentum: float = 0.0
+    volatility: float = 0.0
+    buy_pressure: float = 0.5
+    compression: float = 0.0
+    breakout_probability: float = 0.0
+    reversal_probability: float = 0.0
+    confidence: float = 0.0
+    fits: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-
-def mood_gate_on() -> bool:
-    return (os.getenv("MOOD_GATE") or "false").strip().lower() in {"1", "true", "yes", "y"}
-
-
-def mood_flatten_on() -> bool:
-    return (os.getenv("MOOD_FLATTEN") or "false").strip().lower() in {"1", "true", "yes", "y"}
-
-
-def _imb(tbq: float, tsq: float) -> float:
-    tot = float(tbq) + float(tsq)
-    if tot <= 1e-12:
-        return 0.0
-    return (float(tbq) - float(tsq)) / tot
+    def fit_for(self, strategy: str) -> dict[str, Any] | None:
+        name = str(strategy or "")
+        for row in self.fits:
+            if row.get("strategy") == name:
+                return row
+        return None
 
 
 def _empty(reason: str = "warming_up") -> MoodState:
     gate = mood_gate_on()
     flat = mood_flatten_on()
-    return MoodState(
+    st = MoodState(
         mood="UNKNOWN",
         direction="flat",
         heat=0.0,
@@ -92,7 +150,194 @@ def _empty(reason: str = "warming_up") -> MoodState:
         n_samples=0,
         gate_on=gate,
         flatten_on=flat,
+        regime="UNKNOWN",
+        transition="warming up",
+        confidence=0.0,
+        fits=_swing_only_fits("warming up"),
     )
+    return st
+
+
+def _swing_only_fits(why: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for name in FIT_BOOKS:
+        if name in MOOD_EXEMPT_BOOKS:
+            out.append(
+                {
+                    "strategy": name,
+                    "weight": 0.7,
+                    "stance": "hold_swing",
+                    "preferred_side": "none",
+                    "why": "daily swing — tick regime does not dump",
+                }
+            )
+        else:
+            out.append(
+                {
+                    "strategy": name,
+                    "weight": 0.5,
+                    "stance": "trade",
+                    "preferred_side": "none",
+                    "why": why,
+                }
+            )
+    return out
+
+
+def _regime_for(
+    mood: Mood,
+    *,
+    rng: float,
+    d_imb: float,
+    first_half: float,
+) -> Regime:
+    if mood == "BURST":
+        return "BURST"
+    if mood == "FALL_START":
+        return "BREAKDOWN"
+    if mood == "RISE_START":
+        return "BREAKOUT"
+    if mood == "HEAT":
+        return "TRENDING"
+    if mood == "COOL":
+        return "COOLDOWN" if abs(first_half) >= 14.0 else "EXHAUSTION"
+    if mood == "QUIET":
+        if rng < 6.0 and abs(d_imb) >= 0.06:
+            return "ACCUMULATION"
+        if rng < 5.0:
+            return "CALM"
+        return "RANGE"
+    return "UNKNOWN"
+
+
+def _preferred_side(direction: str, mood: Mood, regime: Regime) -> str:
+    if mood == "FALL_START" or regime == "BREAKDOWN" or (
+        regime == "TRENDING" and direction == "down"
+    ):
+        return "short"
+    if mood == "RISE_START" or regime == "BREAKOUT" or (
+        regime == "TRENDING" and direction == "up"
+    ):
+        return "long"
+    return "none"
+
+
+def book_fits(
+    *,
+    mood: Mood,
+    regime: Regime,
+    direction: str,
+) -> list[dict[str, Any]]:
+    """Strategy Manager: which paper book belongs in this tape. Not an order."""
+    side = _preferred_side(direction, mood, regime)
+    rows: list[dict[str, Any]] = []
+    for name in FIT_BOOKS:
+        rows.append(_fit_one(name, mood=mood, regime=regime, preferred_side=side))
+    return rows
+
+
+def _fit_one(
+    name: str,
+    *,
+    mood: Mood,
+    regime: Regime,
+    preferred_side: str,
+) -> dict[str, Any]:
+    if name in MOOD_EXEMPT_BOOKS:
+        return {
+            "strategy": name,
+            "weight": 0.7,
+            "stance": "hold_swing",
+            "preferred_side": "none",
+            "why": "daily swing — tick regime does not dump or rewrite S13",
+        }
+
+    trend_book = name in {
+        "S8_NET_ZIGZAG",
+        "S11_DISCOVERED",
+        "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+    }
+    vol_book = name == "S5_MINEDGE"
+    fade_book = name == "S20_FADE_HL"
+
+    if regime == "BURST" or mood == "BURST":
+        return {
+            "strategy": name,
+            "weight": 0.10,
+            "stance": "stand_down",
+            "preferred_side": "none",
+            "why": "sudden burst — wait",
+        }
+    if regime in {"COOLDOWN", "EXHAUSTION"} or mood == "COOL":
+        if fade_book:
+            return {
+                "strategy": name,
+                "weight": 0.70,
+                "stance": "trade",
+                "preferred_side": "none",
+                "why": "cooldown — fade may take the mean (S20 stays off until you ENABLE)",
+            }
+        return {
+            "strategy": name,
+            "weight": 0.16,
+            "stance": "stand_down",
+            "preferred_side": "none",
+            "why": "cooldown / exhaustion — do not chase",
+        }
+    if regime in {"CALM", "RANGE", "ACCUMULATION"} or mood == "QUIET":
+        if fade_book:
+            return {
+                "strategy": name,
+                "weight": 0.72,
+                "stance": "trade",
+                "preferred_side": "none",
+                "why": "range — fade book may trade; S20 is not a paper book until you ENABLE",
+            }
+        if vol_book:
+            return {
+                "strategy": name,
+                "weight": 0.22,
+                "stance": "stand_down",
+                "preferred_side": "none",
+                "why": "low profile — min-edge has no move",
+            }
+        return {
+            "strategy": name,
+            "weight": 0.24,
+            "stance": "stand_down",
+            "preferred_side": "none",
+            "why": "range / low profile — trend book stands down",
+        }
+    if fade_book and regime in {"TRENDING", "BREAKOUT", "BREAKDOWN"}:
+        return {
+            "strategy": name,
+            "weight": 0.18,
+            "stance": "stand_down",
+            "preferred_side": "none",
+            "why": "trend / break — fade book stands down",
+        }
+    if trend_book or vol_book:
+        if regime in {"TRENDING", "BREAKOUT", "BREAKDOWN"} or mood in {
+            "HEAT",
+            "FALL_START",
+            "RISE_START",
+        }:
+            return {
+                "strategy": name,
+                "weight": 0.86 if trend_book else 0.78,
+                "stance": "trade",
+                "preferred_side": preferred_side,
+                "why": f"{regime.lower()} — {name.split('_')[0]} may trade with the tape",
+            }
+    return {
+        "strategy": name,
+        "weight": 0.45,
+        "stance": "trade",
+        "preferred_side": preferred_side,
+        "why": "mixed tape",
+    }
 
 
 def classify_samples(
@@ -100,6 +345,7 @@ def classify_samples(
     *,
     gate: bool | None = None,
     flatten: bool | None = None,
+    prev_regime: str = "",
 ) -> MoodState:
     """samples oldest→newest: (ltp, tbq, tsq). Snapshot classifier. Not an order."""
     gate_on = mood_gate_on() if gate is None else bool(gate)
@@ -124,7 +370,6 @@ def classify_samples(
     vel = (px[-1] - px[max(0, n - 8)]) / max(1.0, min(7.0, n - 1))
     window = px[-min(20, n) :]
     rng = max(window) - min(window)
-    # Burst vs earlier rolling ranges of the same length.
     chunk = 8
     ranges: list[float] = []
     i = 0
@@ -214,6 +459,20 @@ def classify_samples(
         "FALL_START": "fall starting — no new longs",
         "RISE_START": "rise starting — no new shorts",
     }
+    regime = _regime_for(mood, rng=rng, d_imb=d_imb, first_half=first_half)
+    prev = str(prev_regime or "").strip().upper()
+    if prev and prev not in {"", "UNKNOWN"} and prev != regime:
+        transition = f"{prev} → {regime}"
+    else:
+        transition = regime
+    vol = _clip(rng / 30.0)
+    compression = _clip(1.0 - rng / 25.0) if not burst else 0.05
+    breakout_p = _clip(
+        (0.55 if burst or mood in {"RISE_START", "FALL_START"} else 0.2)
+        + (0.25 if compression < 0.35 and abs(vel) > 0.4 else 0.0)
+    )
+    reversal_p = _clip(0.65 if mood == "COOL" else (0.35 if burst else 0.18))
+    fits = book_fits(mood=mood, regime=regime, direction=direction)
     return MoodState(
         mood=mood,
         direction=direction,
@@ -231,6 +490,18 @@ def classify_samples(
         n_samples=n,
         gate_on=gate_on,
         flatten_on=flatten_on,
+        regime=regime,
+        transition=transition,
+        direction_score=round(_clip(ret / 40.0, -1.0, 1.0), 3),
+        trend_strength=round(heat_score, 3),
+        momentum=round(_clip(abs(vel) / 2.0), 3),
+        volatility=round(vol, 3),
+        buy_pressure=round(_clip((imb_now + 1.0) / 2.0), 3),
+        compression=round(compression, 3),
+        breakout_probability=round(breakout_p, 3),
+        reversal_probability=round(reversal_p, 3),
+        confidence=round(_clip(n / 80.0), 3),
+        fits=fits,
     )
 
 
@@ -243,10 +514,25 @@ def mood_blocks_entry(
     if not state.gate_on:
         return False, "mood_observe"
     act = str(side or "").strip().lower()
+    fit = state.fit_for(strategy) if strategy else None
+    if fit and fit.get("stance") == "stand_down":
+        return True, (
+            f"mood={state.mood} {state.regime} {strategy} stand_down "
+            f"w={float(fit.get('weight') or 0):.2f}"
+        )
+    if fit and float(fit.get("weight") or 1.0) < mood_fit_min():
+        return True, (
+            f"mood={state.mood} {state.regime} {strategy} low_fit "
+            f"w={float(fit.get('weight') or 0):.2f}"
+        )
+    if fit and act in {"buy", "long"} and fit.get("preferred_side") == "short":
+        return True, f"mood={state.mood} {state.regime} {strategy} prefers_short"
+    if fit and act in {"short", "sell"} and fit.get("preferred_side") == "long":
+        return True, f"mood={state.mood} {state.regime} {strategy} prefers_long"
     if act in {"buy", "long"} and not state.allow_long:
-        return True, f"mood={state.mood} block_long"
+        return True, f"mood={state.mood} {state.regime} block_long"
     if act in {"short", "sell"} and not state.allow_short:
-        return True, f"mood={state.mood} block_short"
+        return True, f"mood={state.mood} {state.regime} block_short"
     return False, "mood_ok"
 
 
@@ -260,14 +546,14 @@ def mood_wants_flatten(
         return False, "mood_no_flatten"
     pos = str(position or "").strip().lower()
     if pos == "long" and state.flatten_long:
-        return True, f"mood={state.mood} flatten_long"
+        return True, f"mood={state.mood} {state.regime} flatten_long"
     if pos == "short" and state.flatten_short:
-        return True, f"mood={state.mood} flatten_short"
+        return True, f"mood={state.mood} {state.regime} flatten_short"
     return False, "mood_hold"
 
 
 class MoodDetector:
-    """Streaming tape → mood. Feed every tick. Desk uses snapshot_mood(db)."""
+    """Streaming tape → market state. Feed every tick. Desk uses snapshot_mood(db)."""
 
     def __init__(self, window: int = 80) -> None:
         self.window = max(16, int(window))
@@ -275,8 +561,9 @@ class MoodDetector:
         self.last: MoodState = _empty()
 
     def update(self, ltp: float, tbq: float = 0.0, tsq: float = 0.0) -> MoodState:
+        prev = self.last.regime
         self._buf.append((float(ltp), float(tbq or 0.0), float(tsq or 0.0)))
-        self.last = classify_samples(list(self._buf))
+        self.last = classify_samples(list(self._buf), prev_regime=prev)
         return self.last
 
 
@@ -312,8 +599,10 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
     d["ok"] = True
     d["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
     d["note"] = (
-        "One mood for all books. Observe only unless MOOD_GATE=true. "
-        "MOOD_FLATTEN=true is required to dump opens. Does not ENABLE. "
-        "Does not change S13/S16 formulas. Keep DRY_RUN=true."
+        "One market state for all books, plus a fit per book. "
+        "Observe only unless MOOD_GATE=true. "
+        "MOOD_FLATTEN=true is required to dump opens. "
+        "Does not ENABLE. Does not change S13/S16 formulas. "
+        "Does not auto-replace a champion. Keep DRY_RUN=true."
     )
     return d

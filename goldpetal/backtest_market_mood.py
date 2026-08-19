@@ -66,13 +66,19 @@ def main() -> int:
     st = classify_samples(samples, gate=False, flatten=False)
     last_ts = rows[-1]["received_at"] if rows else "—"
     print(f"asof={asof or last_ts}  n={st.n_samples}  ltp={samples[-1][0] if samples else '—'}")
-    print(f"mood={st.mood}  dir={st.direction}  heat={st.heat}")
+    print(f"mood={st.mood}  regime={st.regime}  transition={st.transition}")
+    print(f"dir={st.direction}  heat={st.heat}  mom={st.momentum}  vol={st.volatility}")
     print(f"label={st.label}")
     print(f"reason={st.reason}")
     print(
         f"allow_long={st.allow_long} allow_short={st.allow_short} "
         f"(observe only — MOOD_GATE not applied here)"
     )
+    for row in st.fits:
+        print(
+            f"  fit {row['strategy']}: {row['stance']} "
+            f"w={row['weight']:.2f} side={row['preferred_side']} · {row['why']}"
+        )
     print(f"now={datetime.now(IST).isoformat(timespec='seconds')}")
     print("Does not ENABLE. Keep DRY_RUN=true.")
     return 0
