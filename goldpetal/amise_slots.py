@@ -205,23 +205,19 @@ def next_free_slot(folder: Path | None = None, *, genome_id: str = "") -> str | 
     return None
 
 
-def assign_slot(
+def write_slot(
+    slot: str,
     genome: StrategyGenome,
     *,
     proposal_id: str = "",
     folder: Path | None = None,
     note: str = "",
 ) -> dict[str, Any]:
-    """Write genome into the next free S21, S22, … slot (or the same genome_id)."""
+    """Write a genome into a named AMISE chair. Never sets DRY_RUN=false."""
+    if slot_number(slot) is None:
+        return {"ok": False, "error": f"not an AMISE slot: {slot}"}
     g = genome.normalized()
     folder = slots_dir(folder)
-    slot = next_free_slot(folder, genome_id=g.genome_id)
-    if slot is None:
-        return {
-            "ok": False,
-            "error": "AMISE slots S21–S999 are full.",
-            "slots": load_index(folder).get("slots") or {},
-        }
     payload = {
         "slot": slot,
         "assigned_at_ist": _now_iso(),
@@ -252,7 +248,33 @@ def assign_slot(
         "name": g.name,
         "env_patch": slot_env_patch(slot),
         "assigned_at_ist": payload["assigned_at_ist"],
+        "overwritten": True,
     }
+
+
+def assign_slot(
+    genome: StrategyGenome,
+    *,
+    proposal_id: str = "",
+    folder: Path | None = None,
+    note: str = "",
+) -> dict[str, Any]:
+    """Write genome into the next free S21, S22, … slot (or the same genome_id)."""
+    g = genome.normalized()
+    folder = slots_dir(folder)
+    slot = next_free_slot(folder, genome_id=g.genome_id)
+    if slot is None:
+        return {
+            "ok": False,
+            "error": "AMISE slots S21–S999 are full.",
+            "slots": load_index(folder).get("slots") or {},
+        }
+    out = write_slot(
+        slot, g, proposal_id=proposal_id, folder=folder, note=note
+    )
+    if out.get("ok"):
+        out["overwritten"] = False
+    return out
 
 
 def slot_env_patch(slot: str) -> dict[str, str]:
