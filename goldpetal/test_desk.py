@@ -50,8 +50,11 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" in quote
-    assert "gp-header-v5" in html
-    assert " · v5" in html
+    assert "gp-header-v6" in html
+    assert " · v6" in html
+    assert "lastLtpChangeAt" in html
+    hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
+    assert "tape_live" not in hist
     assert "tape dead" in html
     assert "function tapeAgeSec" in html
     assert "Approve → paper" in html

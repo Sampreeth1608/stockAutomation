@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v5: light desk polls; running needs live ticks -->
+<!-- gp-header-v6: live LTP means running; history must not mark tape dead -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v5</div>
+      <div class="clock" id="clock">IST — · v6</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -478,6 +478,8 @@ let watchTab = "open";
 let histReady = false;
 let lastDesk = {};
 let lastTape = { ticks: [], signals: [], live_orders: [], tick_count: 0, ltp: null };
+let lastLtpSeen = null;
+let lastLtpChangeAt = 0;
 let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0 };
 let lastWhy = null;
 let lastMl = null;
@@ -542,7 +544,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v5";
+    if (clock) clock.textContent = "IST " + ist + " · v6";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -579,9 +581,10 @@ function parseTickAt(raw) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
 }
-const TAPE_LIVE_MS = 30000;
+const TAPE_LIVE_MS = 90000;
 function tapeAgeSec() {
-  const raw = lastTape.last_tick_at || (lastDesk.session || {}).last_tick_at || "";
+  const tick0 = (lastTape.ticks || [])[0] || {};
+  const raw = lastTape.last_tick_at || tick0.received_at || (lastDesk.session || {}).last_tick_at || "";
   const d = parseTickAt(raw);
   if (!d) {
     const age = (lastTape.tape_age_sec != null) ? lastTape.tape_age_sec
@@ -591,6 +594,7 @@ function tapeAgeSec() {
   return (Date.now() - d.getTime()) / 1000;
 }
 function tapeIsLive() {
+  if (lastLtpChangeAt && (Date.now() - lastLtpChangeAt) <= 60000) return true;
   const age = tapeAgeSec();
   if (age != null && Number.isFinite(age)) return age <= (TAPE_LIVE_MS / 1000);
   if (typeof lastTape.tape_live === "boolean") return lastTape.tape_live;
@@ -600,10 +604,7 @@ function tapeIsLive() {
 function goldPetalIsRunning() {
   const s = goldPetalSessionNow();
   if (!s.open) return false;
-  const bot = lastDesk.bot || {};
-  const feed = String(bot.feed_source || "off");
-  const feedOn = !!bot.running || feed === "bot" || feed === "collector";
-  return feedOn && tapeIsLive();
+  return tapeIsLive();
 }
 function renderSessionLine() {
   const el = $("session-line");
@@ -671,6 +672,10 @@ function renderQuote(withMood) {
   if (!el) return;
   const ltp = lastTape.ltp;
   const hasPx = !(ltp == null || ltp === "");
+  if (hasPx && String(ltp) !== String(lastLtpSeen)) {
+    lastLtpSeen = ltp;
+    lastLtpChangeAt = Date.now();
+  }
   el.textContent = hasPx ? money(ltp) : "—";
   el.classList.toggle("stale", hasPx && !tapeIsLive());
   if (meta) {
@@ -1542,16 +1547,7 @@ async function loadHistory() {
     const strat = $("hist-strat").value;
     const q = "/api/history?limit=80" + (strat ? "&strategy=" + encodeURIComponent(strat) : "");
     lastHist = await api(q, { timeoutMs: 20000 });
-    lastTape = Object.assign({}, lastTape, {
-      ticks: lastHist.ticks || lastTape.ticks,
-      signals: lastHist.signals || lastTape.signals,
-      tick_count: lastHist.tick_count != null ? lastHist.tick_count : lastTape.tick_count,
-      ltp: lastHist.ltp != null ? lastHist.ltp : lastTape.ltp,
-      db_path: lastHist.db_path || lastTape.db_path,
-      last_tick_at: lastHist.last_tick_at || lastTape.last_tick_at,
-      tape_live: lastHist.tape_live != null ? lastHist.tape_live : lastTape.tape_live,
-      tape_age_sec: lastHist.tape_age_sec != null ? lastHist.tape_age_sec : lastTape.tape_age_sec,
-    });
+    if (lastHist.db_path && !lastTape.db_path) lastTape.db_path = lastHist.db_path;
     renderAll();
   } finally { loadHistory.busy = false; }
 }
