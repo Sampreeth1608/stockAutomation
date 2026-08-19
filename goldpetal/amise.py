@@ -167,7 +167,12 @@ def start_amise_lab(
 
     st = amise_lab_status()
     if st.get("running"):
-        return {**st, "started_new": False, "note": "factory already running"}
+        return {
+            **st,
+            "ok": True,
+            "started_new": False,
+            "note": "factory already running — wait, then Approve on Lab",
+        }
     AMISE_DIR.mkdir(parents=True, exist_ok=True)
     path = db or resolve_desk_db()
     py = python or os.getenv("PYTHON") or "python3"
@@ -385,7 +390,17 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         ),
         {"ok": False, "summary": {}},
     )
-    guardian = _safe(lambda: scan_guardian(db=path), {"ok": False, "books": [], "portfolio_status": "THIN"})
+
+    def _guardian() -> dict[str, Any]:
+        from desk_data import all_trades_cached
+
+        rows, err = all_trades_cached(db_path=path)
+        g = scan_guardian(trades=rows)
+        if err:
+            g = {**g, "note": (g.get("note") or "") + " (" + err + ")"}
+        return g
+
+    guardian = _safe(_guardian, {"ok": False, "books": [], "portfolio_status": "THIN"})
     risk = _safe(lambda: capital_snapshot(), {"ok": False})
     try:
         st = load_state()

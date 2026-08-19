@@ -115,11 +115,16 @@ def test_not_a_paper_book() -> None:
     assert 'data-tab="amise"' in station
     assert "/api/amise" in station
     assert "Profit Guardian" in station
-    assert "Run factory" in station
+    assert "timed out after" in station
+    assert "Starting factory" in station
+    assert "timeoutMs: 30000" in station
     panel = (root / "control_panel.py").read_text(encoding="utf-8")
     assert "/api/amise" in panel
     assert "amise_desk_payload" in panel
     assert "/api/amise/lab" in panel
+    amise_src = (root / "amise.py").read_text(encoding="utf-8")
+    assert "all_trades_cached" in amise_src
+    assert "factory already running" in amise_src
     env = (root / ".env.example").read_text(encoding="utf-8")
     assert "amise.py" in env
     assert "ENABLE_AMISE=" not in env

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v7: LTP from /api/desk; mood gate seeds from ticks so BREAKOUT cannot open new shorts -->
+<!-- gp-header-v8: factory abort shows timeout reason; AMISE uses cached trades -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v7</div>
+      <div class="clock" id="clock">IST — · v8</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -520,14 +520,29 @@ async function api(path, opts) {
   const o = opts || {};
   const ctrl = new AbortController();
   const ms = Number(o.timeoutMs) || (o.method && String(o.method).toUpperCase() !== "GET" ? 60000 : 8000);
-  const timer = setTimeout(() => ctrl.abort(), ms);
+  const timer = setTimeout(() => {
+    try { ctrl.abort("timeout"); } catch (err) { ctrl.abort(); }
+  }, ms);
   try {
     const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { signal: ctrl.signal }));
     const text = await res.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
-    if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+    if (!res.ok) throw new Error(data.error || data.note || text || ("HTTP " + res.status));
     return data;
+  } catch (e) {
+    const msg = String((e && e.message) || e || "");
+    const aborted = (e && e.name === "AbortError") || /abort/i.test(msg);
+    if (aborted) {
+      let hint = path + " timed out after " + Math.round(ms / 1000) + "s";
+      if (String(path).indexOf("/api/amise/lab") >= 0) {
+        hint += " — factory start did not answer. On the VM: tail data/amise/lab.log";
+      } else if (String(path).indexOf("/api/amise") >= 0) {
+        hint += " — AMISE snapshot still loading. Factory may already be running — press Refresh.";
+      }
+      throw new Error(hint);
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
@@ -544,7 +559,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v7";
+    if (clock) clock.textContent = "IST " + ist + " · v8";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1117,7 +1132,7 @@ function renderLab() {
   </table>` : `<p class="hint">No lab decisions yet.</p>`;
 }
 async function loadLab() {
-  lastLab = await api("/api/research");
+  lastLab = await api("/api/research", { timeoutMs: 20000 });
   setLabBadge(((lastLab.pending || []).length) || 0);
   if (watchTab === "lab") renderLab();
 }
@@ -1229,7 +1244,7 @@ function renderAmise() {
   </div>`;
 }
 async function loadAmise() {
-  lastAmise = await api("/api/amise");
+  lastAmise = await api("/api/amise", { timeoutMs: 30000 });
   setAmiseBadge(((lastAmise.awaiting_you || 0) + (lastAmise.alerts || 0)));
   if (watchTab === "amise") renderAmise();
 }
@@ -1593,10 +1608,13 @@ $("btn-ml-refresh").onclick = () => loadMl().catch((e) => flash("flash-ml", Stri
 $("btn-lab-refresh").onclick = () => loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
 $("btn-amise-refresh").onclick = () => loadAmise().catch((e) => flash("flash-amise", String(e.message || e), true));
 $("btn-amise-lab").onclick = () => {
-  api("/api/amise/lab", { method: "POST", body: JSON.stringify({}) })
+  flash("flash-amise", "Starting factory (3m…daily)…");
+  api("/api/amise/lab", { method: "POST", body: JSON.stringify({}), timeoutMs: 20000 })
     .then((res) => {
-      flash("flash-amise", res.note || (res.running ? "Factory running" : "ok"));
-      return loadAmise();
+      flash("flash-amise", res.note || (res.running ? "Factory running — Approve on Lab" : "ok"));
+      return loadAmise().catch((e) => {
+        flash("flash-amise", (res.note || "Factory started") + " · " + String(e.message || e));
+      });
     })
     .catch((e) => flash("flash-amise", String(e.message || e), true));
 };
