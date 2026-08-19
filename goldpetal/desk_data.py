@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -14,7 +15,8 @@ from zoneinfo import ZoneInfo
 from control_state import paper_strategy_names
 from live_orders import recent_orders
 from paper_report import summarize_trades
-from storage import DB_PATH, build_trades, latest_signals, latest_ticks
+from storage import build_trades, latest_signals, latest_ticks, set_db_path
+import storage as _storage
 from charges import paper_lots
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -44,14 +46,47 @@ def json_safe(obj: Any) -> Any:
     return obj
 
 
+def bot_live_ticks_db() -> Path | None:
+    """ticks.db beside the running run_strategy.py / collect_ticks.py process."""
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-af", "run_strategy.py|collect_ticks.py"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    for line in (proc.stdout or "").splitlines():
+        if "pgrep" in line or "control_panel" in line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        cmd = parts[1]
+        if "run_strategy.py" not in cmd and "collect_ticks.py" not in cmd:
+            continue
+        try:
+            pid = int(parts[0])
+            cwd = Path(f"/proc/{pid}/cwd").resolve()
+        except (ValueError, OSError):
+            continue
+        db = cwd / "data" / "ticks.db"
+        if db.is_file():
+            return db
+    return None
+
+
 def desk_db_candidates() -> list[Path]:
     root = Path(__file__).resolve().parent
     home = Path.home()
     out: list[Path] = []
     seen: set[Path] = set()
+    bot_db = bot_live_ticks_db()
     for raw in (
+        *((bot_db,) if bot_db is not None else ()),
         root / "data" / "ticks.db",
-        DB_PATH,
+        _storage.DB_PATH,
         Path.cwd() / "data" / "ticks.db",
         home / "goldpetal-repo" / "goldpetal" / "data" / "ticks.db",
         home / "goldpetal" / "data" / "ticks.db",
@@ -104,21 +139,21 @@ def _last_tick_epoch(p: Path) -> float:
 
 
 def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
-    """Pick the ticks.db the bot is writing (freshest tick, not file mtime).
-
-    Desk ``init_db`` / WAL on ``~/goldpetal/data/ticks.db`` bumps mtime and
-    used to steal the quote from ``goldpetal-repo`` after ``--restart``.
-    """
+    """Live bot ticks.db if the runner is up; else the file with the freshest tick."""
     paths = list(candidates) if candidates is not None else desk_db_candidates()
     use_cache = candidates is None
     now = time.time()
+    bot_db = None if candidates is not None else bot_live_ticks_db()
+    if use_cache and bot_db is not None and bot_db.is_file():
+        _RESOLVE_CACHE.update({"at": now, "path": str(bot_db)})
+        return bot_db
     if use_cache and _RESOLVE_CACHE.get("path") and now - float(_RESOLVE_CACHE.get("at") or 0) < 2.0:
         cached = Path(str(_RESOLVE_CACHE["path"]))
         if cached.is_file():
             return cached
     existing = [p for p in paths if p.is_file()]
     if not existing:
-        chosen = paths[0] if paths else DB_PATH
+        chosen = paths[0] if paths else _storage.DB_PATH
         if use_cache:
             _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
         return chosen
@@ -135,6 +170,63 @@ def resolve_desk_db(*, candidates: list[Path] | None = None) -> Path:
     if use_cache:
         _RESOLVE_CACHE.update({"at": now, "path": str(chosen)})
     return chosen
+
+
+def _same_db(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return str(a) == str(b)
+
+
+def quarantine_stale_ticks_dbs(
+    live: Path, *, candidates: list[Path] | None = None
+) -> list[str]:
+    """Rename leftover ticks.db files so the desk cannot read them. Live file stays."""
+    moved: list[str] = []
+    live_ep = _last_tick_epoch(live) if live.is_file() else 0.0
+    for raw in list(candidates) if candidates is not None else desk_db_candidates():
+        p = Path(raw)
+        if not p.is_file() or _same_db(p, live):
+            continue
+        other_ep = _last_tick_epoch(p)
+        if live_ep > 0 and other_ep > live_ep:
+            continue
+        dest = p.with_name(p.name + ".stale")
+        if dest.exists():
+            dest = p.with_name(p.name + f".stale-{int(time.time())}")
+        try:
+            p.rename(dest)
+            moved.append(f"{p} -> {dest}")
+        except OSError:
+            continue
+        for side in (p.with_name(p.name + "-wal"), p.with_name(p.name + "-shm")):
+            if not side.is_file():
+                continue
+            side_dest = Path(str(dest) + side.name[len(p.name) :])
+            try:
+                side.rename(side_dest)
+                moved.append(f"{side} -> {side_dest}")
+            except OSError:
+                pass
+    if moved:
+        _RESOLVE_CACHE.update({"at": 0.0, "path": ""})
+        reset_trade_cache()
+    return moved
+
+
+def bind_live_ticks_db(*, candidates: list[Path] | None = None) -> dict[str, Any]:
+    """Desk + storage use the bot db. Stale copies are renamed off the candidate list."""
+    live = resolve_desk_db(candidates=candidates)
+    moved = quarantine_stale_ticks_dbs(live, candidates=candidates)
+    set_db_path(live)
+    _RESOLVE_CACHE.update({"at": time.time(), "path": str(live)})
+    return {
+        "ok": True,
+        "live": str(live),
+        "bot_cwd_db": str(bot_live_ticks_db() or ""),
+        "quarantined": moved,
+    }
 
 
 def db_info(db_path: Path) -> dict[str, Any]:

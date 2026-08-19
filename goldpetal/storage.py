@@ -7,12 +7,33 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-DB_PATH = Path(__file__).resolve().parent / "data" / "ticks.db"
+_PACKAGE_DB = Path(__file__).resolve().parent / "data" / "ticks.db"
+DB_PATH = _PACKAGE_DB
 
 
-def connect(db_path: Path = DB_PATH, timeout: float = 30) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=timeout)
+def set_db_path(path: Path | str) -> Path:
+    """Point default storage at the live bot ticks.db. Call-time, not import-time."""
+    global DB_PATH
+    DB_PATH = Path(path)
+    return DB_PATH
+
+
+def _effective_db(db_path: Path | None) -> Path:
+    if db_path is None:
+        return DB_PATH
+    path = Path(db_path)
+    try:
+        if path.resolve() == _PACKAGE_DB.resolve() and DB_PATH.resolve() != path.resolve():
+            return DB_PATH
+    except OSError:
+        pass
+    return path
+
+
+def connect(db_path: Path | None = None, timeout: float = 30) -> sqlite3.Connection:
+    path = _effective_db(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=timeout)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=5000")
@@ -21,7 +42,7 @@ def connect(db_path: Path = DB_PATH, timeout: float = 30) -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: Path = DB_PATH) -> None:
+def init_db(db_path: Path | None = None) -> None:
     with connect(db_path) as conn:
         try:
             conn.execute("PRAGMA journal_mode=WAL")

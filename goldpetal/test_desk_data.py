@@ -101,6 +101,38 @@ def test_resolve_desk_db_prefers_newer_nonempty() -> None:
         assert picked == new
 
 
+def test_quarantine_stale_ticks_db() -> None:
+    from desk_data import quarantine_stale_ticks_dbs
+
+    with tempfile.TemporaryDirectory() as td:
+        live = Path(td) / "live.db"
+        stale = Path(td) / "stale.db"
+        init_db(live)
+        init_db(stale)
+        _tick(live, day="2026-08-19")
+        _tick(stale, day="2026-08-18")
+        moved = quarantine_stale_ticks_dbs(live, candidates=[live, stale])
+        assert live.is_file()
+        assert not stale.is_file()
+        assert (Path(td) / "stale.db.stale").is_file()
+        assert moved
+
+
+def test_set_db_path_redirects_package_default() -> None:
+    from storage import _PACKAGE_DB, _effective_db, set_db_path
+    import storage as st
+
+    with tempfile.TemporaryDirectory() as td:
+        live = Path(td) / "ticks.db"
+        init_db(live)
+        old = st.DB_PATH
+        try:
+            set_db_path(live)
+            assert _effective_db(_PACKAGE_DB) == live
+        finally:
+            set_db_path(old)
+
+
 def test_tape_payload_shows_ticks_without_trades() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Path(td) / "ticks.db"
@@ -186,6 +218,8 @@ if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
     test_resolve_desk_db_prefers_fresher_tick_not_mtime()
+    test_quarantine_stale_ticks_db()
+    test_set_db_path_redirects_package_default()
     test_tape_payload_shows_ticks_without_trades()
     test_tape_freshness_frozen_quote_is_not_live()
     test_tick_feed_stale_during_session()

@@ -831,6 +831,17 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
+    from desk_data import bind_live_ticks_db
+
+    bound = bind_live_ticks_db()
+    print(
+        f"ticks db {bound.get('live')}  "
+        f"bot={bound.get('bot_cwd_db') or 'not running'}  "
+        f"quarantined={len(bound.get('quarantined') or [])}",
+        flush=True,
+    )
+    for row in bound.get("quarantined") or []:
+        print(f"  stale {row}", flush=True)
     load_state()
     load_capital()
     try:

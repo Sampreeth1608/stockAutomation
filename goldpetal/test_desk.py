@@ -50,8 +50,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" in quote
-    assert "gp-header-v9" in html
-    assert " · v9" in html
+    assert "gp-header-v10" in html
+    assert " · v10" in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
     hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
@@ -187,6 +187,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "desk_snapshot" in text
     assert "session_status" in text
     assert "goldpetal_running" in text
+    assert "bind_live_ticks_db" in text
     assert "last_tick_snapshot" in text
     assert "default=8501" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
