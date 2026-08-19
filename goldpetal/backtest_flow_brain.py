@@ -5,6 +5,7 @@ Not S7_HOURLY. Not S16. Not live.
 
   python backtest_flow_brain.py --db data/ticks.db --lots 100 --fees
   python backtest_flow_brain.py --synthetic --lots 1,100 --fees
+  python backtest_flow_brain_next.py --db data/ticks.db --lots 100 --fees
 """
 
 from __future__ import annotations
@@ -254,6 +255,10 @@ def main() -> None:
     print(
         "Stay DRY_RUN. ENABLE_FLOW_BRAIN stays false. Do not live-unlock. "
         "This is not S7_HOURLY and not S16."
+    )
+    print(
+        "Next-move lab: python backtest_flow_brain_next.py "
+        "--db data/ticks.db --lots 100 --fees"
     )
 
 

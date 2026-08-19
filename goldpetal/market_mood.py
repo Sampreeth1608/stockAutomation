@@ -38,6 +38,7 @@ CORE_FIT_BOOKS: tuple[str, ...] = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
+    "FLOW_BRAIN",
 )
 FIT_BOOKS: tuple[str, ...] = CORE_FIT_BOOKS + (
     "S21_AMISE",
@@ -279,6 +280,7 @@ def _fit_one(
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "FLOW_BRAIN",
     }
     vol_book = name == "S5_MINEDGE"
     fade_book = name == "S20_FADE_HL"
