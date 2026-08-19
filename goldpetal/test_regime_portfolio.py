@@ -72,7 +72,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S13_HHHL_DAY" in p.enabled
     assert "S16_HHHL_WICK_1H" in p.enabled
     assert "S18_OHLC_VOL_HTF" in p.enabled
-    assert "S19_BODY_CLOSE_1H" not in p.enabled
+    assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled

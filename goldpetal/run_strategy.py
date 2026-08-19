@@ -2172,8 +2172,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S13/S16/S18 — S4 off, S11 off, S18 paper only, "
-        f"S19/S20 off, AMISE S21+ after Lab Approve)",
+        f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
+        f"S20 off, AMISE S21+ after Lab Approve)",
         flush=True,
     )
 
