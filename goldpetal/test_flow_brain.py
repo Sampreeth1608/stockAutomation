@@ -15,6 +15,7 @@ from flow_brain import (
     after_charges_win_rate,
     flow_imbalance,
     move_scale,
+    scratchy_then_trend_samples,
     simulate_flow_brain,
 )
 from live_readiness import PAPER_ONLY_BOOKS
@@ -163,31 +164,7 @@ def _bull_then_bear() -> list[tuple[datetime, float, float, float]]:
 
 
 def _scratchy_then_trend() -> list[tuple[datetime, float, float, float]]:
-    """Chop that v1 scratches, then a real expansion quality can hold."""
-    ltp, tbq, tsq = 2340.0, 50_000.0, 50_000.0
-    out: list[tuple[datetime, float, float, float]] = []
-    t0 = datetime(2026, 8, 17, 10, 0, 0)
-    i = 0
-    for _minute in range(25):
-        for _s in range(30):
-            ltp += 0.3
-            tbq += 80
-            tsq += 20
-            out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
-            i += 1
-        for _s in range(30):
-            ltp -= 0.3
-            tbq += 20
-            tsq += 80
-            out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
-            i += 1
-    for _s in range(480):
-        ltp += 1.0
-        tbq += 400
-        tsq += 10
-        out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
-        i += 1
-    return out
+    return scratchy_then_trend_samples()
 
 
 def test_v1_pack_matches_ungated() -> None:
@@ -416,6 +393,23 @@ def test_desk_fewer_trades_higher_winrate_than_v1() -> None:
     assert after_charges_inr(desk100) > 0
 
 
+def test_scratchy_1lot_is_not_100x_at_100lots() -> None:
+    samples = scratchy_then_trend_samples()
+    d1 = simulate_flow_brain(
+        samples, lots=1, fees=True, session_filter=False, gates=GATE_PACKS["desk"]
+    )
+    d100 = simulate_flow_brain(
+        samples, lots=100, fees=True, session_filter=False, gates=GATE_PACKS["desk"]
+    )
+    from ohlcv_lab import after_charges_inr
+
+    a1 = after_charges_inr(d1)
+    a100 = after_charges_inr(d100)
+    assert d1.n_trades == d100.n_trades
+    assert d1.n_trades >= 1
+    assert abs(a100 - a1 * 100.0) > 100.0
+
+
 def test_live_confirm_blocks_buy() -> None:
     strat = FlowBrainLiveStrategy(
         min_hold_s=1.0,
@@ -479,6 +473,7 @@ if __name__ == "__main__":
     test_s5_fee_cover_blocks_tiny_expected()
     test_s5_tp_exits_in_profit()
     test_desk_fewer_trades_higher_winrate_than_v1()
+    test_scratchy_1lot_is_not_100x_at_100lots()
     test_live_confirm_blocks_buy()
     test_wired_enable_off_not_slim_not_s16()
     print("flow brain tests ok")

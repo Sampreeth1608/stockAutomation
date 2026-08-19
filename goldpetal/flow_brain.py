@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from backtest_hhhl_candles import Candle, Trade, make_charge_cfg
@@ -482,7 +482,9 @@ def gated_want(
     if g.block_s20_against and snap.s20_1m is not None and snap.s20_1m != want:
         return None
     if g.fee_cover:
-        n = float(lots if lots is not None else g.lots)
+        # Cover uses the pack's lot assumption (desk=100), not the settle
+        # lot. Otherwise 1-lot vs 100-lot backtests take different trades.
+        n = float(g.lots)
         be = fee_break_even_points(snap.ltp, force_fees=True, lots=n)
         req = max(float(g.min_edge_pts), be * float(g.edge_safety))
         if float(snap.expected_pts or 0.0) < req:
@@ -964,4 +966,32 @@ def samples_from_tick_rows(rows: list[Any]) -> list[tuple[datetime, float, float
             continue
         dt = parse_ts(row["received_at"])
         out.append((dt, float(ltp), float(m.get("tbq") or 0.0), float(m.get("tsq") or 0.0)))
+    return out
+
+
+def scratchy_then_trend_samples() -> list[tuple[datetime, float, float, float]]:
+    """Toy tape used for the +₹165 / 1-lot desk row: 25m chop, then 8m expansion."""
+    ltp, tbq, tsq = 2340.0, 50_000.0, 50_000.0
+    out: list[tuple[datetime, float, float, float]] = []
+    t0 = datetime(2026, 8, 17, 10, 0, 0)
+    i = 0
+    for _minute in range(25):
+        for _s in range(30):
+            ltp += 0.3
+            tbq += 80
+            tsq += 20
+            out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
+            i += 1
+        for _s in range(30):
+            ltp -= 0.3
+            tbq += 20
+            tsq += 80
+            out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
+            i += 1
+    for _s in range(480):
+        ltp += 1.0
+        tbq += 400
+        tsq += 10
+        out.append((t0 + timedelta(seconds=i), ltp, tbq, tsq))
+        i += 1
     return out
