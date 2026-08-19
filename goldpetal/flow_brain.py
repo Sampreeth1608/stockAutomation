@@ -399,6 +399,7 @@ class FlowGates:
     min_imb_pct: float = 0.0
     require_rising_imb_level: bool = False
     require_s19_1m: bool = False
+    require_s19_agree: bool = False
     require_s16_agree: bool = False
     block_s20_against: bool = False
     fee_cover: bool = False
@@ -410,6 +411,7 @@ class FlowGates:
     book_drop_min_pct: float = 0.0
     book_drop_persist: int = 1
     protect_profit_pts: float = 25.0
+    scale_exits_to_expected: bool = False
 
     def brain(self) -> FlowBrain:
         return FlowBrain(
@@ -473,6 +475,8 @@ def gated_want(
     if g.require_s19_1m:
         if snap.s19_1m is None or snap.s19_1m != want:
             return None
+    if g.require_s19_agree and snap.s19_1m is not None and snap.s19_1m != want:
+        return None
     if g.require_s16_agree and snap.s16_1m is not None and snap.s16_1m != want:
         return None
     if g.block_s20_against and snap.s20_1m is not None and snap.s20_1m != want:
@@ -523,33 +527,32 @@ GATE_PACKS: dict[str, FlowGates] = {
         persist_until_opposite=True,
     ),
     "desk": FlowGates(
+        # 548k VM tape: confirm10 was 76 trades / 22.4% WR / −₹25k.
+        # Full AND (14% IMB + rising + required S19 1m + 20pt expected + 50pt TP)
+        # took 0 trades. Desk is confirm10 + no-flip + S8 net sign + HTF
+        # agree-if-set + S5 fee cover at real ~3pt BE + 25/10 TP/SL.
         name="desk",
-        decide_every_s=5.0,
-        min_flow_imb=0.20,
-        min_price_pts=3.0,
-        confirm_s=12.0,
+        decide_every_s=2.0,
+        confirm_s=10.0,
         min_hold_s=60.0,
-        cooldown_s=90.0,
-        min_scale="small",
-        min_atr=5.0,
-        require_imb_vel=True,
+        cooldown_s=30.0,
+        min_flow_imb=0.18,
+        min_price_pts=2.0,
         require_expanding=False,
         allow_flip=False,
         persist_until_opposite=True,
         require_net_sign=True,
-        min_imb_pct=14.0,
-        require_rising_imb_level=True,
-        require_s19_1m=True,
+        require_s19_agree=True,
         require_s16_agree=True,
         block_s20_against=True,
         fee_cover=True,
-        min_edge_pts=20.0,
+        min_edge_pts=5.0,
         edge_safety=1.25,
-        tp_pts=50.0,
-        sl_pts=28.0,
+        tp_pts=25.0,
+        sl_pts=10.0,
         book_drop_min_pct=0.25,
         book_drop_persist=1,
-        protect_profit_pts=25.0,
+        protect_profit_pts=8.0,
     ),
 }
 
@@ -582,16 +585,25 @@ def after_charges_win_rate(result: Any) -> float:
 
 
 def s5_targets(g: FlowGates | None, snap: FlowState) -> tuple[float, float]:
-    """S5: target = max(tp_floor, expected×0.85); stop = max(min_edge×0.4, expected×0.45)."""
+    """S5-style stops. Default: use the pack's tp/sl.
+
+    scale_exits_to_expected lifts TP/SL to PointATR (S5 min-edge). On the
+    548k tape that made TP 100+ pts (session range) so exits never fired.
+    Desk keeps fixed 25/10.
+    """
     if g is None:
         return 0.0, 0.0
-    exp = float(snap.expected_pts or 0.0)
     tp = float(g.tp_pts)
     sl = float(g.sl_pts)
-    if g.fee_cover:
+    if g.scale_exits_to_expected:
+        exp = float(snap.expected_pts or 0.0)
         if tp > 0:
             tp = max(tp, exp * 0.85)
         sl = max(float(g.min_edge_pts) * 0.4, exp * 0.45)
+    elif g.fee_cover and tp > 0:
+        tp = max(tp, float(g.min_edge_pts))
+        if sl <= 0:
+            sl = max(float(g.min_edge_pts) * 0.4, tp * 0.4)
     return tp, sl
 
 
