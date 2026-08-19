@@ -62,7 +62,7 @@ SUBSCRIBE_MODE = 3
 DEFAULT_INTERVAL_MINUTES = 30
 RECONNECT_DELAY_SEC = 5
 TICK_WATCHDOG_SEC = float(os.getenv("TICK_WATCHDOG_SEC", "45") or 45)
-TICK_FIRST_GRACE_SEC = float(os.getenv("TICK_FIRST_GRACE_SEC", "90") or 90)
+TICK_FIRST_GRACE_SEC = float(os.getenv("TICK_FIRST_GRACE_SEC", "45") or 45)
 DEFAULT_MARKET_OPEN = "09:00"
 DEFAULT_MARKET_CLOSE = "23:30"
 
@@ -2061,7 +2061,8 @@ def run_once(
                 sws.close()
             except Exception as exc:
                 print(f"TICK WATCHDOG close failed: {exc}", flush=True)
-            return
+            print("TICK WATCHDOG: exiting so supervise starts a new socket", flush=True)
+            os._exit(1)
 
     watch_th = threading.Thread(target=_tick_watchdog, name="tick-watchdog", daemon=True)
     watch_th.start()
