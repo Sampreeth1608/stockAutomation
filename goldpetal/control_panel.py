@@ -834,24 +834,23 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(*_json_bytes(payload))
                 return
             if path == "/api/capture/learn":
-                from you_learn import maybe_auto_paper, propose_mimic
+                from you_learn import propose_mimic
 
                 try:
                     res = propose_mimic()
                 except (ValueError, RuntimeError) as exc:
                     self._send(*_json_bytes({"error": str(exc)}, 400))
                     return
-                if res.get("ok"):
-                    try:
-                        dep = maybe_auto_paper()
-                        res["deploy"] = dep
-                        res["deployed"] = bool(dep.get("deployed"))
-                        res["already"] = bool(dep.get("already"))
-                        res["slot"] = dep.get("slot")
-                        if dep.get("note"):
-                            res["reminder"] = dep.get("note")
-                    except Exception as exc:
-                        res["deploy_error"] = str(exc)
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
+            if path == "/api/capture/go":
+                from you_learn import start_mimic_paper
+
+                try:
+                    res = start_mimic_paper()
+                except (ValueError, RuntimeError) as exc:
+                    self._send(*_json_bytes({"error": str(exc)}, 400))
+                    return
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/s11/activate":

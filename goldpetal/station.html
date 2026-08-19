@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Gold Petal Station</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
-<!-- gp-header-v13: You sittings 30m–day; mimic auto-papers after knowledge is good -->
+<!-- gp-header-v14: You teach, Let it trade button, compare You vs mimic -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v13</div>
+      <div class="clock" id="clock">IST — · v14</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -188,7 +188,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </div>
   <div class="you-strip" id="you-strip">
     <b>You</b>
-    <span class="hint" id="you-strip-hint">Sit 30m, 1h, 3h, or the whole day. Records the tape. Angel only after LIVE + Unlock + type YOU. Mimic papers itself when knowledge is good.</span>
+    <span class="hint" id="you-strip-hint">Sit and teach. Press Let it trade when you want the mimic to paper. Compare You vs mimic. Angel only after LIVE + Unlock + type YOU.</span>
     <span class="mono" id="you-strip-ltp">LTP —</span>
     <button class="btn ok" type="button" data-you="buy">BUY</button>
     <button class="btn danger" type="button" data-you="short">SHORT</button>
@@ -348,8 +348,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="you-panel" hidden>
         <h2>You — trade and teach</h2>
-        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Sit 30 minutes, 1 hour, 3 hours, or the whole day — all count. Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks — then marks 5s / 10s / 30s / 1m / 5m. When knowledge is good the mimic papers itself in those hours. This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE.</p>
-        <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. Type YOU to send a real Angel order after live is armed. Mimic auto-papers after enough sittings — never DRY_RUN=false.</div>
+        <p class="hint">Press what you do <b>now</b> while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Sit 30 minutes, 1 hour, 3 hours, or the whole day — all count. Every click teaches. When you want the mimic to try, press <b>Let it trade</b> (paper in your hours). Compare You vs mimic below. Keep sitting if you want to teach more, then Learn my style and Let it trade again. This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE.</p>
+        <div class="ml-banner ok" id="you-session-banner">Capture only Mon–Fri 09:00–23:30 IST. Type YOU to send Angel after live is armed. Let it trade starts paper only.</div>
         <p class="flash" id="flash-you"></p>
         <div class="ml-card">
           <h3>This tape</h3>
@@ -375,9 +375,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
             <button class="btn" type="button" data-you="close">CLOSE</button>
             <button class="btn" type="button" id="btn-you-refresh">Refresh marks</button>
             <button class="btn warn" type="button" id="btn-you-learn">Learn my style</button>
+            <button class="btn ok" type="button" id="btn-you-go">Let it trade</button>
           </div>
         </div>
         <div id="you-learn"></div>
+        <div id="you-compare"></div>
         <div id="you-kpis"></div>
         <h2 style="margin-top:1rem">You vs coded 1h rule</h2>
         <p class="hint">Coded rule here is naive: green + higher high + higher close + volume up on the last 1h. That is the thin rule. Your NO TRADEs are the missing filter.</p>
@@ -566,7 +568,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v13";
+    if (clock) clock.textContent = "IST " + ist + " · v14";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1275,7 +1277,7 @@ function applyYouSession(d) {
   }
   const banner = $("you-session-banner");
   if (banner) {
-    banner.textContent = (sess.label || "session") + " — 30m / 1h / 3h / whole day sittings. Type YOU to send Angel after live is armed. Mimic papers itself when knowledge is good.";
+    banner.textContent = (sess.label || "session") + " — teach now. Press Let it trade for paper mimic. Type YOU to send Angel after live is armed.";
     banner.className = "ml-banner" + (open ? " ok" : "");
   }
   const liveLine = $("you-live-line");
@@ -1302,14 +1304,14 @@ function renderYou() {
     const sitLabel = buckets["30m"] || buckets["1h"] || buckets["3h"] || buckets["day"]
       ? ((buckets["30m"] || 0) + "×30m · " + (buckets["1h"] || 0) + "×1h · " + (buckets["3h"] || 0) + "×3h · " + (buckets["day"] || 0) + "×day")
       : "—";
-    const knowledge = learn.knowledge_good ? "good — papers itself" : "building";
+    const knowledge = learn.knowledge_good ? "good" : "building";
     const slotBit = deploy.slot
-      ? `<p class="hint">${esc("Named " + deploy.slot + (deploy.restart_needed ? " — type RESTART on Engine to load it." : " papering in your hours."))}</p>`
+      ? `<p class="hint">${esc("Named " + deploy.slot + " — type RESTART on Engine if you just pressed Let it trade.")}</p>`
       : "";
     learnEl.innerHTML = `<div class="ml-card">
-      <h3>Learn my style</h3>
+      <h3>Learn, then Let it trade</h3>
       <div class="ml-stats">
-        ${mlStat("Ready", learn.ready ? "yes" : "not yet", learn.ready ? "ok" : "warn")}
+        ${mlStat("Ready", learn.ready ? "yes — press Let it trade" : "not yet", learn.ready ? "ok" : "warn")}
         ${mlStat("Knowledge", knowledge, learn.knowledge_good ? "ok" : "warn")}
         ${mlStat("Sittings", String(learn.n_sessions != null ? learn.n_sessions : "—"))}
         ${mlStat("Hours", hours.label || "—")}
@@ -1317,8 +1319,34 @@ function renderYou() {
         ${mlStat("Need NO TRADE", String(learn.need_skips != null ? learn.need_skips : "—"))}
         ${mlStat("Sittings mix", sitLabel)}
       </div>
-      <p class="hint">${esc(learn.note || "Sit 30m, 1h, 3h, or the whole day. When knowledge is good the mimic papers itself in those hours. Never DRY_RUN=false.")}</p>
+      <p class="hint">${esc(learn.note || "Trade now to teach. Press Let it trade when you want the mimic to paper. Compare below. Keep sitting if you want to teach more.")}</p>
       ${slotBit}
+    </div>`;
+  }
+  const cmp = d.compare || {};
+  const cmpEl = $("you-compare");
+  if (cmpEl) {
+    const youS = cmp.you_since_start || cmp.you || {};
+    const mimS = cmp.mimic_since_start || {};
+    const mim = cmp.mimic || {};
+    const youWr = youS.win_rate_1m == null ? "—" : pct(youS.win_rate_1m);
+    const mimWr = mimS.win_rate == null ? "—" : pct(mimS.win_rate);
+    const recM = cmp.recent_mimic || [];
+    cmpEl.innerHTML = `<div class="ml-card">
+      <h3>You vs mimic</h3>
+      <div class="ml-stats">
+        ${mlStat("You 1m win%", youWr, "")}
+        ${mlStat("You 1m pts", youS.pts_1m == null ? "—" : String(youS.pts_1m))}
+        ${mlStat("You clicks", String(youS.n_taken != null ? youS.n_taken : "—"))}
+        ${mlStat("Mimic win%", mimWr, mim.armed ? "ok" : "warn")}
+        ${mlStat("Mimic closed", String(mimS.n_closed != null ? mimS.n_closed : "0"))}
+        ${mlStat("Mimic after charges ₹", mimS.pnl_after_charges == null || mimS.pnl_after_charges === "" ? "—" : String(mimS.pnl_after_charges))}
+        ${mlStat("Mimic gross ₹", mimS.gross_pnl == null || mimS.gross_pnl === "" ? "—" : String(mimS.gross_pnl))}
+        ${mlStat("Chair", mim.slot || "not started")}
+      </div>
+      <p class="hint">${esc(cmp.verdict || "Press Let it trade to start the paper mimic, then compare.")}</p>
+      <p class="hint">${esc(cmp.note || "You = 1m marks on your clicks. Mimic = closed paper trades.")}</p>
+      ${recM.length ? recM.map((t) => `<p class="ml-meta">${esc(t.side || "")} ${esc(String(t.entry_ts || "").slice(0, 19))} → ${esc(String(t.exit_ts || "").slice(0, 19))} · ₹ ${esc(t.net_pnl)}</p>`).join("") : ""}
     </div>`;
   }
   const stripLtp = $("you-strip-ltp");
@@ -1407,7 +1435,7 @@ async function recordYou(action) {
   else if (send) msg += " — recorded, not sent (" + (order.error || "live blocked") + ")";
   else msg += " — tape stored, not an order";
   const run = res.learn_run || {};
-  if (run.deployed && run.slot) msg += " — mimic papering " + run.slot + ", type RESTART";
+  if (run.proposed && !run.deployed) msg += " — style updating; press Let it trade when you want it to paper";
   flash("flash-you", msg, !!(send && !rec.places_order));
   flash("flash-you-strip", msg, !!(send && !rec.places_order));
   renderYou();
@@ -1416,6 +1444,18 @@ async function learnYou() {
   const res = await api("/api/capture/learn", { method: "POST", body: JSON.stringify({}) });
   flash("flash-you", res.note || res.reminder || res.error || "Learn submitted");
   loadLab().catch(() => {});
+  return loadYou();
+}
+async function startYouMimic() {
+  const ok = window.confirm(
+    "Start the mimic in paper on your hours? Not live money. Type RESTART on Engine after it names a slot."
+  );
+  if (!ok) return;
+  const res = await api("/api/capture/go", { method: "POST", body: JSON.stringify({}) });
+  flash("flash-you", res.note || res.error || "Let it trade submitted", !res.ok);
+  loadLab().catch(() => {});
+  loadAmise().catch(() => {});
+  loadDesk().catch(() => {});
   return loadYou();
 }
 async function decideLab(id, decision) {
@@ -1684,6 +1724,7 @@ $("btn-amise-lab").onclick = () => {
 };
 $("btn-you-refresh").onclick = () => loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
 $("btn-you-learn").onclick = () => learnYou().catch((e) => flash("flash-you", String(e.message || e), true));
+$("btn-you-go").onclick = () => startYouMimic().catch((e) => flash("flash-you", String(e.message || e), true));
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-you]");
   if (!btn) return;

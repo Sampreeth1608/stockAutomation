@@ -1,9 +1,10 @@
-"""Learn a mimic from You-tab sittings, then paper-trade it.
+"""Learn a mimic from You-tab sittings, then paper-trade it on a button.
 
 Records 30m, 1h, 3h, or whole-day sessions. Fits TBQ/TSQ/LTP/candle
-relationships to your clicks. When knowledge is good it ENABLES the next
-AMISE chair in paper, only in the hours you actually trade. Never sets
-DRY_RUN=false. Live still needs Unlock + LIVE on Live money.
+relationships to your clicks. Press Let it trade to ENABLE the AMISE
+chair in paper, only in the hours you actually trade. Compare You vs
+mimic, then keep sitting and press Learn + Let it trade again if needed.
+Never sets DRY_RUN=false. Live still needs Unlock + LIVE on Live money.
 """
 
 from __future__ import annotations
@@ -336,16 +337,22 @@ def learn_status(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         auto_need.append(f"1m win% ≥ {int(AUTO_WR * 100)} (now {int(float(wr) * 100)})")
     if knowledge_good:
         note = (
-            "Knowledge is good. Mimic papers itself in your hours "
-            f"({hours.get('label') or 'session'}). Restart the bot to load it. "
-            "Does not set DRY_RUN=false."
+            "Knowledge is good. Press Let it trade when you want the mimic to "
+            f"paper in your hours ({hours.get('label') or 'session'}). "
+            "Keep clicking afterwards if you want to teach more. Never DRY_RUN=false."
         )
     elif ready:
-        note = "Draft ready. Keep sitting — auto-trade needs: " + "; ".join(auto_need)
+        extra = ("; ".join(auto_need) + ". ") if auto_need else ""
+        note = (
+            "Draft ready. Press Let it trade to paper the mimic in your hours, "
+            "then compare You vs mimic. " + extra
+            + "Keep sitting to teach more."
+        )
     else:
         note = (
             f"Need {need_taken} more BUY/SHORT, {need_skips} more NO TRADE "
-            f"(and {need_total} total clicks). 30m / 1h / 3h / whole day all count."
+            f"(and {need_total} total clicks). Trade now to teach — 30m / 1h / 3h / "
+            "whole day all count. Then press Let it trade."
         )
     return {
         "n": n,
@@ -365,6 +372,7 @@ def learn_status(items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         "need_skips": need_skips,
         "need_total": need_total,
         "ready": ready,
+        "can_start": ready,
         "knowledge_good": knowledge_good,
         "auto_need": auto_need,
         "n_settled_1m": len(settled),
@@ -456,6 +464,9 @@ def deploy_status(path: Path | None = None) -> dict[str, Any]:
         "hours": raw.get("hours") or {},
         "updated_at_ist": raw.get("updated_at_ist"),
         "knowledge_good": bool(raw.get("knowledge_good")),
+        "started_at_ist": raw.get("started_at_ist"),
+        "armed_by": raw.get("armed_by") or "",
+        "armed": True,
     }
 
 
@@ -527,7 +538,7 @@ def propose_mimic(
         safety_ok=bool(status.get("knowledge_good")),
         safety_reasons=[
             "human mimic from You-tab sittings (30m / 1h / 3h / day)",
-            "papers itself when knowledge is good; never DRY_RUN=false",
+            "starts only when you press Let it trade; never DRY_RUN=false",
         ],
         status="pending",
         env_patch=patch,
@@ -557,9 +568,9 @@ def propose_mimic(
         "genome": genome.to_dict(),
         "learn": status,
         "reminder": (
-            "Lab row updated. When knowledge is good the mimic papers itself "
-            "in your hours. Restart the bot after it deploys. Keep DRY_RUN=true "
-            "until you type LIVE yourself."
+            "Style updated. Press Let it trade when you want the mimic to paper "
+            "in your hours, then compare. Keep DRY_RUN=true until you type LIVE "
+            "yourself."
         ),
     }
 
@@ -576,36 +587,25 @@ def maybe_auto_paper(
     apply_env: bool = True,
     force: bool = False,
 ) -> dict[str, Any]:
-    """ENABLE the you-mimic AMISE chair in paper. Never DRY_RUN=false."""
+    """ENABLE the you-mimic AMISE chair in paper. Never DRY_RUN=false.
+
+    Does nothing unless force=True (Let it trade). Clicks never start it.
+    """
     items = load_examples(examples_path)
     status = learn_status(items)
     dest_deploy = deploy_path if deploy_path is not None else DEPLOY_PATH
-    if not status["knowledge_good"] and not force:
-        return {"ok": True, "deployed": False, "learn": status, "note": status["note"]}
+    if not force:
+        return {
+            "ok": True,
+            "deployed": False,
+            "learn": status,
+            "note": "Press Let it trade to start the mimic in paper.",
+        }
     if not status["ready"]:
         return {"ok": False, "deployed": False, "learn": status, "error": status["note"]}
     genome = build_mimic_genome(items)
     prev = _load_deploy(dest_deploy)
     slot = find_you_mimic_slot(folder=slots_dir)
-    if (
-        not force
-        and slot
-        and str(prev.get("genome_id") or "") == genome.genome_id
-        and str(prev.get("slot") or "") == slot
-    ):
-        return {
-            "ok": True,
-            "deployed": False,
-            "already": True,
-            "slot": slot,
-            "genome_id": genome.genome_id,
-            "learn": status,
-            "restart_needed": False,
-            "note": (
-                f"Mimic already papering {slot} in "
-                f"{status.get('hours', {}).get('label') or 'your hours'}."
-            ),
-        }
     with _lock:
         if slot:
             slot_info = write_slot(
@@ -613,14 +613,14 @@ def maybe_auto_paper(
                 genome,
                 proposal_id="you-mimic",
                 folder=slots_dir,
-                note="you mimic auto-paper",
+                note="you mimic Let it trade",
             )
         else:
             slot_info = assign_slot(
                 genome,
                 proposal_id="you-mimic",
                 folder=slots_dir,
-                note="you mimic auto-paper",
+                note="you mimic Let it trade",
             )
         if not slot_info.get("ok"):
             return {
@@ -638,13 +638,18 @@ def maybe_auto_paper(
             env_applied = bool(applied.get("ok"))
             slot_info["env"] = applied
         approve_strategy_paper(slot, path=state_path)
+        started = str(prev.get("started_at_ist") or "") or _now_iso()
+        if str(prev.get("genome_id") or "") != genome.genome_id:
+            started = _now_iso()
         _save_deploy(
             {
                 "updated_at_ist": _now_iso(),
+                "started_at_ist": started,
+                "armed_by": "button",
                 "slot": slot,
                 "genome_id": genome.genome_id,
                 "hours": status.get("hours") or {},
-                "knowledge_good": True,
+                "knowledge_good": bool(status.get("knowledge_good")),
             },
             dest_deploy,
         )
@@ -666,25 +671,168 @@ def maybe_auto_paper(
         "env_applied": env_applied,
         "restart_needed": True,
         "live_unlocked": False,
+        "started_at_ist": started,
         "learn": status,
         "note": (
             f"Named {slot}. Paper ENABLE on. It will trade like you in "
-            f"{hours.get('label') or 'your hours'} after Restart. "
-            "This did not set DRY_RUN=false. Angel still needs Unlock + LIVE."
+            f"{hours.get('label') or 'your hours'} after Restart. Compare You vs "
+            "mimic on this tab. Keep sitting to teach more, then Learn + Let it "
+            "trade again. This did not set DRY_RUN=false."
         ),
     }
 
 
-def after_new_example(
+def _you_marks(items: list[dict[str, Any]]) -> dict[str, Any]:
+    taken = [r for r in items if r.get("action") in {"buy", "short"}]
+    skips = [r for r in items if r.get("action") == "no_trade"]
+    pts: list[float] = []
+    for r in taken:
+        mark = (r.get("outcomes") or {}).get("1m") or {}
+        if mark.get("taken_pts") is not None:
+            pts.append(float(mark["taken_pts"]))
+    wins = sum(1 for x in pts if x > 0)
+    return {
+        "n": len(items),
+        "n_taken": len(taken),
+        "n_no_trade": len(skips),
+        "n_settled_1m": len(pts),
+        "win_rate_1m": (wins / float(len(pts))) if pts else None,
+        "pts_1m": round(sum(pts), 2) if pts else None,
+    }
+
+
+def _ts_ge(raw: str, start: str) -> bool:
+    a = _parse_ts(str(raw or ""))
+    b = _parse_ts(str(start or ""))
+    if a is None or b is None:
+        return False
+    return a >= b
+
+
+def _mimic_marks(trades: list[dict[str, Any]], slot: str) -> dict[str, Any]:
+    from paper_report import summarize_trades
+
+    s = summarize_trades(trades, strategy=slot)
+    closed_rows = [t for t in trades if str(t.get("status") or "").startswith("CLOSED")]
+
+    def _gross(t: dict[str, Any]) -> float:
+        v = t.get("gross_pnl")
+        if v == "" or v is None:
+            v = t.get("net_pnl")
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    wins = sum(1 for t in closed_rows if _gross(t) > 0)
+    closed = len(closed_rows)
+    return {
+        "n_trades": int(s.get("trades") or 0),
+        "n_closed": closed,
+        "n_open": int(s.get("open") or 0),
+        "n_wins": wins,
+        "win_rate": (wins / float(closed)) if closed else None,
+        "pnl_after_charges": s.get("pnl_after_charges"),
+        "pnl_after_tax": s.get("pnl_after_tax"),
+        "gross_pnl": s.get("gross_pnl"),
+    }
+
+
+def compare_you_vs_mimic(
+    *,
+    examples_path: Path = EXAMPLES_PATH,
+    deploy_path: Path | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """You 1m marks vs mimic closed paper trades. Not a live unlock."""
+    items = load_examples(examples_path)
+    deploy = deploy_status(deploy_path)
+    you_all = _you_marks(items)
+    started = str(deploy.get("started_at_ist") or "")
+    you_since = (
+        _you_marks([r for r in items if _ts_ge(str(r.get("created_at_ist") or ""), started)])
+        if started
+        else you_all
+    )
+    slot = str(deploy.get("slot") or "")
+    mimic_all: dict[str, Any] = {}
+    mimic_since: dict[str, Any] = {}
+    recent: list[dict[str, Any]] = []
+    if slot:
+        from desk_data import resolve_desk_db
+        from storage import build_trades
+
+        db = db_path or resolve_desk_db()
+        trades = build_trades(strategy=slot, db_path=db)
+        mimic_all = _mimic_marks(trades, slot)
+        since_trades = (
+            [t for t in trades if _ts_ge(str(t.get("entry_ts") or ""), started)]
+            if started
+            else trades
+        )
+        mimic_since = _mimic_marks(since_trades, slot)
+        closed = [t for t in since_trades if str(t.get("status") or "").startswith("CLOSED")]
+        for t in closed[-6:]:
+            recent.append(
+                {
+                    "side": t.get("side"),
+                    "entry_ts": t.get("entry_ts"),
+                    "exit_ts": t.get("exit_ts"),
+                    "net_pnl": t.get("net_pnl"),
+                    "status": t.get("status"),
+                }
+            )
+    armed = bool(slot)
+    ywr = you_since.get("win_rate_1m")
+    mwr = mimic_since.get("win_rate")
+    if not armed:
+        verdict = (
+            "Trade here to teach. When the draft is ready, press Let it trade. "
+            "Then we compare your 1m marks with the mimic's closed paper trades."
+        )
+    elif not mimic_since.get("n_closed"):
+        verdict = (
+            f"Mimic papering {slot}. Type RESTART if you just pressed Let it trade. "
+            "Waiting for its first closed paper trade."
+        )
+    elif ywr is None:
+        verdict = (
+            f"Mimic has trades on {slot}. Keep clicking so 1m marks fill, then compare win%."
+        )
+    elif mwr is None:
+        verdict = "You have 1m marks. Waiting for the mimic to close a paper trade."
+    elif float(mwr) >= float(ywr):
+        verdict = (
+            "Mimic 1m-vs-paper win% is matching or ahead of you since start. "
+            "Keep sitting if you want to teach more, then Learn my style and Let it trade again."
+        )
+    else:
+        verdict = (
+            "You are ahead on 1m win% since start. Keep sitting, press Learn my style, "
+            "then Let it trade again to reload the mimic."
+        )
+    return {
+        "you": you_all,
+        "you_since_start": you_since,
+        "mimic": {"slot": slot or None, "armed": armed, **mimic_all},
+        "mimic_since_start": mimic_since,
+        "started_at_ist": started or None,
+        "recent_mimic": recent,
+        "verdict": verdict,
+        "note": (
+            "You column is 1m marks on your clicks (not fills). "
+            "Mimic column is closed paper trades on the AMISE chair. "
+            "Never DRY_RUN=false from this tab."
+        ),
+    }
+
+
+def start_mimic_paper(
     *,
     examples_path: Path = EXAMPLES_PATH,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Refit after a click. Auto-papers when knowledge is good."""
-    items = load_examples(examples_path)
-    status = learn_status(items)
-    out: dict[str, Any] = {"learn": status, "proposed": False, "deployed": False}
-    prop_kw = {k: kwargs[k] for k in ("proposals_path", "mimic_path") if k in kwargs}
+    """Let it trade button: paper ENABLE the current mimic. Never DRY_RUN=false."""
     dep_keys = (
         "proposals_path",
         "mimic_path",
@@ -693,9 +841,44 @@ def after_new_example(
         "state_path",
         "deploy_path",
         "apply_env",
-        "force",
     )
     dep_kw = {k: kwargs[k] for k in dep_keys if k in kwargs}
+    prop_kw = {k: kwargs[k] for k in ("proposals_path", "mimic_path") if k in kwargs}
+    items = load_examples(examples_path)
+    status = learn_status(items)
+    if not status["ready"]:
+        return {
+            "ok": False,
+            "deployed": False,
+            "learn": status,
+            "compare": compare_you_vs_mimic(
+                examples_path=examples_path,
+                deploy_path=kwargs.get("deploy_path"),
+            ),
+            "error": status["note"],
+        }
+    try:
+        propose_mimic(examples_path=examples_path, **prop_kw)
+    except Exception:
+        pass
+    out = maybe_auto_paper(examples_path=examples_path, force=True, **dep_kw)
+    out["compare"] = compare_you_vs_mimic(
+        examples_path=examples_path,
+        deploy_path=kwargs.get("deploy_path") or dep_kw.get("deploy_path"),
+    )
+    return out
+
+
+def after_new_example(
+    *,
+    examples_path: Path = EXAMPLES_PATH,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Refit after a click. Does not start the mimic — that is Let it trade."""
+    items = load_examples(examples_path)
+    status = learn_status(items)
+    out: dict[str, Any] = {"learn": status, "proposed": False, "deployed": False}
+    prop_kw = {k: kwargs[k] for k in ("proposals_path", "mimic_path") if k in kwargs}
     if status["ready"]:
         try:
             prop = propose_mimic(examples_path=examples_path, **prop_kw)
@@ -703,16 +886,5 @@ def after_new_example(
             out["proposal_id"] = prop.get("proposal_id")
         except Exception as exc:
             out["propose_error"] = str(exc)
-    if status["knowledge_good"] or kwargs.get("force"):
-        try:
-            dep = maybe_auto_paper(examples_path=examples_path, **dep_kw)
-            out["deploy"] = dep
-            out["deployed"] = bool(dep.get("deployed"))
-            out["already"] = bool(dep.get("already"))
-            out["slot"] = dep.get("slot")
-            out["note"] = dep.get("note") or status["note"]
-        except Exception as exc:
-            out["deploy_error"] = str(exc)
-    else:
-        out["note"] = status["note"]
+    out["note"] = status["note"]
     return out

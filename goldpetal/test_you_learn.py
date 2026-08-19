@@ -1,4 +1,4 @@
-"""You-tab mimic learner — sittings, hours, auto-paper. Never DRY_RUN=false."""
+"""You-tab mimic learner — sittings, Let it trade, compare. Never DRY_RUN=false."""
 
 from __future__ import annotations
 
@@ -12,13 +12,16 @@ from proposals import load_proposals
 from s18_ohlc_vol_htf import VolBar
 from strategy_amise import AmiseSlotStrategy, vol_to_flow
 from you_learn import (
+    after_new_example,
     build_mimic_genome,
+    compare_you_vs_mimic,
     duration_bucket,
     group_sessions,
     hours_profile,
     learn_status,
     maybe_auto_paper,
     propose_mimic,
+    start_mimic_paper,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -103,6 +106,7 @@ def test_not_ready_until_counts() -> None:
     assert st["need_taken"] > 0
     assert st["need_skips"] > 0
     assert st["knowledge_good"] is False
+    assert st["can_start"] is False
 
 
 def test_genome_from_clicks() -> None:
@@ -162,7 +166,9 @@ def test_knowledge_good_needs_sittings() -> None:
     assert st["ready"] is True
     assert st["n_sessions"] == 1
     assert st["knowledge_good"] is False
-    assert any("sitting" in x for x in st["auto_need"])
+    assert st["can_start"] is True
+    assert st["ready"] is True
+    assert "Let it trade" in (st["note"] or "")
     two = _enough(n_days=2)
     good = learn_status(two)
     assert good["n_sessions"] >= 2
@@ -212,7 +218,17 @@ def test_maybe_auto_paper_assigns_s21_keep_dry(tmp_path: Path) -> None:
     deploy = tmp_path / "deploy.json"
     env.write_text("DRY_RUN=true\nENABLE_S5=true\n", encoding="utf-8")
     save_examples(_enough(n_days=2), path=store)
-    out = maybe_auto_paper(
+    idle = maybe_auto_paper(
+        examples_path=store,
+        proposals_path=props,
+        mimic_path=mimic,
+        slots_dir=slots,
+        env_path=env,
+        state_path=state,
+        deploy_path=deploy,
+    )
+    assert idle["deployed"] is False
+    out = start_mimic_paper(
         examples_path=store,
         proposals_path=props,
         mimic_path=mimic,
@@ -225,6 +241,7 @@ def test_maybe_auto_paper_assigns_s21_keep_dry(tmp_path: Path) -> None:
     assert out["deployed"] is True
     assert out["slot"] == "S21_AMISE"
     assert out["live_unlocked"] is False
+    assert out.get("compare", {}).get("mimic", {}).get("slot") == "S21_AMISE"
     text = env.read_text(encoding="utf-8")
     assert "ENABLE_S21=true" in text
     assert "DRY_RUN=false" not in text
@@ -245,9 +262,96 @@ def test_maybe_auto_paper_assigns_s21_keep_dry(tmp_path: Path) -> None:
         state_path=state,
         deploy_path=deploy,
     )
-    assert again["already"] is True
     assert again["deployed"] is False
-    assert again["slot"] == "S21_AMISE"
+    taught = after_new_example(
+        examples_path=store,
+        proposals_path=props,
+        mimic_path=mimic,
+        slots_dir=slots,
+        env_path=env,
+        state_path=state,
+        deploy_path=deploy,
+    )
+    assert taught["deployed"] is False
+
+
+def test_start_mimic_when_draft_ready(tmp_path: Path) -> None:
+    store = tmp_path / "examples.json"
+    env = tmp_path / ".env"
+    env.write_text("DRY_RUN=true\n", encoding="utf-8")
+    save_examples(_enough(n_days=1), path=store)
+    st = learn_status(_enough(n_days=1))
+    assert st["ready"] is True
+    assert st["knowledge_good"] is False
+    out = start_mimic_paper(
+        examples_path=store,
+        proposals_path=tmp_path / "p.json",
+        mimic_path=tmp_path / "m.json",
+        slots_dir=tmp_path / "slots",
+        env_path=env,
+        state_path=tmp_path / "state.json",
+        deploy_path=tmp_path / "deploy.json",
+    )
+    assert out["ok"] is True
+    assert out["deployed"] is True
+    assert out["slot"] == "S21_AMISE"
+    assert "DRY_RUN=false" not in env.read_text(encoding="utf-8")
+
+
+def test_compare_you_vs_mimic_win_rates(tmp_path: Path) -> None:
+    from storage import init_db, save_signal
+
+    store = tmp_path / "examples.json"
+    deploy = tmp_path / "deploy.json"
+    db = tmp_path / "ticks.db"
+    init_db(db)
+    t0 = datetime(2026, 8, 18, 12, 0, tzinfo=IST)
+    you_rows = [
+        _ex("buy", imb=0.3, bull=True, when=t0, pts=3.0),
+        _ex("buy", imb=0.3, bull=True, when=t0 + timedelta(minutes=2), pts=1.0),
+        _ex("short", imb=-0.3, bull=False, when=t0 + timedelta(minutes=4), pts=-1.0),
+    ]
+    save_examples(you_rows, path=store)
+    deploy.write_text(
+        '{"slot":"S21_AMISE","started_at_ist":"2026-08-18T11:00:00+05:30","armed_by":"button"}',
+        encoding="utf-8",
+    )
+    save_signal(
+        time_label="2026-08-18T12:10:00+05:30",
+        symbol="GOLDPETAL",
+        action="BUY",
+        position_after="long",
+        reason="mimic",
+        price_delta=1.0,
+        net=1.0,
+        net_delta=1.0,
+        dry_run=True,
+        strategy="S21_AMISE",
+        cmp=15000.0,
+        db_path=db,
+    )
+    save_signal(
+        time_label="2026-08-18T12:20:00+05:30",
+        symbol="GOLDPETAL",
+        action="CLOSE",
+        position_after="flat",
+        reason="mimic",
+        price_delta=1.0,
+        net=1.0,
+        net_delta=1.0,
+        dry_run=True,
+        strategy="S21_AMISE",
+        cmp=15010.0,
+        db_path=db,
+    )
+    cmp = compare_you_vs_mimic(examples_path=store, deploy_path=deploy, db_path=db)
+    assert cmp["you"]["n_taken"] == 3
+    assert cmp["you"]["win_rate_1m"] is not None
+    assert cmp["mimic"]["armed"] is True
+    assert cmp["mimic_since_start"]["n_closed"] == 1
+    assert cmp["mimic_since_start"]["win_rate"] == 1.0
+    assert "Let it trade" not in (cmp["verdict"] or "") or "ahead" in (cmp["verdict"] or "").lower() or "matching" in (cmp["verdict"] or "").lower() or "Mimic" in (cmp["verdict"] or "")
+    assert cmp["recent_mimic"]
 
 
 def test_you_hours_gate_entries_and_flatten() -> None:
@@ -304,4 +408,8 @@ if __name__ == "__main__":
     test_thin_set_does_not_propose(td / "b")
     (td / "c").mkdir()
     test_maybe_auto_paper_assigns_s21_keep_dry(td / "c")
+    (td / "d").mkdir()
+    test_start_mimic_when_draft_ready(td / "d")
+    (td / "e").mkdir()
+    test_compare_you_vs_mimic_win_rates(td / "e")
     print("ALL test_you_learn OK")

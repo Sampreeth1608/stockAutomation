@@ -809,29 +809,16 @@ def capture_desk_payload(
     except Exception as exc:
         live = {"would_place": False, "why": str(exc), "dry_run": True}
     try:
-        from you_learn import deploy_status, learn_status, maybe_auto_paper
+        from you_learn import compare_you_vs_mimic, deploy_status, learn_status
 
         learn = learn_status(items)
         deployed = deploy_status()
         if deployed.get("slot"):
             learn["deploy"] = deployed
-        if settle and path == EXAMPLES_PATH and learn.get("knowledge_good"):
-            try:
-                dep = maybe_auto_paper(examples_path=path)
-                learn = dict(dep.get("learn") or learn)
-                if dep.get("slot") or deployed.get("slot"):
-                    learn["deploy"] = {
-                        **deployed,
-                        "slot": dep.get("slot") or deployed.get("slot"),
-                        "deployed": bool(dep.get("deployed")),
-                        "already": bool(dep.get("already")),
-                        "restart_needed": bool(dep.get("restart_needed")),
-                        "note": dep.get("note") or learn.get("note"),
-                    }
-            except Exception as exc:
-                learn["deploy_error"] = str(exc)
+        compare = compare_you_vs_mimic(examples_path=path)
     except Exception as exc:
         learn = {"ready": False, "note": str(exc)}
+        compare = {"verdict": str(exc)}
     return {
         "ok": True,
         "ts_ist": _now_iso(),
@@ -843,6 +830,7 @@ def capture_desk_payload(
         "session": sess,
         "live": live,
         "learn": learn,
+        "compare": compare,
         "summary": capture_summary(items),
         "recent": [example_public(x) for x in items[:40]],
         "note": (
@@ -851,6 +839,7 @@ def capture_desk_payload(
             "Every click stores LTP, TBQ, TSQ, book, OI, 1m–1h candles, and recent ticks. "
             "Sit 30m, 1h, 3h, or the whole day — all count. "
             "Angel only after Paper off + LIVE + Unlock + Restart, then type YOU on the click. "
-            "When knowledge is good the mimic papers itself in your hours. Never DRY_RUN=false."
+            "Press Let it trade when you want the mimic to paper in your hours, "
+            "then compare You vs mimic. Keep sitting to teach more. Never DRY_RUN=false."
         ),
     }

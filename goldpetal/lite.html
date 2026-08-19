@@ -106,7 +106,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 
   <section class="card">
     <h2>You — trade</h2>
-    <p class="hint">Sit 30m, 1h, 3h, or the whole day. Records LTP/TBQ/TSQ/ticks/candles while Gold Petal is open (Mon–Fri 09:00–23:30 IST). Angel only after Paper off + LIVE + Unlock + type YOU. When knowledge is good the mimic papers itself in those hours (never DRY_RUN=false). Learn on the <a href="/#you">station You tab</a>.</p>
+    <p class="hint">Sit 30m, 1h, 3h, or the whole day to teach (Mon–Fri 09:00–23:30 IST). Angel only after Paper off + LIVE + Unlock + type YOU. Press Let it trade when you want the mimic to paper, then compare. Keep sitting to teach more. Never DRY_RUN=false. Full compare: <a href="/#you">station You tab</a>.</p>
     <p class="hint" id="you-ltp-line">LTP …</p>
     <p class="hint" id="you-live-line">Angel: recorded only</p>
     <div class="row">
@@ -118,6 +118,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <button class="btn danger" type="button" data-you="short">SHORT</button>
       <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
       <button class="btn" type="button" data-you="close">CLOSE</button>
+      <button class="btn warn" type="button" id="btn-you-learn">Learn my style</button>
+      <button class="btn ok" type="button" id="btn-you-go">Let it trade</button>
     </div>
     <p class="hint" id="you-sum">No captures yet.</p>
     <p class="flash" id="flash-you"></p>
@@ -320,7 +322,8 @@ async function loadYou() {
     " · NO TRADE " + (s.n_no_trade || 0) +
     " · sittings " + (learn.n_sessions || 0) +
     (hours.label ? (" · " + hours.label) : "") +
-    (learn.knowledge_good ? " · mimic papers itself" : "");
+    (learn.knowledge_good ? " · knowledge good" : "") +
+    (learn.can_start ? " · ready — Let it trade" : "");
   const liveLine = $("you-live-line");
   if (liveLine) liveLine.textContent = live.why || "Angel: recorded only";
   const open = !!(d.session && d.session.open);
@@ -330,6 +333,8 @@ async function loadYou() {
     else b.disabled = !open;
   });
   if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
+  const cmp = (d && d.compare) || {};
+  if (cmp.verdict) $("you-sum").textContent += " · " + cmp.verdict;
 }
 document.querySelectorAll("button[data-you]").forEach((btn) => {
   btn.onclick = () => {
@@ -356,6 +361,21 @@ document.querySelectorAll("button[data-you]").forEach((btn) => {
     }).catch((e) => flash("flash-you", String(e.message || e), true));
   };
 });
+if ($("btn-you-learn")) {
+  $("btn-you-learn").onclick = () => {
+    api("/api/capture/learn", { method: "POST", body: JSON.stringify({}) })
+      .then((res) => { flash("flash-you", res.reminder || res.note || res.error || "Learned"); return loadYou(); })
+      .catch((e) => flash("flash-you", String(e.message || e), true));
+  };
+}
+if ($("btn-you-go")) {
+  $("btn-you-go").onclick = () => {
+    if (!window.confirm("Start the mimic in paper? Not live. Restart the bot after it names a slot.")) return;
+    api("/api/capture/go", { method: "POST", body: JSON.stringify({}) })
+      .then((res) => { flash("flash-you", res.note || res.error || "Let it trade", !res.ok); return loadYou(); })
+      .catch((e) => flash("flash-you", String(e.message || e), true));
+  };
+}
 loadYou().catch(() => {});
 async function loadMood() {
   try {
