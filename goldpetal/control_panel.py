@@ -184,6 +184,7 @@ def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, 
 def desk_payload() -> dict[str, Any]:
     """Light snapshot for the HTML desk (no trade rebuild, no tick count)."""
     from analytics.bot_ops import bot_status
+    from human_capture import session_status
 
     bot = dict(bot_status(lite=True))
     bot.pop("log_tail", None)
@@ -192,6 +193,7 @@ def desk_payload() -> dict[str, Any]:
         "live_desk": desk_snapshot(),
         "state": load_state().to_dict(),
         "capital": capital_snapshot(),
+        "session": session_status(),
     }
 
 

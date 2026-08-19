@@ -38,6 +38,15 @@ def test_station_is_the_operator_page() -> None:
     assert "Does not place an order" in html
     assert "you_skipped_rule_would_take" in html
     assert "Mon–Fri 09:00–23:30" in html
+    assert "Gold Petal running" in html
+    assert "Gold Petal stopped" in html
+    assert "function renderSessionLine" in html
+    assert "function goldPetalSessionNow" in html
+    quote = html.split("function renderQuote()")[1].split("function moodKind")[0]
+    assert "buy qty" not in quote
+    assert "sell qty" not in quote
+    assert "ticks" not in quote
+    assert "waiting for quote" in quote
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
@@ -163,6 +172,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/desk/books" in text
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
+    assert "session_status" in text
+    assert '"session": session_status()' in text
     assert "default=8501" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
     assert "control_panel.py" in sh
@@ -173,6 +184,18 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "Save strategies" in station
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
     assert "trading station" in mac
+
+
+def test_desk_payload_includes_session() -> None:
+    from control_panel import desk_payload
+
+    payload = desk_payload()
+    sess = payload["session"]
+    assert "open" in sess
+    assert sess["open_hhmm"]
+    assert sess["close_hhmm"]
+    assert "now_ist" in sess
+    assert "label" in sess
 
 
 def test_streamlit_cannot_write() -> None:
@@ -190,5 +213,6 @@ if __name__ == "__main__":
     test_lite_html_is_compact_controls()
     test_full_html_keeps_watch_downloads()
     test_control_panel_serves_station_on_8501()
+    test_desk_payload_includes_session()
     test_streamlit_cannot_write()
     print("ALL test_desk OK")

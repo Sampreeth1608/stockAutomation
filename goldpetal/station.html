@@ -36,7 +36,7 @@ button, input, select { font: inherit; }
 .you-strip b { font: 600 12px/1 var(--serif); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
 .tab[data-tab="you"] { color: var(--gold); }
 .top {
-  display: grid; grid-template-columns: 230px 1fr auto;
+  display: grid; grid-template-columns: minmax(16rem, 22rem) 1fr auto;
   align-items: center; gap: 1rem; padding: 0 1.1rem;
   background: linear-gradient(#fffdf9, var(--panel));
   border-bottom: 1px solid var(--line);
@@ -46,6 +46,8 @@ button, input, select { font: inherit; }
   padding-left: .7rem; border-left: 3px solid #c9a45a; }
 .brand h1 { margin: 0; font: 600 18px/1.15 var(--serif); letter-spacing: .01em; color: var(--gold); }
 .brand .sub { color: var(--muted); font: 500 12px/1.25 var(--mono); }
+.brand .sub.running { color: var(--ok); }
+.brand .sub.stopped { color: var(--warn); }
 .quote { display: flex; align-items: center; gap: .8rem; min-width: 0; }
 .quote .sym { font: 600 12px/1 var(--mono); letter-spacing: .16em; color: var(--muted); }
 .quote .ltp { font: 600 30px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
@@ -159,13 +161,13 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <header class="top">
     <div class="brand">
       <h1>Gold Petal Station</h1>
-      <div class="sub" id="session-line">MCX Gold 1g · paper tape</div>
+      <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
     <div class="quote">
       <div class="sym">GOLD</div>
       <div>
         <div class="ltp" id="ltp">—</div>
-        <div class="meta" id="quote-meta">waiting for ticks</div>
+        <div class="meta" id="quote-meta">waiting for quote</div>
       </div>
       <div class="mood-box" id="mood-box" title="One tape read for all books. MOOD_GATE is on: unfit books do not open. Not a paper book.">
         <span class="pill" id="mood-pill">mood warming up</span>
@@ -528,6 +530,44 @@ function tickClock() {
   const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
     weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   $("clock").textContent = "IST " + ist;
+  renderSessionLine();
+}
+function hhmmToSec(value) {
+  const p = String(value || "09:00").split(":");
+  const h = parseInt(p[0], 10);
+  const m = parseInt(p[1], 10);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 9 * 3600;
+  return h * 3600 + m * 60;
+}
+function goldPetalSessionNow() {
+  const sess = lastDesk.session || {};
+  const openS = sess.open_hhmm || "09:00";
+  const closeS = sess.close_hhmm || "23:30";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata", hour12: false,
+    weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date());
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value || "";
+  const wd = get("weekday");
+  const cur = (parseInt(get("hour"), 10) || 0) * 3600
+    + (parseInt(get("minute"), 10) || 0) * 60
+    + (parseInt(get("second"), 10) || 0);
+  const weekend = wd === "Sat" || wd === "Sun";
+  const open = !weekend && cur >= hhmmToSec(openS) && cur <= hhmmToSec(closeS);
+  return { open, weekend, openS, closeS };
+}
+function renderSessionLine() {
+  const el = $("session-line");
+  if (!el) return;
+  const s = goldPetalSessionNow();
+  const hours = "Mon–Fri " + s.openS + "–" + s.closeS + " IST";
+  const live = lastDesk.live_desk || {};
+  const armed = !!live.would_place_real_orders;
+  let line = s.open ? ("Gold Petal running · " + hours) : ("Gold Petal stopped · " + hours);
+  if (s.weekend) line += " · weekend";
+  if (armed) line += " · LIVE ARMED";
+  el.textContent = line;
+  el.className = "sub " + (s.open ? "running" : "stopped");
 }
 function thead(cols) {
   $("grid-head").innerHTML = "<tr>" + cols.map((c) => {
@@ -577,14 +617,9 @@ function allScore() {
 function renderQuote() {
   const ltp = lastTape.ltp;
   $("ltp").textContent = ltp == null || ltp === "" ? "—" : money(ltp);
-  const tick = (lastTape.ticks || [])[0] || {};
   const bits = [];
   if (lastTape.last_tick_at) bits.push(String(lastTape.last_tick_at).slice(11, 19));
-  if (tick.bp != null && tick.bp !== "") bits.push("buy qty " + tick.bp);
-  if (tick.sp != null && tick.sp !== "") bits.push("sell qty " + tick.sp);
-  bits.push((lastTape.tick_count || 0) + " ticks");
-  if (lastMood && lastMood.mood && lastMood.mood !== "UNKNOWN") bits.push("mood " + lastMood.mood);
-  $("quote-meta").textContent = bits.join(" · ") || "waiting for ticks";
+  $("quote-meta").textContent = bits.join(" · ") || "waiting for quote";
   renderMood();
 }
 function moodKind(mood) {
@@ -1382,9 +1417,7 @@ function renderDesk(d) {
     pill(st.trading_enabled === false ? "HELD" : "TRADING", st.trading_enabled === false ? "warn" : "ok"),
     pill(st.live_unlocked ? "UNLOCKED" : "LOCKED", st.live_unlocked ? "warn" : "ok"),
   ].join("");
-  $("session-line").textContent = mode === "ARMED"
-    ? "MCX Gold 1g · LIVE ARMED"
-    : "MCX Gold 1g · paper tape · 100 lots ≠ live size";
+  renderSessionLine();
   $("engine-line").textContent = (bot.running ? "bot running" : "bot stopped")
     + " · feed " + feed
     + (bot.pid ? " · pid " + bot.pid : "");
@@ -1416,9 +1449,10 @@ function renderDesk(d) {
     ? "ARMED — live-picked books send Angel orders."
     : "Paper. Unlock + Live pick + type LIVE + Restart to arm.";
   const db = lastTape.db_path || lastHist.db_path || "";
-  $("foot-left").textContent = (lastTape.tick_count || 0) + " ticks"
-    + (lastHist.lots ? " · " + lastHist.lots + " lots" : "")
-    + (db ? " · " + db.replace(/.*\//, "…/") : "");
+  const foot = [];
+  if (lastHist.lots) foot.push(lastHist.lots + " lots");
+  if (db) foot.push(db.replace(/.*\//, "…/"));
+  $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
 }
 function renderAll() {
   renderQuote();
