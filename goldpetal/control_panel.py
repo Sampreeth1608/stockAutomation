@@ -784,6 +784,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                     total_capital_inr=total,
                     daily_loss_limit_inr=day_loss,
                     allocations=allocations,
+                    live_size_mode=str(data.get("live_size_mode") or "") or None,
                 )
                 status = 200 if res.get("ok") else 400
                 self._send(*_json_bytes(res, status))

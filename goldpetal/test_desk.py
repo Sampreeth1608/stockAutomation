@@ -68,13 +68,15 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v28" in html
-    assert " · v28" in html
+    assert "gp-header-v29" in html
+    assert " · v29" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
     assert 'id="live-panel"' in html
-    assert "₹ capital" in html
+    assert "Tick <b>Lots</b>" in html
+    assert 'data-size="lots"' in html
+    assert 'data-size="capital"' in html
     assert "WR% AC" in html
     assert "Paper AC" in html
     assert "live-kpi-pnl" in html
@@ -115,7 +117,7 @@ def test_station_is_the_operator_page() -> None:
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
-    assert "Save strategies + live ₹" in html
+    assert "Save strategies + live size" in html
     assert "Download signals CSV" in html
     assert "/api/export/signals.csv" in html
     assert "Copy signals → Sheets" in html
@@ -209,8 +211,10 @@ def test_lite_html_is_compact_controls() -> None:
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
-    assert "Save strategies + live ₹" in html
-    assert "S5 / S8 / S13 / S16" in html
+    assert "Save strategies + live size" in html
+    assert 'data-size="lots"' in html
+    assert 'data-size="capital"' in html
+    assert "Tick Lots" in html
     assert "live_eligible" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html

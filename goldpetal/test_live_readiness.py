@@ -448,7 +448,12 @@ def test_apply_desk_arm_paper_locks() -> None:
             total_capital_inr=200000,
             daily_loss_limit_inr=2000,
             allocations=[
-                {"strategy": "S5_MINEDGE", "budget_inr": 50000, "max_lots": 1}
+                {
+                    "strategy": "S5_MINEDGE",
+                    "live_size_mode": "lots",
+                    "live_lots": 1,
+                    "budget_inr": 50000,
+                }
             ],
             path=env,
             state_path=state,
@@ -460,6 +465,8 @@ def test_apply_desk_arm_paper_locks() -> None:
         assert "DRY_RUN=true" in env.read_text(encoding="utf-8")
         plan = capital.load_capital(path=cap)
         assert plan.strategies["S5_MINEDGE"].budget_inr == 50000
+        assert plan.strategies["S5_MINEDGE"].live_lots == 1
+        assert plan.strategies["S5_MINEDGE"].live_size_mode == "lots"
     finally:
         td.cleanup()
         import capital as capital_mod

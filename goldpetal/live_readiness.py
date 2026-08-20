@@ -1,6 +1,7 @@
 """Live-money readiness for the control panel (gates, size, .env writes).
 
-Paper 100 lots is not live size: live qty = min(capital.max_lots, LIVE_MAX_LOTS).
+Paper 100 lots is not live size: tick Lots (contracts) or tick ₹ (budget / LTP).
+Both are capped by LIVE_MAX_LOTS (1–10).
 DRY_RUN=false from this panel requires typing LIVE. LIVE_MAX_LOTS is capped at 10.
 Save writes .env only; Restart supervise loads it into the bot.
 """
@@ -254,12 +255,15 @@ def apply_desk_arm(
     total_capital_inr: float | None = None,
     daily_loss_limit_inr: float | None = None,
     allocations: list[dict[str, Any]] | None = None,
+    live_size_mode: str | None = None,
     path: Path | None = None,
     state_path: Path | None = None,
     capital_path: Path | None = None,
 ) -> dict[str, Any]:
-    """One save: live picks + ₹ per book + Paper or Live. Type LIVE to arm Angel.
+    """One save: live picks + Lots or ₹ per book + Paper or Live. Type LIVE to arm Angel.
 
+    Tick Lots or tick ₹ on a row — that book is the live pick. Lots = contracts.
+    ₹ = floor(budget / LTP), then ceiling lots. Do not write empty ₹ as 0.
     Paper: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
     Does not restart the bot. Empty in_bot keeps current ENABLE_* (Approve
     already papers). Live picks are unioned into in_bot so Angel is not skipped.
@@ -309,6 +313,7 @@ def apply_desk_arm(
             alloc_rows,
             total_capital_inr=total_capital_inr,
             daily_loss_limit_inr=daily_loss_limit_inr,
+            live_size_mode=live_size_mode,
             disable_others=False,
             path=capital_path,
         )
@@ -428,7 +433,7 @@ def _live_book_row(
 
 
 def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Minimal Desk-page state. No full scoreboard, no per-book live qty, no checklist."""
+    """Minimal Desk-page state. No full scoreboard, no checklist."""
     st = load_state()
     env = read_live_env()
     dry = bool(env["dry_run"])
@@ -439,10 +444,31 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
     from analytics.env_bridge import strategy_enable_snapshot
 
     enables_all = strategy_enable_snapshot()
-    books = [
-        _live_book_row(name, approved=approved, summaries=stats)
-        for name in paper_strategy_names()
-    ]
+    try:
+        from capital import load_capital, live_qty_for, normalize_size_mode
+
+        plan = load_capital()
+        cap = int(env["live_max_lots"] or 1)
+    except Exception:
+        plan = None
+        cap = 1
+    books = []
+    for name in paper_strategy_names():
+        extra: dict[str, Any] = {}
+        if plan is not None:
+            sb = plan.strategies.get(name)
+            mode = normalize_size_mode(sb.live_size_mode) if sb else ""
+            if name in approved and not mode:
+                mode = "lots"
+            extra = {
+                "live_size_mode": mode,
+                "live_lots": int(sb.live_lots) if sb and int(sb.live_lots or 0) > 0 else 1,
+                "budget_inr": float(sb.budget_inr) if sb is not None else 50_000.0,
+                "live_qty": live_qty_for(name, cap=cap, plan=plan) if name in approved else 0,
+            }
+        books.append(
+            _live_book_row(name, approved=approved, summaries=stats, extra=extra or None)
+        )
     enables = {name: bool(enables_all.get(name)) for name in paper_strategy_names()}
     return {
         "dry_run": dry,

@@ -68,22 +68,18 @@ def live_lots() -> int:
 
 
 def live_lots_for(strategy: str) -> int:
-    """Per-strategy live size from capital.max_lots, hard-capped by LIVE_MAX_LOTS.
+    """Per-strategy Angel size. Lots tick = live_lots; ₹ tick = floor(budget / LTP).
 
-    8787 Capital sets max_lots per strategy. LIVE_MAX_LOTS in .env is the
-    operator hard ceiling (raise it only when you accept larger real size).
+    Hard-capped by LIVE_MAX_LOTS. Paper 100 lots is never Angel size.
     """
     cap = max(1, _env_int("LIVE_MAX_LOTS", 1))
     default = live_lots()
     try:
-        from capital import load_capital
+        from capital import live_qty_for
 
-        sb = load_capital().strategies.get(strategy)
-        if sb is not None and sb.enabled and int(sb.max_lots) > 0:
-            return min(cap, max(1, int(sb.max_lots)))
+        return live_qty_for(strategy, cap=cap, default=default)
     except Exception:
-        pass
-    return min(default, cap)
+        return min(default, cap)
 
 
 def strategy_may_trade_live(strategy: str, *, action: str = "") -> tuple[bool, str]:

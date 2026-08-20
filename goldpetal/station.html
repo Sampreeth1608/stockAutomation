@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v28: Live tab shows per-book live positions -->
+<!-- gp-header-v29: Live tab — tick Lots or ₹ per book to go live -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -88,6 +88,7 @@ button, input, select { font: inherit; }
   padding: .48rem .72rem; cursor: pointer; border-radius: 6px; }
 .btn:hover { border-color: var(--gold); color: var(--gold); background: #fff; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
+input:disabled { opacity: .45; }
 .btn.ok { background: #eef7f1; border-color: #b7dcc8; color: #0a6e3c; }
 .btn.warn { background: #fbf6ec; border-color: #ead3a8; color: #8a5200; }
 .btn.danger { background: #fbf0ee; border-color: #efc4c0; color: #b81c16; }
@@ -194,7 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v28</div>
+      <div class="clock" id="clock">IST — · v29</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -277,7 +278,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-orders"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it has closed paper trades and WR% AC of 40 or more. Check Live if you want it to send Angel after Arm live. S18 / S19 / S20 / AMISE stay paper until they hit 40% WR% AC.</p>
+        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it has closed paper trades and WR% AC of 40 or more. Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. S18 / S19 / S20 / AMISE stay paper until they hit 40% WR% AC.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
           <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
@@ -292,19 +293,19 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
             <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
             <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
           </div>
-          <p class="hint">Wallet ₹ is the whole live pot (often ₹5,00,000). Each row’s ₹ is that book’s slice — default ₹50,000 — a budget cap, not lots and not paper P&amp;L. Ceiling lots (1–10) is the max any live book may send.</p>
+          <p class="hint">Ceiling lots (1–10) is the hard cap on Angel size. Wallet ₹ and day-loss are risk limits — they do not pick live size. Tick <b>Lots</b> or <b>₹</b> on a book row to send that book live. One tick only.</p>
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">These rows are paper books at ≥40% WR after Angel charges (tax excluded), plus any you already picked. Check Live to pick. ₹ is that book’s live budget (₹50,000 default). Lots is contracts. Then type LIVE, Arm live, RESTART.</p>
+        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Lots = contracts, same lot field on every book (1–ceiling). ₹ = that book’s money; Angel lots = floor(₹ / LTP), then ceiling. Paper Positions stays 100 lots. Then type LIVE, Arm live, RESTART.</p>
         <table>
           <thead>
-            <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
+            <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th></th></tr>
           </thead>
           <tbody id="live-books"></tbody>
         </table>
         <div class="row" style="margin-top:.55rem">
-          <button class="btn ok" id="btn-save-live" type="button">Save strategies + live ₹</button>
+          <button class="btn ok" id="btn-save-live" type="button">Save strategies + live size</button>
           <button class="btn danger" id="btn-exit-all-live" type="button">Exit all</button>
         </div>
         <p class="flash" id="flash-live"></p>
@@ -634,7 +635,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v28";
+    if (clock) clock.textContent = "IST " + ist + " · v29";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1750,23 +1751,27 @@ function renderDesk(d) {
       const name = b.strategy;
       const sb = budgets[name] || {};
       const waiting = !!waitingAll[name];
-      const budget = sb.budget_inr != null ? sb.budget_inr : "";
-      const lots = sb.max_lots != null ? Math.min(10, Number(sb.max_lots) || 1) : 1;
+      const budget = b.budget_inr != null ? b.budget_inr : (sb.budget_inr != null ? sb.budget_inr : "");
+      const liveLots = b.live_lots != null ? Math.min(10, Math.max(1, Number(b.live_lots) || 1)) : (sb.live_lots > 0 ? Math.min(10, Number(sb.live_lots)) : 1);
       const wr = b.win_rate_after_charges;
       const closed = b.closed;
       const pos = posBy[name] || {};
       const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
+      const sizeMode = b.live_size_mode || "";
+      const lotsOn = sizeMode === "lots";
+      const capOn = sizeMode === "capital";
       return `<tr>
         <td>${esc(shortName(name))}</td>
         <td>${esc(posBit)}</td>
         <td class="num">${wr == null || wr === "" ? "—" : pct(wr)}</td>
         <td class="num">${closed == null || closed === "" ? "—" : esc(closed)}</td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
-        <td class="num"><input class="cap" type="number" data-budget="${name}" min="0" step="1000" value="${esc(budget)}"/></td>
-        <td class="num"><input class="cap" type="number" data-lots="${name}" min="1" max="10" value="${esc(lots)}"/></td>
+        <td><input type="checkbox" data-size="lots" data-book="${esc(name)}" ${lotsOn ? "checked" : ""}/></td>
+        <td class="num"><input class="cap" type="number" data-lots="${esc(name)}" min="1" max="10" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
+        <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
+        <td class="num"><input class="cap" type="number" data-budget="${esc(name)}" min="0" step="1000" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="8">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="9">no book at 40% WR% AC yet</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -1803,7 +1808,7 @@ function renderDesk(d) {
       row(botOn, false, botOn ? "Bot on" : "Bot off — Start bot / RESTART"),
       row(em, false, em ? "Emergency clear" : "Emergency on — Clear first"),
       row(trading, false, trading ? "Trading on" : "Trading off"),
-      row(picked, true, picked ? ("Live books: " + liveNames.join(", ")) : "No live book picked (need ≥40% WR% AC, then check Live)"),
+      row(picked, true, picked ? ("Live books: " + liveNames.join(", ")) : "No live book picked (need ≥40% WR% AC, then tick Lots or ₹)"),
       row(liveEnv && unlocked, true, liveEnv && unlocked ? "Mode LIVE" : "Mode Paper — type LIVE to Arm live"),
     ].join("");
   }
@@ -2021,32 +2026,45 @@ $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Fe
 function currentInBot(desk) {
   const en = ((desk || {}).live_desk || {}).enables || {};
   const names = Object.keys(en).filter((k) => en[k]);
-  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  const live = [...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book);
   return [...new Set(names.concat(live))];
+}
+function collectLivePicks() {
+  return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+}
+function collectAllocations() {
+  return [...document.querySelectorAll("input[data-lots]")].map((lotsEl) => {
+    const name = lotsEl.dataset.lots;
+    const budEl = document.querySelector('input[data-budget="' + name + '"]');
+    const lotsChk = document.querySelector('input[data-size="lots"][data-book="' + name + '"]');
+    const capChk = document.querySelector('input[data-size="capital"][data-book="' + name + '"]');
+    const mode = (lotsChk && lotsChk.checked) ? "lots" : ((capChk && capChk.checked) ? "capital" : "");
+    const row = {
+      strategy: name,
+      live_size_mode: mode,
+      live_lots: Number(lotsEl.value || 1),
+      enabled: true,
+    };
+    if (budEl && budEl.value !== "") row.budget_inr = Number(budEl.value);
+    return row;
+  });
 }
 function collectArmBody(mode) {
   const in_bot = currentInBot(lastDesk);
-  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
-  const allocations = [...document.querySelectorAll("input[data-budget]")].map((el) => {
-    const name = el.dataset.budget;
-    const lotsEl = document.querySelector('input[data-lots="' + name + '"]');
-    return {
-      strategy: name,
-      budget_inr: Number(el.value || 0),
-      max_lots: Number((lotsEl && lotsEl.value) || 1),
-      enabled: true,
-    };
-  });
-  return {
+  const live = collectLivePicks();
+  const body = {
     mode: mode,
     confirm: ($("live-word").value || "").trim(),
     live_max_lots: Number($("live-max").value || 1),
     in_bot,
     live,
-    total_capital_inr: Number($("cap-total").value || 0),
-    daily_loss_limit_inr: Number($("cap-dd").value || 0),
-    allocations,
+    allocations: collectAllocations(),
   };
+  const wallet = $("cap-total") && $("cap-total").value;
+  if (wallet !== "" && wallet != null) body.total_capital_inr = Number(wallet);
+  const dayLoss = $("cap-dd") && $("cap-dd").value;
+  if (dayLoss !== "" && dayLoss != null) body.daily_loss_limit_inr = Number(dayLoss);
+  return body;
 }
 function exitAll(flashId) {
   if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Angel CLOSE only for live-armed books. Does not stop paper books.")) return;
@@ -2066,12 +2084,12 @@ $("btn-save-live").onclick = () => {
   const body = collectArmBody("paper");
   body.mode = (lastDesk.live_desk && lastDesk.live_desk.dry_run === false) ? "live" : "paper";
   if (body.mode === "live") body.confirm = "LIVE";
-  act("flash-live", "/api/desk/arm", body, "Live ₹ + lots saved. Type RESTART to load RAM.");
+  act("flash-live", "/api/desk/arm", body, "Live Lots / ₹ saved. Type RESTART to load RAM.");
 };
 $("btn-arm-live").onclick = () => {
   const word = ($("live-word").value || "").trim();
   if (word !== "LIVE") { flash("flash-money", "Type LIVE to arm Angel", true); return; }
-  if (!window.confirm("Arm live? Real Angel orders on live-picked books at ≥40% WR% AC. Lots ceiling applies. Then type RESTART.")) return;
+  if (!window.confirm("Arm live? Real Angel on books you ticked Lots or ₹. Ceiling lots applies. Then type RESTART.")) return;
   const body = collectArmBody("live");
   act("flash-money", "/api/desk/arm", body, "Armed setup saved. Type RESTART on Engine.");
   $("live-word").value = "";
@@ -2082,6 +2100,24 @@ $("btn-mode-paper").onclick = () => {
   body.confirm = "";
   act("flash-money", "/api/desk/arm", body, "Paper mode. Angel is off.");
 };
+document.addEventListener("change", (ev) => {
+  const el = ev.target && ev.target.closest && ev.target.closest("input[data-size]");
+  if (!el) return;
+  const book = el.dataset.book;
+  if (el.checked) {
+    document.querySelectorAll('input[data-size][data-book="' + book + '"]').forEach((other) => {
+      if (other !== el) other.checked = false;
+    });
+  }
+  const lotsChk = document.querySelector('input[data-size="lots"][data-book="' + book + '"]');
+  const capChk = document.querySelector('input[data-size="capital"][data-book="' + book + '"]');
+  const lotsOn = !!(lotsChk && lotsChk.checked);
+  const capOn = !!(capChk && capChk.checked);
+  const lotsEl = document.querySelector('input[data-lots="' + book + '"]');
+  const budEl = document.querySelector('input[data-budget="' + book + '"]');
+  if (lotsEl) lotsEl.disabled = capOn && !lotsOn;
+  if (budEl) budEl.disabled = lotsOn && !capOn;
+});
 
 tickClock();
 setInterval(tickClock, 1000);
