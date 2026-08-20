@@ -26,7 +26,8 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="live"' in html
     assert "Exit all" in html
     assert "/api/desk/arm" in html
-    assert "Positions" in html
+    assert 'data-tab="open">Paper Positions</button>' in html
+    assert "No paper positions" in html
     assert "Blotter" in html
     assert 'data-tab="score">Paper P&amp;L</button>' in html
     assert "paper AC ₹" in html
@@ -67,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v26" in html
-    assert " · v26" in html
+    assert "gp-header-v27" in html
+    assert " · v27" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html

@@ -268,7 +268,7 @@ def _public_live_order(row: dict[str, Any]) -> dict[str, Any]:
 def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
     """Angel-sized P&L from dry_run=0 signals on live-eligible books.
 
-    Positions / Blotter / P&L tabs stay paper 100 lots. This is the Live-tab
+    Paper Positions / Blotter / Paper P&L tabs stay paper 100 lots. This is the Live-tab
     number: live lot size, after Angel charges, tax excluded. Order ids come
     from live_orders.jsonl — Angel app is still the fill confirmation.
     """
@@ -327,7 +327,7 @@ def _empty_live_pnl() -> dict[str, Any]:
             "pnl_after_charges": 0.0,
             "win_rate_after_charges": 0.0,
         },
-        "note": "Paper tape (Positions / Blotter / P&L) stays 100 lots. Real Angel ₹ is here after a live round-trip.",
+        "note": "Paper tape (Paper Positions / Blotter / Paper P&L) stays 100 lots. Real Angel ₹ is here after a live round-trip.",
     }
 
 
