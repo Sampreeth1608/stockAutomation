@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v20: fix Live tab money() crash -->
+<!-- gp-header-v21: Live tab shows real Angel P&L -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -163,6 +163,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 .kpi b { display: block; font: 600 11px/1 var(--font); color: var(--muted);
   text-transform: uppercase; letter-spacing: .12em; }
 .kpi span { font: 600 17px/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+.kpi-note { margin: .35rem .7rem .2rem; }
+#live-panel .kpis { border: 1px solid var(--line); margin: .45rem 0 .7rem; }
 .center-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem;
   padding: .15rem .65rem 0; background: var(--head); border-bottom: 1px solid var(--line); }
 #tabs { flex: 1 1 12rem; }
@@ -192,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v20</div>
+      <div class="clock" id="clock">IST — · v21</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -238,11 +240,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 
     <section class="col">
       <div class="kpis">
-        <div class="kpi"><b>Open</b><span id="kpi-open">0</span></div>
-        <div class="kpi"><b>Closed</b><span id="kpi-closed">0</span></div>
-        <div class="kpi"><b>After charges</b><span id="kpi-pnl">—</span></div>
-        <div class="kpi"><b>Win % (AC)</b><span id="kpi-wr">—</span></div>
+        <div class="kpi"><b>Paper open</b><span id="kpi-open">0</span></div>
+        <div class="kpi"><b>Paper closed</b><span id="kpi-closed">0</span></div>
+        <div class="kpi"><b>Paper AC</b><span id="kpi-pnl">—</span></div>
+        <div class="kpi"><b>Paper WR%</b><span id="kpi-wr">—</span></div>
       </div>
+      <p class="hint kpi-note" id="kpi-note">Those four are the 100-lot paper tape. Real Angel ₹ is on the Live tab.</p>
       <div class="center-head">
         <div class="row" id="tabs">
           <button class="tab on" type="button" data-tab="open">Positions</button>
@@ -267,7 +270,29 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </table>
       </div>
       <div class="scroll" id="live-panel" hidden>
-        <h2>Live books + money</h2>
+        <h2>Real Angel P&amp;L</h2>
+        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Positions / Blotter / Paper AC at the top stay the 100-lot paper tape. Angel app is the fill confirmation.</p>
+        <div class="kpis">
+          <div class="kpi"><b>Live open</b><span id="live-kpi-open">0</span></div>
+          <div class="kpi"><b>Live closed</b><span id="live-kpi-closed">0</span></div>
+          <div class="kpi"><b>Live AC ₹</b><span id="live-kpi-pnl">—</span></div>
+          <div class="kpi"><b>Live WR% AC</b><span id="live-kpi-wr">—</span></div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Book</th><th>Side</th><th>Status</th><th>In</th><th>Out</th><th class="num">Lots</th><th class="num">AC ₹</th><th>Why</th></tr>
+          </thead>
+          <tbody id="live-pnl-trades"></tbody>
+        </table>
+        <h2 style="margin-top:1rem">Angel orders</h2>
+        <p class="hint">A row with an order id is what went to Angel. Skip means that book was not live-picked or a gate blocked it.</p>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Book</th><th>Side</th><th class="num">Qty</th><th>Result</th><th>Order</th><th>Why</th></tr>
+          </thead>
+          <tbody id="live-pnl-orders"></tbody>
+        </table>
+        <h2 style="margin-top:1.1rem">Live books + money</h2>
         <p class="hint">One place to arm. Paper = no Angel. Arm live = type LIVE, pick S5 / S8 / S13 / S16, set ₹ and lots per book, then type RESTART on Engine. S18 / S19 / S20 / AMISE stay paper. Unlock / Lock are gone — Paper and Arm live do that for you.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
@@ -526,7 +551,7 @@ function shortName(name) {
 let watchTab = "open";
 let histReady = false;
 let lastDesk = {};
-let lastTape = { ticks: [], signals: [], live_orders: [], tick_count: 0, ltp: null };
+let lastTape = { ticks: [], signals: [], live_orders: [], live_pnl: {}, tick_count: 0, ltp: null };
 let lastLtpSeen = null;
 let lastLtpChangeAt = 0;
 let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0 };
@@ -608,7 +633,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v20";
+    if (clock) clock.textContent = "IST " + ist + " · v21";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -868,7 +893,7 @@ function showMainTab() {
   if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve a new S21+ slot or a same-chair improve. Never DRY_RUN=false";
   if (watchTab === "amise") $("grid-meta").textContent = "AMISE — regime + fit + factory. Run factory here. Approve on Lab.";
   if (watchTab === "you") $("grid-meta").textContent = "You — records tape always. Angel only after Arm live + type YOU";
-  if (watchTab === "live") $("grid-meta").textContent = "Live — Paper or Arm live. ₹ and lots per book. Type RESTART after save.";
+  if (watchTab === "live") $("grid-meta").textContent = "Live — real Angel ₹ and order ids. Top KPIs stay paper 100 lots. Type RESTART after Arm live.";
 }
 function rangeQs() {
   const from = $("exp-from").value;
@@ -1563,7 +1588,7 @@ function renderGrid() {
     (h.lots ? h.lots + " lots" : ""),
     h.db_path || "",
   ].filter(Boolean);
-  $("grid-meta").textContent = bits.join(" · ");
+  $("grid-meta").textContent = bits.join(" · ") + (tab === "score" || tab === "open" || tab === "trades" ? " · paper 100 lots — real Angel ₹ is on Live" : "");
   if (tab === "open" || tab === "trades") {
     const rows = tab === "open" ? (h.open || []) : (h.trades || []);
     thead(["book", "side", "status", "entry", "in", "exit", "out", "after-tax ₹", "why"]);
@@ -1633,6 +1658,55 @@ function renderGrid() {
   const lr = d.learner || {};
   $("foot-ml").textContent = lr.line || lr.note || "learner cold";
 }
+function livePnlPayload() {
+  return (lastTape && lastTape.live_pnl) || (lastDesk && lastDesk.live_pnl) || {};
+}
+function renderLivePnl() {
+  const p = livePnlPayload();
+  const sum = p.summary || {};
+  const note = $("live-pnl-note");
+  if (note) note.textContent = p.note || "Real Angel ₹ is here after a live round-trip. Top KPIs stay paper 100 lots.";
+  const openEl = $("live-kpi-open");
+  if (!openEl) return;
+  openEl.textContent = sum.open || 0;
+  $("live-kpi-closed").textContent = sum.closed || 0;
+  const pnl = afterChargesInr(sum);
+  const pnlEl = $("live-kpi-pnl");
+  pnlEl.textContent = (sum.closed || p.placed_count) ? money(pnl == null ? 0 : pnl) : "—";
+  pnlEl.className = pnlClass(pnl);
+  const wr = wrAfterCharges(sum);
+  $("live-kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
+  const tradesEl = $("live-pnl-trades");
+  const trades = p.trades || [];
+  tradesEl.innerHTML = trades.map((t) => {
+    const ac = t.pnl_after_charges != null && t.pnl_after_charges !== "" ? t.pnl_after_charges : t.net_pnl;
+    return `<tr>
+      <td>${esc(shortName(t.strategy))}</td>
+      <td>${esc(t.side || "")}</td>
+      <td>${esc(t.status || "")}</td>
+      <td class="num">${money(t.entry_price)}</td>
+      <td class="num">${money(t.exit_price)}</td>
+      <td class="num">${esc(t.lots != null && t.lots !== "" ? t.lots : "")}</td>
+      <td class="num ${pnlClass(ac)}">${t.status === "OPEN" ? "—" : money(ac)}</td>
+      <td>${esc(t.exit_reason || t.entry_reason || "")}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="8">No live round-trips yet — Arm live, then wait for a live-picked book to open and close.</td></tr>`;
+  const ordersEl = $("live-pnl-orders");
+  const orders = p.orders || lastTape.live_orders || [];
+  ordersEl.innerHTML = orders.map((o) => {
+    const placed = o.placed === true || (o.ok && !o.skipped && !o.dry_run);
+    const result = placed ? "sent" : (o.skipped || o.dry_run ? "skip" : (o.ok ? "ok" : "fail"));
+    return `<tr>
+      <td>${esc(String(o.ts || o.ts_ist || o.time || "").slice(0, 19))}</td>
+      <td>${esc(shortName(o.strategy))}</td>
+      <td>${esc(o.transaction || o.side || "")}</td>
+      <td class="num">${esc(o.quantity != null ? o.quantity : "")}</td>
+      <td class="${placed ? "ok" : (result === "fail" ? "bad" : "")}">${esc(result)}</td>
+      <td>${esc(o.order_id || "")}</td>
+      <td>${esc(o.reason || "")}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7">No Angel order rows yet (normal in paper).</td></tr>`;
+}
 function renderDesk(d) {
   lastDesk = d;
   const sess = d.session || {};
@@ -1642,6 +1716,7 @@ function renderDesk(d) {
     lastTape = Object.assign({}, lastTape, next);
     renderQuote(false);
   }
+  if (d.live_pnl) lastTape = Object.assign({}, lastTape, { live_pnl: d.live_pnl });
   fillStratSelect();
   const live = d.live_desk || {};
   const bot = d.bot || {};
@@ -1746,11 +1821,13 @@ function renderDesk(d) {
   if (lastHist.lots) foot.push(lastHist.lots + " lots");
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
+  renderLivePnl();
 }
 function renderAll() {
   renderQuote();
   renderKpis();
   renderGrid();
+  renderLivePnl();
   if (lastDesk.live_desk) renderDesk(lastDesk);
 }
 async function loadDesk() {

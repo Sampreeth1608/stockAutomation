@@ -429,6 +429,7 @@ def build_trades(
     *,
     lot_size: float | None = None,
     signal_limit: int | None = None,
+    live_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) into round-trip trades + PnL.
 
@@ -438,6 +439,8 @@ def build_trades(
     Post-trade Angel fees + tax are always computed for display (even when
     IGNORE_FEES=true). lot_size overrides LOT_SIZE for fee/PnL scaling.
     signal_limit caps how far back each book is scanned (desk tape).
+    live_only keeps signals stored with dry_run=0 (armed live), so paper
+    100-lot tape is not mixed into Angel-sized P&L.
     """
     if strategy is None:
         with connect(db_path) as conn:
@@ -452,7 +455,11 @@ def build_trades(
         trade_no = 0
         for name in names:
             for t in _build_trades_one(
-                name, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+                name,
+                db_path=db_path,
+                lot_size=lot_size,
+                signal_limit=signal_limit,
+                live_only=live_only,
             ):
                 trade_no += 1
                 t = dict(t)
@@ -460,8 +467,19 @@ def build_trades(
                 merged.append(t)
         return merged
     return _build_trades_one(
-        strategy, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+        strategy,
+        db_path=db_path,
+        lot_size=lot_size,
+        signal_limit=signal_limit,
+        live_only=live_only,
     )
+
+
+def _signal_is_live(row: Any) -> bool:
+    try:
+        return int(row["dry_run"] or 0) == 0
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _build_trades_one(
@@ -470,9 +488,12 @@ def _build_trades_one(
     *,
     lot_size: float | None = None,
     signal_limit: int | None = None,
+    live_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) for one strategy."""
     rows = list_signals(strategy=strategy, db_path=db_path, limit=signal_limit)
+    if live_only:
+        rows = [r for r in rows if _signal_is_live(r)]
     trades: list[dict[str, Any]] = []
     open_trade: dict[str, Any] | None = None
     trade_no = 0

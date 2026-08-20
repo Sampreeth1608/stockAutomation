@@ -13,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
-from live_orders import recent_orders
+from live_orders import live_lots_for, recent_orders
 from paper_report import summarize_trades
 from storage import build_trades, latest_signals, latest_ticks, set_db_path
 import storage as _storage
@@ -24,7 +24,10 @@ TAPE_LIVE_SEC = 30
 
 _TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": [], "error": "", "db": ""}
 _TRADE_LOCK = threading.Lock()
+_LIVE_PNL_CACHE: dict[str, Any] = {"at": 0.0, "payload": None, "db": ""}
+_LIVE_PNL_LOCK = threading.Lock()
 _SIGNAL_WINDOW = 1500
+_LIVE_PNL_BOOKS_EXTRA = frozenset({"YOU_MANUAL"})
 
 
 def row_to_dict(row: Any) -> dict[str, Any]:
@@ -241,6 +244,140 @@ def db_info(db_path: Path) -> dict[str, Any]:
 
 def reset_trade_cache() -> None:
     _TRADE_CACHE.update({"at": 0.0, "rows": [], "error": "", "db": ""})
+    _LIVE_PNL_CACHE.update({"at": 0.0, "payload": None, "db": ""})
+
+
+def _public_live_order(row: dict[str, Any]) -> dict[str, Any]:
+    skipped = bool(row.get("skipped"))
+    dry = bool(row.get("dry_run"))
+    ok = bool(row.get("ok"))
+    return {
+        "ts": str(row.get("ts_ist") or row.get("ts") or row.get("time") or ""),
+        "strategy": str(row.get("strategy") or ""),
+        "transaction": str(row.get("transaction") or ""),
+        "quantity": row.get("quantity") or 0,
+        "ok": ok,
+        "skipped": skipped,
+        "dry_run": dry,
+        "order_id": str(row.get("order_id") or ""),
+        "reason": str(row.get("reason") or ""),
+        "placed": ok and not skipped and not dry,
+    }
+
+
+def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
+    """Angel-sized P&L from dry_run=0 signals on live-eligible books.
+
+    Positions / Blotter / P&L tabs stay paper 100 lots. This is the Live-tab
+    number: live lot size, after Angel charges, tax excluded. Order ids come
+    from live_orders.jsonl — Angel app is still the fill confirmation.
+    """
+    from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+    db = db_path or resolve_desk_db()
+    now = time.time()
+    cached = _LIVE_PNL_CACHE.get("payload")
+    if (
+        cached is not None
+        and _LIVE_PNL_CACHE.get("db") == str(db)
+        and float(_LIVE_PNL_CACHE["at"]) > 0
+        and now - float(_LIVE_PNL_CACHE["at"]) < 8
+    ):
+        return dict(cached)
+    if not _LIVE_PNL_LOCK.acquire(blocking=False):
+        return dict(cached) if cached is not None else _empty_live_pnl()
+    try:
+        now = time.time()
+        cached = _LIVE_PNL_CACHE.get("payload")
+        if (
+            cached is not None
+            and _LIVE_PNL_CACHE.get("db") == str(db)
+            and float(_LIVE_PNL_CACHE["at"]) > 0
+            and now - float(_LIVE_PNL_CACHE["at"]) < 8
+        ):
+            return dict(cached)
+        payload = _build_live_pnl(db, LIVE_ELIGIBLE_BOOKS)
+        _LIVE_PNL_CACHE.update({"at": time.time(), "payload": payload, "db": str(db)})
+        return dict(payload)
+    finally:
+        _LIVE_PNL_LOCK.release()
+
+
+def _empty_live_pnl() -> dict[str, Any]:
+    return {
+        "trades": [],
+        "open": [],
+        "closed": [],
+        "scoreboard": [],
+        "orders": [],
+        "placed_count": 0,
+        "lots": 1,
+        "summary": {
+            "strategy": "LIVE",
+            "closed": 0,
+            "open": 0,
+            "gross_pnl": 0.0,
+            "charges": 0.0,
+            "pnl_after_charges": 0.0,
+            "win_rate_after_charges": 0.0,
+        },
+        "note": "Paper tape (Positions / Blotter / P&L) stays 100 lots. Real Angel ₹ is here after a live round-trip.",
+    }
+
+
+def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
+    books = sorted(set(eligible) | set(_LIVE_PNL_BOOKS_EXTRA))
+    rows: list[dict[str, Any]] = []
+    lot_used = 1
+    try:
+        for name in books:
+            lots = max(1, int(live_lots_for(name)))
+            lot_used = max(lot_used, lots)
+            rows.extend(
+                build_trades(
+                    strategy=name,
+                    db_path=db,
+                    signal_limit=_SIGNAL_WINDOW,
+                    lot_size=float(lots),
+                    live_only=True,
+                )
+            )
+    except Exception:
+        rows = []
+    open_t = [t for t in rows if t.get("status") == "OPEN"]
+    closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
+    closed_rev = list(reversed(closed))
+    board_names = sorted({str(t.get("strategy") or "") for t in rows if t.get("strategy")})
+    scoreboard = [summarize_trades(rows, s) for s in board_names]
+    summary = summarize_trades(rows, None)
+    summary["strategy"] = "LIVE"
+    orders = [_public_live_order(o) for o in recent_orders(limit=40)]
+    placed = [o for o in orders if o.get("placed")]
+    out = _empty_live_pnl()
+    out.update(
+        {
+            "trades": (open_t + closed_rev)[:80],
+            "open": open_t,
+            "closed": closed_rev[:80],
+            "scoreboard": scoreboard + [summary],
+            "orders": orders,
+            "placed_count": len(placed),
+            "lots": lot_used,
+            "summary": summary,
+        }
+    )
+    if not closed and not open_t and not placed:
+        out["note"] = (
+            "No real Angel round-trips yet. Paper Open / Closed / After charges "
+            "at the top stay 100 lots. After Arm live, this block fills when a "
+            "live-picked book (S5 / S8 / S13 / S16) opens and closes."
+        )
+    else:
+        out["note"] = (
+            f"Live lot size (ceiling {lot_used}). After Angel charges, tax excluded. "
+            "Angel app is the fill confirmation. Top KPIs / Blotter / P&L stay paper 100 lots."
+        )
+    return out
 
 
 def parse_tick_at(raw: str) -> datetime | None:
@@ -332,13 +469,14 @@ def tape_payload(
     signal_limit: int = 40,
     db_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Ticks / signals / live orders only — never rebuilds trades."""
+    """Ticks / signals / live orders — paper trades stay on /api/history."""
     db = db_path or resolve_desk_db()
     payload: dict[str, Any] = {
         **db_info(db),
         "ticks": [],
         "signals": [],
         "live_orders": [],
+        "live_pnl": _empty_live_pnl(),
         "tick_count": 0,
         "ltp": None,
         "last_tick_at": "",
@@ -355,6 +493,10 @@ def tape_payload(
         payload.update(last_tick_snapshot(db_path=db))
     except Exception as exc:
         payload["error"] = str(exc)
+    try:
+        payload["live_pnl"] = live_pnl_payload(db_path=db)
+    except Exception as exc:
+        payload["live_pnl"] = {**_empty_live_pnl(), "note": str(exc)}
     return payload
 
 

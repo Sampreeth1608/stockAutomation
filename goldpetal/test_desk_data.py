@@ -6,10 +6,12 @@ import json
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from desk_data import (
     history_payload,
     json_safe,
+    live_pnl_payload,
     reset_trade_cache,
     resolve_desk_db,
     tape_freshness,
@@ -145,6 +147,8 @@ def test_tape_payload_shows_ticks_without_trades() -> None:
         assert tape["ltp"] is not None
         assert str(db) in tape["db_path"]
         assert "tape_live" in tape
+        assert "live_pnl" in tape
+        assert tape["live_pnl"]["summary"]["closed"] == 0
 
 
 def test_tape_freshness_frozen_quote_is_not_live() -> None:
@@ -214,6 +218,83 @@ def test_list_signals_limit_keeps_latest() -> None:
         assert rows[1]["reason"] == "4"
 
 
+def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        _tick(db)
+        _round_trip(db)
+        save_signal(
+            time_label="2026-08-17T13:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="live_in",
+            price_delta=1.0,
+            net=20.0,
+            net_delta=2.0,
+            dry_run=False,
+            strategy="S5_MINEDGE",
+            cmp=15010.0,
+            db_path=db,
+        )
+        save_signal(
+            time_label="2026-08-17T14:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="CLOSE",
+            position_after="flat",
+            reason="live_out",
+            price_delta=1.0,
+            net=10.0,
+            net_delta=-2.0,
+            dry_run=False,
+            strategy="S5_MINEDGE",
+            cmp=15025.0,
+            db_path=db,
+        )
+        save_signal(
+            time_label="2026-08-17T13:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="s18_not_live",
+            price_delta=1.0,
+            net=20.0,
+            net_delta=2.0,
+            dry_run=False,
+            strategy="S18_OHLC_VOL_HTF",
+            cmp=15010.0,
+            db_path=db,
+        )
+        save_signal(
+            time_label="2026-08-17T14:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="CLOSE",
+            position_after="flat",
+            reason="s18_not_live",
+            price_delta=1.0,
+            net=10.0,
+            net_delta=-2.0,
+            dry_run=False,
+            strategy="S18_OHLC_VOL_HTF",
+            cmp=15025.0,
+            db_path=db,
+        )
+        with patch("desk_data.live_lots_for", return_value=1):
+            pnl = live_pnl_payload(db_path=db)
+        names = {t["strategy"] for t in pnl["trades"]}
+        assert names == {"S5_MINEDGE"}
+        assert int(pnl["summary"]["closed"]) == 1
+        closed = pnl["trades"][0]
+        assert float(closed.get("gross_pnl") or 0) == 15.0
+        assert float(closed.get("lots") or 0) == 1.0
+        hist = history_payload(db_path=db, limit=80)
+        paper = [t for t in hist["trades"] if t.get("strategy") == "S16_HHHL_WICK_1H"]
+        assert paper
+        assert float(paper[0].get("gross_pnl") or 0) == 1500.0
+
+
 if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
@@ -225,4 +306,5 @@ if __name__ == "__main__":
     test_tick_feed_stale_during_session()
     test_history_payload_has_closed_trade_and_ticks()
     test_list_signals_limit_keeps_latest()
+    test_live_pnl_excludes_paper_and_scales_live_lots()
     print("ALL test_desk_data OK")

@@ -224,6 +224,22 @@ def desk_payload() -> dict[str, Any]:
         flatten = flatten_desk_status()
     except Exception:
         flatten = {"pending": [], "by_strategy": {}, "recent": [], "bot_running": False}
+    try:
+        from desk_data import live_pnl_payload
+
+        live_pnl = live_pnl_payload()
+    except Exception:
+        live_pnl = {
+            "trades": [],
+            "open": [],
+            "closed": [],
+            "orders": [],
+            "scoreboard": [],
+            "placed_count": 0,
+            "lots": 1,
+            "summary": {"closed": 0, "open": 0, "pnl_after_charges": 0.0},
+            "note": "Live P&L unavailable",
+        }
     return {
         "bot": bot,
         "live_desk": desk_snapshot(),
@@ -231,6 +247,7 @@ def desk_payload() -> dict[str, Any]:
         "capital": capital_snapshot(),
         "session": sess,
         "flatten": flatten,
+        "live_pnl": live_pnl,
     }
 
 

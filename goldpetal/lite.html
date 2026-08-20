@@ -131,6 +131,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
+    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots.</p>
     <p class="hint">No Unlock / Lock. Paper only = Angel off. Arm live = type LIVE, then Restart. Set ₹ and lots per live book below.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
@@ -235,6 +236,19 @@ function render(d) {
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
     : "Paper. Type LIVE, Arm live, then Restart.";
+  const lp = d.live_pnl || {};
+  const sum = lp.summary || {};
+  const ac = sum.pnl_after_charges;
+  const closed = sum.closed || 0;
+  const openN = sum.open || 0;
+  const placed = lp.placed_count || 0;
+  const acBit = (closed || placed) ? ("Live AC ₹ " + (ac == null || ac === "" ? "—" : ac)) : "Live AC ₹ —";
+  $("live-pnl-line").textContent = (lp.note || "Real Angel ₹ is Live AC after a live round-trip.")
+    + " · " + acBit
+    + " · open " + openN
+    + " · closed " + closed
+    + " · Angel sends " + placed
+    + ". Paper tape stays on the full desk KPIs.";
 }
 function renderMl(d) {
   const s11 = (d && d.s11) || {};
