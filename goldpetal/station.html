@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v30: Live ₹ is the amount you type, not the paper wallet split -->
+<!-- gp-header-v31: Live P&L by book; paper fill is not Angel -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -195,7 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v30</div>
+      <div class="clock" id="clock">IST — · v31</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -246,13 +246,22 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="live-panel" hidden>
         <h2>Real Angel P&amp;L</h2>
-        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Paper Positions / Blotter / Paper P&amp;L stay the 100-lot paper tape. Angel app is the fill confirmation.</p>
+        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Paper Positions / Blotter / Paper P&amp;L stay the 100-lot paper tape — a paper fill is not an Angel order. Angel app is the fill confirmation.</p>
         <div class="kpis">
           <div class="kpi"><b>Live open</b><span id="live-kpi-open">0</span></div>
           <div class="kpi"><b>Live closed</b><span id="live-kpi-closed">0</span></div>
           <div class="kpi"><b>Live AC ₹</b><span id="live-kpi-pnl">—</span></div>
           <div class="kpi"><b>Live WR% AC</b><span id="live-kpi-wr">—</span></div>
         </div>
+        <p class="hint">All live money is <b>Live AC ₹</b>. Each strategy is <b>Live P&amp;L by book</b>. Paper P&amp;L tab is 100 lots, not Angel.</p>
+        <h2 style="margin-top:.85rem">Live P&amp;L by book</h2>
+        <p class="hint">Angel size after charges (tax excluded). Zeros until that book gets an Angel fill. WR% on the Live books table above is paper, not this.</p>
+        <table>
+          <thead>
+            <tr><th>Book</th><th class="num">Open</th><th class="num">Closed</th><th class="num">WR% AC</th><th class="num">AC ₹</th></tr>
+          </thead>
+          <tbody id="live-pnl-books"></tbody>
+        </table>
         <h2 style="margin-top:.85rem">Live positions</h2>
         <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only.</p>
         <table>
@@ -270,7 +279,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-trades"></tbody>
         </table>
         <h2 style="margin-top:1rem">Angel orders</h2>
-        <p class="hint">A row with an order id is what went to Angel. Skip means that book was not live-picked or a gate blocked it.</p>
+        <p class="hint">A row with an order id is what went to Angel. Skip Why: <code>bot_still_paper_restart_required</code> = type RESTART after Arm live. Empty after a paper fill = bot still paper in RAM.</p>
         <table>
           <thead>
             <tr><th>Time</th><th>Book</th><th>Side</th><th class="num">Qty</th><th>Result</th><th>Order</th><th>Why</th></tr>
@@ -655,7 +664,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v30";
+    if (clock) clock.textContent = "IST " + ist + " · v31";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1662,6 +1671,31 @@ function renderDlPreview() {
 function livePnlPayload() {
   return (lastTape && lastTape.live_pnl) || (lastDesk && lastDesk.live_pnl) || {};
 }
+function livePosRows(p) {
+  const fromPnl = (p.positions && p.positions.length) ? p.positions
+    : ((p.open && p.open.length) ? p.open : []);
+  if (fromPnl.length) return fromPnl;
+  const books = ((lastDesk || {}).live_desk || {}).books || [];
+  return books.filter((b) => b.live_approved || b.live_size_mode === "lots" || b.live_size_mode === "capital").map((b) => ({
+    strategy: b.strategy,
+    side: "FLAT",
+    status: "FLAT",
+    lots: b.live_qty || b.live_lots || "",
+    entry_price: "",
+    pnl_after_charges: "",
+  }));
+}
+function liveBookScoreRows(p) {
+  const rows = (p.scoreboard || []).filter((r) => r && r.strategy && r.strategy !== "LIVE" && r.strategy !== "ALL");
+  if (rows.length) return rows;
+  return livePosRows(p).map((t) => ({
+    strategy: t.strategy,
+    open: 0,
+    closed: 0,
+    win_rate_after_charges: "",
+    pnl_after_charges: "",
+  }));
+}
 function renderLivePnl() {
   const p = livePnlPayload();
   const sum = p.summary || {};
@@ -1677,10 +1711,26 @@ function renderLivePnl() {
   pnlEl.className = pnlClass(pnl);
   const wr = wrAfterCharges(sum);
   $("live-kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
+  const booksEl = $("live-pnl-books");
+  if (booksEl) {
+    const bookRows = liveBookScoreRows(p);
+    booksEl.innerHTML = bookRows.map((r) => {
+      const ac = afterChargesInr(r);
+      const wrB = wrAfterCharges(r);
+      const closed = r.closed || 0;
+      return `<tr>
+        <td>${esc(shortName(r.strategy))}</td>
+        <td class="num">${esc(r.open || 0)}</td>
+        <td class="num">${esc(closed)}</td>
+        <td class="num">${closed ? pct(wrB) : "—"}</td>
+        <td class="num ${closed ? pnlClass(ac) : ""}">${closed ? money(ac == null ? 0 : ac) : "—"}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">No live-picked book yet — tick Lots or ₹, Save, Arm live. Paper P&amp;L is the other tab.</td></tr>`;
+  }
   const openElBody = $("live-pnl-open");
   if (openElBody) {
     const waitingAll = ((lastDesk.flatten || {}).by_strategy) || {};
-    const posRows = p.positions || (p.open || []).map((t) => t);
+    const posRows = livePosRows(p);
     openElBody.innerHTML = posRows.map((t) => {
       const name = t.strategy;
       const waiting = !!waitingAll[name];
@@ -1711,7 +1761,7 @@ function renderLivePnl() {
       <td class="num ${pnlClass(ac)}">${money(ac)}</td>
       <td>${esc(t.exit_reason || t.entry_reason || "")}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8">No live round-trips yet — Arm live, then wait for a live-picked book to open and close.</td></tr>`;
+  }).join("") || `<tr><td colspan="8">No live round-trips yet — Arm live + RESTART, then wait for an Angel order id. A paper fill here does not count.</td></tr>`;
   const ordersEl = $("live-pnl-orders");
   const orders = p.orders || lastTape.live_orders || [];
   ordersEl.innerHTML = orders.map((o) => {
@@ -1726,7 +1776,7 @@ function renderLivePnl() {
       <td>${esc(o.order_id || "")}</td>
       <td>${esc(o.reason || "")}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="7">No Angel order rows yet (normal in paper).</td></tr>`;
+  }).join("") || `<tr><td colspan="7">No Angel order rows. If Paper Positions just filled, the bot is still paper — type RESTART after Arm live.</td></tr>`;
 }
 function renderDesk(d) {
   lastDesk = d;
@@ -1764,7 +1814,7 @@ function renderDesk(d) {
     const waitingAll = (d.flatten || {}).by_strategy || {};
     const liveRows = (live.books || []).filter((b) => b.live_eligible);
     const posBy = {};
-    (((d.live_pnl || lastTape.live_pnl || {}).positions) || ((d.live_pnl || {}).open) || []).forEach((t) => {
+    livePosRows(d.live_pnl || lastTape.live_pnl || {}).forEach((t) => {
       if (t && t.strategy) posBy[t.strategy] = t;
     });
     $("live-books").innerHTML = liveRows.map((b) => {

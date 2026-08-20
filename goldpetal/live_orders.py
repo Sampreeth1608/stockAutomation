@@ -104,6 +104,40 @@ def strategy_may_trade_live(strategy: str, *, action: str = "") -> tuple[bool, s
     return True, "ok"
 
 
+def _null_skip_reason() -> tuple[str, bool]:
+    """When live is armed, paper-broker skips must show on the Live tab.
+
+    NullBroker is chosen at bot start if DRY_RUN was true. Arm live writes
+    DRY_RUN=false, but RAM still uses NullBroker until RESTART. Paper tape
+    still records; Angel does not. Log that so Angel orders is not empty.
+    Pure paper (not armed) stays silent.
+    """
+    try:
+        st = load_state()
+    except Exception:
+        return "dry_run_or_paper", False
+    if not st.live_unlocked:
+        return "dry_run_or_paper", False
+    env_dry = True
+    try:
+        from analytics.env_bridge import read_env
+
+        raw = read_env().get("DRY_RUN")
+        if raw is None:
+            raw = os.getenv("DRY_RUN", "true")
+        env_dry = str(raw).strip().lower() in {"1", "true", "yes", "y"}
+    except Exception:
+        env_dry = os.getenv("DRY_RUN", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+        }
+    if not env_dry:
+        return "bot_still_paper_restart_required", True
+    return "dry_run_or_paper", True
+
+
 def _append_order_log(row: dict[str, Any]) -> None:
     ensure_control_dir(ORDERS_PATH)
     row = dict(row)
@@ -343,17 +377,21 @@ class NullBroker:
         return "PAPER/null broker (no live orders)"
 
     def place_signal(self, *, strategy: str, action: str, price: float | None = None, tag: str = "") -> OrderResult:
+        reason, log_it = _null_skip_reason()
         res = OrderResult(
             ok=True,
             dry_run=True,
             skipped=True,
-            reason="dry_run_or_paper",
+            reason=reason,
             strategy=strategy,
             symbol=self.symbol,
             token=self.token,
+            transaction=str(action or "").upper() or None,
         )
         self.last_result = res
         self.skip_count += 1
+        if log_it:
+            _append_order_log(res.to_dict())
         return res
 
 

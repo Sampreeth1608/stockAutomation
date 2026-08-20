@@ -328,7 +328,7 @@ def _empty_live_pnl() -> dict[str, Any]:
             "pnl_after_charges": 0.0,
             "win_rate_after_charges": 0.0,
         },
-        "note": "Paper tape (Paper Positions / Blotter / Paper P&L) stays 100 lots. Real Angel ₹ is here after a live round-trip.",
+        "note": "Paper tape (Paper Positions / Blotter / Paper P&L) stays 100 lots. Real Angel ₹ is Live AC (all) and Live P&L by book (each strategy) after a live round-trip.",
     }
 
 
@@ -400,13 +400,22 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     open_t = [t for t in rows if t.get("status") == "OPEN"]
     closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
     closed_rev = list(reversed(closed))
-    board_names = sorted({str(t.get("strategy") or "") for t in rows if t.get("strategy")})
+    positions = _live_positions_by_book(open_t)
+    board_names: list[str] = []
+    seen: set[str] = set()
+    for raw in [str(r.get("strategy") or "") for r in positions] + sorted(
+        {str(t.get("strategy") or "") for t in rows if t.get("strategy")}
+    ):
+        name = str(raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        board_names.append(name)
     scoreboard = [summarize_trades(rows, s) for s in board_names]
     summary = summarize_trades(rows, None)
     summary["strategy"] = "LIVE"
     orders = [_public_live_order(o) for o in recent_orders(limit=40)]
     placed = [o for o in orders if o.get("placed")]
-    positions = _live_positions_by_book(open_t)
     out = _empty_live_pnl()
     out.update(
         {
@@ -421,11 +430,21 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
             "summary": summary,
         }
     )
-    if not closed and not open_t and not placed:
+    skip_reasons = {
+        str(o.get("reason") or "")
+        for o in orders
+        if o.get("skipped") or o.get("dry_run")
+    }
+    if "bot_still_paper_restart_required" in skip_reasons:
         out["note"] = (
-            "No real Angel round-trips yet. Paper Open / Closed / After charges "
-            "at the top stay 100 lots. After Arm live, this block fills when a "
-            "live-picked book (S5 / S8 / S13 / S16) opens and closes."
+            "Paper can fill while Angel does not: this bot started in paper. "
+            "Type RESTART after Arm live. Live AC ₹ stays empty until an Angel order id appears."
+        )
+    elif not closed and not open_t and not placed:
+        out["note"] = (
+            "No Angel round-trips yet. Paper Positions / Paper P&L are the 100-lot tape — "
+            "not a live fill. All live ₹ is Live AC below; per-book live ₹ is Live P&L by book. "
+            "If paper just took a trade, read Angel orders Why (empty = bot still paper, type RESTART)."
         )
     else:
         out["note"] = (

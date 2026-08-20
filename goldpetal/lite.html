@@ -82,7 +82,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
-    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots.</p>
+    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots. A paper fill is not an Angel order.</p>
+    <p class="hint">All live money = Live AC ₹. Each strategy = Live P&amp;L by book (zeros until an Angel fill). Paper P&amp;L on the full desk is 100 lots.</p>
+    <table style="margin-top:.35rem">
+      <thead><tr><th>Book</th><th>Open</th><th>Closed</th><th>WR%</th><th>AC ₹</th></tr></thead>
+      <tbody id="live-pnl-books"></tbody>
+    </table>
     <p class="hint">Live positions: one row per live-picked book (OPEN = Angel lots, FLAT = none).</p>
     <table style="margin-top:.35rem">
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
@@ -206,6 +211,25 @@ function liveBudgetDisplay(b, sb) {
   return n;
 }
 let lastLite = {};
+function livePosRows(p, d) {
+  const fromPnl = (p.positions && p.positions.length) ? p.positions
+    : ((p.open && p.open.length) ? p.open : []);
+  if (fromPnl.length) return fromPnl;
+  const books = ((d || lastLite || {}).live_desk || {}).books || [];
+  return books.filter((b) => b.live_approved || b.live_size_mode === "lots" || b.live_size_mode === "capital").map((b) => ({
+    strategy: b.strategy,
+    side: "FLAT",
+    status: "FLAT",
+    lots: b.live_qty || b.live_lots || "",
+  }));
+}
+function liveBookScoreRows(p, d) {
+  const rows = (p.scoreboard || []).filter((r) => r && r.strategy && r.strategy !== "LIVE" && r.strategy !== "ALL");
+  if (rows.length) return rows;
+  return livePosRows(p, d).map((t) => ({
+    strategy: t.strategy, open: 0, closed: 0, win_rate_after_charges: "", pnl_after_charges: "",
+  }));
+}
 function render(d) {
   lastLite = d;
   const live = d.live_desk || {};
@@ -226,7 +250,7 @@ function render(d) {
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
     const posBy = {};
-    ((d.live_pnl || {}).positions || (d.live_pnl || {}).open || []).forEach((t) => {
+    livePosRows(d.live_pnl || {}, d).forEach((t) => {
       if (t && t.strategy) posBy[t.strategy] = t;
     });
     $("live-books").innerHTML = (live.books || []).filter((b) => b.live_eligible).map((b) => {
@@ -275,11 +299,26 @@ function render(d) {
     + " · open " + openN
     + " · closed " + closed
     + " · Angel sends " + placed
-    + ". Paper tape stays on the full desk KPIs.";
+    + ". Paper tape is not live ₹.";
+  const booksEl = $("live-pnl-books");
+  if (booksEl) {
+    booksEl.innerHTML = liveBookScoreRows(lp, d).map((r) => {
+      const closedB = r.closed || 0;
+      const acB = r.pnl_after_charges;
+      const wrB = r.win_rate_after_charges;
+      return `<tr>
+        <td>${shortName(r.strategy)}</td>
+        <td>${esc(r.open || 0)}</td>
+        <td>${esc(closedB)}</td>
+        <td>${closedB ? (wrB == null || wrB === "" ? "—" : String(Math.round(Number(wrB)))) : "—"}</td>
+        <td>${closedB ? (acB == null || acB === "" ? "—" : acB) : "—"}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">No live-picked book yet</td></tr>`;
+  }
   const posEl = $("live-pnl-open");
   if (posEl) {
     const waitingAll = ((d.flatten || {}).by_strategy) || {};
-    posEl.innerHTML = (lp.positions || lp.open || []).map((t) => {
+    posEl.innerHTML = livePosRows(lp, d).map((t) => {
       const name = t.strategy;
       const waiting = !!waitingAll[name];
       const open = String(t.status || "") === "OPEN";

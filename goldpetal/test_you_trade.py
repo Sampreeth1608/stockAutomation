@@ -118,6 +118,29 @@ def test_queue_and_finish(tmp_path: Path) -> None:
         os.environ["DRY_RUN"] = "true"
 
 
+def test_you_live_status_says_restart_when_armed_but_dry(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    td = tempfile.TemporaryDirectory()
+    try:
+        state = Path(td.name) / "state.json"
+        control_state.STATE_PATH = state
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(True, path=state)
+        order = tmp_path / "ord.json"
+        pos = tmp_path / "pos.json"
+        with patch("you_trade.read_live_env", return_value={"dry_run": True, "live_max_lots": 1}):
+            st = you_live_status(order_path=order, pos_path=pos, now=datetime.now(IST))
+        assert st["dry_run"] is True
+        assert "RESTART" in st["why"]
+        assert "Paper Positions is not a live fill" in st["why"]
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+        os.environ["DRY_RUN"] = "true"
+
+
 if __name__ == "__main__":
     td = Path(tempfile.mkdtemp())
     (td / "a").mkdir()
@@ -126,4 +149,6 @@ if __name__ == "__main__":
     test_request_blocked_when_paper(td / "b")
     (td / "c").mkdir()
     test_queue_and_finish(td / "c")
+    (td / "d").mkdir()
+    test_you_live_status_says_restart_when_armed_but_dry(td / "d")
     print("ALL test_you_trade OK")

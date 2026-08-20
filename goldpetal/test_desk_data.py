@@ -355,6 +355,12 @@ def test_live_pnl_positions_flat_when_live_picked_and_no_open() -> None:
         assert by_name["S5_MINEDGE"]["side"] == "FLAT"
         assert by_name["S8_NET_ZIGZAG"]["status"] == "FLAT"
         assert pnl["open"] == []
+        board = {r["strategy"]: r for r in pnl["scoreboard"]}
+        assert "S5_MINEDGE" in board
+        assert "S8_NET_ZIGZAG" in board
+        assert board["LIVE"]["strategy"] == "LIVE"
+        assert int(board["S5_MINEDGE"]["closed"]) == 0
+        assert int(board["S8_NET_ZIGZAG"]["closed"]) == 0
 
 
 if __name__ == "__main__":

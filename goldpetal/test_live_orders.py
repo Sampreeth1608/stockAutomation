@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import control_state
 import live_orders
@@ -60,14 +60,48 @@ def test_live_lots_capped() -> None:
 
 
 def test_null_broker_when_dry_run() -> None:
-    os.environ["DRY_RUN"] = "true"
-    session = MagicMock()
-    session.api = _FakeApi()
-    b = broker_from_session(session, {"symbol": "GOLDPETAL26APRFUT", "token": "1"})
-    assert isinstance(b, NullBroker)
-    res = b.place_signal(strategy="S10_LEGACY30", action="BUY", price=100.0)
-    assert res.dry_run and res.skipped
-    assert not session.api.calls
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        os.environ["DRY_RUN"] = "true"
+        session = MagicMock()
+        session.api = _FakeApi()
+        b = broker_from_session(session, {"symbol": "GOLDPETAL26APRFUT", "token": "1"})
+        assert isinstance(b, NullBroker)
+        res = b.place_signal(strategy="S10_LEGACY30", action="BUY", price=100.0)
+        assert res.dry_run and res.skipped
+        assert not session.api.calls
+        assert not orders.exists()
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+        live_orders.ORDERS_PATH = control_state.CONTROL_DIR / "live_orders.jsonl"
+
+
+def test_null_broker_logs_when_armed_but_bot_still_paper() -> None:
+    """Arm live writes DRY_RUN=false; RAM NullBroker must show Why on the Live tab."""
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(True, path=state)
+        os.environ["DRY_RUN"] = "true"
+        with patch("analytics.env_bridge.read_env", return_value={"DRY_RUN": "false"}):
+            b = NullBroker(symbol="GOLDPETAL", token="1")
+            res = b.place_signal(strategy="S5_MINEDGE", action="BUY", price=100.0)
+        assert res.dry_run and res.skipped
+        assert res.reason == "bot_still_paper_restart_required"
+        row = json.loads(orders.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert row["reason"] == "bot_still_paper_restart_required"
+        assert row["strategy"] == "S5_MINEDGE"
+        assert row["transaction"] == "BUY"
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+        live_orders.ORDERS_PATH = control_state.CONTROL_DIR / "live_orders.jsonl"
 
 
 def test_gates_block_without_approval(monkeypatch_paths=None) -> None:
@@ -255,6 +289,8 @@ if __name__ == "__main__":
     print("ok live_lots")
     test_null_broker_when_dry_run()
     print("ok null_broker")
+    test_null_broker_logs_when_armed_but_bot_still_paper()
+    print("ok null_broker_logs_restart")
     test_gates_block_without_approval()
     print("ok gates_block")
     test_you_manual_live_without_book_approval()

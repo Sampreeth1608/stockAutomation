@@ -157,7 +157,13 @@ def you_live_status(
     dry = bool(env["dry_run"])
     would = bool(live_ok and bot_ok)
     if dry:
-        why = "DRY_RUN=true — Paper mode on the Live tab. Type LIVE to Arm live, then Restart"
+        if st.live_unlocked:
+            why = (
+                "Live tab is armed but DRY_RUN is still true — type RESTART so "
+                "Angel can fire. Paper Positions is not a live fill."
+            )
+        else:
+            why = "DRY_RUN=true — Paper mode on the Live tab. Type LIVE to Arm live, then Restart"
     elif not st.live_unlocked:
         why = "live locked — Arm live on the Live tab"
     elif not live_ok:
@@ -165,7 +171,10 @@ def you_live_status(
     elif not bot_ok:
         why = "bot not running — Start bot / RESTART so Angel can fire"
     else:
-        why = "armed — type YOU on BUY/SHORT/CLOSE to send 1 lot (LIVE_MAX cap)"
+        why = (
+            "LIVE ARMED — Angel is on. Paper tape stays 100 lots. "
+            "Live P&L is the Live tab (all + per book)."
+        )
     return {
         "live_ok": live_ok,
         "live_why": live_why,
