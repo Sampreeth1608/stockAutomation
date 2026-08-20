@@ -647,10 +647,12 @@ async function loadMood() {
       el.textContent = "regime off · books trade their formulas · press Enable regime";
     } else {
       const mode = d.flatten_on ? "regime ON · flatten" : "regime ON";
+      const pick = (d.layers || []).filter((L) => L && L.ready && (L.key === "ticks80" || L.key === "1h" || L.key === "day" || L.key === "week"));
       el.textContent = (d.label || d.mood || "mood") +
         (d.regime ? " · " + d.regime : "") +
+        (d.alignment ? " · " + d.alignment : "") +
         " · " + mode
-        + (d.reason ? " · " + d.reason : "")
+        + (pick.length ? " · " + pick.map((L) => (L.label || L.key) + " " + (L.regime || L.mood)).join(" · ") : "")
         + " · not a paper book";
       const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
       if (fits.length) {

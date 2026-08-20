@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v43: Live regime labels only after Enable regime; not next to LTP -->
+<!-- gp-header-v44: Multi-horizon regime (80 ticks + 5m…3h + day + week) after Enable -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v43</div>
+      <div class="clock" id="clock">IST — · v44</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -408,7 +408,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <div id="amise-pipeline"></div>
         <h2 style="margin-top:1rem">Market state</h2>
-        <p class="hint">Live labels on the tab row only after <b>Enable regime</b>. This card is research. Off = observe only — it does not skip a book.</p>
+        <p class="hint">Live labels on the tab row only after <b>Enable regime</b>. Stack is 80 ticks, 5m…3h, day, and week. Off = observe only — it does not skip a book.</p>
         <div id="amise-market"></div>
         <h2 style="margin-top:1rem">Strategy manager — who fits this regime</h2>
         <div id="amise-fits"></div>
@@ -701,7 +701,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v43";
+    if (clock) clock.textContent = "IST " + ist + " · v44";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -879,15 +879,25 @@ function renderMood(d) {
   const mood = lastMood.mood || "UNKNOWN";
   pill.className = "pill " + moodKind(mood);
   const regime = lastMood.regime && lastMood.regime !== "UNKNOWN" ? lastMood.regime : mood;
-  pill.textContent = (lastMood.label || mood) + (lastMood.transition ? " · " + lastMood.transition : "");
+  const align = lastMood.alignment || "";
+  pill.textContent = (lastMood.label || mood)
+    + (align && align !== "warming" ? " · " + align : "")
+    + (lastMood.transition ? " · " + lastMood.transition : "");
   const mode = lastMood.flatten_on ? "regime ON · flatten" : "regime ON";
   const bits = [mode, regime];
+  if (align) bits.push(align);
+  if (lastMood.structure) bits.push(lastMood.structure);
+  const pickKeys = { ticks80: 1, "1h": 1, day: 1, week: 1 };
+  (lastMood.layers || []).forEach((L) => {
+    if (L && pickKeys[L.key] && L.ready) {
+      bits.push(L.label + " " + (L.regime || L.mood) + (L.direction && L.direction !== "flat" ? " " + L.direction : ""));
+    }
+  });
   if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
-  if (lastMood.reason) bits.push(lastMood.reason);
   if (hint) hint.textContent = bits.join(" · ");
   pill.title = bits.join(" · ");
   if (box) {
-    box.title = "Regime on — Fit / TREND / CHOP / WIDE_SPREAD can skip books. Type RESTART. S16 1h formula and S13/overnight never veto.";
+    box.title = "Regime on — 80 ticks + 5m…3h + day + week. Unfit books skip. Type RESTART. S16 1h formula and S13/overnight never veto.";
   }
   renderFits();
 }
@@ -1339,12 +1349,24 @@ function renderAmise() {
     <p class="hint">${esc(d.note || "")}</p>
   </div>`;
   const gated = mkt.gate_on === true;
+  const layers = mkt.layers || [];
+  const layerTable = layers.length ? `<table>
+      <thead><tr><th>Horizon</th><th>Regime</th><th>Mood</th><th>Dir</th><th class="num">n</th></tr></thead>
+      <tbody>${layers.map((L) => `<tr>
+        <td>${esc(L.label || L.key || "")}</td>
+        <td>${esc(L.ready ? (L.regime || "—") : "warming")}</td>
+        <td>${esc(L.ready ? (L.mood || "—") : "need ticks")}</td>
+        <td>${esc(L.direction || "")}</td>
+        <td class="num">${esc(L.n_samples ?? "")}</td>
+      </tr>`).join("")}</tbody>
+    </table>` : "";
   $("amise-market").innerHTML = `<div class="ml-card">
     <h3>${esc(gated ? (mkt.label || mkt.mood || "mood") : "regime off")}</h3>
     <p class="ml-meta">${gated
-      ? (esc(mkt.regime || "UNKNOWN") + " · " + esc(mkt.transition || "") + " · regime ON")
+      ? (esc(mkt.regime || "UNKNOWN") + " · " + esc(mkt.alignment || "") + " · " + esc(mkt.structure || "") + " · regime ON")
       : "Enable regime is off — observe only. Books trade their formulas."}</p>
     <p class="hint">${esc(gated ? (mkt.reason || "") : ("observed " + (mkt.label || mkt.mood || "") + (mkt.regime ? " · " + mkt.regime : "") + (mkt.reason ? " · " + mkt.reason : "")))}</p>
+    ${layerTable}
   </div>`;
   const fits = mgr.fits || mkt.fits || [];
   $("amise-fits").innerHTML = fits.length ? `<table>

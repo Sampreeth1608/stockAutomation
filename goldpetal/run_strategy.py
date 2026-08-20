@@ -366,7 +366,9 @@ def run_once(
         seeded_mood = mood_det.seed_from_db()
         print(
             f"Mood seed n={seeded_mood.n_samples} mood={seeded_mood.mood} "
-            f"regime={seeded_mood.regime} {seeded_mood.label}",
+            f"regime={seeded_mood.regime} {seeded_mood.alignment} "
+            f"layers={sum(1 for L in (seeded_mood.layers or []) if L.get('ready'))}/"
+            f"{len(seeded_mood.layers or [])} {seeded_mood.label}",
             flush=True,
         )
     except Exception as exc:
@@ -1740,6 +1742,10 @@ def run_once(
                 except Exception:
                     pass
             if tick_count == 1 or tick_count % 50 == 0:
+                try:
+                    mood_det.refresh_layers()
+                except Exception:
+                    pass
                 s3_extra = ""
                 if strategy_s3.enabled:
                     if strategy_s3.last_prob is not None:
@@ -1754,6 +1760,7 @@ def run_once(
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"regime={rs.regime} "
                     f"mood={mood_det.last.mood} "
+                    f"align={mood_det.last.alignment} "
                     f"regime={mood_det.last.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "

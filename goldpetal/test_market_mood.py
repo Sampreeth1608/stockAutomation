@@ -309,6 +309,102 @@ def test_mood_desk_payload_note_follows_gate() -> None:
         assert "Market regime is OFF" not in d["note"]
     finally:
         os.environ.pop("MOOD_GATE", None)
+
+
+def test_horizon_stack_has_operator_rungs() -> None:
+    from market_mood import HORIZON_KEYS, LAYER_SAMPLES, downsample_samples
+
+    assert HORIZON_KEYS == (
+        "ticks80",
+        "5m",
+        "15m",
+        "30m",
+        "45m",
+        "1h",
+        "1h15",
+        "1h30",
+        "1h45",
+        "2h",
+        "2h15",
+        "2h30",
+        "2h45",
+        "3h",
+        "day",
+        "week",
+    )
+    assert LAYER_SAMPLES == 80
+    pts = [(100.0 + i, 1.0, 1.0) for i in range(400)]
+    out = downsample_samples(pts, 80)
+    assert out[0] == pts[0]
+    assert out[-1] == pts[-1]
+    assert 70 <= len(out) <= 82
+
+
+def test_htf_fight_stands_down_hour_book_not_s16() -> None:
+    from market_mood import HORIZON_SPECS, blend_layers, classify_samples, mood_blocks_entry
+
+    rise = classify_samples(_rise(), gate=True, with_fits=False)
+    fall = classify_samples(_fall(), gate=True, with_fits=False)
+    layers = {spec.key: rise for spec in HORIZON_SPECS}
+    for key in ("2h", "3h", "day", "week"):
+        layers[key] = fall
+    st = blend_layers(layers, gate=True)
+    assert st.alignment == "fighting"
+    s18 = st.fit_for("S18_OHLC_VOL_HTF")
+    assert s18 is not None and s18["stance"] == "stand_down"
+    blocked18, why18 = mood_blocks_entry(st, "BUY", strategy="S18_OHLC_VOL_HTF")
+    assert blocked18 is True and "stand_down" in why18
+    buy16, why16 = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
+    assert buy16 is False and why16 == "s16_1h_formula"
+    s5 = st.fit_for("S5_MINEDGE")
+    assert s5 is not None and s5["stance"] == "trade"
+    s13 = st.fit_for("S13_HHHL_DAY")
+    assert s13 is not None and s13["stance"] == "hold_swing"
+    blocked, why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
+    assert blocked is False and why == "mood_exempt"
+
+
+def test_snapshot_mood_exposes_layers() -> None:
+    import tempfile
+
+    from storage import init_db, save_tick
+
+    from market_mood import HORIZON_KEYS, snapshot_mood
+
+    os.environ["MOOD_GATE"] = "true"
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "ticks.db"
+            init_db(db)
+            px, tbq, tsq = 15300.0, 5000.0, 8000.0
+            for i in range(24):
+                px += 4.0
+                tbq += 80.0
+                tsq -= 20.0
+                save_tick(
+                    {
+                        "last_traded_price": int(px * 100),
+                        "total_buy_quantity": tbq,
+                        "total_sell_quantity": tsq,
+                    },
+                    symbol="GOLDPETAL",
+                    token="1",
+                    received_at=f"2026-08-19T11:{i:02d}:00+05:30",
+                    db_path=db,
+                )
+            snap = snapshot_mood(db)
+            keys = [row["key"] for row in snap.layers]
+            assert keys == list(HORIZON_KEYS)
+            assert snap.mood == "RISE_START"
+            ticks = next(row for row in snap.layers if row["key"] == "ticks80")
+            assert ticks["ready"] is True
+            day = next(row for row in snap.layers if row["key"] == "day")
+            assert day["ready"] is True
+    finally:
+        os.environ.pop("MOOD_GATE", None)
+
+
+def test_not_a_paper_book() -> None:
     root = Path(__file__).resolve().parent
     assert "MARKET_MOOD" not in ALL_STRATEGY_NAMES
     assert "mood" not in SLIM_PAPER_STRATEGIES
@@ -340,6 +436,7 @@ def test_mood_desk_payload_note_follows_gate() -> None:
     assert "FORMULA_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
+    assert "refresh_layers" in runner
     assert "ENTRY BLOCKED" in runner
     assert "strategy.position = prev" in runner
     assert "AMISE" not in ALL_STRATEGY_NAMES
@@ -362,5 +459,8 @@ if __name__ == "__main__":
     test_mood_gate_defaults_off()
     test_set_regime_gate_writes_env()
     test_mood_desk_payload_note_follows_gate()
+    test_horizon_stack_has_operator_rungs()
+    test_htf_fight_stands_down_hour_book_not_s16()
+    test_snapshot_mood_exposes_layers()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")
