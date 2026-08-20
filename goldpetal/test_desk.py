@@ -371,6 +371,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
     assert "trading station" in mac
     assert "GoldPetal.command" in mac
+    assert "git show origin" in mac
+    assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
     assert "Darwin" in cmd

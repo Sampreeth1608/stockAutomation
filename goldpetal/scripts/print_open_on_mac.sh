@@ -16,14 +16,16 @@ print_open_on_mac() {
   echo "The Google Cloud Console SSH button is also the VM."
   echo
   echo "On the Mac laptop (not this SSH tab):"
-  echo "  Easiest on the Mac (not this SSH tab):"
-  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap"
-  echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
-  echo "  The Desktop file only opens the tunnel + Chrome. It must say Gold Petal v35."
-  echo "  If Chrome is blank, leave that window open and paste the gcloud ssh -N -L line below."
-  echo "  Or Terminal (IAP — not ssh to 8.231.125.120:22):"
+  echo "  Copy ONE command at a time. scp does not open the desk."
+  echo "  1) Open the desk (leave this running, then Chrome http://127.0.0.1:8501/ ):"
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
+  echo
+  echo "  2) Replace the Desktop file with v35 (~4397 bytes, window says Gold Petal v35):"
+  echo "     gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/GoldPetal.command' > ~/Desktop/GoldPetal.command"
+  echo "     chmod +x ~/Desktop/GoldPetal.command"
+  echo "     open ~/Desktop/GoldPetal.command"
+  echo "  Do not put chmod on the gcloud line. wc -c ~/Desktop/GoldPetal.command must not be 2898 (old file)."
   echo
   echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
   echo "  Do not open port 22 or 8501 to the internet."
