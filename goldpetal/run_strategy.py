@@ -629,7 +629,8 @@ def run_once(
             return
         regime = regime_det.last.regime
         action = result_s1.action
-        # Block new entries when regime unfit / emergency / capital; optionally flatten.
+        # Emergency / capital / ENABLE still gate entries. Mood and TREND/CHOP
+        # labels do not.
         if action in {"BUY", "SHORT"}:
             ok_enter, enter_why = _may_enter(strategy_s1.name, regime, side=action)
             if not ok_enter:
@@ -1602,16 +1603,10 @@ def run_once(
         )
 
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
-        """1h FLIP books. S16 uses its 1h formula; mood does not skip that close."""
+        """1h FLIP books. Mood/regime do not skip a finished-hour close."""
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
-            return
-        formula_gate = strategy.name in FORMULA_GATE_BOOKS
-        if (
-            not formula_gate
-            and int(getattr(mood_det.last, "n_samples", 0) or 0) < 8
-        ):
             return
         prev = strategy.position
         prev_entry = getattr(strategy, "entry_price", None)

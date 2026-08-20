@@ -69,12 +69,17 @@ def lab_fast_on() -> bool:
 
 
 def ensure_mood_gate(*, path: Path | None = None) -> dict[str, Any]:
-    """Turn MOOD_GATE on so fit actually picks who may open. Never DRY_RUN=false."""
+    """Keep mood/regime observe-only. Never DRY_RUN=false. Never veto books."""
     from analytics.env_bridge import write_env_updates
 
-    res = write_env_updates({"MOOD_GATE": "true"}, path=path)
+    res = write_env_updates(
+        {"MOOD_GATE": "false", "FLATTEN_ON_BAD_REGIME": "false", "MOOD_FLATTEN": "false"},
+        path=path,
+    )
     if res.get("ok"):
-        os.environ["MOOD_GATE"] = "true"
+        os.environ["MOOD_GATE"] = "false"
+        os.environ["FLATTEN_ON_BAD_REGIME"] = "false"
+        os.environ["MOOD_FLATTEN"] = "false"
     return res
 
 

@@ -541,7 +541,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "gate_on": False,
                         "flatten_on": False,
                         "note": (
-                            "Desk still runs. Mood gate defaults on so unfit books do not open. "
+                            "Desk still runs. Mood and market regime are observe-only. "
                             "Not a paper book. Keep DRY_RUN=true."
                         ),
                     }
@@ -930,10 +930,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 from amise import ensure_mood_gate
 
                 res = ensure_mood_gate()
-                res["gate_on"] = True
+                res["gate_on"] = False
                 res["note"] = (
-                    "MOOD_GATE=true written. Restart the bot so paper books "
-                    "stand down in unfit regimes. Never dumps S13. Keep DRY_RUN=true."
+                    "MOOD_GATE=false written. Mood and market regime are observe-only. "
+                    "Enabled books trade their formulas. Restart the bot. Keep DRY_RUN=true."
                 )
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return

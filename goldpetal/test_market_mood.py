@@ -60,9 +60,10 @@ def test_fall_start_blocks_long_when_gated() -> None:
         assert st.allow_long is False
         assert st.flatten_long is True
         blocked, why = mood_blocks_entry(st, "BUY")
-        assert blocked and "block_long" in why
+        assert blocked is False
+        assert why == "mood_observe"
         want, _ = mood_wants_flatten(st, "long")
-        assert want is True
+        assert want is False
     finally:
         os.environ.pop("MOOD_GATE", None)
         os.environ.pop("MOOD_FLATTEN", None)
@@ -85,7 +86,8 @@ def test_rise_start_blocks_short_when_gated() -> None:
     assert st.mood == "RISE_START"
     assert st.allow_short is False
     blocked, why = mood_blocks_entry(st, "SHORT")
-    assert blocked and "block_short" in why
+    assert blocked is False
+    assert why == "mood_observe"
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
     overnight, overnight_why = mood_blocks_entry(st, "SHORT", strategy="OVERNIGHT_GAP")
@@ -123,9 +125,9 @@ def test_quiet_stands_down_trend_books() -> None:
     gap = st.fit_for("OVERNIGHT_GAP")
     assert gap is not None and gap["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
-    assert blocked is False and why == "mood_ok"
+    assert blocked is False and why == "mood_observe"
     blocked5, why5 = mood_blocks_entry(st, "BUY", strategy="S5_MINEDGE")
-    assert blocked5 is False and why5 == "mood_ok"
+    assert blocked5 is False and why5 == "mood_observe"
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
 
@@ -136,11 +138,11 @@ def test_fall_prefers_short_on_trend_books() -> None:
     assert s8 is not None
     assert s8["stance"] == "trade"
     assert s8["preferred_side"] == "short"
-    blocked_long, _ = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
+    blocked_long, why_long = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
     blocked_short, why_s = mood_blocks_entry(st, "SHORT", strategy="S8_NET_ZIGZAG")
-    assert blocked_long is True
+    assert blocked_long is False and why_long == "mood_observe"
     assert blocked_short is False
-    assert why_s == "mood_ok"
+    assert why_s == "mood_observe"
     buy16, why16 = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
     short16, why_s16 = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
     assert buy16 is False and why16 == "s16_1h_formula"
@@ -151,7 +153,7 @@ def test_burst_stands_down_intraday() -> None:
     st = classify_samples(_burst(), gate=True)
     assert st.mood == "BURST"
     blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-    assert blocked and "stand_down" in why
+    assert blocked is False and why == "mood_observe"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
     assert s16_blocked is False and s16_why == "s16_1h_formula"
     flat16, flat_why = mood_wants_flatten(st, "short", strategy="S16_HHHL_WICK_1H")
@@ -184,9 +186,9 @@ def test_warming_up_stands_down_and_blocks_shorts() -> None:
     s19 = st.fit_for("S19_BODY_CLOSE_1H")
     assert s19 is not None and s19["stance"] == "stand_down"
     blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-    assert blocked and "stand_down" in why
-    blocked19, _ = mood_blocks_entry(st, "SHORT", strategy="S19_BODY_CLOSE_1H")
-    assert blocked19 is True
+    assert blocked is False and why == "mood_observe"
+    blocked19, why19 = mood_blocks_entry(st, "SHORT", strategy="S19_BODY_CLOSE_1H")
+    assert blocked19 is False and why19 == "mood_observe"
     skipped, skip_why = mood_blocks_entry(st, "SHORT", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
@@ -203,8 +205,8 @@ def test_rise_start_blocks_hour_book_shorts() -> None:
         "S8_NET_ZIGZAG",
     ):
         blocked, why = mood_blocks_entry(st, "SHORT", strategy=name)
-        assert blocked, (name, why)
-        assert "prefers_long" in why or "block_short" in why, why
+        assert blocked is False, (name, why)
+        assert why == "mood_observe"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
     assert s16_blocked is False and s16_why == "s16_1h_formula"
 
@@ -241,17 +243,17 @@ def test_seed_from_db_blocks_short_on_rise() -> None:
         assert st.mood == snap.mood == "RISE_START"
         assert st.n_samples >= 8
         blocked, _why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-        assert blocked is True
+        assert blocked is False
 
 
-def test_mood_gate_defaults_on() -> None:
+def test_mood_gate_defaults_off() -> None:
     os.environ.pop("MOOD_GATE", None)
     from market_mood import mood_gate_on
 
-    assert mood_gate_on() is True
-    os.environ["MOOD_GATE"] = "false"
+    assert mood_gate_on() is False
+    os.environ["MOOD_GATE"] = "true"
     try:
-        assert mood_gate_on() is False
+        assert mood_gate_on() is True
     finally:
         os.environ.pop("MOOD_GATE", None)
 
@@ -275,7 +277,8 @@ def test_not_a_paper_book() -> None:
     panel = (root / "control_panel.py").read_text(encoding="utf-8")
     assert "/api/mood" in panel
     env = (root / ".env.example").read_text(encoding="utf-8")
-    assert "MOOD_GATE=true" in env
+    assert "MOOD_GATE=false" in env
+    assert "FLATTEN_ON_BAD_REGIME=false" in env
     assert "MOOD_FLATTEN=false" in env
     assert "MOOD_FIT_MIN=0.40" in env
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
@@ -303,6 +306,6 @@ if __name__ == "__main__":
     test_warming_up_stands_down_and_blocks_shorts()
     test_rise_start_blocks_hour_book_shorts()
     test_seed_from_db_blocks_short_on_rise()
-    test_mood_gate_defaults_on()
+    test_mood_gate_defaults_off()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")

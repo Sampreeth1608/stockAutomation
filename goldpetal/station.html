@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v36: S16 1h wick/HHLL FLIP is not mood stand-down -->
+<!-- gp-header-v37: mood and market regime are observe-only; books trade their formulas -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -189,20 +189,20 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div class="ltp" id="ltp">—</div>
         <div class="meta" id="quote-meta">waiting for quote</div>
       </div>
-      <div class="mood-box" id="mood-box" title="One tape read for all books. MOOD_GATE is on: unfit books do not open. S16 1h wick/HHLL FLIP is not vetoed by stand-down. Held 1h shorts stay until the next hour close (MOOD_FLATTEN is off). S13/S4 ignore this tick window. Not a paper book.">
+      <div class="mood-box" id="mood-box" title="One tape read for the desk. MOOD_GATE is off. Observe only: mood and market regime do not skip or flatten a book. Each enabled strategy trades its own formula. MOOD_FLATTEN is off. Not a paper book.">
         <span class="pill" id="mood-pill">mood warming up</span>
         <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · observe only</div>
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v36</div>
+      <div class="clock" id="clock">IST — · v37</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
   </header>
   <div class="fit-strip" id="fit-strip">
     <b>Fit</b>
-    <span id="fit-line">one regime for all books · mood gate picks who may open</span>
+    <span id="fit-line">one regime for the desk · observe only · books trade their formulas</span>
   </div>
   <div class="you-strip" id="you-strip">
     <b>You</b>
@@ -416,7 +416,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood gate is on (MOOD_GATE) — unfit books do not open. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood and market regime are observe-only — they do not skip or flatten a book. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Arm live on the Live tab.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -718,7 +718,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v36";
+    if (clock) clock.textContent = "IST " + ist + " · v37";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -897,7 +897,7 @@ function fitLabel(f) {
 function renderFits() {
   const line = $("fit-line");
   const rows = lastMood.fits || [];
-  let text = "one regime for all books · mood gate picks who may open";
+  let text = "one regime for the desk · observe only · books trade their formulas";
   if (rows.length) {
     text = rows.map((f) => {
       const short = shortName(f.strategy).replace(/ .*/, "") || f.strategy;

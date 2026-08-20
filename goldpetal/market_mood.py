@@ -1,18 +1,11 @@
-"""Shared Gold Petal market state — one brain in front of the books.
+"""Shared Gold Petal market state — observe only.
 
-AMISE slice 1: Market State + Strategy Manager fit.
-The tape is classified once. Every paper book reads the same regime and a
-fit score (trade / stand down / hold swing). Copying "if falling then short"
-into every formula would make them all trade the same.
-
-Desk always shows state + fit. Paper uses the gate (MOOD_GATE default on)
-so books that do not fit this regime will not open. Flattening opens still
-needs MOOD_FLATTEN=true. S13/S4 skip the tick-window gate and are never
-dumped. Not a paper book. Do not ENABLE. Does not change S13/S16 formulas.
-Keep DRY_RUN=true.
-
-Not built here: relationship factory, auto challengers, combining books into
-one order, or a profit-printer. Learning ≠ deploy. You approve.
+AMISE slice 1: Market State + Strategy Manager fit (desk display).
+The tape is classified once so the desk can show one regime and a fit
+score (trade / stand down / hold swing). Fit does not open, skip, or
+flatten a book. Each enabled strategy trades its own formula.
+MOOD_GATE default off. Mood flatten off. Not a paper book. Do not ENABLE.
+Does not change S13/S16 formulas. Keep DRY_RUN=true.
 """
 
 from __future__ import annotations
@@ -83,7 +76,7 @@ Stance = Literal["trade", "stand_down", "hold_swing"]
 
 
 def mood_gate_on() -> bool:
-    return (os.getenv("MOOD_GATE") or "true").strip().lower() in {"1", "true", "yes", "y"}
+    return (os.getenv("MOOD_GATE") or "false").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def mood_flatten_on() -> bool:
@@ -593,52 +586,25 @@ def classify_samples(
 def mood_blocks_entry(
     state: MoodState, side: str, *, strategy: str = ""
 ) -> tuple[bool, str]:
-    """True = do not open. Ignored unless MOOD_GATE is on. S13/S4 skip."""
+    """True = do not open. Always False — Fit is display only."""
+    del state, side
     if strategy in MOOD_EXEMPT_BOOKS:
         return False, "mood_exempt"
     if strategy in FORMULA_GATE_BOOKS:
         return False, "s16_1h_formula"
-    if not state.gate_on:
-        return False, "mood_observe"
-    act = str(side or "").strip().lower()
-    fit = state.fit_for(strategy) if strategy else None
-    if fit and fit.get("stance") == "stand_down":
-        return True, (
-            f"mood={state.mood} {state.regime} {strategy} stand_down "
-            f"w={float(fit.get('weight') or 0):.2f}"
-        )
-    if fit and float(fit.get("weight") or 1.0) < mood_fit_min():
-        return True, (
-            f"mood={state.mood} {state.regime} {strategy} low_fit "
-            f"w={float(fit.get('weight') or 0):.2f}"
-        )
-    if fit and act in {"buy", "long"} and fit.get("preferred_side") == "short":
-        return True, f"mood={state.mood} {state.regime} {strategy} prefers_short"
-    if fit and act in {"short", "sell"} and fit.get("preferred_side") == "long":
-        return True, f"mood={state.mood} {state.regime} {strategy} prefers_long"
-    if act in {"buy", "long"} and not state.allow_long:
-        return True, f"mood={state.mood} {state.regime} block_long"
-    if act in {"short", "sell"} and not state.allow_short:
-        return True, f"mood={state.mood} {state.regime} block_short"
-    return False, "mood_ok"
+    return False, "mood_observe"
 
 
 def mood_wants_flatten(
     state: MoodState, position: str, *, strategy: str = ""
 ) -> tuple[bool, str]:
-    """True = flatten open. Needs MOOD_GATE and MOOD_FLATTEN. Never S13/S4."""
+    """True = flatten open. Always False — mood never dumps a book."""
+    del state, position
     if strategy in MOOD_EXEMPT_BOOKS:
         return False, "mood_exempt"
     if strategy in FORMULA_GATE_BOOKS:
         return False, "s16_1h_formula"
-    if not state.gate_on or not state.flatten_on:
-        return False, "mood_no_flatten"
-    pos = str(position or "").strip().lower()
-    if pos == "long" and state.flatten_long:
-        return True, f"mood={state.mood} {state.regime} flatten_long"
-    if pos == "short" and state.flatten_short:
-        return True, f"mood={state.mood} {state.regime} flatten_short"
-    return False, "mood_hold"
+    return False, "mood_no_flatten"
 
 
 class MoodDetector:

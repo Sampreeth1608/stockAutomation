@@ -31,14 +31,20 @@ def test_portfolio_gates() -> None:
     assert p.allows("S1_NETDELTA", "TREND")
     assert p.allows("S5_MINEDGE", "TREND")
     assert not p.allows("S2_BALANCE", "TREND")  # not enabled
-    assert not p.allows("S1_NETDELTA", "WIDE_SPREAD")
-    assert p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
-    assert not p.allows("S3_ML", "CHOP")  # chop: overnight only by default
+    assert p.allows("S1_NETDELTA", "WIDE_SPREAD")
+    assert not p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
+    assert p.allows("S3_ML", "CHOP")
     assert p.allows("S5_MINEDGE", "UNKNOWN")
     # Smooth rallies often label QUIET — S5 must still be eligible (own fee gate).
     assert p.allows("S5_MINEDGE", "QUIET")
     assert p.allows("S5_MINEDGE", "CHOP")
     assert not p.allows("S2_BALANCE", "CHOP")
+    dump = PortfolioConfig(
+        enabled={"S1_NETDELTA", "S3_ML", "S5_MINEDGE"},
+        flatten_when_blocked=True,
+    )
+    assert not dump.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
+    assert dump.should_flatten("S2_BALANCE", "WIDE_SPREAD")
     p10 = PortfolioConfig(enabled={"S10_LEGACY30"})
     assert p10.allows("S10_LEGACY30", "TREND")
     assert p10.allows("S10_LEGACY30", "QUIET")
@@ -104,7 +110,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S25_AMISE" in p25.enabled
     assert p25.allows("S25_AMISE", "TREND")
     assert p25.allows("S25_AMISE", "CHOP")
-    assert not p25.allows("S25_AMISE", "WIDE_SPREAD")
+    assert p25.allows("S25_AMISE", "WIDE_SPREAD")
     os.environ.pop("ENABLE_S25", None)
 
     os.environ["ENABLE_OVERNIGHT_GAP"] = "true"

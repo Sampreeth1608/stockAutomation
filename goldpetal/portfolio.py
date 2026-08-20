@@ -110,7 +110,7 @@ class PortfolioConfig:
     allowed: dict[Regime, set[str]] = field(
         default_factory=lambda: {k: set(v) for k, v in DEFAULT_ALLOWED.items()}
     )
-    flatten_when_blocked: bool = True
+    flatten_when_blocked: bool = False
 
     def is_enabled(self, strategy: str) -> bool:
         return strategy in self.enabled
@@ -125,17 +125,16 @@ class PortfolioConfig:
         return False
 
     def allows(self, strategy: str, regime: Regime) -> bool:
-        if strategy not in self.enabled:
-            return False
-        return self._in_regime(strategy, regime)
+        """Enabled books may open in any regime. Desk still shows the tape label."""
+        del regime
+        return strategy in self.enabled
 
     def should_flatten(self, strategy: str, regime: Regime) -> bool:
-        """True if open position should be closed because regime no longer fits."""
+        """Never dump an enabled book because TREND/CHOP/QUIET/WIDE_SPREAD changed."""
+        del regime
         if not self.flatten_when_blocked:
             return False
-        if strategy not in self.enabled:
-            return True
-        return not self._in_regime(strategy, regime)
+        return strategy not in self.enabled
 
 
 def portfolio_from_env() -> PortfolioConfig:
@@ -212,5 +211,5 @@ def portfolio_from_env() -> PortfolioConfig:
             "S19_BODY_CLOSE_1H",
         }
 
-    flatten = on("FLATTEN_ON_BAD_REGIME", "true")
+    flatten = on("FLATTEN_ON_BAD_REGIME", "false")
     return PortfolioConfig(enabled=enabled, flatten_when_blocked=flatten)
