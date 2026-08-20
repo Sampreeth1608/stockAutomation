@@ -229,15 +229,17 @@ def audit(event: str, *, ok: bool, detail: dict[str, Any] | None = None) -> None
 
 
 def auth_required() -> bool:
-    """If DESK_AUTH=false, skip login. Default: require when password set."""
+    """Login only when a password is actually configured.
+
+    DESK_AUTH=true with no DESK_PASSWORD must not block the desk. Bind-on-localhost
+    and TOTP for Arm live stay on their own flags.
+    """
     _ensure_dotenv()
     flag = (
         _desk_secret_from_file("DESK_AUTH") or os.getenv("DESK_AUTH", "")
     ).strip().lower()
     if flag in {"0", "false", "no", "n", "off"}:
         return False
-    if flag in {"1", "true", "yes", "y", "on"}:
-        return True
     return desk_password_configured()
 
 

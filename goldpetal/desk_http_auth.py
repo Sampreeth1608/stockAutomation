@@ -129,14 +129,7 @@ def public_bind_blocked(host: str) -> str | None:
 
 
 def desk_http_start_error() -> str | None:
-    """Refuse boot when auth is forced but no password exists."""
-    if auth_required() and not desk_password_configured():
-        hint = desk_password_hint()
-        return (
-            "DESK_AUTH is on but DESK_PASSWORD / DESK_PASSWORD_HASH is not set. "
-            f"Put a password in {hint.get('env_path') or '.env'}, "
-            "or DESK_AUTH=false only for recovery."
-        )
+    """Never refuse boot for a missing password. Public bind is a separate check."""
     return None
 
 
@@ -144,8 +137,10 @@ def desk_http_start_warning() -> str | None:
     if auth_required():
         return None
     return (
-        "WARNING: HTML desk has no password. Set DESK_PASSWORD in .env. "
-        "The IAP tunnel is not a login. Do not set DESK_AUTH=false except recovery."
+        "HTML desk login is off (no DESK_PASSWORD). "
+        "IAP + bind 127.0.0.1 stay. Arm live still needs LIVE"
+        + (" and TOTP" if dangerous_requires_totp() else "")
+        + "."
     )
 
 
@@ -370,6 +365,16 @@ def check_access(
     method_u = (method or "GET").upper()
     p = path or "/"
     if not auth_required():
+        if method_u in {"POST", "PUT", "PATCH", "DELETE"} and path_requires_totp(p, data):
+            code = totp_code(headers, data)
+            if not code or not verify_totp(code):
+                audit("desk_http_totp", ok=False, detail={"path": p, "login": "off"})
+                return Access(
+                    allow=False,
+                    status=403,
+                    error="authenticator OTP required for this action",
+                    kind="json",
+                )
         return Access(allow=True, kind="")
     if method_u == "GET" and p in LOGIN_PATHS:
         sess = session_from_headers(headers)

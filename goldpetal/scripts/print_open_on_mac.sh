@@ -19,7 +19,7 @@ print_open_on_mac() {
   echo "  Copy ONE command at a time. scp does not open the desk."
   echo "  Connection refused on the tunnel = 8501 is down on the VM. Start it:"
   echo "    gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart'"
-  echo "  Leave the GoldPetal.command tunnel window open. Then Chrome http://127.0.0.1:8501/"
+  echo "  Login is off until DESK_PASSWORD is set. IAP + localhost bind stay."
   echo "  1) Open the desk (leave this running, then Chrome http://127.0.0.1:8501/ ):"
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"

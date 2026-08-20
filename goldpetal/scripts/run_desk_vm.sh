@@ -33,13 +33,12 @@ mkdir -p data/control
 CMD=("$PY" control_panel.py --host "$HOST" --port "$PORT")
 
 preflight_desk() {
-  # Do not pkill a live station if the new process would refuse to boot
-  # (DESK_AUTH=true and no DESK_PASSWORD).
+  # Bind lock / other boot refuses. A missing DESK_PASSWORD must not block 8501.
   local err
   err="$("$PY" -c 'from desk_http_auth import desk_http_start_error; e=desk_http_start_error(); print(e or "")' 2>/dev/null || true)"
   if [[ -n "${err:-}" ]]; then
     echo "$err" >&2
-    echo "Leaving the running station alone. Set DESK_PASSWORD in .env, or DESK_AUTH=false only for recovery." >&2
+    echo "Leaving the running station alone." >&2
     return 2
   fi
   return 0

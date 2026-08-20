@@ -62,12 +62,17 @@ def test_public_bind_refused() -> None:
     os.environ.pop("DESK_BIND_PUBLIC", None)
 
 
-def test_start_error_when_auth_forced_without_password(tmp_path: Path) -> None:
+def test_missing_password_does_not_block_boot(tmp_path: Path) -> None:
     _isolate(tmp_path, "DESK_AUTH=true\n")
     try:
-        err = desk_http_start_error()
-        assert err
-        assert "DESK_PASSWORD" in err
+        from analytics.desk_auth import auth_required
+
+        assert desk_http_start_error() is None
+        assert auth_required() is False
+        acc = check_access(method="GET", path="/", headers={})
+        assert acc.allow
+        api = check_access(method="GET", path="/api/status", headers={})
+        assert api.allow
     finally:
         _clear_isolate()
 
@@ -119,6 +124,35 @@ def test_auth_on_blocks_then_login(tmp_path: Path) -> None:
             data={"off": True},
         )
         assert with_csrf.allow
+    finally:
+        _clear_isolate()
+
+
+def test_totp_still_gates_arm_without_login(tmp_path: Path) -> None:
+    _isolate(tmp_path, "DESK_TOTP_SECRET=MFRGGZDFMY\nDESK_TOTP_REQUIRED=true\n")
+    try:
+        home = check_access(method="GET", path="/", headers={})
+        assert home.allow
+        blocked = check_access(
+            method="POST",
+            path="/api/desk/arm",
+            headers={},
+            data={"mode": "live", "confirm": "LIVE"},
+        )
+        assert not blocked.allow
+        assert blocked.status == 403
+        orig = http_auth.verify_totp
+        http_auth.verify_totp = lambda code: str(code) == "123456"  # type: ignore[assignment]
+        try:
+            ok = check_access(
+                method="POST",
+                path="/api/desk/arm",
+                headers={},
+                data={"mode": "live", "confirm": "LIVE", "totp": "123456"},
+            )
+            assert ok.allow
+        finally:
+            http_auth.verify_totp = orig
     finally:
         _clear_isolate()
 
@@ -250,11 +284,14 @@ if __name__ == "__main__":
     test_public_bind_refused()
     print("ok bind")
     with TemporaryDirectory() as td:
-        test_start_error_when_auth_forced_without_password(Path(td))
-        print("ok start error")
+        test_missing_password_does_not_block_boot(Path(td))
+        print("ok missing password boots")
     with TemporaryDirectory() as td:
         test_auth_off_allows_api(Path(td))
         print("ok auth off")
+    with TemporaryDirectory() as td:
+        test_totp_still_gates_arm_without_login(Path(td))
+        print("ok totp without login")
     with TemporaryDirectory() as td:
         test_auth_on_blocks_then_login(Path(td))
         print("ok login csrf")

@@ -139,11 +139,8 @@ def require_desk_login() -> bool:
         f"password_len={hint['password_len']}"
     )
     if not desk_password_configured():
-        st.error(
-            "DESK_AUTH is on but DESK_PASSWORD / DESK_PASSWORD_HASH is not set in .env. "
-            "Set one, or DESK_AUTH=false for trusted localhost-only use."
-        )
-        return False
+        st.info("Desk login is off until DESK_PASSWORD is set. IAP and localhost bind stay.")
+        return True
     # Prefer non-form inputs: browser password managers often fill the visual
     # field without updating Streamlit form state (submit then looks "wrong").
     pw = st.text_input("Desk password", type="password", key="desk_login_pw")

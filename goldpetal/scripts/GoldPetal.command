@@ -81,8 +81,7 @@ start_station_on_vm() {
   if [[ "$rc" -ne 0 ]]; then
     echo
     echo "Desk restart on the VM returned $rc."
-    echo "If you saw DESK_PASSWORD / DESK_AUTH, put a real password in ~/goldpetal/.env"
-    echo "or set DESK_AUTH=false only for recovery, then run:"
+    echo "Leave this window open and paste the start command in another Mac Terminal:"
     print_start_desk
   else
     echo "Station start finished on the VM."
