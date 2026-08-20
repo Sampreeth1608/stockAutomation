@@ -56,8 +56,11 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v15" in html
-    assert " · v15" in html
+    assert "gp-header-v16" in html
+    assert " · v16" in html
+    assert "WR% AC" in html
+    assert "S18 / S19 / S20 / AMISE stay paper" in html
+    assert "live_eligible" in html
     assert "exact IST click time" in html
     assert "tape_lag_ms" in html
     assert "Let it trade" in html
@@ -155,6 +158,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "/#amise" in html
     assert "AMISE" in html
     assert "after charges" in html
+    assert "S5 / S8 / S13 / S16" in html
+    assert "live_eligible" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
@@ -245,6 +250,13 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "--tunnel-through-iap" in cmd
     assert "8.231.125.120" in cmd
     assert 'cd "$(dirname "$0")/.."' not in cmd
+    from live_readiness import LIVE_ELIGIBLE_BOOKS, PAPER_ONLY_BOOKS
+
+    assert "S13_HHHL_DAY" in LIVE_ELIGIBLE_BOOKS
+    assert "S16_HHHL_WICK_1H" in LIVE_ELIGIBLE_BOOKS
+    assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
+    assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
+    assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
     tunnel = (ROOT / "panel_tunnel.sh").read_text(encoding="utf-8")
     assert "--tunnel-through-iap" in tunnel
     assert "exec ssh -N -L" not in tunnel

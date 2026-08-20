@@ -87,7 +87,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="row" style="margin-top:.55rem">
       <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
     </div>
-    <p class="hint">Live without In bot is ignored. Type RESTART after save to load RAM.</p>
+    <p class="hint">Live pick is S5 / S8 / S13 / S16 only. S18 / S19 / S20 / AMISE stay paper. Type RESTART after save.</p>
     <p class="flash" id="flash-books"></p>
   </section>
 
@@ -208,7 +208,7 @@ function render(d) {
       return `<tr>
         <td>${shortName(name)}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
+        <td>${b.live_eligible !== false ? `<input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/>` : "paper"}</td>
       </tr>`;
     }).join("") || `<tr><td colspan="3">no books</td></tr>`;
     $("paper-only").checked = live.dry_run !== false;
@@ -300,7 +300,10 @@ $("btn-save-money").onclick = () => {
   }, "Money saved — Restart to load");
   $("live-word").value = "";
 };
-$("btn-unlock").onclick = () => act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+$("btn-unlock").onclick = () => {
+  if (!window.confirm("Unlock live path? Still need Live pick (S5/S8/S13/S16), uncheck Paper only, type LIVE, Lots=1, Save, RESTART.")) return;
+  act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+};
 $("btn-lock").onclick = () => act("flash-money", "/api/live", { unlocked: false }, "Live locked");
 $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
   total_capital_inr: Number($("cap-total").value || 0),

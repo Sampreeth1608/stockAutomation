@@ -28,6 +28,14 @@ DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
     {"S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL", "FLOW_BRAIN"}
 )
+# First live-capital test: 1 lot, these four only. S18/S19/S20/AMISE/S11 stay paper.
+LIVE_ELIGIBLE_BOOKS = frozenset(
+    {"S5_MINEDGE", "S8_NET_ZIGZAG", "S13_HHHL_DAY", "S16_HHHL_WICK_1H"}
+)
+
+
+def book_may_go_live(name: str) -> bool:
+    return str(name).strip() in LIVE_ELIGIBLE_BOOKS
 
 
 def _truthy(raw: str | None, default: str = "true") -> bool:
@@ -127,11 +135,8 @@ def apply_desk_books(
     known = list(paper_strategy_names())
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
     live_raw = [str(n).strip() for n in live if str(n).strip() in known]
-    live_set = [n for n in live_raw if n in in_set and n not in PAPER_ONLY_BOOKS]
-    skipped = [n for n in live_raw if n not in in_set]
-    skipped_paper_only = [n for n in live_raw if n in PAPER_ONLY_BOOKS]
-    if skipped_paper_only:
-        skipped = list(dict.fromkeys(skipped + skipped_paper_only))
+    live_set = [n for n in live_raw if n in in_set and n in LIVE_ELIGIBLE_BOOKS]
+    skipped = [n for n in live_raw if n not in live_set]
     en = apply_panel_enables(in_set, path=path)
     st = set_live_approved(
         live_set,
@@ -149,7 +154,7 @@ def apply_desk_books(
             "Saved In-bot and Live picks. Restart the engine to load In-bot into RAM. "
             "Live picks do not send Angel orders until money is LIVE and unlocked. "
             + (
-                f"Ignored live picks not in-bot: {', '.join(skipped)}. "
+                f"Ignored live picks: {', '.join(skipped)}. "
                 if skipped
                 else ""
             )
@@ -203,11 +208,16 @@ def desk_snapshot() -> dict[str, Any]:
     dry = bool(env["dry_run"])
     live_ok, _why = is_live_mode_allowed()
     approved = list(st.live_approved or [])
+    armed = any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
     from analytics.env_bridge import strategy_enable_snapshot
 
     enables_all = strategy_enable_snapshot()
     books = [
-        {"strategy": name, "live_approved": name in approved}
+        {
+            "strategy": name,
+            "live_approved": name in approved and name in LIVE_ELIGIBLE_BOOKS,
+            "live_eligible": name in LIVE_ELIGIBLE_BOOKS,
+        }
         for name in paper_strategy_names()
     ]
     enables = {name: bool(enables_all.get(name)) for name in paper_strategy_names()}
@@ -216,7 +226,7 @@ def desk_snapshot() -> dict[str, Any]:
         "live_max_lots": env["live_max_lots"],
         "enables": enables,
         "books": books,
-        "would_place_real_orders": bool(live_ok and not dry and approved),
+        "would_place_real_orders": bool(live_ok and not dry and armed),
     }
 
 
@@ -230,6 +240,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     bot_ok = age is not None and age <= 180
     cap = _live_max()
     approved = list(st.live_approved or [])
+    armed = any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
 
     steps = [
         {
@@ -262,9 +273,13 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         },
         {
             "id": "approved",
-            "ok": bool(approved),
+            "ok": armed,
             "label": "At least one strategy live-approved",
-            "detail": ", ".join(approved) if approved else "none — paper stays paper",
+            "detail": (
+                ", ".join(n for n in approved if n in LIVE_ELIGIBLE_BOOKS)
+                if any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
+                else "none — paper stays paper. First live test: S5, S8, S13, S16 only."
+            ),
         },
         {
             "id": "lots_cap",
@@ -295,7 +310,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     for name in paper_strategy_names():
         sb = plan.strategies.get(name)
         paper_lots = int(sb.max_lots) if sb is not None else 0
-        on_live = name in approved
+        on_live = name in approved and name in LIVE_ELIGIBLE_BOOKS
         qty = live_lots_for(name) if on_live else 0
         ram_key = name.split("_")[0]  # S14 from S14_WICK30_STRICT
         ram_pos = ram.get(ram_key) or ram.get(name) or "—"
@@ -304,6 +319,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
                 "strategy": name,
                 "paper_max_lots": paper_lots,
                 "live_approved": on_live,
+                "live_eligible": name in LIVE_ELIGIBLE_BOOKS,
                 "live_qty": qty,
                 "ram": ram_pos,
                 "warn_100": paper_lots >= 100,
@@ -322,7 +338,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "live_allowed": [live_ok, live_why],
         "live_max_lots": cap,
         "default_live_lots": live_lots(),
-        "would_place_real_orders": bool(live_ok and not dry and approved),
+        "would_place_real_orders": bool(live_ok and not dry and armed),
         "steps_ok": n_ok,
         "steps_n": len(steps),
         "steps": steps,
@@ -340,6 +356,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "note": (
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
-            "DRY_RUN=false, Restart supervise. Size is LIVE_MAX_LOTS (panel cap 10), not paper 100."
+            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16 at LIVE_MAX_LOTS=1. "
+            "S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (panel cap 10), not paper 100."
         ),
     }

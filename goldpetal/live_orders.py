@@ -92,6 +92,10 @@ def strategy_may_trade_live(strategy: str) -> tuple[bool, str]:
         return False, reason
     if str(strategy) == "YOU_MANUAL":
         return True, "ok_you_tab"
+    from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+    if str(strategy) not in LIVE_ELIGIBLE_BOOKS:
+        return False, "not_live_eligible"
     require = _env_bool("LIVE_REQUIRE_APPROVAL", True)
     if not require:
         return True, "ok_no_approval_required"

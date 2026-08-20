@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v15: You click timestamps + ticks/candles at press -->
+<!-- gp-header-v16: first live test S5/S8/S13/S16 1 lot; rank after charges -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -182,7 +182,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v15</div>
+      <div class="clock" id="clock">IST — · v16</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -206,12 +206,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <section class="col">
       <div class="pane">
         <h2>Books</h2>
-        <p class="hint">In bot loads after Restart. Live pick only sends Angel when money is armed.</p>
+        <p class="hint">In bot loads after Restart. Live pick is S5 / S8 / S13 / S16 only. Rank is after Angel charges (tax excluded). S18 / S19 / S20 / AMISE stay paper.</p>
       </div>
       <div class="scroll">
         <table>
           <thead>
-            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR%</th><th class="num">₹</th><th>Fit</th></tr>
+            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th>Fit</th></tr>
           </thead>
           <tbody id="books"></tbody>
         </table>
@@ -228,8 +228,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="kpis">
         <div class="kpi"><b>Open</b><span id="kpi-open">0</span></div>
         <div class="kpi"><b>Closed</b><span id="kpi-closed">0</span></div>
-        <div class="kpi"><b>After-tax</b><span id="kpi-pnl">—</span></div>
-        <div class="kpi"><b>Win % (AT)</b><span id="kpi-wr">—</span></div>
+        <div class="kpi"><b>After charges</b><span id="kpi-pnl">—</span></div>
+        <div class="kpi"><b>Win % (AC)</b><span id="kpi-wr">—</span></div>
       </div>
       <div class="center-head">
         <div class="row" id="tabs">
@@ -450,7 +450,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
           <button class="btn" id="btn-save-cap" type="button">Save capital</button>
         </div>
-        <p class="hint">Paper 100 lots is not live size (cap 1–10). Type LIVE to turn paper off.</p>
+        <p class="hint">First live test: leave Lots at 1. Live pick S5, S8, S13, or S16. Uncheck Paper only, type LIVE, Save money, Unlock, type RESTART. Paper 100 lots is not live size. S18/S19/S20/AMISE stay paper.</p>
         <p class="flash" id="flash-money"></p>
       </div>
     </section>
@@ -574,7 +574,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v15";
+    if (clock) clock.textContent = "IST " + ist + " · v16";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -689,6 +689,11 @@ function afterChargesInr(sc) {
   if (sc && sc.pnl_after_tax != null && sc.pnl_after_tax !== "") return Number(sc.pnl_after_tax);
   return null;
 }
+function wrAfterCharges(sc) {
+  if (sc && sc.win_rate_after_charges != null && sc.win_rate_after_charges !== "") return Number(sc.win_rate_after_charges);
+  if (sc && sc.win_rate != null && sc.win_rate !== "") return Number(sc.win_rate);
+  return null;
+}
 function allScore() {
   const rows = lastHist.scoreboard || [];
   return rows.find((r) => r.strategy === "ALL" || r.strategy == null) || rows[rows.length - 1] || {};
@@ -782,8 +787,8 @@ function renderKpis() {
   const why = (lastWhy && lastWhy.overall) || {};
   $("kpi-open").textContent = lastHist.total_open || 0;
   $("kpi-closed").textContent = lastHist.total_closed || why.closed || 0;
-  const pnl = all.pnl_after_tax != null ? all.pnl_after_tax : why.pnl_after_tax;
-  const wr = why.win_rate_after_tax != null ? why.win_rate_after_tax : all.win_rate;
+  const pnl = afterChargesInr(all);
+  const wr = why.win_rate_after_charges != null ? why.win_rate_after_charges : wrAfterCharges(all);
   const pnlEl = $("kpi-pnl");
   pnlEl.textContent = pnl == null ? "—" : money(pnl);
   pnlEl.className = pnlClass(pnl);
@@ -1565,15 +1570,15 @@ function renderGrid() {
     return;
   }
   if (tab === "score") {
-    thead(["book", "closed", "open", "win %", "gross ₹", "fees ₹", "after-tax ₹"]);
+    thead(["book", "closed", "open", "win % AC", "gross ₹", "fees ₹", "after charges ₹"]);
     $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
       <td>${esc(shortName(r.strategy))}</td>
       <td class="num">${fmt(r.closed, 0)}</td>
       <td class="num">${fmt(r.open, 0)}</td>
-      <td class="num">${pct(r.win_rate)}</td>
+      <td class="num">${pct(wrAfterCharges(r))}</td>
       <td class="num">${money(r.gross_pnl)}</td>
       <td class="num">${money(r.charges)}</td>
-      <td class="num ${pnlClass(r.pnl_after_tax)}">${money(r.pnl_after_tax)}</td>
+      <td class="num ${pnlClass(afterChargesInr(r))}">${money(afterChargesInr(r))}</td>
     </tr>`).join("") || `<tr><td colspan="7">No P&L yet</td></tr>`;
     return;
   }
@@ -1626,13 +1631,14 @@ function renderDesk(d) {
     $("books").innerHTML = (live.books || []).map((b) => {
       const name = b.strategy;
       const sc = scoreFor(name);
-      const wr = sc.win_rate != null ? pct(sc.win_rate) : "—";
-      const pnl = sc.pnl_after_tax;
+      const wr = wrAfterCharges(sc);
+      const pnl = afterChargesInr(sc);
+      const liveOk = b.live_eligible !== false;
       return `<tr>
         <td>${esc(shortName(name))}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
-        <td class="num">${esc(wr)}</td>
+        <td>${liveOk ? `<input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/>` : `<span class="hint">paper</span>`}</td>
+        <td class="num">${wr == null ? "—" : pct(wr)}</td>
         <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
         <td class="num" data-fit="${esc(name)}">${esc(fitLabel(fitFor(name)))}</td>
       </tr>`;
@@ -1859,7 +1865,10 @@ $("btn-save-money").onclick = () => {
   }, "Money saved — Restart to load");
   $("live-word").value = "";
 };
-$("btn-unlock").onclick = () => act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+$("btn-unlock").onclick = () => {
+  if (!window.confirm("Unlock live path? Real Angel orders still need: Live pick (S5/S8/S13/S16), uncheck Paper only, type LIVE, Save money, Lots=1, type RESTART. S18/S19/S20/AMISE stay paper.")) return;
+  act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+};
 $("btn-lock").onclick = () => act("flash-money", "/api/live", { unlocked: false }, "Live locked");
 $("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
   total_capital_inr: Number($("cap-total").value || 0),
