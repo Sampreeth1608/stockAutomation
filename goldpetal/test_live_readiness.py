@@ -25,6 +25,18 @@ def test_hard_live_max_lots_imported() -> None:
     assert HARD_LIVE_MAX_LOTS == 1000
     assert PANEL_LIVE_MAX_LOTS == 1000
 
+
+def test_hard_live_max_lots_survives_old_live_orders(monkeypatch) -> None:
+    import importlib
+
+    import live_orders
+    import live_readiness as lr
+
+    monkeypatch.delattr(live_orders, "HARD_LIVE_MAX_LOTS", raising=True)
+    reloaded = importlib.reload(lr)
+    assert reloaded.HARD_LIVE_MAX_LOTS == 1000
+    assert reloaded.PANEL_LIVE_MAX_LOTS == 1000
+
 IST = ZoneInfo("Asia/Kolkata")
 
 

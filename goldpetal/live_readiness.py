@@ -22,13 +22,13 @@ from control_state import (
 )
 from operator_desk import OPERATOR_PANEL, OPERATOR_URL
 from position_safety import read_bot_health
+import live_orders as _live_orders
 
-try:
-    from live_orders import HARD_LIVE_MAX_LOTS, live_lots, live_lots_for
-except ImportError:  # mixed VM git-show copy: older live_orders.py
-    from live_orders import live_lots, live_lots_for
-
-    HARD_LIVE_MAX_LOTS = 1000
+# Named import of HARD_LIVE_MAX_LOTS crashes 8501 when live_orders.py is an
+# older git-show copy. getattr keeps the desk up; cap is still 1000.
+HARD_LIVE_MAX_LOTS = int(getattr(_live_orders, "HARD_LIVE_MAX_LOTS", 1000) or 1000)
+live_lots = _live_orders.live_lots
+live_lots_for = getattr(_live_orders, "live_lots_for", None) or (lambda _strategy: live_lots())
 
 IST = ZoneInfo("Asia/Kolkata")
 PANEL_LIVE_MAX_LOTS = HARD_LIVE_MAX_LOTS
