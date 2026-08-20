@@ -1211,8 +1211,10 @@ def main() -> None:
     load_capital()
     try:
         from amise import ensure_mood_gate
+        from live_readiness import ensure_overnight_gap_enable
 
         ensure_mood_gate()
+        ensure_overnight_gap_enable()
     except Exception:
         pass
     threading.Thread(target=_amise_auto_loop, name="amise-auto-lab", daemon=True).start()

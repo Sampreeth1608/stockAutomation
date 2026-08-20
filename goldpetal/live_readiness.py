@@ -114,6 +114,25 @@ def book_may_go_live(
     return n in qualified_live_names(summaries=summaries)
 
 
+def ensure_overnight_gap_enable(*, path: Path | None = None) -> dict[str, Any]:
+    """Paper overnight gap so closed trades can reach 40% WR% AC for the Live tab.
+
+    Does not Arm live. Does not set DRY_RUN=false. Type RESTART on Engine.
+    """
+    from analytics.env_bridge import write_env_updates
+
+    res = write_env_updates({"ENABLE_OVERNIGHT_GAP": "true"}, path=path)
+    if res.get("ok"):
+        os.environ["ENABLE_OVERNIGHT_GAP"] = "true"
+    out = dict(res)
+    out["enabled"] = True
+    out["note"] = (
+        "Overnight gap papers. Live tab after closed trades and WR% AC ≥ 40. "
+        "You Arm live. Type RESTART on Engine. Keep DRY_RUN=true. Stay at 3 lots."
+    )
+    return out
+
+
 def _truthy(raw: str | None, default: str = "true") -> bool:
     v = (raw if raw is not None else default).strip().lower()
     return v in {"1", "true", "yes", "y"}

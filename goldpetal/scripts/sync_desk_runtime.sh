@@ -30,6 +30,9 @@ FILES=(
   goldpetal/entry_gates.py
   goldpetal/amise.py
   goldpetal/trade_analysis.py
+  goldpetal/analytics/env_bridge.py
+  goldpetal/overnight_gap.py
+  goldpetal/strategy_overnight_gap.py
   goldpetal/.env.example
   goldpetal/station.html
   goldpetal/lite.html

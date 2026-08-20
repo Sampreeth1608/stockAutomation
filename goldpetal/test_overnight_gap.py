@@ -359,14 +359,20 @@ def test_hydrate_uses_session_high_low() -> None:
         assert out.action == "BUY"
 
 
-def test_enable_default_false() -> None:
+def test_enable_default_true() -> None:
     import os
 
     from portfolio import portfolio_from_env
 
     os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
     p = portfolio_from_env()
-    assert "OVERNIGHT_GAP" not in p.enabled
+    assert "OVERNIGHT_GAP" in p.enabled
+    env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "ENABLE_OVERNIGHT_GAP=true" in env
+    portfolio = (ROOT / "portfolio.py").read_text(encoding="utf-8")
+    assert 'on("ENABLE_OVERNIGHT_GAP", "true")' in portfolio
+    panel = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "ensure_overnight_gap_enable" in panel
 
 
 def test_wide_spread_allows() -> None:
@@ -468,7 +474,7 @@ if __name__ == "__main__":
     test_friday_entry_exits_monday()
     test_rollover_blocks_entry()
     test_hydrate_uses_session_high_low()
-    test_enable_default_false()
+    test_enable_default_true()
     test_paper_until_40_then_live_tab()
     test_mood_exempt()
     test_on_desk_and_slim()

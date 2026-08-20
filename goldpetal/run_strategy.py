@@ -1861,7 +1861,7 @@ def run_once(
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
-            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Paper until you Arm live.
+            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Papers; Live after 40% WR% AC.
             emit_overnight_gap_if_changed(now, message)
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)
@@ -2159,7 +2159,7 @@ def main() -> None:
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
         f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
-        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP off, AMISE S21+ after Lab Approve)",
+        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP paper then Live at 40% WR% AC, AMISE S21+ after Lab Approve)",
         flush=True,
     )
 

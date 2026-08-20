@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v39" in html
-    assert " · v39" in html
+    assert "gp-header-v40" in html
+    assert " · v40" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -109,6 +109,7 @@ def test_station_is_the_operator_page() -> None:
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
+    assert "Overnight gap papers now" in html
     assert "S18 / S19 / S20 / AMISE / overnight gap stay paper" in html
     assert "live_eligible" in html
     assert "exact IST click time" in html
@@ -235,6 +236,7 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Approve already papers" in html
     assert "only Angel" in html
     assert "40% WR% AC" in html
+    assert "Overnight gap papers now" in html
     assert "overnight gap stay paper until they hit 40%" in html
     assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
@@ -400,6 +402,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/.env.example" in sync
     assert "goldpetal/portfolio.py" in sync
     assert "goldpetal/storage.py" in sync
+    assert "goldpetal/analytics/env_bridge.py" in sync
+    assert "goldpetal/overnight_gap.py" in sync
+    assert "goldpetal/strategy_overnight_gap.py" in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
@@ -409,7 +414,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v39" in cmd
+    assert "Gold Petal v40" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

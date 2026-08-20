@@ -132,7 +132,7 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S5": "true",
     "ENABLE_S6": "false",
     "ENABLE_FLOW_BRAIN": "false",
-    "ENABLE_OVERNIGHT_GAP": "false",
+    "ENABLE_OVERNIGHT_GAP": "true",
     "ENABLE_S8": "true",
     "ENABLE_S9": "false",
     "ENABLE_S10": "false",

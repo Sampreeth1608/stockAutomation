@@ -408,6 +408,24 @@ def test_apply_desk_books_overnight_gap_live_when_wr_40() -> None:
         td.cleanup()
 
 
+def test_ensure_overnight_gap_enable_writes_env() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text("ENABLE_OVERNIGHT_GAP=false\nDRY_RUN=true\n", encoding="utf-8")
+        os.environ["ENABLE_OVERNIGHT_GAP"] = "false"
+        from live_readiness import ensure_overnight_gap_enable
+
+        res = ensure_overnight_gap_enable(path=env)
+        assert res.get("ok") is True
+        assert "ENABLE_OVERNIGHT_GAP=true" in env.read_text(encoding="utf-8")
+        assert os.environ.get("ENABLE_OVERNIGHT_GAP") == "true"
+        assert "40" in str(res.get("note") or "")
+    finally:
+        os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
+        td.cleanup()
+
+
 def test_desk_snapshot_skips_checklist() -> None:
     os.environ["DRY_RUN"] = "true"
     snap = desk_snapshot(summaries={})
@@ -660,6 +678,8 @@ if __name__ == "__main__":
     print("ok overnight gap paper until 40")
     test_apply_desk_books_overnight_gap_live_when_wr_40()
     print("ok overnight gap live at 40")
+    test_ensure_overnight_gap_enable_writes_env()
+    print("ok overnight gap enable write")
     test_desk_snapshot_skips_checklist()
     print("ok desk snapshot")
     test_apply_desk_books_amise_not_live()

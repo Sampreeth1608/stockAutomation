@@ -144,10 +144,12 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S5, S8, S13, S16, S18 (S4 off — Angel/ticks daily
+    Slim paper default: S5, S8, S13, S16, S18, S19, overnight gap (S4 off — Angel/ticks daily
     swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
-    false) — AMISE factory holds the research ML.     S18 stays paper-only. S19 paper 1h body+close is on (not live). S20
-    stays off until you ask. AMISE slots S21+ ENABLE after Lab Approve.
+    false) — AMISE factory holds the research ML. S18 stays paper until 40% WR% AC.
+    S19 paper 1h body+close is on (Live after 40%). Overnight gap papers; Live tab
+    after closed trades and WR% AC ≥ 40 — you Arm. S20 stays off until you ask.
+    AMISE slots S21+ ENABLE after Lab Approve.
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -167,7 +169,7 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S6_MIN30")
     if on("ENABLE_FLOW_BRAIN", "false"):
         enabled.add("FLOW_BRAIN")
-    if on("ENABLE_OVERNIGHT_GAP", "false"):
+    if on("ENABLE_OVERNIGHT_GAP", "true"):
         enabled.add("OVERNIGHT_GAP")
     if on("ENABLE_S8", "true"):
         enabled.add("S8_NET_ZIGZAG")
@@ -213,6 +215,7 @@ def portfolio_from_env() -> PortfolioConfig:
             "S16_HHHL_WICK_1H",
             "S18_OHLC_VOL_HTF",
             "S19_BODY_CLOSE_1H",
+            "OVERNIGHT_GAP",
         }
 
     flatten = on("FLATTEN_ON_BAD_REGIME", "false")
