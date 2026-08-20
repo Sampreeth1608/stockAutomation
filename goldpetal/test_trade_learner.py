@@ -114,7 +114,7 @@ def test_allows_high_winrate_book() -> None:
     feat = {"strategy": "S5_MINEDGE", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S5_MINEDGE", feat)
     assert ok is True, why
-    assert "ml_p=" in why or "warmup" in why
+    assert "own_gate" in why or "ml_p=" in why or "warmup" in why
 
 
 def test_allows_positive_ev_book() -> None:
@@ -230,6 +230,22 @@ def test_ratchet_only_rises() -> None:
     test_need_is_flexible_when_stretch_not_seen()
 
 
+def test_s5_s8_own_gate_not_frozen_by_hour_ml() -> None:
+    lr = TradeLearner()
+    trades = [
+        _t("S5_MINEDGE", -80.0, f"2026-08-11T10:{i:02d}:00") for i in range(16)
+    ] + [
+        _t("S8_NET_ZIGZAG", -80.0, f"2026-08-11T10:{i:02d}:00") for i in range(16)
+    ]
+    lr.fit(trades)
+    feat5 = {"strategy": "S5_MINEDGE", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    feat8 = {"strategy": "S8_NET_ZIGZAG", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
+    ok5, why5 = lr.allow("S5_MINEDGE", feat5)
+    ok8, why8 = lr.allow("S8_NET_ZIGZAG", feat8)
+    assert ok5 is True and "own_gate" in why5
+    assert ok8 is True and "own_gate" in why8
+
+
 def test_on_close_exists() -> None:
     lr = TradeLearner()
     lr.on_close("S13_HHHL_DAY")
@@ -257,6 +273,7 @@ if __name__ == "__main__":
     test_enters_when_this_trade_beats_base_without_seventy()
     test_skips_losing_hour_keeps_winning_hour()
     test_need_is_flexible_when_stretch_not_seen()
+    test_s5_s8_own_gate_not_frozen_by_hour_ml()
     test_on_close_exists()
     test_reset_clears_singleton()
     print("ALL test_trade_learner OK")

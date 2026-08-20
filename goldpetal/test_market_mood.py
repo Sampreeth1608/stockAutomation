@@ -104,7 +104,9 @@ def test_quiet_stands_down_trend_books() -> None:
     assert st.mood == "QUIET"
     assert st.regime in {"CALM", "RANGE", "ACCUMULATION"}
     s8 = st.fit_for("S8_NET_ZIGZAG")
-    assert s8 is not None and s8["stance"] == "stand_down"
+    assert s8 is not None and s8["stance"] == "trade"
+    s5 = st.fit_for("S5_MINEDGE")
+    assert s5 is not None and s5["stance"] == "trade"
     s16 = st.fit_for("S16_HHHL_WICK_1H")
     assert s16 is not None and s16["stance"] == "stand_down"
     fb = st.fit_for("FLOW_BRAIN")
@@ -112,7 +114,9 @@ def test_quiet_stands_down_trend_books() -> None:
     s13 = st.fit_for("S13_HHHL_DAY")
     assert s13 is not None and s13["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
-    assert blocked and "stand_down" in why
+    assert blocked is False and why == "mood_ok"
+    blocked5, why5 = mood_blocks_entry(st, "BUY", strategy="S5_MINEDGE")
+    assert blocked5 is False and why5 == "mood_ok"
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
 
@@ -256,6 +260,7 @@ def test_not_a_paper_book() -> None:
     assert "MOOD_FIT_MIN=0.40" in env
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert "mood_blocks_entry" in runner
+    assert "OWN_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
     assert "ENTRY BLOCKED" in runner

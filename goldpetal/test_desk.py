@@ -56,8 +56,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v16" in html
-    assert " · v16" in html
+    assert "gp-header-v17" in html
+    assert " · v17" in html
     assert "WR% AC" in html
     assert "S18 / S19 / S20 / AMISE stay paper" in html
     assert "live_eligible" in html

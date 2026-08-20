@@ -545,6 +545,10 @@ class TradeLearner:
             return True, (
                 f"ml_warmup n={n} this={p_setup:.2f} base={base:.2f} need={need:.2f}"
             )
+        # S5/S8 already require expected-move / book rising-IMB. The hour
+        # ratchet was freezing them in quiet Gold while S13/S16 still fired.
+        if strategy in {"S5_MINEDGE", "S8_NET_ZIGZAG"}:
+            return True, f"own_gate n={n} this={p_setup:.2f} base={base:.2f}"
 
         b_n = int(extra.get("bucket_n") or 0)
         p_b = float(extra.get("bucket_p") or -1.0)

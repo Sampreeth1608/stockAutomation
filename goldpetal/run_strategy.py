@@ -997,12 +997,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(
+            ok_enter, why = _may_enter(
                 strategy_s5.name, regime_det.last.regime, side=result.action
             )
             if not ok_enter:
                 strategy_s5.position = "flat"
                 strategy_s5.entry_price = None
+                strategy_s5.last_skip = why
+                if state["tick_count"] % 50 == 0:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] {strategy_s5.name} "
+                        f"ENTRY BLOCKED ({why}) exp={strategy_s5.last_expected}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
                 return
         _record_signal(
             time_label=now.isoformat(timespec="seconds"),
@@ -1102,12 +1110,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(
+            ok_enter, why = _may_enter(
                 strategy_s8.name, regime_det.last.regime, side=result.action
             )
             if not ok_enter:
                 strategy_s8.position = "flat"
                 strategy_s8.entry_price = None
+                strategy_s8.last_skip = why
+                if state["tick_count"] % 50 == 0:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] {strategy_s8.name} "
+                        f"ENTRY BLOCKED ({why}) imb={strategy_s8.last_imb:.1f}%"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
                 return
         if (
             strategy_s8.position != "flat"
@@ -1600,11 +1616,13 @@ def run_once(
                     f"regime={mood_det.last.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
-                    f"s4={strategy_s4.position} s5={strategy_s5.position} "
-                    f"s6={strategy_s6.position} fb={strategy_fb.position} s8={strategy_s8.position}"
-                    f"/{strategy_s8.bias} s9={strategy_s9.position}"
-                    f"/{strategy_s9.last_label} s10={strategy_s10.position}"
-                    f"/{strategy_s10.bias} s11={strategy_s11.position} "
+                    f"s4={strategy_s4.position} "
+                    f"s5={strategy_s5.position}/{strategy_s5.last_skip or '-'} "
+                    f"s6={strategy_s6.position} fb={strategy_fb.position} "
+                    f"s8={strategy_s8.position}/{strategy_s8.bias}/{strategy_s8.last_skip or '-'} "
+                    f"s9={strategy_s9.position}/{strategy_s9.last_label} "
+                    f"s10={strategy_s10.position}/{strategy_s10.bias} "
+                    f"s11={strategy_s11.position} "
                     f"s13={strategy_s13.position} "
                     f"s16={strategy_s16.position} "
                     f"s18={strategy_s18.position} "
@@ -1630,6 +1648,10 @@ def run_once(
                             "S19": strategy_s19.position,
                             "S20": strategy_s20.position,
                             "YOU": broker.positions.get("YOU_MANUAL", "flat"),
+                        },
+                        "skips": {
+                            "S5": strategy_s5.last_skip,
+                            "S8": strategy_s8.last_skip,
                         },
                         "runner": "run_strategy",
                     }

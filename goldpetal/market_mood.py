@@ -30,6 +30,10 @@ from amise_slots import amise_books_now, is_amise_slot, load_slot_genome, slot_i
 IST = ZoneInfo("Asia/Kolkata")
 # Daily/overnight books: show mood, never flatten, skip tick-window entry gate.
 MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT"})
+# Tick books with their own edge/book gates. Mood still prefers a side in
+# heat/fall/rise and still stands them down in a burst. Quiet/range/cool
+# must not freeze S5/S8 — portfolio already allows them in QUIET/CHOP.
+OWN_GATE_BOOKS = frozenset({"S5_MINEDGE", "S8_NET_ZIGZAG"})
 CORE_FIT_BOOKS: tuple[str, ...] = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
@@ -315,6 +319,14 @@ def _fit_one(
                 "preferred_side": "none",
                 "why": "cooldown — fade may take the mean (S20 stays off until you ENABLE)",
             }
+        if name in OWN_GATE_BOOKS:
+            return {
+                "strategy": name,
+                "weight": 0.62,
+                "stance": "trade",
+                "preferred_side": "none",
+                "why": "cooldown — S5 minedge / S8 book still decide",
+            }
         return {
             "strategy": name,
             "weight": 0.16,
@@ -330,6 +342,14 @@ def _fit_one(
                 "stance": "trade",
                 "preferred_side": "none",
                 "why": "range — fade book may trade; S20 is not a paper book until you ENABLE",
+            }
+        if name in OWN_GATE_BOOKS:
+            return {
+                "strategy": name,
+                "weight": 0.70,
+                "stance": "trade",
+                "preferred_side": "none",
+                "why": "quiet/range — S5 minedge / S8 book still decide",
             }
         if vol_book:
             return {
