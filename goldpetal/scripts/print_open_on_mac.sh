@@ -17,11 +17,14 @@ print_open_on_mac() {
   echo
   echo "On the Mac laptop (not this SSH tab):"
   echo "  Easiest on the Mac (not this SSH tab):"
-  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --zone=asia-south1-c"
+  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap"
   echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
-  echo "  Or Terminal:"
+  echo "  Or Terminal (IAP — not ssh to 8.231.125.120:22):"
   echo
-  echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
+  echo
+  echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
+  echo "  Do not open port 22 or 8501 to the internet."
   echo
   echo "  Then Chrome on the Mac (not this SSH tab):"
   echo "     http://127.0.0.1:8501/          trading station"
