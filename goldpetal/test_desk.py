@@ -71,10 +71,11 @@ def test_station_is_the_operator_page() -> None:
     assert "Mon–Fri 09:00–23:30" in html
     assert "Gold Petal running" in html
     assert "Gold Petal stopped" in html
-    sess_fn = html.split("function renderSessionLine")[1].split("function thead")[0]
-    assert "goldpetal_running" in sess_fn
-    assert "waiting for desk" in sess_fn
     assert "function goldPetalSessionNow" in html
+    run_fn = html.split("function goldPetalIsRunning")[1].split("function renderSessionLine")[0]
+    assert "goldpetal_running" in run_fn
+    sess_fn = html.split("function renderSessionLine")[1].split("function thead")[0]
+    assert "waiting for desk" in sess_fn
     quote = html.split("function renderQuote(")[1].split("function moodKind")[0]
     assert "buy qty" not in quote
     assert "sell qty" not in quote
