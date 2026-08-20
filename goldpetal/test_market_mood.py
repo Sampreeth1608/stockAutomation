@@ -434,6 +434,13 @@ def test_not_a_paper_book() -> None:
     assert "mood_blocks_entry" in runner
     assert "OWN_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
     assert "FORMULA_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
+    mood_py = (root / "market_mood.py").read_text(encoding="utf-8")
+    assert "SELECT COUNT(*)" not in mood_py
+    assert "WINDOW_ROW_CAP" in mood_py
+    assert "clear_mood_cache" in mood_py
+    station = (root / "station.html").read_text(encoding="utf-8")
+    assert "waiting for desk" in station
+    assert "loadMood.busy" in station
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
     assert "refresh_layers" in runner
@@ -441,6 +448,56 @@ def test_not_a_paper_book() -> None:
     assert "strategy.position = prev" in runner
     assert "AMISE" not in ALL_STRATEGY_NAMES
     assert "MARKET_STATE" not in ALL_STRATEGY_NAMES
+
+
+def test_tick_mood_window_downsamples_without_count() -> None:
+    import tempfile
+    from datetime import timedelta
+
+    from storage import init_db, save_tick
+
+    from market_mood import LAYER_SAMPLES, tape_now, tick_mood_window
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        px = 15300.0
+        for i in range(400):
+            px += 0.5
+            save_tick(
+                {
+                    "last_traded_price": int(px * 100),
+                    "total_buy_quantity": 5000.0,
+                    "total_sell_quantity": 5000.0,
+                },
+                symbol="GOLDPETAL",
+                token="1",
+                received_at=f"2026-08-20T11:{i // 60:02d}:{i % 60:02d}+05:30",
+                db_path=db,
+            )
+        now = tape_now(db)
+        samples = tick_mood_window(db, since=now - timedelta(hours=2))
+        assert 70 <= len(samples) <= LAYER_SAMPLES + 2
+        assert samples[0][0] < samples[-1][0]
+
+
+def test_mood_desk_payload_cache_returns_a_copy() -> None:
+    import tempfile
+
+    from market_mood import clear_mood_cache, mood_desk_payload
+
+    missing = Path(tempfile.mkdtemp()) / "no-ticks.db"
+    os.environ["MOOD_GATE"] = "false"
+    try:
+        clear_mood_cache()
+        first = mood_desk_payload(missing)
+        first["note"] = "mutated"
+        second = mood_desk_payload(missing)
+        assert "mutated" not in second["note"]
+        assert "OFF" in second["note"]
+    finally:
+        os.environ.pop("MOOD_GATE", None)
+        clear_mood_cache()
 
 
 if __name__ == "__main__":
@@ -462,5 +519,7 @@ if __name__ == "__main__":
     test_horizon_stack_has_operator_rungs()
     test_htf_fight_stands_down_hour_book_not_s16()
     test_snapshot_mood_exposes_layers()
+    test_tick_mood_window_downsamples_without_count()
+    test_mood_desk_payload_cache_returns_a_copy()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")

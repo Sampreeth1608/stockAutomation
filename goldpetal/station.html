@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v45: AMISE always uses market state; Enable only gates your books -->
+<!-- gp-header-v46: cheap mood poll so GOLD quote and Engine can paint -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v45</div>
+      <div class="clock" id="clock">IST — · v46</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -486,7 +486,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="pane">
         <h2>Engine</h2>
-        <p class="mono" id="engine-line">…</p>
+        <p class="mono" id="engine-line">waiting for desk…</p>
         <div class="row" style="margin-top:.4rem">
           <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
           <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
@@ -634,8 +634,10 @@ function withDeskAuth(opts) {
   return o;
 }
 async function bootAuth() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => { try { ctrl.abort(); } catch (err) {} }, 8000);
   try {
-    const r = await fetch("/api/desk/session", { credentials: "same-origin" });
+    const r = await fetch("/api/desk/session", { credentials: "same-origin", signal: ctrl.signal });
     if (r.status === 401) {
       location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
       return false;
@@ -651,6 +653,8 @@ async function bootAuth() {
     return true;
   } catch (e) {
     return true;
+  } finally {
+    clearTimeout(timer);
   }
 }
 async function api(path, opts) {
@@ -681,6 +685,10 @@ async function api(path, opts) {
         hint += " — factory start did not answer. On the VM: tail data/amise/lab.log";
       } else if (String(path).indexOf("/api/amise") >= 0) {
         hint += " — AMISE snapshot still loading. Factory may already be running — press Refresh.";
+      } else if (String(path).indexOf("/api/desk") >= 0) {
+        hint += " — Engine stays waiting until the station answers. Not Angel network. RESTART the station if this repeats.";
+      } else if (String(path).indexOf("/api/tape") >= 0) {
+        hint += " — GOLD LTP waits on tape. If Engine says bot stopped, press Start bot (not feed-only).";
       }
       throw new Error(hint);
     }
@@ -701,7 +709,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v45";
+    if (clock) clock.textContent = "IST " + ist + " · v46";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -759,7 +767,9 @@ function tapeIsLive() {
   return false;
 }
 function goldPetalIsRunning() {
-  return goldPetalSessionNow().open;
+  const sess = lastDesk.session || {};
+  if (typeof sess.goldpetal_running === "boolean") return sess.goldpetal_running;
+  return false;
 }
 function renderSessionLine() {
   const el = $("session-line");
@@ -768,8 +778,16 @@ function renderSessionLine() {
   const hours = "Mon–Fri " + s.openS + "–" + s.closeS + " IST";
   const live = lastDesk.live_desk || {};
   const armed = !!live.would_place_real_orders;
+  const deskReady = !!(lastDesk.bot || lastDesk.session);
+  if (!deskReady) {
+    el.textContent = "waiting for desk · " + hours;
+    el.className = "sub stopped";
+    return;
+  }
   const running = goldPetalIsRunning();
-  let line = running ? ("Gold Petal running · " + hours) : ("Gold Petal stopped · " + hours);
+  let line = running
+    ? ("Gold Petal running · " + hours)
+    : (s.open ? ("Gold Petal hours · " + hours) : ("Gold Petal stopped · " + hours));
   if (s.weekend) line += " · weekend";
   if (armed) line += " · LIVE ARMED";
   el.textContent = line;
@@ -934,6 +952,8 @@ function renderFits() {
   });
 }
 async function loadMood() {
+  if (loadMood.busy) return;
+  loadMood.busy = true;
   try {
     renderMood(await api("/api/mood"));
     renderQuote();
@@ -945,7 +965,7 @@ async function loadMood() {
       gate_on: false,
       flatten_on: false,
     });
-  }
+  } finally { loadMood.busy = false; }
 }
 function renderKpis() {
   const all = allScore();
@@ -2348,17 +2368,18 @@ if (location.hash === "#live") {
   showMainTab();
 }
 bootExports().catch((e) => flash("flash-dl", String(e.message || e), true));
-bootAuth().then((ok) => {
+bootAuth().then(async (ok) => {
   if (ok === false) return;
-  loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
-  loadTape().catch(() => {});
-  loadMood().catch(() => {});
+  try { await loadDesk(); }
+  catch (e) { flash("flash-engine", String(e.message || e), true); }
+  loadTape().catch((e) => flash("flash-grid", String(e.message || e), true));
+  setTimeout(() => loadMood().catch(() => {}), 1500);
 });
 setTimeout(() => loadHistory().catch(() => {}), 10000);
-setTimeout(() => loadMl().catch(() => {}), 2000);
-setTimeout(() => loadLab().catch(() => {}), 4000);
-setTimeout(() => loadAmise().catch(() => {}), 6000);
-setTimeout(() => loadYou().catch(() => {}), 3000);
+setTimeout(() => loadMl().catch(() => {}), 4000);
+setTimeout(() => loadLab().catch(() => {}), 8000);
+setTimeout(() => loadAmise().catch(() => {}), 12000);
+setTimeout(() => loadYou().catch(() => {}), 5000);
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 30000);
@@ -2366,7 +2387,7 @@ setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 30000);
 setInterval(() => { if (!typing() && watchTab === "amise") loadAmise().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 12000);
-setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 5000);
+setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 8000);
 </script>
 </body>
 </html>

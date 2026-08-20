@@ -71,7 +71,9 @@ def test_station_is_the_operator_page() -> None:
     assert "Mon–Fri 09:00–23:30" in html
     assert "Gold Petal running" in html
     assert "Gold Petal stopped" in html
-    assert "function renderSessionLine" in html
+    sess_fn = html.split("function renderSessionLine")[1].split("function thead")[0]
+    assert "goldpetal_running" in sess_fn
+    assert "waiting for desk" in sess_fn
     assert "function goldPetalSessionNow" in html
     quote = html.split("function renderQuote(")[1].split("function moodKind")[0]
     assert "buy qty" not in quote
@@ -81,8 +83,11 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v45" in html
-    assert " · v45" in html
+    assert "gp-header-v46" in html
+    assert " · v46" in html
+    assert "waiting for desk" in html
+    assert "Gold Petal hours" in html
+    assert "waiting for desk…" in html
     assert "mkt.layers" in html
     assert "80 ticks" in html
     assert "reads this stack" in html
@@ -435,7 +440,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v45" in cmd
+    assert "Gold Petal v46" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

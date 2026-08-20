@@ -10,6 +10,8 @@ are never vetoed. Keep DRY_RUN=true.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -81,6 +83,11 @@ HORIZON_SPECS: tuple[HorizonSpec, ...] = (
 )
 HORIZON_KEYS: tuple[str, ...] = tuple(h.key for h in HORIZON_SPECS)
 LAYER_SAMPLES = 80
+# Newest N ticks in a window — no COUNT(*) of the week on every /api/mood.
+WINDOW_ROW_CAP = 2500
+_MOOD_CACHE_SEC = 8.0
+_mood_lock = threading.Lock()
+_mood_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 FAST_HORIZONS: tuple[str, ...] = ("ticks80", "5m", "15m")
 STRUCT_HORIZONS: tuple[str, ...] = ("2h", "3h", "day", "week")
 Mood = Literal[
@@ -132,7 +139,14 @@ def set_regime_gate(on: bool, *, path: Path | None = None) -> dict[str, Any]:
         if on
         else "Market regime OFF. Books trade their formulas. Type RESTART on Engine."
     )
+    clear_mood_cache()
     return out
+
+
+def clear_mood_cache() -> None:
+    """Drop the 8s desk mood snapshot. Enable regime and tests call this."""
+    with _mood_lock:
+        _mood_cache.clear()
 
 
 def mood_flatten_on() -> bool:
@@ -883,6 +897,55 @@ def tape_now(db: Path | None = None) -> datetime:
     return datetime.now(IST)
 
 
+def _tick_samples_from_rows(rows: list[Any]) -> list[tuple[float, float, float]]:
+    return [
+        (float(r["ltp"]), float(r["bp"] or 0.0), float(r["sp"] or 0.0))
+        for r in rows
+    ]
+
+
+def _tick_mood_samples_on(conn: Any, *, limit: int = 80) -> list[tuple[float, float, float]]:
+    rows = list(
+        conn.execute(
+            """
+            SELECT ltp, bp, sp FROM ticks
+            WHERE ltp IS NOT NULL
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (max(8, int(limit)),),
+        )
+    )
+    rows.reverse()
+    return _tick_samples_from_rows(rows)
+
+
+def _tick_mood_window_on(
+    conn: Any,
+    *,
+    since: datetime,
+    target: int = LAYER_SAMPLES,
+) -> list[tuple[float, float, float]]:
+    """Newest WINDOW_ROW_CAP ticks in [since, tape], then downsample. No COUNT(*)."""
+    target = max(8, int(target))
+    cap = max(target * 12, WINDOW_ROW_CAP)
+    rows = list(
+        conn.execute(
+            """
+            SELECT ltp, bp, sp FROM ticks
+            WHERE ltp IS NOT NULL AND received_at >= ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (_iso(since), cap),
+        )
+    )
+    if not rows:
+        return []
+    rows.reverse()
+    return downsample_samples(_tick_samples_from_rows(rows), target)
+
+
 def tick_mood_samples(
     db: Path | None = None, *, limit: int = 80
 ) -> list[tuple[float, float, float]]:
@@ -894,22 +957,7 @@ def tick_mood_samples(
         return []
     init_db(path)
     with connect(path) as conn:
-        rows = list(
-            conn.execute(
-                """
-                SELECT ltp, bp, sp FROM ticks
-                WHERE ltp IS NOT NULL
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (max(8, int(limit)),),
-            )
-        )
-    rows.reverse()
-    return [
-        (float(r["ltp"]), float(r["bp"] or 0.0), float(r["sp"] or 0.0))
-        for r in rows
-    ]
+        return _tick_mood_samples_on(conn, limit=limit)
 
 
 def tick_mood_window(
@@ -918,7 +966,7 @@ def tick_mood_window(
     since: datetime,
     target: int = LAYER_SAMPLES,
 ) -> list[tuple[float, float, float]]:
-    """~target samples spanning [since, tape]. Stride so a week is not the last 80 ticks."""
+    """~target samples from the newest ticks in [since, tape]. Desk-poll cheap."""
     from desk_data import resolve_desk_db
     from storage import connect, init_db
 
@@ -926,51 +974,8 @@ def tick_mood_window(
     if not Path(path).is_file():
         return []
     init_db(path)
-    start = _iso(since)
-    target = max(8, int(target))
     with connect(path) as conn:
-        n = int(
-            conn.execute(
-                """
-                SELECT COUNT(*) AS n FROM ticks
-                WHERE ltp IS NOT NULL AND received_at >= ?
-                """,
-                (start,),
-            ).fetchone()["n"]
-            or 0
-        )
-        if n <= 0:
-            return []
-        stride = max(1, n // target)
-        rows = list(
-            conn.execute(
-                """
-                SELECT ltp, bp, sp FROM ticks
-                WHERE ltp IS NOT NULL AND received_at >= ?
-                  AND (id % ?) = 0
-                ORDER BY id ASC
-                LIMIT ?
-                """,
-                (start, stride, target + 40),
-            )
-        )
-        if len(rows) < 8 and stride > 1:
-            rows = list(
-                conn.execute(
-                    """
-                    SELECT ltp, bp, sp FROM ticks
-                    WHERE ltp IS NOT NULL AND received_at >= ?
-                    ORDER BY id ASC
-                    LIMIT ?
-                    """,
-                    (start, target + 40),
-                )
-            )
-    samples = [
-        (float(r["ltp"]), float(r["bp"] or 0.0), float(r["sp"] or 0.0))
-        for r in rows
-    ]
-    return downsample_samples(samples, target)
+        return _tick_mood_window_on(conn, since=since, target=target)
 
 
 def _since_for(spec: HorizonSpec, now: datetime) -> datetime | None:
@@ -1004,20 +1009,41 @@ def classify_horizons(
     gate: bool | None = None,
     flatten: bool | None = None,
 ) -> dict[str, MoodState]:
-    now = tape_now(db)
+    from desk_data import resolve_desk_db
+    from storage import connect, init_db
+
     gate_on = mood_gate_on() if gate is None else bool(gate)
     flatten_on = mood_flatten_on() if flatten is None else bool(flatten)
-    out: dict[str, MoodState] = {}
-    for spec in HORIZON_SPECS:
-        if spec.kind == "ticks":
-            raw = tick_mood_samples(db, limit=LAYER_SAMPLES)
-        else:
-            since = _since_for(spec, now)
-            raw = tick_mood_window(db, since=since) if since is not None else []
-        out[spec.key] = classify_samples(
-            raw, gate=gate_on, flatten=flatten_on, with_fits=False
-        )
-    return out
+    empty = {spec.key: _empty("need ≥8 ticks") for spec in HORIZON_SPECS}
+    path = db or resolve_desk_db()
+    if not Path(path).is_file():
+        return empty
+    init_db(path)
+    with connect(path) as conn:
+        now = datetime.now(IST)
+        row = conn.execute(
+            "SELECT received_at FROM ticks ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            parsed = _parse_received(str(row["received_at"] or ""))
+            if parsed is not None:
+                now = parsed
+        out: dict[str, MoodState] = {}
+        ticks_raw = _tick_mood_samples_on(conn, limit=LAYER_SAMPLES)
+        for spec in HORIZON_SPECS:
+            if spec.kind == "ticks":
+                raw = ticks_raw
+            else:
+                since = _since_for(spec, now)
+                raw = (
+                    _tick_mood_window_on(conn, since=since)
+                    if since is not None
+                    else []
+                )
+            out[spec.key] = classify_samples(
+                raw, gate=gate_on, flatten=flatten_on, with_fits=False
+            )
+        return out
 
 
 def blend_layers(
@@ -1136,7 +1162,7 @@ class MoodDetector:
         return self.last
 
     def refresh_layers(self, db: Path | None = None) -> MoodState:
-        """Re-read 5m…week from the tape. Call on seed and every ~50 ticks. Not every tick."""
+        """Re-read 5m…week from the tape. Seed + every ~50 ticks. One SQLite pass."""
         fast = (
             classify_samples(list(self._buf), with_fits=True)
             if self._buf
@@ -1164,7 +1190,25 @@ def snapshot_mood(db: Path | None = None, *, limit: int = 240) -> MoodState:
     return blend_layers(layers)
 
 
+def _mood_cache_key(db: Path | None, gate_on: bool) -> str:
+    try:
+        from desk_data import resolve_desk_db
+
+        path = str(Path(db or resolve_desk_db()).resolve())
+    except Exception:
+        path = str(db or "")
+    return f"{path}|{int(gate_on)}"
+
+
 def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
+    """Desk / AMISE snapshot. Cached ~8s so the 5s poll cannot starve /api/desk + /api/tape."""
+    gate_on = mood_gate_on()
+    key = _mood_cache_key(db, gate_on)
+    now = time.monotonic()
+    with _mood_lock:
+        hit = _mood_cache.get(key)
+        if hit is not None and now - hit[0] < _MOOD_CACHE_SEC:
+            return dict(hit[1])
     st = snapshot_mood(db)
     d = st.to_dict()
     d["ok"] = True
@@ -1186,4 +1230,6 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
             "AMISE may still observe the tape. Type RESTART after you toggle. "
             "Does not ENABLE. Keep DRY_RUN=true."
         )
-    return d
+    with _mood_lock:
+        _mood_cache[key] = (time.monotonic(), d)
+    return dict(d)
