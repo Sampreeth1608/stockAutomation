@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal</title>
+<title>Gold Petal Desk</title>
 <meta name="theme-color" content="#7a5314"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <style>
@@ -47,8 +47,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 </style>
 </head>
 <body>
-  <h1>Gold Petal</h1>
-  <p class="hint">Compact controls. <a href="/">Trading station</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <a href="/full#why">Why win rate is low</a> · <a href="/full#s14-calc">S14 calculation</a></p>
+  <h1>Gold Petal Desk</h1>
+  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a></p>
   <div class="pills" id="pills"></div>
   <p class="hint" id="mood-line">mood … · one tape read for all books · MOOD_GATE on: unfit books do not open</p>
 
@@ -81,13 +81,14 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Strategies</h2>
     <table>
-      <thead><tr><th>Book</th><th>In bot</th><th>Live</th><th></th></tr></thead>
+      <thead><tr><th>Book</th><th>In bot</th><th></th></tr></thead>
       <tbody id="books"></tbody>
     </table>
     <div class="row" style="margin-top:.55rem">
       <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
+      <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
-    <p class="hint">Live pick is S5 / S8 / S13 / S16 only. S18 / S19 / S20 / AMISE stay paper. Exit flattens that book only. Type RESTART after save.</p>
+    <p class="hint">In = paper in the bot after Restart. Live pick is S5 / S8 / S13 / S16 only. Exit one row or Exit all. Type RESTART after save.</p>
     <p class="flash" id="flash-books"></p>
   </section>
 
@@ -96,19 +97,19 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <p class="hint" id="ml-s11-line">Loading S11 pack…</p>
     <p class="hint" id="ml-s18-line">Loading S18 pack…</p>
     <div id="ml-pending"></div>
-    <p class="hint">S11 and S18 rank after Angel charges (tax excluded). After the first S11 pack is approved, a new row appears only if it beats that pack. Approve → paper, then type RESTART. Full inspector: <a href="/#ml">station ML tab</a>.</p>
+    <p class="hint">S11 and S18 rank after Angel charges (tax excluded). After the first S11 pack is approved, a new row appears only if it beats that pack. Approve → paper, then type RESTART. Full inspector: <a href="/#ml">desk ML tab</a>.</p>
     <p class="flash" id="flash-ml"></p>
   </section>
 
   <section class="card">
     <h2>Research Lab</h2>
     <p class="hint" id="lab-line">Loading lab…</p>
-    <p class="hint">AI can propose. You decide on the <a href="/#lab">station Lab tab</a>. This phone page does not approve, ENABLE, or arm live.</p>
+    <p class="hint">AI can propose. You decide on the <a href="/#lab">desk Lab tab</a>. This phone page does not approve, ENABLE, or arm live.</p>
   </section>
 
   <section class="card">
     <h2>You — trade</h2>
-    <p class="hint">Sit 30m, 1h, 3h, or the whole day to teach (Mon–Fri 09:00–23:30 IST). Every BUY / SHORT / CLOSE stores the exact click time plus ticks and candles. Angel only after Paper off + LIVE + Unlock + type YOU. Press Let it trade when you want the mimic to paper, then compare. Keep sitting to teach more. Never DRY_RUN=false. Full compare: <a href="/#you">station You tab</a>.</p>
+    <p class="hint">Sit 30m, 1h, 3h, or the whole day to teach (Mon–Fri 09:00–23:30 IST). Every BUY / SHORT / CLOSE stores the exact click time plus ticks and candles. Angel only after Arm live on Live + type YOU. Press Let it trade when you want the mimic to paper, then compare. Keep sitting to teach more. Full compare: <a href="/#you">desk You tab</a>.</p>
     <p class="hint" id="you-ltp-line">LTP …</p>
     <p class="hint" id="you-live-line">Angel: recorded only</p>
     <div class="row">
@@ -128,20 +129,22 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
-    <h2>Live money</h2>
+    <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
+    <p class="hint">No Unlock / Lock. Paper only = Angel off. Arm live = type LIVE, then Restart. Set ₹ and lots per live book below.</p>
     <div class="row" style="margin-top:.5rem">
-      <label class="chk"><input type="checkbox" id="paper-only"/> Paper only</label>
-      <label class="chk">Lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
-      <input id="live-word" placeholder="LIVE" autocomplete="off"/>
-      <button class="btn" id="btn-save-money" type="button">Save money</button>
-    </div>
-    <div class="row" style="margin-top:.45rem">
-      <button class="btn warn" id="btn-unlock" type="button">Unlock live</button>
-      <button class="btn" id="btn-lock" type="button">Lock live</button>
+      <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
       <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
-      <button class="btn" id="btn-save-cap" type="button">Save capital</button>
+    </div>
+    <table style="margin-top:.45rem">
+      <thead><tr><th>Book</th><th>Live</th><th>₹</th><th>Lots</th></tr></thead>
+      <tbody id="live-books"></tbody>
+    </table>
+    <div class="row" style="margin-top:.45rem">
+      <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
+      <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
+      <button class="btn ok" id="btn-mode-paper" type="button">Paper only</button>
     </div>
     <p class="flash" id="flash-money"></p>
   </section>
@@ -197,23 +200,33 @@ function render(d) {
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
     pill("feed " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "ok", st.emergency_off ? "bad" : "ok"),
-    pill(st.live_unlocked ? "unlocked" : "locked", st.live_unlocked ? "warn" : "ok"),
+    pill(st.live_unlocked && live.dry_run === false ? "live path" : "paper", st.live_unlocked && live.dry_run === false ? "warn" : "ok"),
   ].join("");
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
   if (!typing()) {
     const enables = live.enables || {};
+    const cap = d.capital || {};
+    const budgets = cap.strategies || {};
     $("books").innerHTML = (live.books || []).map((b) => {
       const name = b.strategy;
       const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
       return `<tr>
         <td>${shortName(name)}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td>${b.live_eligible !== false ? `<input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/>` : "paper"}</td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="4">no books</td></tr>`;
-    $("paper-only").checked = live.dry_run !== false;
+    }).join("") || `<tr><td colspan="3">no books</td></tr>`;
+    $("live-books").innerHTML = (live.books || []).filter((b) => b.live_eligible !== false).map((b) => {
+      const name = b.strategy;
+      const sb = budgets[name] || {};
+      return `<tr>
+        <td>${shortName(name)}</td>
+        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
+        <td><input type="number" data-budget="${name}" value="${esc(sb.budget_inr != null ? sb.budget_inr : "")}"/></td>
+        <td><input type="number" data-lots="${name}" min="1" max="10" value="${esc(sb.max_lots != null ? sb.max_lots : 1)}"/></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="4">none</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     const cap = d.capital || {};
     $("cap-total").value = cap.total_capital_inr || "";
@@ -221,7 +234,7 @@ function render(d) {
   }
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
-    : "Paper. Unlock + Live pick + type LIVE + Restart to arm.";
+    : "Paper. Type LIVE, Arm live, then Restart.";
 }
 function renderMl(d) {
   const s11 = (d && d.s11) || {};
@@ -300,24 +313,47 @@ $("books").addEventListener("click", (ev) => {
   if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Paper CLOSE always. Angel CLOSE only if live-armed.")) return;
   act("flash-books", "/api/desk/flatten", { strategy: name }, "Exit queued — bot CLOSEs on the next tick.");
 });
-$("btn-save-money").onclick = () => {
-  const paper = $("paper-only").checked;
-  act("flash-money", "/api/live/env", {
-    dry_run: paper,
+$("btn-exit-all").onclick = () => {
+  if (!window.confirm("Flatten EVERY book now?")) return;
+  act("flash-books", "/api/desk/flatten", { all: true }, "Exit all queued.");
+};
+function collectArmBody(mode) {
+  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  const allocations = [...document.querySelectorAll("input[data-budget]")].map((el) => {
+    const name = el.dataset.budget;
+    const lotsEl = document.querySelector('input[data-lots="' + name + '"]');
+    return {
+      strategy: name,
+      budget_inr: Number(el.value || 0),
+      max_lots: Number((lotsEl && lotsEl.value) || 1),
+      enabled: true,
+    };
+  });
+  return {
+    mode,
+    confirm: ($("live-word").value || "").trim(),
     live_max_lots: Number($("live-max").value || 1),
-    confirm: $("live-word").value.trim(),
-  }, "Money saved — Restart to load");
+    in_bot,
+    live,
+    total_capital_inr: Number($("cap-total").value || 0),
+    daily_loss_limit_inr: Number($("cap-dd").value || 0),
+    allocations,
+  };
+}
+$("btn-arm-live").onclick = () => {
+  const word = ($("live-word").value || "").trim();
+  if (word !== "LIVE") { flash("flash-money", "Type LIVE to arm Angel", true); return; }
+  if (!window.confirm("Arm live? Real Angel on picked S5/S8/S13/S16. Then type RESTART.")) return;
+  act("flash-money", "/api/desk/arm", collectArmBody("live"), "Armed setup saved. Type RESTART.");
   $("live-word").value = "";
 };
-$("btn-unlock").onclick = () => {
-  if (!window.confirm("Unlock live path? Still need Live pick (S5/S8/S13/S16), uncheck Paper only, type LIVE, Lots=1, Save, RESTART.")) return;
-  act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
+$("btn-mode-paper").onclick = () => {
+  if (!window.confirm("Switch to Paper? Angel stops.")) return;
+  const body = collectArmBody("paper");
+  body.confirm = "";
+  act("flash-money", "/api/desk/arm", body, "Paper mode. Angel is off.");
 };
-$("btn-lock").onclick = () => act("flash-money", "/api/live", { unlocked: false }, "Live locked");
-$("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
-  total_capital_inr: Number($("cap-total").value || 0),
-  daily_loss_limit_inr: Number($("cap-dd").value || 0),
-}, "Capital saved");
 load().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
 loadLab().catch(() => {});

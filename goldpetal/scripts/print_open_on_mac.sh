@@ -27,7 +27,7 @@ print_open_on_mac() {
   echo "  Do not open port 22 or 8501 to the internet."
   echo
   echo "  Then Chrome on the Mac (not this SSH tab):"
-  echo "     http://127.0.0.1:8501/          trading station"
+  echo "     http://127.0.0.1:8501/          Gold Petal desk"
   echo "     http://127.0.0.1:8501/lite     compact controls"
   echo "     http://127.0.0.1:8501/full     archive / downloads"
   echo "     Hard-refresh: Cmd+Shift+R"

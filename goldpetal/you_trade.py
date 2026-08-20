@@ -157,9 +157,9 @@ def you_live_status(
     dry = bool(env["dry_run"])
     would = bool(live_ok and bot_ok)
     if dry:
-        why = "DRY_RUN=true — uncheck Paper only, type LIVE, Save, Unlock, Restart"
+        why = "DRY_RUN=true — Paper mode on the Live tab. Type LIVE to Arm live, then Restart"
     elif not st.live_unlocked:
-        why = "live locked — Unlock live on Live money"
+        why = "live locked — Arm live on the Live tab"
     elif not live_ok:
         why = live_why
     elif not bot_ok:

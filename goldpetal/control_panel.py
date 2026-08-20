@@ -691,12 +691,65 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(*_json_bytes(res, status))
                 return
             if path == "/api/desk/flatten":
-                from desk_flatten import flatten_desk_status, request_flatten
+                from desk_flatten import flatten_desk_status, request_flatten, request_flatten_all
 
-                name = str(data.get("strategy") or "").strip()
-                res = request_flatten(name)
+                if data.get("all"):
+                    names = [
+                        str(s).strip()
+                        for s in (data.get("strategies") or [])
+                        if str(s).strip()
+                    ]
+                    res = request_flatten_all(strategies=names or None)
+                else:
+                    name = str(data.get("strategy") or "").strip()
+                    res = request_flatten(name)
                 status = 200 if res.get("ok") else 400
                 res = {**res, "flatten": flatten_desk_status()}
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/desk/arm":
+                from live_readiness import apply_desk_arm
+
+                allocations = data.get("allocations") or []
+                if not isinstance(allocations, list):
+                    allocations = []
+                try:
+                    lots = int(data.get("live_max_lots") or 1)
+                except (TypeError, ValueError):
+                    lots = 1
+                try:
+                    total = (
+                        float(data["total_capital_inr"])
+                        if data.get("total_capital_inr") not in (None, "")
+                        else None
+                    )
+                    day_loss = (
+                        float(data["daily_loss_limit_inr"])
+                        if data.get("daily_loss_limit_inr") not in (None, "")
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    self._send(*_json_bytes({"ok": False, "error": "capital must be numbers"}, 400))
+                    return
+                res = apply_desk_arm(
+                    mode=str(data.get("mode") or "paper"),
+                    confirm=str(data.get("confirm") or ""),
+                    live_max_lots=lots,
+                    in_bot=[
+                        str(s).strip()
+                        for s in (data.get("in_bot") or [])
+                        if str(s).strip()
+                    ],
+                    live=[
+                        str(s).strip()
+                        for s in (data.get("live") or [])
+                        if str(s).strip()
+                    ],
+                    total_capital_inr=total,
+                    daily_loss_limit_inr=day_loss,
+                    allocations=allocations,
+                )
+                status = 200 if res.get("ok") else 400
                 self._send(*_json_bytes(res, status))
                 return
             if path == "/api/amise/lab":

@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from control_state import is_live_mode_allowed, load_state, paper_strategy_names
+from control_state import (
+    is_live_mode_allowed,
+    load_state,
+    paper_strategy_names,
+    set_live_unlocked,
+)
 from operator_desk import OPERATOR_PANEL, OPERATOR_URL
 from live_orders import live_lots, live_lots_for
 from position_safety import read_bot_health
@@ -159,6 +164,108 @@ def apply_desk_books(
                 else ""
             )
         ),
+    }
+
+
+def apply_desk_arm(
+    *,
+    mode: str,
+    confirm: str = "",
+    live_max_lots: int = 1,
+    in_bot: list[str] | None = None,
+    live: list[str] | None = None,
+    total_capital_inr: float | None = None,
+    daily_loss_limit_inr: float | None = None,
+    allocations: list[dict[str, Any]] | None = None,
+    path: Path | None = None,
+    state_path: Path | None = None,
+    capital_path: Path | None = None,
+) -> dict[str, Any]:
+    """One save: books + ₹ per book + Paper or Live. Type LIVE to arm Angel.
+
+    Paper: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
+    Does not restart the bot. Does not ENABLE new research books.
+    """
+    want = str(mode or "paper").strip().lower()
+    if want in {"armed", "angel", "on"}:
+        want = "live"
+    if want not in {"paper", "live"}:
+        return {"ok": False, "error": "mode must be paper or live"}
+    if want == "live" and str(confirm or "").strip() != LIVE_CONFIRM_WORD:
+        return {
+            "ok": False,
+            "error": "Type LIVE to arm. Paper stays on until you do.",
+        }
+
+    books = apply_desk_books(
+        list(in_bot or []),
+        list(live or []),
+        path=path,
+        state_path=state_path,
+    )
+    if not books.get("ok"):
+        return {**books, "ok": False}
+
+    from capital import apply_live_capital_allocation, capital_snapshot
+
+    alloc_rows = [
+        row
+        for row in (allocations or [])
+        if isinstance(row, dict) and str(row.get("strategy") or "").strip()
+    ]
+    if (
+        alloc_rows
+        or total_capital_inr is not None
+        or daily_loss_limit_inr is not None
+    ):
+        apply_live_capital_allocation(
+            alloc_rows,
+            total_capital_inr=total_capital_inr,
+            daily_loss_limit_inr=daily_loss_limit_inr,
+            disable_others=False,
+            path=capital_path,
+        )
+
+    dry = want != "live"
+    env = apply_panel_live_env(
+        dry_run=dry,
+        live_max_lots=live_max_lots,
+        confirm=confirm,
+        path=path,
+        sync_environ=path is None,
+    )
+    if not env.get("ok"):
+        return {
+            "ok": False,
+            "error": env.get("error") or "money save failed",
+            "books": books,
+            "env": env,
+        }
+
+    if want == "live":
+        st = set_live_unlocked(True, path=state_path, note="desk Arm live")
+        live_note = (
+            "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
+            "Angel fires only on live-picked S5 / S8 / S13 / S16."
+        )
+        if not books.get("live_approved"):
+            live_note += " No live book is picked yet — check Live on those rows first."
+    else:
+        st = set_live_unlocked(False, path=state_path, note="desk Paper mode")
+        live_note = (
+            "Paper mode saved. Angel is off. Type RESTART if you changed In-bot books."
+        )
+
+    return {
+        "ok": True,
+        "mode": want,
+        "books": books,
+        "env": env,
+        "state": st.to_dict(),
+        "capital": capital_snapshot(path=capital_path),
+        "live_desk": live_readiness(),
+        "restart_needed": True,
+        "note": live_note,
     }
 
 

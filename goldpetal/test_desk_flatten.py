@@ -12,6 +12,7 @@ from desk_flatten import (
     flatten_ram,
     known_flatten_names,
     request_flatten,
+    request_flatten_all,
     take_flatten_requests,
 )
 
@@ -54,6 +55,20 @@ def test_two_books_independent(tmp_path: Path) -> None:
     jobs = take_flatten_requests(path=path, now=now)
     names = {j["strategy"] for j in jobs}
     assert names == {"S5_MINEDGE", "S8_NET_ZIGZAG"}
+
+
+def test_flatten_all_queues_named(tmp_path: Path) -> None:
+    path = tmp_path / "flatten_all.json"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=IST)
+    res = request_flatten_all(
+        strategies=["S5_MINEDGE", "S16_HHHL_WICK_1H"],
+        path=path,
+        now=now,
+    )
+    assert res["ok"] is True
+    assert res["n"] == 2
+    jobs = take_flatten_requests(path=path, now=now)
+    assert {j["strategy"] for j in jobs} == {"S5_MINEDGE", "S16_HHHL_WICK_1H"}
 
 
 def test_flatten_ram_long() -> None:
@@ -171,6 +186,7 @@ if __name__ == "__main__":
     test_you_manual_not_via_exit(p)
     test_queue_take_finish(p)
     test_two_books_independent(p)
+    test_flatten_all_queues_named(p)
     test_flatten_ram_long()
     test_flatten_ram_already_flat()
     test_flatten_ram_uses_flatten_method()

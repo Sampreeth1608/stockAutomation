@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent
 
 def test_station_is_the_operator_page() -> None:
     html = (ROOT / "station.html").read_text(encoding="utf-8")
-    assert "Gold Petal Station" in html
+    assert "Gold Petal Desk" in html
+    assert "Gold Petal Station" not in html
     assert 'rel="manifest"' in html
     assert "/manifest.webmanifest" in html
     assert "Start bot" in html
@@ -17,7 +18,11 @@ def test_station_is_the_operator_page() -> None:
     assert "Start feed only" in html
     assert "Save strategies" in html
     assert "Paper only" in html
-    assert "Unlock live" in html
+    assert "Arm live" in html
+    assert "Unlock live" not in html
+    assert 'data-tab="live"' in html
+    assert "Exit all" in html
+    assert "/api/desk/arm" in html
     assert "Positions" in html
     assert "Blotter" in html
     assert "Downloads" in html
@@ -56,11 +61,13 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v18" in html
-    assert " · v18" in html
+    assert "gp-header-v19" in html
+    assert " · v19" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
-    assert "Exit flattens that book only" in html
+    assert "Exit all" in html
+    assert 'id="live-panel"' in html
+    assert "₹ capital" in html
     assert "WR% AC" in html
     assert "S18 / S19 / S20 / AMISE stay paper" in html
     assert "live_eligible" in html
@@ -144,7 +151,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Start bot" in html
     assert 'rel="manifest"' in html
     assert "Save strategies" in html
-    assert "Trading station" in html
+    assert "Gold Petal Desk" in html
+    assert "href=\"/\"" in html
     assert "ML / S11 + S18" in html
     assert "Research Lab" in html
     assert "You — trade" in html
@@ -165,7 +173,11 @@ def test_lite_html_is_compact_controls() -> None:
     assert "live_eligible" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
-    assert "Exit flattens that book only" in html
+    assert "Exit all" in html
+    assert "Arm live" in html
+    assert "/api/desk/arm" in html
+    assert "Unlock live" not in html
+    assert "Live books + money" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
@@ -226,6 +238,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/desk/books" in text
     assert "/api/desk/flatten" in text
     assert "request_flatten" in text
+    assert "request_flatten_all" in text
+    assert "/api/desk/arm" in text
+    assert "apply_desk_arm" in text
     runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
     assert "emit_desk_flatten" in runner
     assert "apply_pending_flattens" in runner
@@ -278,7 +293,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "GoldPetal.command" in launcher
     man = (ROOT / "manifest.webmanifest").read_text(encoding="utf-8")
     assert '"display": "standalone"' in man
-    assert "Gold Petal" in man
+    assert '"name": "Gold Petal Desk"' in man or '"name":"Gold Petal Desk"' in man.replace(" ", "")
 
 
 def test_desk_payload_includes_session() -> None:

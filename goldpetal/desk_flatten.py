@@ -199,6 +199,56 @@ def request_flatten(
     }
 
 
+def request_flatten_all(
+    *,
+    strategies: list[str] | None = None,
+    path: Path = REQUEST_PATH,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Queue Exit for every desk book (or the names passed). One click, many CLOSEs."""
+    if strategies:
+        names = [str(n).strip() for n in strategies if str(n).strip()]
+    else:
+        names = [n for n in paper_strategy_names() if n in known_flatten_names()]
+    queued: list[dict[str, Any]] = []
+    already: list[str] = []
+    errors: list[str] = []
+    for name in names:
+        res = request_flatten(name, path=path, now=now)
+        if res.get("queued"):
+            queued.append(res.get("request") or {"strategy": name})
+        elif res.get("already_queued"):
+            already.append(name)
+        else:
+            errors.append(f"{name}: {res.get('error') or 'failed'}")
+    bot_ok = bot_is_running(now=now)
+    n = len(queued) + len(already)
+    if n == 0 and errors:
+        return {
+            "ok": False,
+            "queued": False,
+            "n": 0,
+            "errors": errors,
+            "error": "; ".join(errors[:4]),
+            "bot_running": bot_ok,
+        }
+    note = (
+        f"Exit all queued for {n} book(s). Bot CLOSEs each on the next tick."
+        if bot_ok
+        else f"Exit all queued for {n} book(s). Start bot / type RESTART so CLOSE can fire."
+    )
+    return {
+        "ok": True,
+        "queued": True,
+        "n": n,
+        "queued_names": [r.get("strategy") for r in queued],
+        "already_queued": already,
+        "errors": errors,
+        "bot_running": bot_ok,
+        "note": note,
+    }
+
+
 def take_flatten_requests(
     path: Path = REQUEST_PATH,
     *,

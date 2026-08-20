@@ -357,6 +357,57 @@ def test_apply_desk_books_amise_not_live() -> None:
         td.cleanup()
 
 
+def test_apply_desk_arm_rejects_live_without_word() -> None:
+    from live_readiness import apply_desk_arm
+
+    res = apply_desk_arm(mode="live", confirm="")
+    assert res["ok"] is False
+    assert "LIVE" in res["error"]
+
+
+def test_apply_desk_arm_paper_locks() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        import capital
+        import control_state
+        from live_readiness import apply_desk_arm
+
+        env = Path(td.name) / ".env"
+        env.write_text("ENABLE_S5=true\nDRY_RUN=true\nLIVE_MAX_LOTS=1\n", encoding="utf-8")
+        state = Path(td.name) / "state.json"
+        cap = Path(td.name) / "capital.json"
+        control_state.STATE_PATH = state
+        capital.CAPITAL_PATH = cap
+        res = apply_desk_arm(
+            mode="paper",
+            confirm="",
+            live_max_lots=1,
+            in_bot=["S5_MINEDGE"],
+            live=["S5_MINEDGE"],
+            total_capital_inr=200000,
+            daily_loss_limit_inr=2000,
+            allocations=[
+                {"strategy": "S5_MINEDGE", "budget_inr": 50000, "max_lots": 1}
+            ],
+            path=env,
+            state_path=state,
+            capital_path=cap,
+        )
+        assert res["ok"] is True
+        assert res["mode"] == "paper"
+        assert control_state.load_state(path=state).live_unlocked is False
+        assert "DRY_RUN=true" in env.read_text(encoding="utf-8")
+        plan = capital.load_capital(path=cap)
+        assert plan.strategies["S5_MINEDGE"].budget_inr == 50000
+    finally:
+        td.cleanup()
+        import capital as capital_mod
+        import control_state as cs
+
+        cs.STATE_PATH = cs.CONTROL_DIR / "state.json"
+        capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -386,4 +437,8 @@ if __name__ == "__main__":
     print("ok desk snapshot")
     test_apply_desk_books_amise_not_live()
     print("ok amise not live")
+    test_apply_desk_arm_rejects_live_without_word()
+    print("ok arm needs LIVE")
+    test_apply_desk_arm_paper_locks()
+    print("ok arm paper")
     print("ALL test_live_readiness OK")
