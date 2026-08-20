@@ -17,7 +17,10 @@ def test_station_is_the_operator_page() -> None:
     assert "Stop bot" in html
     assert "Start feed only" in html
     assert "Save strategies" in html
-    assert "Paper only" in html
+    assert "Paper is already running" in html
+    assert "Stop live" in html
+    assert ">Paper only<" not in html
+    assert "Wallet ₹" in html
     assert "Arm live" in html
     assert "Unlock live" not in html
     assert 'data-tab="live"' in html
@@ -61,8 +64,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v22" in html
-    assert " · v22" in html
+    assert "gp-header-v23" in html
+    assert " · v23" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html

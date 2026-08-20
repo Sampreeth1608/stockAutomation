@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v22: no left books / Edge / Tape / Signals; Downloads has signals -->
+<!-- gp-header-v23: Live tab: no Paper-only button; wallet ₹ label -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -194,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v22</div>
+      <div class="clock" id="clock">IST — · v23</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -267,26 +267,26 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-orders"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">One place to arm. Paper = no Angel. Arm live = type LIVE, pick S5 / S8 / S13 / S16, set ₹ and lots per book, then type RESTART on Engine. S18 / S19 / S20 / AMISE stay paper. Unlock / Lock are gone — Paper and Arm live do that for you.</p>
+        <p class="hint">Paper is already running. This tab is only to Arm live. Type LIVE, pick S5 / S8 / S13 / S16, set each book’s ₹ slice and lots, then type RESTART. S18 / S19 / S20 / AMISE stay paper.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
-          <p class="hint" id="money-line">Paper. Angel is off until you Arm live.</p>
+          <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
           <ul class="steps" id="arm-steps"></ul>
           <div class="row">
             <label class="chk">Ceiling lots <input class="cap" type="number" id="live-max" min="1" max="10" value="1"/></label>
-            <label class="chk">Book ₹ <input class="cap" type="number" id="cap-total" step="1000"/></label>
+            <label class="chk">Wallet ₹ <input class="cap" type="number" id="cap-total" step="1000"/></label>
             <label class="chk">Day-loss ₹ <input class="cap" type="number" id="cap-dd" step="100"/></label>
           </div>
           <div class="row" style="margin-top:.45rem">
             <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
             <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
-            <button class="btn ok" id="btn-mode-paper" type="button">Paper only</button>
+            <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
           </div>
-          <p class="hint">Ceiling lots is the max any live book may send (1–10). Per-book lots below cannot beat that ceiling.</p>
+          <p class="hint">Wallet ₹ is the whole live pot (often ₹5,00,000). Each row’s ₹ is that book’s slice — default ₹50,000 — a budget cap, not lots and not paper P&amp;L. Ceiling lots (1–10) is the max any live book may send.</p>
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">In = this book runs after Restart. Live = may send Angel after Arm live. Set ₹ and lots. Exit flattens one book. S5 / S8 / S13 / S16 only.</p>
+        <p class="hint">In = this book runs after Restart. Live = may send Angel after Arm live. ₹ on the row is that book’s live budget (₹50,000 default). Lots is how many contracts. Exit flattens one book. S5 / S8 / S13 / S16 only.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>In</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
@@ -507,7 +507,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="pane">
         <h2>Mode</h2>
         <p class="armed" id="mode-line">Paper</p>
-        <p class="hint">Live books, ₹ per strategy, and Arm live are on the Live tab.</p>
+        <p class="hint">Paper is already running. Arm live is on the Live tab.</p>
         <div class="row" style="margin-top:.35rem">
           <button class="btn" id="btn-goto-live-side" type="button">Open Live tab</button>
         </div>
@@ -632,7 +632,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v22";
+    if (clock) clock.textContent = "IST " + ist + " · v23";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1770,13 +1770,15 @@ function renderDesk(d) {
     : "Paper — Angel is off";
   if (moneyEl) moneyEl.textContent = armed
     ? ("ARMED — live-picked books send Angel orders" + (liveNames.length ? (": " + liveNames.join(", ")) : "."))
-    : "Paper. Pick live books, set ₹, type LIVE, Arm live, then type RESTART.";
+    : "Paper is already running. Angel stays off until you Arm live.";
   if (modeLine) {
     modeLine.textContent = statusText;
     modeLine.className = "armed";
     if (!armed) modeLine.style.color = "";
   }
   if (armStatus) armStatus.textContent = armed ? "Armed" : "Paper";
+  const paperBtn = $("btn-mode-paper");
+  if (paperBtn) paperBtn.hidden = !armed;
   const steps = $("arm-steps");
   if (steps) {
     const botOn = !!(d.bot || {}).running;

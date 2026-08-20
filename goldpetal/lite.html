@@ -82,12 +82,13 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
     <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots.</p>
-    <p class="hint">No left Books list. In and Live both sit here. Live pick is S5 / S8 / S13 / S16 only. Paper only = Angel off. Arm live = type LIVE, then Restart.</p>
+    <p class="hint">Paper is already running. In and Live both sit here. Live pick is S5 / S8 / S13 / S16 only. Arm live = type LIVE, then Restart.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
-      <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
+      <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
     </div>
+    <p class="hint">Wallet ₹ is the whole live pot. Each row’s ₹ is that book’s slice (default ₹50,000) — not lots.</p>
     <table style="margin-top:.45rem">
       <thead><tr><th>Book</th><th>In</th><th>Live</th><th>₹</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
@@ -100,7 +101,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="row" style="margin-top:.45rem">
       <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
       <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
-      <button class="btn ok" id="btn-mode-paper" type="button">Paper only</button>
+      <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
       <button class="btn ok" id="btn-save-books" type="button">Save strategies + ₹</button>
       <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
@@ -229,13 +230,14 @@ function render(d) {
       </tr>`;
     }).join("") || `<tr><td colspan="3">none</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
-    const cap = d.capital || {};
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
   }
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
-    : "Paper. Type LIVE, Arm live, then Restart.";
+    : "Paper is already running. Angel stays off until you Arm live.";
+  const paperBtn = $("btn-mode-paper");
+  if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;
   const lp = d.live_pnl || {};
   const sum = lp.summary || {};
   const ac = sum.pnl_after_charges;
