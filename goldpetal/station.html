@@ -1354,7 +1354,7 @@ function renderAmise() {
   </div>`;
   $("amise-market").innerHTML = `<div class="ml-card">
     <h3>${esc(mkt.label || mkt.mood || "mood")}</h3>
-    <p class="ml-meta">${esc(mkt.regime || "UNKNOWN")} · ${esc(mkt.transition || "")} · ${mkt.gate_on ? "GATE ON" : "observe only"}</p>
+    <p class="ml-meta">${esc(mkt.regime || "UNKNOWN")} · ${esc(mkt.transition || "")} · ${mkt.gate_on ? "regime ON" : "regime off"}</p>
     <p class="hint">${esc(mkt.reason || "")}</p>
   </div>`;
   const fits = mgr.fits || mkt.fits || [];
