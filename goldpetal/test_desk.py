@@ -84,11 +84,13 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v46" in html
-    assert " · v46" in html
+    assert "gp-header-v47" in html
+    assert " · v47" in html
     assert "waiting for desk" in html
     assert "Gold Petal hours" in html
     assert "waiting for desk…" in html
+    assert "lastMood.gate_on === true" in html
+    assert "setTimeout(() => loadAmise" not in html
     assert "mkt.layers" in html
     assert "80 ticks" in html
     assert "reads this stack" in html
@@ -374,6 +376,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "load_login_html" in text
     assert '"trace": traceback' not in text
     assert "internal error" in text
+    assert "_internal_error_bytes" in text
+    assert "time.sleep(300)" in text
     runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
     assert "emit_desk_flatten" in runner
     assert "apply_pending_flattens" in runner
@@ -441,7 +445,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v46" in cmd
+    assert "Gold Petal v47" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

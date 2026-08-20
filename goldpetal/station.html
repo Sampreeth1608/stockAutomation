@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v46: cheap mood poll so GOLD quote and Engine can paint -->
+<!-- gp-header-v47: light desk — mood/AMISE on demand, not every poll -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v46</div>
+      <div class="clock" id="clock">IST — · v47</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -709,7 +709,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v46";
+    if (clock) clock.textContent = "IST " + ist + " · v47";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -2028,7 +2028,8 @@ async function loadDesk() {
   loadDesk.busy = true;
   try {
     const d = await api("/api/desk");
-    renderDesk(d);
+    try { renderDesk(d); }
+    catch (e) { flash("flash-engine", String(e.message || e), true); }
   } finally { loadDesk.busy = false; }
 }
 async function loadTape() {
@@ -2373,21 +2374,19 @@ bootAuth().then(async (ok) => {
   try { await loadDesk(); }
   catch (e) { flash("flash-engine", String(e.message || e), true); }
   loadTape().catch((e) => flash("flash-grid", String(e.message || e), true));
-  setTimeout(() => loadMood().catch(() => {}), 1500);
 });
-setTimeout(() => loadHistory().catch(() => {}), 10000);
-setTimeout(() => loadMl().catch(() => {}), 4000);
-setTimeout(() => loadLab().catch(() => {}), 8000);
-setTimeout(() => loadAmise().catch(() => {}), 12000);
-setTimeout(() => loadYou().catch(() => {}), 5000);
+setTimeout(() => loadHistory().catch(() => {}), 8000);
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 30000);
-setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 20000);
-setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 30000);
+setInterval(() => { if (!typing() && watchTab === "ml") loadMl().catch(() => {}); }, 20000);
+setInterval(() => { if (!typing() && watchTab === "lab") loadLab().catch(() => {}); }, 30000);
 setInterval(() => { if (!typing() && watchTab === "amise") loadAmise().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 12000);
-setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 8000);
+setInterval(() => {
+  if (typing()) return;
+  if (lastMood.gate_on === true || watchTab === "amise") loadMood().catch(() => {});
+}, 12000);
 </script>
 </body>
 </html>

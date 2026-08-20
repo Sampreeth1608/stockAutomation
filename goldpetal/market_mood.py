@@ -1162,7 +1162,7 @@ class MoodDetector:
         return self.last
 
     def refresh_layers(self, db: Path | None = None) -> MoodState:
-        """Re-read 5m…week from the tape. Seed + every ~50 ticks. One SQLite pass."""
+        """Re-read 5m…week from the tape. Seed + every ~200 ticks. One SQLite pass."""
         fast = (
             classify_samples(list(self._buf), with_fits=True)
             if self._buf
@@ -1190,28 +1190,39 @@ def snapshot_mood(db: Path | None = None, *, limit: int = 240) -> MoodState:
     return blend_layers(layers)
 
 
-def _mood_cache_key(db: Path | None, gate_on: bool) -> str:
+def snapshot_mood_fast(db: Path | None = None) -> MoodState:
+    """80-tick feel only. Desk header poll. Full 5m…week is snapshot_mood / AMISE / engine seed."""
+    samples = tick_mood_samples(db, limit=LAYER_SAMPLES)
+    fast = classify_samples(samples, with_fits=False)
+    layers = {spec.key: _empty() for spec in HORIZON_SPECS}
+    layers["ticks80"] = fast
+    return blend_layers(layers, gate=fast.gate_on, flatten=fast.flatten_on)
+
+
+def _mood_cache_key(db: Path | None, gate_on: bool, full: bool) -> str:
     try:
         from desk_data import resolve_desk_db
 
         path = str(Path(db or resolve_desk_db()).resolve())
     except Exception:
         path = str(db or "")
-    return f"{path}|{int(gate_on)}"
+    return f"{path}|{int(gate_on)}|{int(full)}"
 
 
-def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
-    """Desk / AMISE snapshot. Cached ~8s so the 5s poll cannot starve /api/desk + /api/tape."""
+def mood_desk_payload(db: Path | None = None, *, full: bool = False) -> dict[str, Any]:
+    """Desk poll is 80 ticks (cached ~8s). Pass full=True for AMISE / factory invent."""
     gate_on = mood_gate_on()
-    key = _mood_cache_key(db, gate_on)
+    key = _mood_cache_key(db, gate_on, full)
     now = time.monotonic()
+    ttl = 20.0 if full else _MOOD_CACHE_SEC
     with _mood_lock:
         hit = _mood_cache.get(key)
-        if hit is not None and now - hit[0] < _MOOD_CACHE_SEC:
+        if hit is not None and now - hit[0] < ttl:
             return dict(hit[1])
-    st = snapshot_mood(db)
+    st = snapshot_mood(db) if full else snapshot_mood_fast(db)
     d = st.to_dict()
     d["ok"] = True
+    d["full"] = bool(full)
     d["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
     if st.gate_on:
         d["note"] = (

@@ -438,9 +438,11 @@ def test_not_a_paper_book() -> None:
     assert "SELECT COUNT(*)" not in mood_py
     assert "WINDOW_ROW_CAP" in mood_py
     assert "clear_mood_cache" in mood_py
+    assert "snapshot_mood_fast" in mood_py
     station = (root / "station.html").read_text(encoding="utf-8")
     assert "waiting for desk" in station
     assert "loadMood.busy" in station
+    assert "lastMood.gate_on === true" in station
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
     assert "refresh_layers" in runner
@@ -479,6 +481,41 @@ def test_tick_mood_window_downsamples_without_count() -> None:
         samples = tick_mood_window(db, since=now - timedelta(hours=2))
         assert 70 <= len(samples) <= LAYER_SAMPLES + 2
         assert samples[0][0] < samples[-1][0]
+
+
+def test_snapshot_mood_fast_is_ticks80_only() -> None:
+    import tempfile
+
+    from storage import init_db, save_tick
+
+    from market_mood import snapshot_mood, snapshot_mood_fast
+
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        px, tbq, tsq = 15300.0, 5000.0, 8000.0
+        for i in range(24):
+            px += 4.0
+            tbq += 80.0
+            tsq -= 20.0
+            save_tick(
+                {
+                    "last_traded_price": int(px * 100),
+                    "total_buy_quantity": tbq,
+                    "total_sell_quantity": tsq,
+                },
+                symbol="GOLDPETAL",
+                token="1",
+                received_at=f"2026-08-19T11:{i:02d}:00+05:30",
+                db_path=db,
+            )
+        fast = snapshot_mood_fast(db)
+        full = snapshot_mood(db)
+        ticks = next(row for row in fast.layers if row["key"] == "ticks80")
+        week = next(row for row in fast.layers if row["key"] == "week")
+        assert ticks["ready"] is True
+        assert week["ready"] is False
+        assert fast.mood == full.mood == "RISE_START"
 
 
 def test_mood_desk_payload_cache_returns_a_copy() -> None:
@@ -520,6 +557,7 @@ if __name__ == "__main__":
     test_htf_fight_stands_down_hour_book_not_s16()
     test_snapshot_mood_exposes_layers()
     test_tick_mood_window_downsamples_without_count()
+    test_snapshot_mood_fast_is_ticks80_only()
     test_mood_desk_payload_cache_returns_a_copy()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")

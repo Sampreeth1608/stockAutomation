@@ -1741,7 +1741,7 @@ def run_once(
                     get_learner().maybe_refit()
                 except Exception:
                     pass
-            if tick_count == 1 or tick_count % 50 == 0:
+            if tick_count == 1 or tick_count % 200 == 0:
                 try:
                     mood_det.refresh_layers()
                 except Exception:

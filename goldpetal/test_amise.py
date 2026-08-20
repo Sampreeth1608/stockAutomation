@@ -152,6 +152,17 @@ def test_not_a_paper_book() -> None:
     assert "daily" in station.lower()
 
 
+def test_auto_lab_does_not_start_without_prior_run() -> None:
+    import os
+    from unittest.mock import patch
+
+    os.environ["AMISE_AUTO_LAB"] = "true"
+    from amise import auto_lab_due
+
+    with patch("amise.amise_lab_status", return_value={"running": False, "last_run_at": ""}):
+        assert auto_lab_due() is False
+
+
 if __name__ == "__main__":
     from pathlib import Path as P
     import tempfile
@@ -165,4 +176,5 @@ if __name__ == "__main__":
     d = P(tempfile.mkdtemp())
     test_amise_desk_payload_empty_db(d)
     test_similar_states_quiet(P(tempfile.mkdtemp()))
+    test_auto_lab_does_not_start_without_prior_run()
     print("ALL test_amise OK")

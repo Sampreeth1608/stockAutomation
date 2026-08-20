@@ -141,7 +141,8 @@ def auto_lab_due(*, now: datetime | None = None) -> bool:
     last = _parse_ts(str(st.get("last_run_at") or ""))
     now = now or datetime.now(IST)
     if last is None:
-        return True
+        # First factory is Run factory on the AMISE tab. Auto only repeats.
+        return False
     if last.tzinfo is None:
         last = last.replace(tzinfo=IST)
     return (now - last.astimezone(IST)) >= timedelta(hours=auto_lab_hours())
@@ -369,7 +370,9 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
 
     path = db or resolve_desk_db()
     mood = _safe(
-        lambda: __import__("market_mood", fromlist=["mood_desk_payload"]).mood_desk_payload(path),
+        lambda: __import__("market_mood", fromlist=["mood_desk_payload"]).mood_desk_payload(
+            path, full=True
+        ),
         {"ok": False, "mood": "UNKNOWN", "fits": [], "label": "mood unavailable", "layers": []},
     )
     mood["amise_uses_market"] = True
@@ -377,12 +380,7 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         lambda: __import__("research_desk", fromlist=["research_desk_payload"]).research_desk_payload(),
         {"ok": False, "pending": [], "counts": {}, "challengers": []},
     )
-    you = _safe(
-        lambda: __import__("human_capture", fromlist=["capture_desk_payload"]).capture_desk_payload(
-            db=path, settle=False
-        ),
-        {"ok": False, "summary": {}},
-    )
+    you = {"ok": True, "summary": {}}
 
     def _guardian() -> dict[str, Any]:
         from desk_data import all_trades_cached

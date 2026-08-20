@@ -175,6 +175,12 @@ def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
     return status, body, "application/json; charset=utf-8"
 
 
+def _internal_error_bytes(exc: BaseException) -> tuple[int, bytes, str]:
+    traceback.print_exc()
+    msg = f"internal error: {type(exc).__name__}: {exc}"
+    return _json_bytes({"ok": False, "error": msg[:240]}, 500)
+
+
 def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, Any]:
     state = load_state()
     ticks = [_row_to_dict(r) for r in latest_ticks(limit=tick_limit)]
@@ -270,11 +276,28 @@ def desk_payload() -> dict[str, Any]:
             "summary": {"closed": 0, "open": 0, "pnl_after_charges": 0.0},
             "note": "Live P&L unavailable",
         }
+    try:
+        live_desk = desk_snapshot()
+    except Exception:
+        live_desk = {
+            "dry_run": True,
+            "books": [],
+            "would_place_real_orders": False,
+            "live_max_lots": 1,
+        }
+    try:
+        state = load_state().to_dict()
+    except Exception:
+        state = {}
+    try:
+        capital = capital_snapshot()
+    except Exception:
+        capital = {}
     return {
         "bot": bot,
-        "live_desk": desk_snapshot(),
-        "state": load_state().to_dict(),
-        "capital": capital_snapshot(),
+        "live_desk": live_desk,
+        "state": state,
+        "capital": capital,
         "session": sess,
         "flatten": flatten,
         "live_pnl": live_pnl,
@@ -717,9 +740,8 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(status, body, ctype)
                 return
             self._send(*_json_bytes({"error": "not found"}, 404))
-        except Exception:
-            traceback.print_exc()
-            self._send(*_json_bytes({"ok": False, "error": "internal error"}, 500))
+        except Exception as exc:
+            self._send(*_internal_error_bytes(exc))
 
     def do_POST(self) -> None:  # noqa: N802
         try:
@@ -1162,9 +1184,8 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
 
             self._send(*_json_bytes({"error": "not found"}, 404))
-        except Exception:
-            traceback.print_exc()
-            self._send(*_json_bytes({"ok": False, "error": "internal error"}, 500))
+        except Exception as exc:
+            self._send(*_internal_error_bytes(exc))
 
 
 def _amise_auto_loop() -> None:
@@ -1173,7 +1194,7 @@ def _amise_auto_loop() -> None:
     from amise import maybe_start_auto_lab
 
     while True:
-        time.sleep(60)
+        time.sleep(300)
         try:
             maybe_start_auto_lab()
         except Exception:

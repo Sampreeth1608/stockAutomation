@@ -26,6 +26,7 @@ _TRADE_CACHE: dict[str, Any] = {"at": 0.0, "rows": [], "error": "", "db": ""}
 _TRADE_LOCK = threading.Lock()
 _LIVE_PNL_CACHE: dict[str, Any] = {"at": 0.0, "payload": None, "db": ""}
 _LIVE_PNL_LOCK = threading.Lock()
+_PGREP_CACHE: dict[str, Any] = {"at": 0.0, "path": ""}
 _SIGNAL_WINDOW = 1500
 _LIVE_PNL_BOOKS_EXTRA = frozenset({"YOU_MANUAL"})
 
@@ -51,6 +52,20 @@ def json_safe(obj: Any) -> Any:
 
 def bot_live_ticks_db() -> Path | None:
     """ticks.db beside the running run_strategy.py / collect_ticks.py process."""
+    now = time.time()
+    if now - float(_PGREP_CACHE.get("at") or 0) < 3.0:
+        raw = str(_PGREP_CACHE.get("path") or "")
+        if not raw:
+            return None
+        p = Path(raw)
+        return p if p.is_file() else None
+    found = _bot_live_ticks_db_scan()
+    _PGREP_CACHE["at"] = now
+    _PGREP_CACHE["path"] = str(found) if found is not None else ""
+    return found
+
+
+def _bot_live_ticks_db_scan() -> Path | None:
     try:
         proc = subprocess.run(
             ["pgrep", "-af", "run_strategy.py|collect_ticks.py"],
