@@ -363,6 +363,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "gp-desk-login" in sh
     assert "0.0.0.0" in sh
     assert "gp-header-v" in sh
+    assert "preflight_desk" in sh
+    assert "Leaving the running station alone" in sh
     assert "old station.html on disk" not in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
     assert "Save strategies" in station
@@ -374,7 +376,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "Darwin" in cmd
     assert "gcloud compute ssh" in cmd
     assert "127.0.0.1:8501" in cmd
-    assert "seq 1 90" in cmd
+    assert "seq 1 20" in cmd
+    assert "curl -sL" in cmd
+    assert "Google Chrome" in cmd
+    assert "Gold Petal v35" in cmd
+    assert "does not restart the desk" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
     assert "--tunnel-through-iap" in cmd
     assert "8.231.125.120" in cmd

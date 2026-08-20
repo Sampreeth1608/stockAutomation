@@ -19,6 +19,8 @@ print_open_on_mac() {
   echo "  Easiest on the Mac (not this SSH tab):"
   echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap"
   echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
+  echo "  The Desktop file only opens the tunnel + Chrome. It must say Gold Petal v35."
+  echo "  If Chrome is blank, leave that window open and paste the gcloud ssh -N -L line below."
   echo "  Or Terminal (IAP — not ssh to 8.231.125.120:22):"
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"

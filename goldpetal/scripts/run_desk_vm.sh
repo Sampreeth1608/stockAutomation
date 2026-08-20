@@ -32,6 +32,19 @@ mkdir -p data/control
 
 CMD=("$PY" control_panel.py --host "$HOST" --port "$PORT")
 
+preflight_desk() {
+  # Do not pkill a live station if the new process would refuse to boot
+  # (DESK_AUTH=true and no DESK_PASSWORD).
+  local err
+  err="$("$PY" -c 'from desk_http_auth import desk_http_start_error; e=desk_http_start_error(); print(e or "")' 2>/dev/null || true)"
+  if [[ -n "${err:-}" ]]; then
+    echo "$err" >&2
+    echo "Leaving the running station alone. Set DESK_PASSWORD in .env, or DESK_AUTH=false only for recovery." >&2
+    return 2
+  fi
+  return 0
+}
+
 stop_old() {
   pkill -f 'streamlit run analytics/app.py' 2>/dev/null || true
   pkill -f '[p]ython.*control_panel.py' 2>/dev/null || pkill -f 'control_panel.py' || true
@@ -63,6 +76,7 @@ wait_up() {
 }
 
 if [[ "${1:-}" == "--fg" ]]; then
+  preflight_desk
   stop_old
   echo "→ station foreground :${PORT}"
   print_open_on_mac
@@ -71,6 +85,10 @@ fi
 
 start_detached() {
   local session="${TMUX_DESK_SESSION:-gp-desk}"
+  if ! preflight_desk; then
+    wait_up || true
+    return 2
+  fi
   tmux kill-session -t "=$session" 2>/dev/null || true
   stop_old
   {
