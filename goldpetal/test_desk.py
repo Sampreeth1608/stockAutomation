@@ -61,8 +61,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v19" in html
-    assert " · v19" in html
+    assert "gp-header-v20" in html
+    assert " · v20" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -84,6 +84,8 @@ def test_station_is_the_operator_page() -> None:
     assert "tape_live" not in hist
     desk_fn = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "tape_live" not in desk_fn
+    assert "const money " not in desk_fn
+    assert "moneyEl" in desk_fn
     assert "tape dead" not in html
     assert "function tapeAgeSec" in html
     assert "Approve → paper" in html
