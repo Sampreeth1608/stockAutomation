@@ -226,6 +226,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/sheets/pack.zip" in text
     assert "/api/sheets/monitor.zip" in text
     assert "monitor_sheet_zip_bytes" in text
+    assert "except ImportError" in text
     assert "/manifest.webmanifest" in text
     assert "MANIFEST_PATH" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")

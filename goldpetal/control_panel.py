@@ -70,11 +70,22 @@ from s11_desk import (
 )
 from research_desk import decide_research, research_desk_payload
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
-from monitor_sheet import (
-    STATUS_FIELDS,
-    build_status_rows,
-    monitor_sheet_zip_bytes,
-)
+try:
+    from monitor_sheet import (
+        STATUS_FIELDS,
+        build_status_rows,
+        monitor_sheet_zip_bytes,
+    )
+except ImportError:  # partial VM copy — desk must still boot
+    STATUS_FIELDS = ["section", "field", "value"]
+
+    def build_status_rows() -> list:
+        return []
+
+    def monitor_sheet_zip_bytes() -> bytes:
+        raise ModuleNotFoundError(
+            "monitor_sheet.py missing on this desk folder — copy it from the branch"
+        )
 from s14_exchange_sheet import (
     HTML_NAME,
     load_sheet_csv,
