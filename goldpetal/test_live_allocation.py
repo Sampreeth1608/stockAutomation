@@ -213,7 +213,7 @@ def test_live_qty_capital_mode_uses_budget_over_ltp() -> None:
                 {
                     "strategy": "S5_MINEDGE",
                     "live_size_mode": "capital",
-                    "budget_inr": 50_000,
+                    "live_budget_inr": 50_000,
                 }
             ],
             path=capital_path,
@@ -250,6 +250,39 @@ def test_can_open_trade_skips_zero_budget_in_lots_mode() -> None:
         td.cleanup()
 
 
+def test_live_budget_not_paper_split() -> None:
+    td, _, capital_path, _ = _tmp()
+    try:
+        plan = default_plan()
+        plan.strategies["S5_MINEDGE"].budget_inr = 4444.44
+        plan.strategies["S5_MINEDGE"].live_budget_inr = 0
+        plan.strategies["S5_MINEDGE"].live_size_mode = "capital"
+        save_capital(plan, path=capital_path)
+        from capital import live_qty_for
+
+        assert live_qty_for(
+            "S5_MINEDGE", cap=10, default=1, ltp=15_000, plan=plan
+        ) == 1
+        apply_live_capital_allocation(
+            [
+                {
+                    "strategy": "S5_MINEDGE",
+                    "live_size_mode": "capital",
+                    "live_budget_inr": 45_000,
+                }
+            ],
+            path=capital_path,
+        )
+        plan = load_capital(path=capital_path)
+        assert plan.strategies["S5_MINEDGE"].budget_inr == 4444.44
+        assert plan.strategies["S5_MINEDGE"].live_budget_inr == 45_000
+        assert live_qty_for(
+            "S5_MINEDGE", cap=10, default=1, ltp=15_000, plan=plan
+        ) == 3
+    finally:
+        td.cleanup()
+
+
 if __name__ == "__main__":
     test_set_live_approved_exact_set()
     print("ok set_live_approved")
@@ -265,4 +298,6 @@ if __name__ == "__main__":
     print("ok capital_qty")
     test_can_open_trade_skips_zero_budget_in_lots_mode()
     print("ok zero_budget_lots")
+    test_live_budget_not_paper_split()
+    print("ok live_budget")
     print("ALL test_live_allocation OK")

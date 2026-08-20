@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v29" in html
-    assert " · v29" in html
+    assert "gp-header-v30" in html
+    assert " · v30" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -77,6 +77,9 @@ def test_station_is_the_operator_page() -> None:
     assert "Tick <b>Lots</b>" in html
     assert 'data-size="lots"' in html
     assert 'data-size="capital"' in html
+    assert "liveMoneyDirty" in html
+    assert "live_budget_inr" in html
+    assert "liveBudgetDisplay" in html
     assert "WR% AC" in html
     assert "Paper AC" in html
     assert "live-kpi-pnl" in html
@@ -215,6 +218,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert 'data-size="lots"' in html
     assert 'data-size="capital"' in html
     assert "Tick Lots" in html
+    assert "liveMoneyDirty" in html
+    assert "liveBudgetDisplay" in html
     assert "live_eligible" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html

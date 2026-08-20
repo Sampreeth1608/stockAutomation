@@ -94,7 +94,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
     </div>
-    <p class="hint">Tick Lots = contracts (1–ceiling). Tick ₹ = floor(that book’s ₹ / LTP), then ceiling. Wallet ₹ is the pot, not live size. Paper Positions stays 100 lots.</p>
+    <p class="hint">Tick Lots = contracts (1–ceiling). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). That number is live capital — not the paper wallet split.</p>
     <table style="margin-top:.45rem">
       <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Lots</th><th>qty</th><th>₹</th><th>amount</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
@@ -185,6 +185,26 @@ function typing() {
   const el = document.activeElement;
   return el && el.matches && el.matches("input, textarea");
 }
+let liveMoneyDirty = false;
+function markLiveMoneyDirty(ev) {
+  const t = ev.target;
+  if (!t) return;
+  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word") {
+    liveMoneyDirty = true;
+    return;
+  }
+  if (t.closest && t.closest("#live-books") && t.matches && t.matches("input")) liveMoneyDirty = true;
+}
+document.addEventListener("input", markLiveMoneyDirty);
+document.addEventListener("change", markLiveMoneyDirty);
+function liveBudgetDisplay(b, sb) {
+  const v = (b && b.live_budget_inr != null && b.live_budget_inr !== "")
+    ? b.live_budget_inr
+    : (sb && sb.live_budget_inr);
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n;
+}
 let lastLite = {};
 function render(d) {
   lastLite = d;
@@ -202,7 +222,7 @@ function render(d) {
   ].join("");
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
-  if (!typing()) {
+  if (!typing() && !liveMoneyDirty) {
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
     const posBy = {};
@@ -217,7 +237,7 @@ function render(d) {
       const wrBit = (wr == null || wr === "") ? "—" : String(Math.round(Number(wr)));
       const pos = posBy[name] || {};
       const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
-      const budget = b.budget_inr != null ? b.budget_inr : (sb.budget_inr != null ? sb.budget_inr : "");
+      const budget = liveBudgetDisplay(b, sb);
       const liveLots = Math.min(10, Math.max(1, Number(b.live_lots || sb.live_lots || 1) || 1));
       const sizeMode = b.live_size_mode || "";
       const lotsOn = sizeMode === "lots";
@@ -230,7 +250,7 @@ function render(d) {
         <td><input type="checkbox" data-size="lots" data-book="${esc(name)}" ${lotsOn ? "checked" : ""}/></td>
         <td><input type="number" data-lots="${esc(name)}" min="1" max="10" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
         <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
-        <td><input type="number" data-budget="${esc(name)}" min="0" step="1000" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
+        <td><input type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
     }).join("") || `<tr><td colspan="9">no book at 40% WR% AC yet</td></tr>`;
@@ -320,6 +340,7 @@ async function load() {
 async function act(id, path, body, okMsg) {
   try {
     const res = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
+    if (String(path).indexOf("/api/desk/arm") >= 0) liveMoneyDirty = false;
     flash(id, okMsg || res.note || "ok");
     await load();
   } catch (e) { flash(id, String(e.message || e), true); }
@@ -384,6 +405,8 @@ function collectLivePicks() {
   return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
 }
 function collectAllocations() {
+  const capBooks = [...document.querySelectorAll('input[data-size="capital"]:checked')];
+  const wallet = Number(($("cap-total") && $("cap-total").value) || 0);
   return [...document.querySelectorAll("input[data-lots]")].map((lotsEl) => {
     const name = lotsEl.dataset.lots;
     const budEl = document.querySelector('input[data-budget="' + name + '"]');
@@ -396,7 +419,11 @@ function collectAllocations() {
       live_lots: Number(lotsEl.value || 1),
       enabled: true,
     };
-    if (budEl && budEl.value !== "") row.budget_inr = Number(budEl.value);
+    if (mode === "capital") {
+      let amt = (budEl && budEl.value !== "") ? Number(budEl.value) : 0;
+      if (!(amt > 0) && capBooks.length === 1 && wallet > 0) amt = wallet;
+      if (amt > 0) row.live_budget_inr = amt;
+    }
     return row;
   });
 }

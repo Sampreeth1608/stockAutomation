@@ -59,6 +59,8 @@ class StrategyBudget:
     # Live tab: "" = not sized for Angel. "lots" or "capital" is how this book goes live.
     live_size_mode: str = ""
     live_lots: int = 0
+    # ₹ the operator types on Live. Not the paper even-split of Wallet.
+    live_budget_inr: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -125,6 +127,17 @@ def _latest_ltp_safe() -> float | None:
         return None
 
 
+def live_budget_amount(sb: StrategyBudget | None) -> float:
+    """₹ used for Angel size. 0 means the operator has not typed live capital yet."""
+    if sb is None:
+        return 0.0
+    try:
+        n = float(sb.live_budget_inr or 0)
+    except (TypeError, ValueError):
+        n = 0.0
+    return n if n > 0 else 0.0
+
+
 def lots_from_budget(budget_inr: float, ltp: float | None, cap: int) -> int:
     """Gold Petal 1g: 1 lot notional ≈ LTP ₹. Cap is LIVE_MAX_LOTS (1–10)."""
     ceiling = max(1, int(cap))
@@ -166,7 +179,7 @@ def live_qty_for(
     mode = book_mode or plan_mode
     if mode == SIZE_CAPITAL:
         px = ltp if ltp is not None else _latest_ltp_safe()
-        return lots_from_budget(sb.budget_inr, px, ceiling)
+        return lots_from_budget(live_budget_amount(sb), px, ceiling)
     live = int(sb.live_lots or 0)
     if live > 0:
         return max(1, min(ceiling, live))
@@ -218,6 +231,7 @@ def load_capital(path: Path | None = None) -> CapitalPlan:
             enabled=bool(row.get("enabled", True)),
             live_size_mode=normalize_size_mode(row.get("live_size_mode")),
             live_lots=int(row.get("live_lots", 0) or 0),
+            live_budget_inr=float(row.get("live_budget_inr", 0) or 0),
         )
     # Ensure defaults exist for any new strategy names.
     from charges import paper_lots
@@ -284,6 +298,7 @@ def update_strategy_budget(
     enabled: bool | None = None,
     live_size_mode: str | None = None,
     live_lots: int | None = None,
+    live_budget_inr: float | None = None,
     path: Path | None = None,
 ) -> CapitalPlan:
     plan = load_capital(path)
@@ -300,6 +315,8 @@ def update_strategy_budget(
         sb.live_size_mode = normalize_size_mode(live_size_mode)
     if live_lots is not None:
         sb.live_lots = max(0, int(live_lots))
+    if live_budget_inr is not None:
+        sb.live_budget_inr = max(0.0, float(live_budget_inr))
     plan.strategies[strategy] = sb
     return save_capital(plan, path=path)
 
@@ -352,6 +369,8 @@ def apply_live_capital_allocation(
             kwargs["max_lots"] = int(row["max_lots"])
         if "live_lots" in row and row.get("live_lots") not in (None, ""):
             kwargs["live_lots"] = max(0, int(row["live_lots"]))
+        if "live_budget_inr" in row and row.get("live_budget_inr") not in (None, ""):
+            kwargs["live_budget_inr"] = float(row["live_budget_inr"])
         if "live_size_mode" in row:
             kwargs["live_size_mode"] = str(row.get("live_size_mode") or "")
         if "max_open_trades" in row and row.get("max_open_trades") not in (None, ""):

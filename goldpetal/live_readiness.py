@@ -463,7 +463,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
             extra = {
                 "live_size_mode": mode,
                 "live_lots": int(sb.live_lots) if sb and int(sb.live_lots or 0) > 0 else 1,
-                "budget_inr": float(sb.budget_inr) if sb is not None else 50_000.0,
+                "live_budget_inr": float(sb.live_budget_inr or 0) if sb is not None else 0.0,
                 "live_qty": live_qty_for(name, cap=cap, plan=plan) if name in approved else 0,
             }
         books.append(
