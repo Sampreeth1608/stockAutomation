@@ -235,14 +235,14 @@ def test_control_panel_serves_station_on_8501() -> None:
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
     assert "trading station" in mac
     assert "GoldPetal.command" in mac
-    launcher = (ROOT / "scripts" / "open_desk_mac.sh").read_text(encoding="utf-8")
-    assert "uname -s" in launcher
-    assert "Darwin" in launcher
-    assert "127.0.0.1:8501" in launcher
-    assert "--host 0.0.0.0" not in launcher
-    assert "DRY_RUN=true" in launcher
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
-    assert "open_desk_mac.sh" in cmd
+    assert "Darwin" in cmd
+    assert "gcloud compute ssh" in cmd
+    assert "127.0.0.1:8501" in cmd
+    assert 'cd "$(dirname "$0")/.."' not in cmd
+    assert "goldpetal-repo" in cmd
+    launcher = (ROOT / "scripts" / "open_desk_mac.sh").read_text(encoding="utf-8")
+    assert "GoldPetal.command" in launcher
     man = (ROOT / "manifest.webmanifest").read_text(encoding="utf-8")
     assert '"display": "standalone"' in man
     assert "Gold Petal" in man

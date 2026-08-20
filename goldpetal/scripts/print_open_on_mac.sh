@@ -16,8 +16,9 @@ print_open_on_mac() {
   echo "The Google Cloud Console SSH button is also the VM."
   echo
   echo "On the Mac laptop (not this SSH tab):"
-  echo "  Easiest: copy goldpetal/scripts/GoldPetal.command to the Mac Desktop"
-  echo "           and double-click it (opens the tunnel + Chrome)."
+  echo "  Easiest on the Mac (not this SSH tab):"
+  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --zone=asia-south1-c"
+  echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
   echo "  Or Terminal:"
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
