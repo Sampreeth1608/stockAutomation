@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v40: Overnight gap papers; Live tab after 40% WR% AC -->
+<!-- gp-header-v41: Enable regime sits next to You · trade -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -94,6 +94,7 @@ input:disabled { opacity: .45; }
 .btn.danger { background: #fbf0ee; border-color: #efc4c0; color: #b81c16; }
 .btn.tiny { padding: .22rem .42rem; font-size: 11px; letter-spacing: .03em; }
 #btn-regime.on { background: #eef7f1; border-color: #b7dcc8; color: #0a6e3c; }
+#tabs #btn-regime { margin: .28rem .15rem .35rem .35rem; padding: .42rem .75rem; font-size: 13px; }
 .steps { margin: .35rem 0 .55rem; padding: 0; list-style: none; }
 .steps li { font: 13px/1.45 var(--mono); color: var(--muted); padding: .1rem 0; }
 .steps li.ok { color: var(--ok); }
@@ -193,14 +194,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="mood-box" id="mood-box" title="Fit is a label until you press Enable regime. Then MOOD_GATE and TREND/CHOP/WIDE_SPREAD skip unfit books. Type RESTART. S16 1h formula and S13/overnight never veto. Not a paper book.">
         <span class="pill" id="mood-pill">mood warming up</span>
         <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · regime off</div>
-        <div class="row" style="margin-top:2px">
-          <button class="btn tiny" type="button" id="btn-regime">Enable regime</button>
-          <span class="flash" id="flash-regime"></span>
-        </div>
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v40</div>
+      <div class="clock" id="clock">IST — · v41</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -241,6 +238,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
           <button class="tab" type="button" data-tab="amise">AMISE<span id="amise-badge"></span></button>
           <button class="tab" type="button" data-tab="you">You · trade<span id="you-badge"></span></button>
+          <button class="btn warn" type="button" id="btn-regime" title="Turn market regime on or off. Type RESTART after. S16 formula and S13/overnight never veto.">Enable regime</button>
+          <span class="flash" id="flash-regime"></span>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
       </div>
@@ -725,7 +724,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v40";
+    if (clock) clock.textContent = "IST " + ist + " · v41";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -894,6 +893,8 @@ function renderMood(d) {
   if (btn) {
     btn.textContent = on ? "Regime on" : "Enable regime";
     btn.classList.toggle("on", on);
+    btn.classList.toggle("ok", on);
+    btn.classList.toggle("warn", !on);
     btn.title = on
       ? "Click to turn market regime OFF. Type RESTART after."
       : "Click to turn market regime ON. Type RESTART after.";

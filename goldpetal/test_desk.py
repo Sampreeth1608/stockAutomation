@@ -39,6 +39,10 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="you"' in html
     assert 'id="you-strip"' in html
     assert "You · trade" in html
+    tabs = html.split('id="tabs"')[1].split("</div>")[0]
+    assert "Enable regime" in tabs
+    assert 'id="btn-regime"' in tabs
+    assert tabs.index('data-tab="you"') < tabs.index('id="btn-regime"')
     assert "You — trade and teach" in html
     assert "/api/capture" in html
     assert "/api/capture/learn" in html
@@ -68,8 +72,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v40" in html
-    assert " · v40" in html
+    assert "gp-header-v41" in html
+    assert " · v41" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -414,7 +418,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v40" in cmd
+    assert "Gold Petal v41" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
