@@ -169,37 +169,11 @@ def sim_trades(
 
 def upload_to_google(folder: Path, sheet_id: str, creds_path: str) -> None:
     """Upload each CSV as a worksheet tab. Requires: pip install gspread google-auth"""
-    import gspread
-    from google.oauth2.service_account import Credentials
+    from google_sheet_io import upload_csv_dir, spreadsheet_url
 
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-
-    csvs = sorted(folder.glob("*.csv"))
-    print(f"Uploading {len(csvs)} CSVs → spreadsheet {sheet_id}")
-    for path in csvs:
-        title = path.stem[:100]
-        with path.open(newline="", encoding="utf-8") as f:
-            rows = list(csv.reader(f))
-        if not rows:
-            continue
-        try:
-            ws = sh.worksheet(title)
-            ws.clear()
-        except gspread.WorksheetNotFound:
-            # Sheets soft limit ~100 tabs / cell caps — create
-            rows_n = max(len(rows), 1000)
-            cols_n = max(len(rows[0]), 10)
-            ws = sh.add_worksheet(title=title, rows=rows_n, cols=cols_n)
-        # chunk updates
-        ws.update("A1", rows, value_input_option="USER_ENTERED")
-        print(f"  tab {title}: {len(rows)-1} data rows")
-    print(f"Done. Open: https://docs.google.com/spreadsheets/d/{sheet_id}")
+    print(f"Uploading CSVs → spreadsheet {sheet_id}")
+    url = upload_csv_dir(folder, sheet_id=sheet_id, creds_path=creds_path)
+    print(f"Done. Open: {url or spreadsheet_url(sheet_id)}")
 
 
 def main() -> None:

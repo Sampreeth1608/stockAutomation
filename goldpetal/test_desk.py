@@ -95,6 +95,9 @@ def test_station_is_the_operator_page() -> None:
     assert "/api/export/pack.zip" in html
     assert "/api/export/trades.csv" in html
     assert "/api/sheets/pack.zip" in html
+    assert "/api/sheets/monitor.zip" in html
+    assert "Download phone monitor" in html
+    assert "Copy status → Sheets" in html
     assert 'data-tab="dl"' in html
     assert "/api/tape" in html
     assert "/api/history" in html
@@ -162,6 +165,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "Watch" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
+    assert "Download phone monitor" in html
+    assert "/api/sheets/monitor.zip" in html
     assert "Save strategies" in html
     assert "--bg:#ffffff" in html.replace(" ", "")
     assert "/api/tape" in html
@@ -210,6 +215,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "bind_live_ticks_db" in text
     assert "last_tick_snapshot" in text
     assert "default=8501" in text
+    assert "/api/sheets/pack.zip" in text
+    assert "/api/sheets/monitor.zip" in text
+    assert "monitor_sheet_zip_bytes" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
     assert "control_panel.py" in sh
     assert "8501" in sh

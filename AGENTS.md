@@ -146,6 +146,30 @@ python3 sheets_pack.py
 
 Import CSVs in Google Sheets: File → Import → Upload (start with `scoreboard.csv`, then `trades_all.csv` as a new sheet).
 
+### Phone Google Sheet (read-only monitor)
+
+A Google Sheet is good for **watching** on the phone. It is **not** the desk. It cannot start/stop, emergency, Approve, or Unlock live.
+
+Tabs: STATUS, BOOKS (rank `after_charges₹`, tax excluded), OPEN, CLOSED, MOOD, SIGNALS, HOW_TO.
+
+**Easy (snapshot):**
+```bash
+cd ~/goldpetal && python3 monitor_sheet.py
+# → data/monitor_sheet/goldpetal_monitor_*.zip
+```
+Drive → New spreadsheet → File → Import → STATUS.csv then BOOKS.csv.
+
+Or on the desk Downloads tab: **Download phone monitor** / **Copy status → Sheets**.
+
+**Auto-refresh (one-time Google setup, then easy):**
+1. Enable Google Sheets API, create a service-account JSON, copy it to the VM (not git).
+2. Create a blank Sheet, share it with the service-account email as Editor.
+3. In `.env`: `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_MONITOR_SHEET_ID`.
+4. `pip install gspread google-auth` then `python3 monitor_sheet.py --upload`
+5. Optional: `python3 monitor_sheet.py --upload --every 300` or `./push_monitor_sheet.sh`
+
+Keep `DRY_RUN=true`. Do not upload `.env` or `ticks.db` to Drive.
+
 ### How to plan the week
 
 | When | What |
