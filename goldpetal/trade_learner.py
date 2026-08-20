@@ -431,6 +431,7 @@ class TradeLearner:
 
     def fit_from_db(self, db_path: Path | None = None) -> None:
         from charges import paper_lots
+        from live_orders import live_lots_for
         from storage import DB_PATH, build_trades
 
         db = db_path or DB_PATH
@@ -438,14 +439,24 @@ class TradeLearner:
         rows: list[dict[str, Any]] = []
         try:
             for name in LEARN_STRATEGIES:
-                rows.extend(
-                    build_trades(
-                        strategy=name,
-                        db_path=db,
-                        signal_limit=1200,
-                        lot_size=paper_lots(),
-                    )
+                paper = build_trades(
+                    strategy=name,
+                    db_path=db,
+                    signal_limit=1200,
+                    lot_size=paper_lots(),
                 )
+                rows.extend(t for t in paper if t.get("tape") != "live")
+                live = build_trades(
+                    strategy=name,
+                    db_path=db,
+                    signal_limit=1200,
+                    lot_size=float(max(1, int(live_lots_for(name)))),
+                    live_only=True,
+                )
+                for t in live:
+                    t = dict(t)
+                    t["tape"] = "live"
+                    rows.append(t)
         except Exception:
             rows = []
         self.fit(rows)

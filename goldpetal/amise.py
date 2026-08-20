@@ -62,18 +62,12 @@ def lab_fast_on() -> bool:
 
 
 def ensure_mood_gate(*, path: Path | None = None) -> dict[str, Any]:
-    """Keep mood/regime observe-only. Never DRY_RUN=false. Never veto books."""
-    from analytics.env_bridge import write_env_updates
+    """Desk boot must not overwrite Enable regime. Button owns MOOD_GATE."""
+    del path
+    from market_mood import mood_gate_on
 
-    res = write_env_updates(
-        {"MOOD_GATE": "false", "FLATTEN_ON_BAD_REGIME": "false", "MOOD_FLATTEN": "false"},
-        path=path,
-    )
-    if res.get("ok"):
-        os.environ["MOOD_GATE"] = "false"
-        os.environ["FLATTEN_ON_BAD_REGIME"] = "false"
-        os.environ["MOOD_FLATTEN"] = "false"
-    return res
+    on = mood_gate_on()
+    return {"ok": True, "skipped": True, "gate_on": on}
 
 
 def _now_iso() -> str:

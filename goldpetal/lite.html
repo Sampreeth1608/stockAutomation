@@ -51,7 +51,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <h1>Gold Petal Desk</h1>
   <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
-  <p class="hint" id="mood-line">mood … · MOOD_GATE off · observe only · books trade their formulas</p>
+  <p class="hint" id="mood-line">mood … · regime off · books trade their formulas</p>
+  <div class="row">
+    <button class="btn" type="button" id="btn-regime" title="Writes MOOD_GATE. Type RESTART after.">Enable regime</button>
+    <span class="flash" id="flash-regime"></span>
+  </div>
 
   <section class="card">
     <h2>Stop / go</h2>
@@ -83,7 +87,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
-    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots. A paper fill is not an Angel order.</p>
+    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live. Live closed trades are on the full desk Blotter (separate from paper). Angel order ids are on Downloads. Desk Open / Closed / After charges stay paper 100 lots.</p>
     <p class="hint">All live money = Live AC ₹. Each strategy = Live P&amp;L by book (zeros until an Angel fill). Paper P&amp;L on the full desk is 100 lots.</p>
     <table style="margin-top:.35rem">
       <thead><tr><th>Book</th><th>Open</th><th>Closed</th><th>WR%</th><th>AC ₹</th></tr></thead>
@@ -262,6 +266,7 @@ function liveBudgetDisplay(b, sb) {
   return n;
 }
 let lastLite = {};
+let lastMood = { gate_on: false };
 function livePosRows(p, d) {
   const fromPnl = (p.positions && p.positions.length) ? p.positions
     : ((p.open && p.open.length) ? p.open : []);
@@ -633,9 +638,12 @@ loadYou().catch(() => {});
 async function loadMood() {
   try {
     const d = await api("/api/mood");
+    lastMood = d || lastMood;
     const el = $("mood-line");
+    const btn = $("btn-regime");
     if (!el) return;
-    const mode = d.gate_on ? (d.flatten_on ? "GATE+FLATTEN" : "GATE ON") : "observe only";
+    const on = d.gate_on === true;
+    const mode = on ? (d.flatten_on ? "regime ON · flatten" : "regime ON") : "regime off";
     el.textContent = (d.label || d.mood || "mood") +
       (d.regime ? " · " + d.regime : "") +
       " · " + mode
@@ -649,12 +657,31 @@ async function loadMood() {
         return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
       }).join(" · ");
     }
+    if (btn) {
+      btn.textContent = on ? "Regime on" : "Enable regime";
+      btn.title = on
+        ? "Click to turn market regime OFF. Type RESTART after."
+        : "Click to turn market regime ON. Type RESTART after.";
+    }
   } catch (e) {
     const el = $("mood-line");
     if (el) el.textContent = "mood unavailable · " + String(e.message || e);
   }
 }
 loadMood().catch(() => {});
+if ($("btn-regime")) {
+  $("btn-regime").onclick = async () => {
+    const on = !(lastMood && lastMood.gate_on === true);
+    try {
+      const res = await api("/api/desk/regime", { method: "POST", body: JSON.stringify({ on: on }) });
+      flash("flash-regime", res.note || (on ? "Regime ON — type RESTART" : "Regime off — type RESTART"));
+      lastMood = Object.assign({}, lastMood, { gate_on: !!res.gate_on });
+      await loadMood();
+    } catch (e) {
+      flash("flash-regime", String(e.message || e), true);
+    }
+  };
+}
 $("ml-pending").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-ml]");
   if (!btn) return;

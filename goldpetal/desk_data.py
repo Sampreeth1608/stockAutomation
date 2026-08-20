@@ -328,7 +328,7 @@ def _empty_live_pnl() -> dict[str, Any]:
             "pnl_after_charges": 0.0,
             "win_rate_after_charges": 0.0,
         },
-        "note": "Paper tape (Paper Positions / Blotter / Paper P&L) stays 100 lots. Real Angel ₹ is Live AC (all) and Live P&L by book (each strategy) after a live round-trip.",
+        "note": "Paper tape stays 100 lots. Angel orders are on Downloads. Live closed round-trips are on Blotter (separate from paper closed).",
     }
 
 
@@ -598,12 +598,14 @@ def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, An
         try:
             for name in paper_strategy_names():
                 rows.extend(
-                    build_trades(
+                    t
+                    for t in build_trades(
                         strategy=name,
                         db_path=db,
                         signal_limit=_SIGNAL_WINDOW,
                         lot_size=paper_lots(),
                     )
+                    if t.get("tape") != "live"
                 )
         except Exception as exc:
             err = str(exc)

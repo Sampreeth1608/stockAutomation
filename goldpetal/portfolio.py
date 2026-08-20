@@ -125,16 +125,20 @@ class PortfolioConfig:
         return False
 
     def allows(self, strategy: str, regime: Regime) -> bool:
-        """Enabled books may open in any regime. Desk still shows the tape label."""
-        del regime
-        return strategy in self.enabled
+        """When Enable regime is off, every enabled book may open."""
+        if strategy not in self.enabled:
+            return False
+        if not self.flatten_when_blocked:
+            return True
+        return self._in_regime(strategy, regime)
 
     def should_flatten(self, strategy: str, regime: Regime) -> bool:
-        """Never dump an enabled book because TREND/CHOP/QUIET/WIDE_SPREAD changed."""
-        del regime
+        """Dump only when Enable regime is on and this book does not fit TREND/CHOP/WIDE_SPREAD."""
         if not self.flatten_when_blocked:
             return False
-        return strategy not in self.enabled
+        if strategy not in self.enabled:
+            return True
+        return not self._in_regime(strategy, regime)
 
 
 def portfolio_from_env() -> PortfolioConfig:

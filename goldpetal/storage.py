@@ -625,6 +625,7 @@ def _build_trades_one(
                 "net_pnl_pct": "",
                 "lots": float(lot_size) if lot_size is not None else "",
                 "status": "OPEN",
+                "tape": "live" if _signal_is_live(r) else "paper",
             }
         elif action == "CLOSE" and open_trade is not None:
             trades.append(

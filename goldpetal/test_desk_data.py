@@ -289,10 +289,12 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
         closed = pnl["trades"][0]
         assert float(closed.get("gross_pnl") or 0) == 15.0
         assert float(closed.get("lots") or 0) == 1.0
+        assert closed.get("tape") == "live"
         hist = history_payload(db_path=db, limit=80)
         paper = [t for t in hist["trades"] if t.get("strategy") == "S16_HHHL_WICK_1H"]
         assert paper
         assert float(paper[0].get("gross_pnl") or 0) == 1500.0
+        assert all(t.get("tape") != "live" for t in hist["trades"])
 
 
 def test_live_pnl_positions_one_row_per_open_book() -> None:

@@ -920,6 +920,13 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status = 200 if res.get("ok") else 400
                 self._send(*_json_bytes(res, status))
                 return
+            if path == "/api/desk/regime":
+                from market_mood import set_regime_gate
+
+                on = bool(data.get("on"))
+                res = set_regime_gate(on)
+                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                return
             if path == "/api/amise/lab":
                 from amise import start_amise_lab
 
@@ -930,10 +937,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 from amise import ensure_mood_gate
 
                 res = ensure_mood_gate()
-                res["gate_on"] = False
+                res["gate_on"] = bool(res.get("gate_on"))
                 res["note"] = (
-                    "MOOD_GATE=false written. Mood and market regime are observe-only. "
-                    "Enabled books trade their formulas. Restart the bot. Keep DRY_RUN=true."
+                    "Enable regime is a desk button. This path does not rewrite .env. "
+                    "Type RESTART after you toggle. Keep DRY_RUN=true."
                 )
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return

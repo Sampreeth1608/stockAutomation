@@ -43,8 +43,11 @@ def test_portfolio_gates() -> None:
         enabled={"S1_NETDELTA", "S3_ML", "S5_MINEDGE"},
         flatten_when_blocked=True,
     )
-    assert not dump.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
-    assert dump.should_flatten("S2_BALANCE", "WIDE_SPREAD")
+    assert not dump.allows("S1_NETDELTA", "WIDE_SPREAD")
+    assert dump.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
+    assert not dump.allows("S3_ML", "CHOP")
+    assert dump.allows("S5_MINEDGE", "CHOP")
+    assert not dump.should_flatten("S5_MINEDGE", "CHOP")
     p10 = PortfolioConfig(enabled={"S10_LEGACY30"})
     assert p10.allows("S10_LEGACY30", "TREND")
     assert p10.allows("S10_LEGACY30", "QUIET")

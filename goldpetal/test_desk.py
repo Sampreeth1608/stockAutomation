@@ -51,7 +51,7 @@ def test_station_is_the_operator_page() -> None:
     assert "stand down" in html
     assert "fall starting" in html
     assert "MOOD_GATE" in html
-    assert "observe only" in html
+    assert "Enable regime" in html
     assert "NO TRADE" in html
     assert "Send to Angel" in html
     assert "you_skipped_rule_would_take" in html
@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v38" in html
-    assert " · v38" in html
+    assert "gp-header-v39" in html
+    assert " · v39" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -98,7 +98,13 @@ def test_station_is_the_operator_page() -> None:
     assert "function livePosRows" in html
     assert "function liveBookScoreRows" in html
     assert "Live positions" in html
-    assert "Live round-trips" in html
+    assert "Live round-trips" not in html
+    assert 'id="blotter-live-closed"' in html
+    assert 'id="dl-orders-body"' in html
+    assert 'id="btn-regime"' in html
+    assert "/api/desk/regime" in html
+    assert "function fillLiveClosed" in html
+    assert "function fillAngelOrders" in html
     assert "<th>Pos</th>" in html
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
@@ -219,7 +225,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "/api/mood" in html
     assert "id=\"mood-line\"" in html
     assert "MOOD_GATE" in html
-    assert "Mon–Fri 09:00–23:30" in html
+    assert "Enable regime" in html
+    assert 'id="btn-regime"' in html
+    assert "/api/desk/regime" in html
     assert "/#lab" in html
     assert "/#amise" in html
     assert "AMISE" in html
@@ -391,6 +399,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/amise.py" in sync
     assert "goldpetal/.env.example" in sync
     assert "goldpetal/portfolio.py" in sync
+    assert "goldpetal/storage.py" in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
@@ -400,7 +409,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v38" in cmd
+    assert "Gold Petal v39" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
