@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v25: Live tab lists 40% WR% AC books to pick -->
+<!-- gp-header-v26: P&L tab is paper P&L -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -194,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v25</div>
+      <div class="clock" id="clock">IST — · v26</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -228,7 +228,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab on" type="button" data-tab="open">Positions</button>
           <button class="tab" type="button" data-tab="live">Live</button>
           <button class="tab" type="button" data-tab="trades">Blotter</button>
-          <button class="tab" type="button" data-tab="score">P&amp;L</button>
+          <button class="tab" type="button" data-tab="score">Paper P&amp;L</button>
           <button class="tab" type="button" data-tab="dl">Downloads</button>
           <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
@@ -245,7 +245,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="live-panel" hidden>
         <h2>Real Angel P&amp;L</h2>
-        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Positions / Blotter / Paper AC at the top stay the 100-lot paper tape. Angel app is the fill confirmation.</p>
+        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Positions / Blotter / Paper P&amp;L stay the 100-lot paper tape. Angel app is the fill confirmation.</p>
         <div class="kpis">
           <div class="kpi"><b>Live open</b><span id="live-kpi-open">0</span></div>
           <div class="kpi"><b>Live closed</b><span id="live-kpi-closed">0</span></div>
@@ -624,7 +624,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v25";
+    if (clock) clock.textContent = "IST " + ist + " · v26";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1597,7 +1597,7 @@ function renderGrid() {
     }).join("") || `<tr><td colspan="9">${h.trades_loading ? "Loading…" : (tab === "open" ? "No open positions" : "No trades")}</td></tr>`;
     return;
   }
-  thead(["book", "closed", "open", "win % AC", "gross ₹", "fees ₹", "after charges ₹"]);
+  thead(["book", "closed", "open", "paper WR% AC", "gross ₹", "fees ₹", "paper AC ₹"]);
   $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
     <td>${esc(shortName(r.strategy))}</td>
     <td class="num">${fmt(r.closed, 0)}</td>
@@ -1606,7 +1606,7 @@ function renderGrid() {
     <td class="num">${money(r.gross_pnl)}</td>
     <td class="num">${money(r.charges)}</td>
     <td class="num ${pnlClass(afterChargesInr(r))}">${money(afterChargesInr(r))}</td>
-  </tr>`).join("") || `<tr><td colspan="7">No P&L yet</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="7">No paper P&L yet</td></tr>`;
 }
 function renderDlPreview() {
   const ticksEl = $("dl-ticks-body");
