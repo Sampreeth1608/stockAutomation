@@ -21,8 +21,14 @@ from control_state import (
     set_live_unlocked,
 )
 from operator_desk import OPERATOR_PANEL, OPERATOR_URL
-from live_orders import HARD_LIVE_MAX_LOTS, live_lots, live_lots_for
 from position_safety import read_bot_health
+
+try:
+    from live_orders import HARD_LIVE_MAX_LOTS, live_lots, live_lots_for
+except ImportError:  # mixed VM git-show copy: older live_orders.py
+    from live_orders import live_lots, live_lots_for
+
+    HARD_LIVE_MAX_LOTS = 1000
 
 IST = ZoneInfo("Asia/Kolkata")
 PANEL_LIVE_MAX_LOTS = HARD_LIVE_MAX_LOTS

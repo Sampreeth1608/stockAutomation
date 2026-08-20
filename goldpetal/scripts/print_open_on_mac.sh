@@ -17,7 +17,9 @@ print_open_on_mac() {
   echo
   echo "On the Mac laptop (not this SSH tab):"
   echo "  Copy ONE command at a time. scp does not open the desk."
-  echo "  Connection refused on the tunnel = 8501 is down on the VM. Start it:"
+  echo "  ImportError HARD_LIVE_MAX_LOTS = live_orders.py on the VM is old. Copy matching files, then restart:"
+  echo "    gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/live_orders.py > ~/goldpetal/live_orders.py && git show origin/cursor/live-1lot-test-a4b2:goldpetal/live_readiness.py > ~/goldpetal/live_readiness.py && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/run_desk_vm.sh > ~/goldpetal/scripts/run_desk_vm.sh && cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart'"
+  echo "  Connection refused on the tunnel = 8501 is down. After the files match, restart only:"
   echo "    gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart'"
   echo "  Login is off until DESK_PASSWORD is set. IAP + localhost bind stay."
   echo "  1) Open the desk (leave this running, then Chrome http://127.0.0.1:8501/ ):"

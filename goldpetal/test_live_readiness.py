@@ -9,6 +9,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from live_readiness import (
+    HARD_LIVE_MAX_LOTS,
+    PANEL_LIVE_MAX_LOTS,
     apply_panel_enables,
     apply_panel_live_env,
     bot_age_seconds,
@@ -17,6 +19,11 @@ from live_readiness import (
     panel_restart_allowed,
     read_live_env,
 )
+
+
+def test_hard_live_max_lots_imported() -> None:
+    assert HARD_LIVE_MAX_LOTS == 1000
+    assert PANEL_LIVE_MAX_LOTS == 1000
 
 IST = ZoneInfo("Asia/Kolkata")
 

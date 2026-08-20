@@ -31,6 +31,40 @@ fi
 mkdir -p data/control
 
 CMD=("$PY" control_panel.py --host "$HOST" --port "$PORT")
+SYNC_BRANCH="${GP_SYNC_BRANCH:-origin/cursor/live-1lot-test-a4b2}"
+REPO_DIR="${GP_REPO_DIR:-$HOME/goldpetal-repo}"
+
+copy_from_origin() {
+  local rel="$1"
+  local dest="$2"
+  git -C "$REPO_DIR" show "${SYNC_BRANCH}:${rel}" > "$dest"
+}
+
+ensure_live_orders_cap() {
+  # Mixed git-show copies: new live_readiness.py vs old live_orders.py.
+  if "$PY" -c 'from live_orders import HARD_LIVE_MAX_LOTS' >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "WARNING: live_orders.py missing HARD_LIVE_MAX_LOTS (mixed VM copy)."
+  if [[ ! -d "$REPO_DIR/.git" ]]; then
+    echo "Copy ${SYNC_BRANCH}:goldpetal/live_orders.py into $PWD then restart." >&2
+    return 0
+  fi
+  echo "Copying live_orders.py + live_readiness.py from $SYNC_BRANCH"
+  git -C "$REPO_DIR" fetch origin || true
+  copy_from_origin goldpetal/live_orders.py "$PWD/live_orders.py"
+  copy_from_origin goldpetal/live_readiness.py "$PWD/live_readiness.py" || true
+}
+
+preflight_import() {
+  local err
+  if err="$("$PY" -c 'import live_readiness' 2>&1)"; then
+    return 0
+  fi
+  echo "$err" >&2
+  echo "Python import failed — station will not boot. Copy matching files from $SYNC_BRANCH." >&2
+  return 1
+}
 
 preflight_desk() {
   # Bind lock / other boot refuses. A missing DESK_PASSWORD must not block 8501.
@@ -75,6 +109,8 @@ wait_up() {
 }
 
 if [[ "${1:-}" == "--fg" ]]; then
+  ensure_live_orders_cap
+  preflight_import
   preflight_desk
   stop_old
   echo "→ station foreground :${PORT}"
@@ -84,6 +120,10 @@ fi
 
 start_detached() {
   local session="${TMUX_DESK_SESSION:-gp-desk}"
+  ensure_live_orders_cap
+  if ! preflight_import; then
+    return 1
+  fi
   if ! preflight_desk; then
     wait_up || true
     return 2

@@ -364,6 +364,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "0.0.0.0" in sh
     assert "gp-header-v" in sh
     assert "preflight_desk" in sh
+    assert "ensure_live_orders_cap" in sh
+    assert "HARD_LIVE_MAX_LOTS" in sh
     assert "Leaving the running station alone" in sh
     assert "old station.html on disk" not in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
@@ -372,6 +374,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "trading station" in mac
     assert "GoldPetal.command" in mac
     assert "git show origin" in mac
+    assert "live_orders.py" in mac
+    assert "HARD_LIVE_MAX_LOTS" in mac
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
