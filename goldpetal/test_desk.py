@@ -37,7 +37,8 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="lab"' in html
     assert 'data-tab="amise"' in html
     assert 'data-tab="you"' in html
-    assert 'id="you-strip"' in html
+    assert 'id="you-strip"' not in html
+    assert 'id="fit-strip"' not in html
     assert "You · trade" in html
     tabs = html.split('id="tabs"')[1].split("</div>")[0]
     assert "Enable regime" in tabs
@@ -51,7 +52,6 @@ def test_station_is_the_operator_page() -> None:
     assert "type YOU" in html
     assert "/api/mood" in html
     assert 'id="mood-pill"' in html
-    assert 'id="fit-strip"' in html
     assert "stand down" in html
     assert "fall starting" in html
     assert "MOOD_GATE" in html
@@ -72,8 +72,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v41" in html
-    assert " · v41" in html
+    assert "gp-header-v42" in html
+    assert " · v42" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -418,7 +418,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v41" in cmd
+    assert "Gold Petal v42" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

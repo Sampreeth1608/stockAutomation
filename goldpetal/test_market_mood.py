@@ -299,7 +299,6 @@ def test_not_a_paper_book() -> None:
     station = (root / "station.html").read_text(encoding="utf-8")
     assert "/api/mood" in station
     assert "mood-pill" in station
-    assert "fit-strip" in station
     assert "data-fit" in station
     assert 'id="btn-regime"' in station
     assert "/api/desk/regime" in station

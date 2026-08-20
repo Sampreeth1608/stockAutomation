@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v41: Enable regime sits next to You · trade -->
+<!-- gp-header-v42: Drop Fit strip and You strip extras -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -34,12 +34,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 var(--font); letter-spacing: .01em;
   font-feature-settings: "ss01", "kern"; -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
-.station { display: grid; grid-template-rows: 62px auto auto minmax(0,1fr) 32px; height: 100%; }
-.you-strip {
-  display: flex; flex-wrap: wrap; align-items: center; gap: .45rem;
-  padding: .4rem 1.1rem; background: #fbf8f1; border-bottom: 1px solid #ead3a8;
-}
-.you-strip b { font: 600 12px/1 var(--serif); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+.station { display: grid; grid-template-rows: 62px minmax(0,1fr) 32px; height: 100%; }
 .tab[data-tab="you"] { color: var(--gold); }
 .top {
   display: grid; grid-template-columns: minmax(16rem, 22rem) 1fr auto;
@@ -62,12 +57,6 @@ button, input, select { font: inherit; }
 .mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
 .mood-box .pill { width: fit-content; }
 .mood-box .hint { margin: 0; font: 11px/1.35 var(--mono); color: var(--muted); }
-.fit-strip {
-  display: flex; flex-wrap: wrap; align-items: center; gap: .35rem;
-  padding: .28rem 1.1rem; background: #f7f4ee; border-bottom: 1px solid var(--line);
-  font: 11px/1.3 var(--mono); color: var(--muted);
-}
-.fit-strip b { font: 600 11px/1 var(--serif); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
 .top-right { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
 .clock { font: 500 12px/1 var(--mono); color: var(--muted); margin-right: .35rem; }
 .pill { font: 500 11px/1 var(--mono); padding: .28rem .5rem; border-radius: 999px;
@@ -197,26 +186,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v41</div>
+      <div class="clock" id="clock">IST — · v42</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
   </header>
-  <div class="fit-strip" id="fit-strip">
-    <b>Fit</b>
-    <span id="fit-line">one regime for the desk · regime off · books trade their formulas</span>
-  </div>
-  <div class="you-strip" id="you-strip">
-    <b>You</b>
-    <span class="hint" id="you-strip-hint">Sit and teach. Press Let it trade when you want the mimic to paper. Compare You vs mimic. Angel only after Arm live on the Live tab + type YOU.</span>
-    <span class="mono" id="you-strip-ltp">LTP —</span>
-    <button class="btn ok" type="button" data-you="buy">BUY</button>
-    <button class="btn danger" type="button" data-you="short">SHORT</button>
-    <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
-    <button class="btn" type="button" data-you="close" id="btn-you-close-strip">CLOSE</button>
-    <button class="btn" type="button" id="btn-goto-you">Open You tab</button>
-    <span class="flash" id="flash-you-strip"></span>
-  </div>
 
   <div class="work">
     <section class="col">
@@ -724,7 +698,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v41";
+    if (clock) clock.textContent = "IST " + ist + " · v42";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1622,7 +1596,6 @@ async function recordYou(action) {
   const run = res.learn_run || {};
   if (run.proposed && !run.deployed) msg += " — style updating; press Let it trade when you want it to paper";
   flash("flash-you", msg, !!(send && !rec.places_order));
-  flash("flash-you-strip", msg, !!(send && !rec.places_order));
   renderYou();
 }
 async function learnYou() {
@@ -2072,16 +2045,8 @@ document.addEventListener("click", (ev) => {
   if (!btn) return;
   recordYou(btn.dataset.you).catch((e) => {
     flash("flash-you", String(e.message || e), true);
-    flash("flash-you-strip", String(e.message || e), true);
   });
 });
-$("btn-goto-you").onclick = () => {
-  watchTab = "you";
-  location.hash = "you";
-  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "you"));
-  showMainTab();
-  loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
-};
 function gotoLive() {
   watchTab = "live";
   location.hash = "live";
