@@ -78,12 +78,16 @@ def test_write_monitor_pack() -> None:
         with zipfile.ZipFile(zip_path) as zf:
             names = set(zf.namelist())
         for name in (
+            "LIVE.csv",
+            "MARKET.csv",
+            "STRATEGIES.csv",
+            "SIGNALS.csv",
+            "TRADES.csv",
+            "LAB.csv",
+            "RISK.csv",
+            "COMMANDS.csv",
             "STATUS.csv",
             "BOOKS.csv",
-            "OPEN.csv",
-            "CLOSED.csv",
-            "MOOD.csv",
-            "SIGNALS.csv",
             "HOW_TO.csv",
             "README.txt",
         ):
@@ -101,9 +105,10 @@ def test_write_monitor_pack() -> None:
         flow = next(r for r in books if r["strategy"] == "FLOW_BRAIN")
         assert flow["in_bot"] == "NO"
         how = "\n".join(r["step"] for r in how_to_rows())
-        assert "watch only" in how.lower() or "Watch only" in WATCH_NOTE
+        assert "LIVE" in how
         assert "Unlock live" in how
         assert "GOOGLE_MONITOR_SHEET_ID" in how
+        assert "micro_live" in how
 
 
 def test_zip_bytes() -> None:
@@ -113,8 +118,10 @@ def test_zip_bytes() -> None:
         blob = monitor_sheet_zip_bytes(db_path=db)
         assert blob[:2] == b"PK"
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-            assert "STATUS.csv" in zf.namelist()
-            assert "BOOKS.csv" in zf.namelist()
+            names = zf.namelist()
+            assert "LIVE.csv" in names
+            assert "STRATEGIES.csv" in names
+            assert "COMMANDS.csv" in names
 
 
 def test_sheet_env_helpers() -> None:
@@ -128,7 +135,7 @@ def test_sheet_env_helpers() -> None:
     env2 = {"GOOGLE_SHEET_ID": "fallback"}
     assert resolve_sheet_id(env=env2) == "fallback"
     assert "abc123" in spreadsheet_url("abc123")
-    assert TAB_ORDER[0] == "STATUS"
+    assert TAB_ORDER[0] == "LIVE"
     assert STATUS_FIELDS == ["key", "value"]
 
 

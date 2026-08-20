@@ -99,6 +99,36 @@ def upload_tables(
     return spreadsheet_url(sheet_id)
 
 
+def open_spreadsheet(sheet_id: str, creds_path: str):
+    """Authorized gspread Spreadsheet. Raises ImportError if gspread is missing."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError as exc:
+        raise ImportError(
+            "Google upload needs: pip install gspread google-auth"
+        ) from exc
+    creds_file = Path(creds_path)
+    if not creds_file.is_file():
+        raise FileNotFoundError(f"service account JSON not found: {creds_path}")
+    creds = Credentials.from_service_account_file(
+        str(creds_file), scopes=[SHEETS_SCOPE]
+    )
+    gc = gspread.authorize(creds)
+    return gc.open_by_key(sheet_id)
+
+
+def read_table(sh: Any, title: str) -> list[list[str]]:
+    """All values from a tab, or [] if the tab does not exist."""
+    import gspread
+
+    try:
+        ws = sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return []
+    return [list(r) for r in ws.get_all_values()]
+
+
 def upload_csv_dir(
     folder: Path,
     *,

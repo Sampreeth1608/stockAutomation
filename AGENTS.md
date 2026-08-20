@@ -148,25 +148,27 @@ Import CSVs in Google Sheets: File → Import → Upload (start with `scoreboard
 
 ### Phone Google Sheet (read-only monitor)
 
-A Google Sheet is good for **watching** on the phone. It is **not** the desk. It cannot start/stop, emergency, Approve, or Unlock live.
+A Google Sheet is a **dashboard** (LIVE quote, mood, books, blotter, lab, risk). Python still owns ticks, strategies, and orders. Do **not** stream every tick into Sheets — push a 15–60s snapshot. Rank `after_charges₹` (tax excluded). Keep `DRY_RUN=true`. There is no single “AI LONG 73%” brain.
 
-Tabs: STATUS, BOOKS (rank `after_charges₹`, tax excluded), OPEN, CLOSED, MOOD, SIGNALS, HOW_TO.
+Tabs: LIVE, MARKET, STRATEGIES, SIGNALS, TRADES, LAB, RISK, COMMANDS.
+
+COMMANDS may set pause / emergency (type YES). Sheets **cannot** micro-live, Unlock live, Approve, or start/stop the bot. Those stay on desk `http://127.0.0.1:8501/`.
 
 **Easy (snapshot):**
 ```bash
 cd ~/goldpetal && python3 monitor_sheet.py
 # → data/monitor_sheet/goldpetal_monitor_*.zip
 ```
-Drive → New spreadsheet → File → Import → STATUS.csv then BOOKS.csv.
+Drive → New spreadsheet → File → Import → LIVE.csv then STRATEGIES.csv.
 
-Or on the desk Downloads tab: **Download phone monitor** / **Copy status → Sheets**.
+Or on the desk Downloads tab: **Download phone monitor**.
 
 **Auto-refresh (one-time Google setup, then easy):**
 1. Enable Google Sheets API, create a service-account JSON, copy it to the VM (not git).
 2. Create a blank Sheet, share it with the service-account email as Editor.
 3. In `.env`: `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_MONITOR_SHEET_ID`.
 4. `pip install gspread google-auth` then `python3 monitor_sheet.py --upload`
-5. Optional: `python3 monitor_sheet.py --upload --every 300` or `./push_monitor_sheet.sh`
+5. Session: `python3 monitor_sheet.py --upload --every 30` (not 1 second) or `./push_monitor_sheet.sh`
 
 Keep `DRY_RUN=true`. Do not upload `.env` or `ticks.db` to Drive.
 
