@@ -70,6 +70,11 @@ from s11_desk import (
 )
 from research_desk import decide_research, research_desk_payload
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
+from monitor_sheet import (
+    STATUS_FIELDS,
+    build_status_rows,
+    monitor_sheet_zip_bytes,
+)
 from s14_exchange_sheet import (
     HTML_NAME,
     load_sheet_csv,
@@ -535,11 +540,30 @@ class ControlHandler(BaseHTTPRequestHandler):
                     {"Content-Disposition": f'attachment; filename="{name}"'},
                 )
                 return
+            if path == "/api/sheets/monitor.zip":
+                blob = monitor_sheet_zip_bytes()
+                stamp = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y%m%d_%H%M%S")
+                name = f"goldpetal_monitor_{stamp}.zip"
+                self._send(
+                    200,
+                    blob,
+                    "application/zip",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
             if path == "/api/sheets/scoreboard.tsv":
                 rows = build_scoreboard_rows()
                 tsv = rows_to_tsv(rows, SCORE_FIELDS)
                 status, body, ctype = _json_bytes(
                     {"kind": "scoreboard", "rows": len(rows), "tsv": tsv}
+                )
+                self._send(status, body, ctype)
+                return
+            if path == "/api/sheets/status.tsv":
+                rows = build_status_rows()
+                tsv = rows_to_tsv(rows, STATUS_FIELDS)
+                status, body, ctype = _json_bytes(
+                    {"kind": "status", "rows": len(rows), "tsv": tsv}
                 )
                 self._send(status, body, ctype)
                 return

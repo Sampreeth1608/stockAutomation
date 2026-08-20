@@ -251,7 +251,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="dl-panel" hidden>
         <h2>Downloads</h2>
-        <p class="hint">CSV / ZIP for the laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV. Compact start/stop is the Risk and Engine column on the right.</p>
+        <p class="hint">CSV / ZIP for the laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV. Phone monitor ZIP is the 7-tab dashboard (LIVE / books after charges). Start/stop stays in the Risk and Engine column. Sheets COMMANDS may pause/emergency only — not Unlock live.</p>
         <div class="row" style="margin-top:.45rem">
           <label class="chk">From <input type="date" id="exp-from"/></label>
           <label class="chk">To <input type="date" id="exp-to"/></label>
@@ -267,6 +267,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div class="row" style="margin-top:.45rem">
           <button class="btn" type="button" id="btn-sheets-pack">Download Sheets pack</button>
           <button class="btn warn" type="button" id="btn-copy-score">Copy scoreboard → Sheets</button>
+          <button class="btn ok" type="button" id="btn-monitor-pack">Download phone monitor</button>
+          <button class="btn warn" type="button" id="btn-copy-status">Copy status → Sheets</button>
           <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
         </div>
         <p class="flash" id="flash-dl"></p>
@@ -1799,11 +1801,22 @@ $("btn-sheets-pack").onclick = () => {
   downloadUrl("/api/sheets/pack.zip");
   flash("flash-dl", "Downloading Sheets pack (scoreboard + trades + opens + signals)");
 };
+$("btn-monitor-pack").onclick = () => {
+  downloadUrl("/api/sheets/monitor.zip");
+  flash("flash-dl", "Downloading phone monitor (STATUS + BOOKS after charges). Watch only — not start/stop.");
+};
 $("btn-copy-score").onclick = async () => {
   try {
     const data = await api("/api/sheets/scoreboard.tsv");
     await navigator.clipboard.writeText(data.tsv || "");
     flash("flash-dl", `Copied ${data.rows || 0} scoreboard rows — paste into Google Sheets`);
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+$("btn-copy-status").onclick = async () => {
+  try {
+    const data = await api("/api/sheets/status.tsv");
+    await navigator.clipboard.writeText(data.tsv || "");
+    flash("flash-dl", `Copied ${data.rows || 0} status rows — paste into Google Sheets (watch only)`);
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
 };
 $("btn-s14-zip").onclick = () => {

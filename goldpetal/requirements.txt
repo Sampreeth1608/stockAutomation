@@ -10,6 +10,6 @@ scikit-learn
 joblib
 # optional: S9 bar ML booster (train_s9_bar_ml.py --model lightgbm)
 # lightgbm
-# optional: upload manual pack CSVs to Google Sheets
+# optional: upload phone monitor / manual pack CSVs to Google Sheets
 # gspread
 # google-auth
