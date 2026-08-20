@@ -295,6 +295,68 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
         assert float(paper[0].get("gross_pnl") or 0) == 1500.0
 
 
+def test_live_pnl_positions_one_row_per_open_book() -> None:
+    """Live tab lists each Angel OPEN book; paper 100-lot opens stay off this list."""
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        _tick(db)
+        _round_trip(db)
+        save_signal(
+            time_label="2026-08-17T13:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="live_in",
+            price_delta=1.0,
+            net=20.0,
+            net_delta=2.0,
+            dry_run=False,
+            strategy="S5_MINEDGE",
+            cmp=15010.0,
+            db_path=db,
+        )
+        st = ControlState()
+        with (
+            patch("control_state.load_state", return_value=st),
+            patch("desk_data.live_lots_for", return_value=1),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        assert int(pnl["summary"]["open"]) == 1
+        assert [t["strategy"] for t in pnl["open"]] == ["S5_MINEDGE"]
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert "S5_MINEDGE" in by_name
+        assert by_name["S5_MINEDGE"]["status"] == "OPEN"
+        assert by_name["S5_MINEDGE"]["side"] == "BUY"
+        assert float(by_name["S5_MINEDGE"].get("lots") or 0) == 1.0
+        assert "S16_HHHL_WICK_1H" not in by_name
+        assert not [t for t in pnl["closed"] if t.get("strategy") == "S5_MINEDGE"]
+
+
+def test_live_pnl_positions_flat_when_live_picked_and_no_open() -> None:
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        _tick(db)
+        st = ControlState(live_approved=["S5_MINEDGE", "S8_NET_ZIGZAG"])
+        with (
+            patch("control_state.load_state", return_value=st),
+            patch("desk_data.live_lots_for", return_value=1),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S5_MINEDGE"]["status"] == "FLAT"
+        assert by_name["S5_MINEDGE"]["side"] == "FLAT"
+        assert by_name["S8_NET_ZIGZAG"]["status"] == "FLAT"
+        assert pnl["open"] == []
+
+
 if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
@@ -307,4 +369,6 @@ if __name__ == "__main__":
     test_history_payload_has_closed_trade_and_ticks()
     test_list_signals_limit_keeps_latest()
     test_live_pnl_excludes_paper_and_scales_live_lots()
+    test_live_pnl_positions_one_row_per_open_book()
+    test_live_pnl_positions_flat_when_live_picked_and_no_open()
     print("ALL test_desk_data OK")

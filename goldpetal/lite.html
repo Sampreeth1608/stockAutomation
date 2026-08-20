@@ -82,6 +82,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
     <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots.</p>
+    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel lots, FLAT = none).</p>
+    <table style="margin-top:.35rem">
+      <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
+      <tbody id="live-pnl-open"></tbody>
+    </table>
     <p class="hint">Approve already papers every book. This page is only Angel. A book appears at ≥40% WR% AC with closed trades — S5 / S8 / S13 / S16 and any other paper book. Check Live to pick. S18 / S19 / S20 / AMISE stay paper until they hit 40%.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
@@ -90,7 +95,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     </div>
     <p class="hint">Wallet ₹ is the whole live pot. Each row’s ₹ is that book’s slice (default ₹50,000) — not lots. Paper In is not here.</p>
     <table style="margin-top:.45rem">
-      <thead><tr><th>Book</th><th>WR%</th><th>n</th><th>Live</th><th>₹</th><th>Lots</th><th></th></tr></thead>
+      <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Live</th><th>₹</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
     </table>
     <div class="row" style="margin-top:.45rem">
@@ -199,14 +204,21 @@ function render(d) {
   if (!typing()) {
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
+    const posBy = {};
+    ((d.live_pnl || {}).positions || (d.live_pnl || {}).open || []).forEach((t) => {
+      if (t && t.strategy) posBy[t.strategy] = t;
+    });
     $("live-books").innerHTML = (live.books || []).filter((b) => b.live_eligible).map((b) => {
       const name = b.strategy;
       const sb = budgets[name] || {};
       const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
       const wr = b.win_rate_after_charges;
       const wrBit = (wr == null || wr === "") ? "—" : String(Math.round(Number(wr)));
+      const pos = posBy[name] || {};
+      const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
       return `<tr>
         <td>${shortName(name)}</td>
+        <td>${esc(posBit)}</td>
         <td>${wrBit}</td>
         <td>${esc(b.closed == null ? "—" : b.closed)}</td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
@@ -214,7 +226,7 @@ function render(d) {
         <td><input type="number" data-lots="${name}" min="1" max="10" value="${esc(sb.max_lots != null ? sb.max_lots : 1)}"/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="7">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="8">no book at 40% WR% AC yet</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -237,6 +249,22 @@ function render(d) {
     + " · closed " + closed
     + " · Angel sends " + placed
     + ". Paper tape stays on the full desk KPIs.";
+  const posEl = $("live-pnl-open");
+  if (posEl) {
+    const waitingAll = ((d.flatten || {}).by_strategy) || {};
+    posEl.innerHTML = (lp.positions || lp.open || []).map((t) => {
+      const name = t.strategy;
+      const waiting = !!waitingAll[name];
+      const open = String(t.status || "") === "OPEN";
+      return `<tr>
+        <td>${shortName(name)}</td>
+        <td>${esc(t.side || "FLAT")}</td>
+        <td>${esc(t.status || "FLAT")}</td>
+        <td>${esc(t.lots != null && t.lots !== "" ? t.lots : "")}</td>
+        <td><button type="button" class="btn danger" data-exit="${esc(name)}" ${waiting || !open ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">No live positions</td></tr>`;
+  }
 }
 function renderMl(d) {
   const s11 = (d && d.s11) || {};
@@ -312,7 +340,7 @@ $("btn-save-books").onclick = () => {
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
-  if (!btn.closest("#live-books")) return;
+  if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
   if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Paper CLOSE always. Angel CLOSE only if live-armed.")) return;
   act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — bot CLOSEs on the next tick.");

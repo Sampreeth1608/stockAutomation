@@ -235,6 +235,7 @@ def desk_payload() -> dict[str, Any]:
         live_pnl = {
             "trades": [],
             "open": [],
+            "positions": [],
             "closed": [],
             "orders": [],
             "scoreboard": [],

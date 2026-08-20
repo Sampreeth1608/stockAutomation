@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v27: Positions tab is paper positions -->
+<!-- gp-header-v28: Live tab shows per-book live positions -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -194,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v27</div>
+      <div class="clock" id="clock">IST — · v28</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -252,6 +252,16 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <div class="kpi"><b>Live AC ₹</b><span id="live-kpi-pnl">—</span></div>
           <div class="kpi"><b>Live WR% AC</b><span id="live-kpi-wr">—</span></div>
         </div>
+        <h2 style="margin-top:.85rem">Live positions</h2>
+        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only.</p>
+        <table>
+          <thead>
+            <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
+          </thead>
+          <tbody id="live-pnl-open"></tbody>
+        </table>
+        <h2 style="margin-top:1rem">Live round-trips</h2>
+        <p class="hint">Closed Angel round-trips after charges (tax excluded). Paper Positions / Paper P&amp;L stay 100 lots.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th>In</th><th>Out</th><th class="num">Lots</th><th class="num">AC ₹</th><th>Why</th></tr>
@@ -289,7 +299,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <p class="hint">These rows are paper books at ≥40% WR after Angel charges (tax excluded), plus any you already picked. Check Live to pick. ₹ is that book’s live budget (₹50,000 default). Lots is contracts. Then type LIVE, Arm live, RESTART.</p>
         <table>
           <thead>
-            <tr><th>Book</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
+            <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
           </thead>
           <tbody id="live-books"></tbody>
         </table>
@@ -624,7 +634,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v27";
+    if (clock) clock.textContent = "IST " + ist + " · v28";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1646,9 +1656,29 @@ function renderLivePnl() {
   pnlEl.className = pnlClass(pnl);
   const wr = wrAfterCharges(sum);
   $("live-kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
+  const openElBody = $("live-pnl-open");
+  if (openElBody) {
+    const waitingAll = ((lastDesk.flatten || {}).by_strategy) || {};
+    const posRows = p.positions || (p.open || []).map((t) => t);
+    openElBody.innerHTML = posRows.map((t) => {
+      const name = t.strategy;
+      const waiting = !!waitingAll[name];
+      const open = String(t.status || "") === "OPEN";
+      const ac = t.pnl_after_charges != null && t.pnl_after_charges !== "" ? t.pnl_after_charges : t.net_pnl;
+      return `<tr>
+        <td>${esc(shortName(name))}</td>
+        <td>${esc(t.side || "FLAT")}</td>
+        <td>${esc(t.status || "FLAT")}</td>
+        <td class="num">${open ? money(t.entry_price) : "—"}</td>
+        <td class="num">${esc(t.lots != null && t.lots !== "" ? t.lots : "")}</td>
+        <td class="num ${open ? "" : pnlClass(ac)}">${open ? "—" : (t.status === "FLAT" ? "—" : money(ac))}</td>
+        <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting || !open ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="7">No live positions — pick a book, Arm live, then a live-picked book opens here (one row per strategy).</td></tr>`;
+  }
   const tradesEl = $("live-pnl-trades");
-  const trades = p.trades || [];
-  tradesEl.innerHTML = trades.map((t) => {
+  const closed = (p.closed || []).length ? (p.closed || []) : (p.trades || []).filter((t) => String(t.status || "").startsWith("CLOSED"));
+  tradesEl.innerHTML = closed.map((t) => {
     const ac = t.pnl_after_charges != null && t.pnl_after_charges !== "" ? t.pnl_after_charges : t.net_pnl;
     return `<tr>
       <td>${esc(shortName(t.strategy))}</td>
@@ -1657,7 +1687,7 @@ function renderLivePnl() {
       <td class="num">${money(t.entry_price)}</td>
       <td class="num">${money(t.exit_price)}</td>
       <td class="num">${esc(t.lots != null && t.lots !== "" ? t.lots : "")}</td>
-      <td class="num ${pnlClass(ac)}">${t.status === "OPEN" ? "—" : money(ac)}</td>
+      <td class="num ${pnlClass(ac)}">${money(ac)}</td>
       <td>${esc(t.exit_reason || t.entry_reason || "")}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="8">No live round-trips yet — Arm live, then wait for a live-picked book to open and close.</td></tr>`;
@@ -1712,6 +1742,10 @@ function renderDesk(d) {
     const budgets = cap.strategies || {};
     const waitingAll = (d.flatten || {}).by_strategy || {};
     const liveRows = (live.books || []).filter((b) => b.live_eligible);
+    const posBy = {};
+    (((d.live_pnl || lastTape.live_pnl || {}).positions) || ((d.live_pnl || {}).open) || []).forEach((t) => {
+      if (t && t.strategy) posBy[t.strategy] = t;
+    });
     $("live-books").innerHTML = liveRows.map((b) => {
       const name = b.strategy;
       const sb = budgets[name] || {};
@@ -1720,8 +1754,11 @@ function renderDesk(d) {
       const lots = sb.max_lots != null ? Math.min(10, Number(sb.max_lots) || 1) : 1;
       const wr = b.win_rate_after_charges;
       const closed = b.closed;
+      const pos = posBy[name] || {};
+      const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
       return `<tr>
         <td>${esc(shortName(name))}</td>
+        <td>${esc(posBit)}</td>
         <td class="num">${wr == null || wr === "" ? "—" : pct(wr)}</td>
         <td class="num">${closed == null || closed === "" ? "—" : esc(closed)}</td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
@@ -1729,7 +1766,7 @@ function renderDesk(d) {
         <td class="num"><input class="cap" type="number" data-lots="${name}" min="1" max="10" value="${esc(lots)}"/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="7">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="8">no book at 40% WR% AC yet</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -2018,7 +2055,7 @@ function exitAll(flashId) {
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
-  if (!btn.closest("#live-books")) return;
+  if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
   const label = shortName(name);
   if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed.")) return;

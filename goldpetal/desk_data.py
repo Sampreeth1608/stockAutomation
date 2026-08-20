@@ -313,6 +313,7 @@ def _empty_live_pnl() -> dict[str, Any]:
     return {
         "trades": [],
         "open": [],
+        "positions": [],
         "closed": [],
         "scoreboard": [],
         "orders": [],
@@ -329,6 +330,52 @@ def _empty_live_pnl() -> dict[str, Any]:
         },
         "note": "Paper tape (Paper Positions / Blotter / Paper P&L) stays 100 lots. Real Angel ₹ is here after a live round-trip.",
     }
+
+
+def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per live-picked book: OPEN trade if any, else FLAT."""
+    from control_state import load_state
+    from live_readiness import NEVER_LIVE_BOOKS, book_may_go_live
+
+    open_by: dict[str, dict[str, Any]] = {}
+    for trade in open_t:
+        name = str(trade.get("strategy") or "").strip()
+        if name:
+            open_by[name] = trade
+    names: list[str] = []
+    seen: set[str] = set()
+    approved = list(load_state().live_approved or [])
+    for raw in list(approved) + list(open_by.keys()):
+        name = str(raw or "").strip()
+        if not name or name in seen or name in NEVER_LIVE_BOOKS:
+            continue
+        if name not in open_by and not book_may_go_live(name):
+            continue
+        seen.add(name)
+        names.append(name)
+    rows: list[dict[str, Any]] = []
+    for name in names:
+        trade = open_by.get(name)
+        if trade:
+            row = dict(trade)
+            if row.get("lots") in (None, ""):
+                row["lots"] = live_lots_for(name)
+            rows.append(row)
+            continue
+        rows.append(
+            {
+                "strategy": name,
+                "side": "FLAT",
+                "status": "FLAT",
+                "lots": live_lots_for(name),
+                "entry_price": "",
+                "exit_price": "",
+                "pnl_after_charges": "",
+                "entry_reason": "",
+                "exit_reason": "",
+            }
+        )
+    return rows
 
 
 def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
@@ -359,11 +406,13 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     summary["strategy"] = "LIVE"
     orders = [_public_live_order(o) for o in recent_orders(limit=40)]
     placed = [o for o in orders if o.get("placed")]
+    positions = _live_positions_by_book(open_t)
     out = _empty_live_pnl()
     out.update(
         {
             "trades": (open_t + closed_rev)[:80],
             "open": open_t,
+            "positions": positions,
             "closed": closed_rev[:80],
             "scoreboard": scoreboard + [summary],
             "orders": orders,

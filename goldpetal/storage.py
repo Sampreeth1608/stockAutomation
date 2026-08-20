@@ -623,6 +623,7 @@ def _build_trades_one(
                 "pnl_after_tax": "",
                 "net_pnl": "",
                 "net_pnl_pct": "",
+                "lots": float(lot_size) if lot_size is not None else "",
                 "status": "OPEN",
             }
         elif action == "CLOSE" and open_trade is not None:

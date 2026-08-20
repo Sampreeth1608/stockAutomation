@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v27" in html
-    assert " · v27" in html
+    assert "gp-header-v28" in html
+    assert " · v28" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -78,6 +78,11 @@ def test_station_is_the_operator_page() -> None:
     assert "WR% AC" in html
     assert "Paper AC" in html
     assert "live-kpi-pnl" in html
+    assert 'id="live-pnl-open"' in html
+    assert "Live positions" in html
+    assert "Live round-trips" in html
+    assert "<th>Pos</th>" in html
+    assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
     assert "S18 / S19 / S20 / AMISE stay paper" in html
@@ -215,6 +220,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Unlock live" not in html
     assert "Live books + money" in html
     assert "live-pnl-line" in html
+    assert 'id="live-pnl-open"' in html
+    assert "Live positions" in html
     assert "Real Angel P&amp;L" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
