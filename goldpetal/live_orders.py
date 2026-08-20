@@ -82,6 +82,38 @@ def live_lots_for(strategy: str) -> int:
         return min(default, cap)
 
 
+def mirror_positions_from_signals(
+    rows: list[Any], *, live_only: bool = False
+) -> dict[str, str]:
+    """Newest row per strategy → long/short/flat. Paper tape is not an Angel position."""
+    seeded: dict[str, str] = {}
+    for row in rows:
+        try:
+            raw = row["dry_run"] if not isinstance(row, dict) else row.get("dry_run")
+            dry = int(raw or 0)
+        except (TypeError, ValueError, KeyError):
+            dry = 0
+        if live_only and dry != 0:
+            continue
+        try:
+            name = str(
+                (row["strategy"] if not isinstance(row, dict) else row.get("strategy")) or ""
+            )
+            pos = str(
+                (
+                    row["position_after"]
+                    if not isinstance(row, dict)
+                    else row.get("position_after")
+                )
+                or ""
+            ).lower()
+        except (TypeError, KeyError):
+            continue
+        if name and name not in seeded and pos in {"long", "short", "flat"}:
+            seeded[name] = pos
+    return seeded
+
+
 def strategy_may_trade_live(strategy: str, *, action: str = "") -> tuple[bool, str]:
     ok, reason = is_live_mode_allowed()
     if not ok:

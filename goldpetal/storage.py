@@ -302,27 +302,27 @@ def latest_signals(
     limit: int = 20,
     strategy: str | None = None,
     db_path: Path = DB_PATH,
+    *,
+    live_only: bool = False,
 ) -> list[sqlite3.Row]:
     init_db(db_path)
+    where: list[str] = []
+    params: list[Any] = []
     if strategy:
-        query = """
-            SELECT time_label, symbol, strategy, action, position_after, reason,
-                   price_delta, net, net_delta, dry_run, cmp
-            FROM signals
-            WHERE strategy = ?
-            ORDER BY id DESC
-            LIMIT ?
-        """
-        params: tuple[Any, ...] = (strategy, limit)
-    else:
-        query = """
-            SELECT time_label, symbol, strategy, action, position_after, reason,
-                   price_delta, net, net_delta, dry_run, cmp
-            FROM signals
-            ORDER BY id DESC
-            LIMIT ?
-        """
-        params = (limit,)
+        where.append("strategy = ?")
+        params.append(strategy)
+    if live_only:
+        where.append("dry_run = 0")
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    query = f"""
+        SELECT time_label, symbol, strategy, action, position_after, reason,
+               price_delta, net, net_delta, dry_run, cmp
+        FROM signals
+        {clause}
+        ORDER BY id DESC
+        LIMIT ?
+    """
+    params.append(int(limit))
     with connect(db_path) as conn:
         return list(conn.execute(query, params))
 

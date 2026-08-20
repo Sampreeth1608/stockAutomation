@@ -305,6 +305,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
     assert "emit_desk_flatten" in runner
     assert "apply_pending_flattens" in runner
+    assert "mirror_positions_from_signals" in runner
+    assert "live_only=not dry_run" in runner
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
     assert "session_status" in text

@@ -17,7 +17,7 @@ from desk_data import (
     tape_freshness,
     tape_payload,
 )
-from storage import init_db, list_signals, save_signal, save_tick
+from storage import init_db, latest_signals, list_signals, save_signal, save_tick
 
 
 def _tick(db: Path, day: str = "2026-08-17", ltp: int = 1500000) -> None:
@@ -363,6 +363,46 @@ def test_live_pnl_positions_flat_when_live_picked_and_no_open() -> None:
         assert int(board["S8_NET_ZIGZAG"]["closed"]) == 0
 
 
+def test_latest_signals_live_only_skips_paper() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        save_signal(
+            time_label="2026-08-20T15:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="paper",
+            price_delta=1.0,
+            net=1.0,
+            net_delta=1.0,
+            dry_run=True,
+            strategy="S5_MINEDGE",
+            cmp=15700.0,
+            db_path=db,
+        )
+        save_signal(
+            time_label="2026-08-20T15:01:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="live",
+            price_delta=1.0,
+            net=1.0,
+            net_delta=1.0,
+            dry_run=False,
+            strategy="S8_NET_ZIGZAG",
+            cmp=15710.0,
+            db_path=db,
+        )
+        all_rows = latest_signals(limit=10, db_path=db)
+        live_rows = latest_signals(limit=10, db_path=db, live_only=True)
+        assert len(all_rows) == 2
+        assert len(live_rows) == 1
+        assert live_rows[0]["strategy"] == "S8_NET_ZIGZAG"
+        assert int(live_rows[0]["dry_run"] or 0) == 0
+
+
 if __name__ == "__main__":
     test_json_safe_strips_nan()
     test_resolve_desk_db_prefers_newer_nonempty()
@@ -377,4 +417,5 @@ if __name__ == "__main__":
     test_live_pnl_excludes_paper_and_scales_live_lots()
     test_live_pnl_positions_one_row_per_open_book()
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
+    test_latest_signals_live_only_skips_paper()
     print("ALL test_desk_data OK")

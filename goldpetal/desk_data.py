@@ -442,9 +442,9 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
         )
     elif not closed and not open_t and not placed:
         out["note"] = (
-            "No Angel round-trips yet. Paper Positions / Paper P&L are the 100-lot tape — "
-            "not a live fill. All live ₹ is Live AC below; per-book live ₹ is Live P&L by book. "
-            "If paper just took a trade, read Angel orders Why (empty = bot still paper, type RESTART)."
+            "No Angel round-trips yet. Paper opens stay paper — they do not become live. "
+            "Live is FLAT until the next live-picked entry. All live ₹ is Live AC; each book is "
+            "Live P&L by book. After RESTART, the next emit shows on Angel orders (order id or Why)."
         )
     else:
         out["note"] = (

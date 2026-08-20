@@ -19,7 +19,7 @@ from auth import login
 from depth import depth_buy_sell_sums
 from entry_gates import allow_new_entry
 from export_full_ticks import _depth_side
-from live_orders import broker_from_session
+from live_orders import broker_from_session, mirror_positions_from_signals
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
 from market_mood import MoodDetector, mood_blocks_entry, mood_wants_flatten
@@ -200,17 +200,17 @@ def run_once(
     contract = find_goldpetal_futures(force_refresh=True)
     session = login()
     broker = broker_from_session(session, contract)
-    # Seed broker mirror from last DB signal per strategy so CLOSE/REVERSE work after restart.
+    # Seed Angel mirror from last *live* signal. Paper opens must not look like contracts.
     try:
-        seeded: dict[str, str] = {}
-        for row in latest_signals(limit=200):
-            name = str(row["strategy"] or "")
-            pos = str(row["position_after"] or "").lower()
-            if name and name not in seeded and pos in {"long", "short", "flat"}:
-                seeded[name] = pos
+        seeded = mirror_positions_from_signals(
+            latest_signals(limit=400, live_only=not dry_run),
+            live_only=not dry_run,
+        )
         if seeded and hasattr(broker, "seed_positions"):
             broker.seed_positions(seeded)
             print(f"Broker positions seeded: {seeded}", flush=True)
+        elif not dry_run:
+            print("Broker positions seeded: {} (paper opens are not live)", flush=True)
     except Exception as exc:
         logger.warning("Could not seed broker positions: %s", exc)
     try:

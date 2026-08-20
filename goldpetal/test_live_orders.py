@@ -18,7 +18,7 @@ from control_state import (
     set_live_unlocked,
     set_trading_enabled,
 )
-from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots
+from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots, mirror_positions_from_signals
 
 
 class _FakeApi:
@@ -284,6 +284,19 @@ def test_broker_from_session_live_when_not_dry() -> None:
     os.environ["DRY_RUN"] = "true"
 
 
+def test_mirror_positions_skips_paper_when_live_only() -> None:
+    rows = [
+        {"strategy": "S5_MINEDGE", "position_after": "long", "dry_run": 1},
+        {"strategy": "S8_NET_ZIGZAG", "position_after": "short", "dry_run": 1},
+        {"strategy": "S5_MINEDGE", "position_after": "flat", "dry_run": 0},
+    ]
+    paper = mirror_positions_from_signals(rows, live_only=False)
+    assert paper["S5_MINEDGE"] == "long"
+    assert paper["S8_NET_ZIGZAG"] == "short"
+    live = mirror_positions_from_signals(rows, live_only=True)
+    assert live == {"S5_MINEDGE": "flat"}
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -305,4 +318,6 @@ if __name__ == "__main__":
     print("ok s18 live at 40")
     test_broker_from_session_live_when_not_dry()
     print("ok broker_from_session")
+    test_mirror_positions_skips_paper_when_live_only()
+    print("ok mirror_skips_paper")
     print("ALL test_live_orders OK")
