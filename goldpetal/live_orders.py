@@ -86,22 +86,25 @@ def live_lots_for(strategy: str) -> int:
     return min(default, cap)
 
 
-def strategy_may_trade_live(strategy: str) -> tuple[bool, str]:
+def strategy_may_trade_live(strategy: str, *, action: str = "") -> tuple[bool, str]:
     ok, reason = is_live_mode_allowed()
     if not ok:
         return False, reason
+    from live_readiness import NEVER_LIVE_BOOKS, book_may_go_live
+
     if str(strategy) == "YOU_MANUAL":
         return True, "ok_you_tab"
-    from live_readiness import LIVE_ELIGIBLE_BOOKS
-
-    if str(strategy) not in LIVE_ELIGIBLE_BOOKS:
+    if str(strategy) in NEVER_LIVE_BOOKS:
         return False, "not_live_eligible"
     require = _env_bool("LIVE_REQUIRE_APPROVAL", True)
-    if not require:
-        return True, "ok_no_approval_required"
     st = load_state()
-    if strategy not in st.live_approved:
+    if require and strategy not in st.live_approved:
         return False, "strategy_not_live_approved"
+    act = str(action or "").upper()
+    if act == "CLOSE":
+        return True, "ok_close"
+    if not book_may_go_live(strategy):
+        return False, "not_live_eligible"
     return True, "ok"
 
 
@@ -216,7 +219,7 @@ class LiveBroker:
         price: float | None = None,
         tag: str = "",
     ) -> OrderResult:
-        may, why = strategy_may_trade_live(strategy)
+        may, why = strategy_may_trade_live(strategy, action=action)
         if not may:
             self.skip_count += 1
             res = OrderResult(

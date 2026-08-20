@@ -64,8 +64,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v24" in html
-    assert " · v24" in html
+    assert "gp-header-v25" in html
+    assert " · v25" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -101,6 +101,8 @@ def test_station_is_the_operator_page() -> None:
     assert 'id="books"' not in html
     assert "Approve already papers" in html
     assert "only Angel" in html
+    assert "WR% AC of 40" in html
+    assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
@@ -193,6 +195,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "after charges" in html
     assert "Approve already papers" in html
     assert "only Angel" in html
+    assert "40% WR% AC" in html
+    assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
@@ -316,6 +320,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
     assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
+    from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
+
+    assert LIVE_WR_MIN_PCT == 40.0
+    assert summary_qualifies_live({"closed": 5, "win_rate_after_charges": 40.0}) is True
+    assert summary_qualifies_live({"closed": 5, "win_rate_after_charges": 39.9}) is False
     tunnel = (ROOT / "panel_tunnel.sh").read_text(encoding="utf-8")
     assert "--tunnel-through-iap" in tunnel
     assert "exec ssh -N -L" not in tunnel

@@ -310,7 +310,7 @@ def test_apply_desk_books_s20_stays_paper_only() -> None:
 
 def test_desk_snapshot_skips_checklist() -> None:
     os.environ["DRY_RUN"] = "true"
-    snap = desk_snapshot()
+    snap = desk_snapshot(summaries={})
     assert "steps" not in snap
     assert "S16_HHHL_WICK_1H" in snap["enables"]
     assert "S18_OHLC_VOL_HTF" in snap["enables"]
@@ -323,7 +323,7 @@ def test_desk_snapshot_skips_checklist() -> None:
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
     assert s18["live_eligible"] is False
-    assert s16["live_eligible"] is True
+    assert s16["live_eligible"] is False
     assert "S4_OVERNIGHT" not in snap["enables"]
     assert not any(b["strategy"] == "S4_OVERNIGHT" for b in snap["books"])
     assert "S14_WICK30_STRICT" not in snap["enables"]
@@ -353,6 +353,67 @@ def test_apply_desk_books_amise_not_live() -> None:
         assert "S13_HHHL_DAY" in res["live_approved"]
         assert "S21_AMISE" in res["skipped_live_not_in_bot"]
         assert "DRY_RUN=true" in env.read_text(encoding="utf-8")
+    finally:
+        td.cleanup()
+
+
+def test_summary_qualifies_live_needs_closed_and_40pct() -> None:
+    from live_readiness import summary_qualifies_live
+
+    assert summary_qualifies_live(None) is False
+    assert summary_qualifies_live({"closed": 0, "win_rate_after_charges": 100}) is False
+    assert summary_qualifies_live({"closed": 5, "win_rate_after_charges": 39.9}) is False
+    assert summary_qualifies_live({"closed": 5, "win_rate_after_charges": 40.0}) is True
+    assert summary_qualifies_live({"closed": 1, "win_rate": 100}) is True
+
+
+def test_desk_snapshot_lists_40pct_paper_books() -> None:
+    os.environ["DRY_RUN"] = "true"
+    snap = desk_snapshot(
+        summaries={
+            "S18_OHLC_VOL_HTF": {
+                "closed": 10,
+                "win_rate_after_charges": 40.0,
+                "pnl_after_charges": 250.0,
+            },
+            "S16_HHHL_WICK_1H": {"closed": 8, "win_rate_after_charges": 25.0},
+            "S21_AMISE": {"closed": 4, "win_rate_after_charges": 50.0},
+        }
+    )
+    s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
+    s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
+    s21 = next(b for b in snap["books"] if b["strategy"] == "S21_AMISE")
+    s5 = next(b for b in snap["books"] if b["strategy"] == "S5_MINEDGE")
+    assert s18["live_eligible"] is True
+    assert s18["qualifies_live"] is True
+    assert s18["closed"] == 10
+    assert s16["live_eligible"] is False
+    assert s21["live_eligible"] is True
+    assert s5["live_eligible"] is False
+    assert snap["live_wr_min_pct"] == 40.0
+
+
+def test_apply_desk_books_s18_live_when_wr_40() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S13=true\nENABLE_S18=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S13_HHHL_DAY", "S18_OHLC_VOL_HTF"],
+            ["S13_HHHL_DAY", "S18_OHLC_VOL_HTF"],
+            path=env,
+            state_path=state,
+            qualified=["S18_OHLC_VOL_HTF"],
+        )
+        assert res["ok"] is True
+        assert "S18_OHLC_VOL_HTF" in res["live_approved"]
+        assert "S13_HHHL_DAY" in res["live_approved"]
     finally:
         td.cleanup()
 
@@ -481,6 +542,12 @@ if __name__ == "__main__":
     print("ok desk snapshot")
     test_apply_desk_books_amise_not_live()
     print("ok amise not live")
+    test_summary_qualifies_live_needs_closed_and_40pct()
+    print("ok wr 40 gate")
+    test_desk_snapshot_lists_40pct_paper_books()
+    print("ok snapshot 40pct")
+    test_apply_desk_books_s18_live_when_wr_40()
+    print("ok s18 live at 40")
     test_apply_desk_arm_rejects_live_without_word()
     print("ok arm needs LIVE")
     test_apply_desk_arm_paper_locks()

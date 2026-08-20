@@ -198,9 +198,41 @@ def test_s18_cannot_trade_live_even_if_approved() -> None:
         _arm_live(state, "S18_OHLC_VOL_HTF")
         api = _FakeApi()
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
-        res = broker.place_signal(strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0)
+        from unittest.mock import patch
+
+        with patch("live_readiness.qualified_live_names", return_value=frozenset()):
+            res = broker.place_signal(strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0)
         assert res.skipped and res.reason == "not_live_eligible"
         assert not api.calls
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+def test_s18_can_trade_live_when_wr_40() -> None:
+    from unittest.mock import patch
+
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "false"
+        os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
+        os.environ["LIVE_LOTS"] = "1"
+        os.environ["LIVE_MAX_LOTS"] = "1"
+        _arm_live(state, "S18_OHLC_VOL_HTF")
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        with patch(
+            "live_readiness.qualified_live_names",
+            return_value=frozenset({"S18_OHLC_VOL_HTF"}),
+        ):
+            res = broker.place_signal(
+                strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0
+            )
+        assert res.ok and res.transaction == "BUY"
+        assert api.calls
     finally:
         td.cleanup()
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
@@ -233,6 +265,8 @@ if __name__ == "__main__":
     print("ok seed_emergency")
     test_s18_cannot_trade_live_even_if_approved()
     print("ok s18 not live")
+    test_s18_can_trade_live_when_wr_40()
+    print("ok s18 live at 40")
     test_broker_from_session_live_when_not_dry()
     print("ok broker_from_session")
     print("ALL test_live_orders OK")

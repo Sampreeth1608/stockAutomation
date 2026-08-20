@@ -272,7 +272,8 @@ def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
     number: live lot size, after Angel charges, tax excluded. Order ids come
     from live_orders.jsonl — Angel app is still the fill confirmation.
     """
-    from live_readiness import LIVE_ELIGIBLE_BOOKS
+    from control_state import load_state
+    from live_readiness import LIVE_ELIGIBLE_BOOKS, NEVER_LIVE_BOOKS, book_may_go_live
 
     db = db_path or resolve_desk_db()
     now = time.time()
@@ -296,7 +297,12 @@ def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
             and now - float(_LIVE_PNL_CACHE["at"]) < 8
         ):
             return dict(cached)
-        payload = _build_live_pnl(db, LIVE_ELIGIBLE_BOOKS)
+        approved = [
+            n
+            for n in (load_state().live_approved or [])
+            if n not in NEVER_LIVE_BOOKS and book_may_go_live(n)
+        ]
+        payload = _build_live_pnl(db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved))
         _LIVE_PNL_CACHE.update({"at": time.time(), "payload": payload, "db": str(db)})
         return dict(payload)
     finally:
@@ -537,6 +543,12 @@ def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, An
         return list(rows), err
     finally:
         _TRADE_LOCK.release()
+
+
+def paper_strategy_summaries(*, db_path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Closed-trade WR% AC per paper book. Shared with the Live-tab 40% gate."""
+    rows, _ = all_trades_cached(db_path=db_path)
+    return {name: summarize_trades(rows, name) for name in paper_strategy_names()}
 
 
 def recent_trades(limit: int = 8) -> list[dict[str, Any]]:

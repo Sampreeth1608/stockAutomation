@@ -33,14 +33,70 @@ DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
     {"S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL", "FLOW_BRAIN"}
 )
-# First live-capital test: 1 lot, these four only. S18/S19/S20/AMISE/S11 stay paper.
+# First live-capital test: 1 lot, these four. Other paper books may join
+# the Live tab (and Angel) only after closed trades and WR% AC ≥ 40.
 LIVE_ELIGIBLE_BOOKS = frozenset(
     {"S5_MINEDGE", "S8_NET_ZIGZAG", "S13_HHHL_DAY", "S16_HHHL_WICK_1H"}
 )
+LIVE_WR_MIN_PCT = 40.0
+LIVE_MIN_CLOSED = 1
+NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN"})
 
 
-def book_may_go_live(name: str) -> bool:
-    return str(name).strip() in LIVE_ELIGIBLE_BOOKS
+def summary_qualifies_live(summary: dict[str, Any] | None) -> bool:
+    """Closed paper trades and WR% after Angel charges (tax excluded) ≥ 40."""
+    if not summary:
+        return False
+    try:
+        closed = int(summary.get("closed") or 0)
+    except (TypeError, ValueError):
+        closed = 0
+    if closed < LIVE_MIN_CLOSED:
+        return False
+    raw = summary.get("win_rate_after_charges")
+    if raw is None or raw == "":
+        raw = summary.get("win_rate")
+    try:
+        wr = float(raw)
+    except (TypeError, ValueError):
+        return False
+    return wr >= LIVE_WR_MIN_PCT
+
+
+def paper_summaries_for_live() -> dict[str, dict[str, Any]]:
+    try:
+        from desk_data import paper_strategy_summaries
+
+        return dict(paper_strategy_summaries() or {})
+    except Exception:
+        return {}
+
+
+def qualified_live_names(
+    *, summaries: dict[str, dict[str, Any]] | None = None
+) -> frozenset[str]:
+    stats = summaries if summaries is not None else paper_summaries_for_live()
+    names: list[str] = []
+    for name in paper_strategy_names():
+        if name in NEVER_LIVE_BOOKS:
+            continue
+        if summary_qualifies_live(stats.get(name)):
+            names.append(name)
+    return frozenset(names)
+
+
+def book_may_go_live(
+    name: str,
+    *,
+    summaries: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    """Angel may use this book: seed four, or any paper book at ≥40% WR% AC."""
+    n = str(name).strip()
+    if n in NEVER_LIVE_BOOKS or n not in set(paper_strategy_names()):
+        return False
+    if n in LIVE_ELIGIBLE_BOOKS:
+        return True
+    return n in qualified_live_names(summaries=summaries)
 
 
 def _truthy(raw: str | None, default: str = "true") -> bool:
@@ -142,17 +198,26 @@ def apply_desk_books(
     *,
     path: Path | None = None,
     state_path: Path | None = None,
+    qualified: list[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
+    Live pick is seed four, or a paper book that currently qualifies at 40% WR% AC.
     """
-    from control_state import paper_strategy_names, set_live_approved
+    from control_state import load_state, paper_strategy_names, set_live_approved
 
     known = list(paper_strategy_names())
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
     live_raw = [str(n).strip() for n in live if str(n).strip() in known]
-    live_set = [n for n in live_raw if n in in_set and n in LIVE_ELIGIBLE_BOOKS]
+    extra = (
+        {str(n).strip() for n in qualified if str(n).strip()}
+        if qualified is not None
+        else set(qualified_live_names())
+    )
+    prev = set(load_state(path=state_path).live_approved or [])
+    allowed = (set(LIVE_ELIGIBLE_BOOKS) | extra | prev) - set(NEVER_LIVE_BOOKS)
+    live_set = [n for n in live_raw if n in in_set and n in allowed]
     skipped = [n for n in live_raw if n not in live_set]
     en = apply_panel_enables(in_set, path=path)
     st = set_live_approved(
@@ -215,8 +280,9 @@ def apply_desk_arm(
     live_names = [str(n).strip() for n in (live or []) if str(n).strip()]
     if not incoming:
         incoming = current_in_bot_names(path=path)
+    can_live = set(LIVE_ELIGIBLE_BOOKS) | set(qualified_live_names())
     for name in live_names:
-        if name in LIVE_ELIGIBLE_BOOKS and name not in incoming:
+        if name in can_live and name not in incoming:
             incoming.append(name)
     books = apply_desk_books(
         incoming,
@@ -267,7 +333,7 @@ def apply_desk_arm(
         st = set_live_unlocked(True, path=state_path, note="desk Arm live")
         live_note = (
             "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
-            "Angel fires only on live-picked S5 / S8 / S13 / S16."
+            "Angel fires only on live-picked books at ≥40% WR% AC (seed four S5/S8/S13/S16 included)."
         )
         if not books.get("live_approved"):
             live_note += " No live book is picked yet — check Live on those rows first."
@@ -329,23 +395,52 @@ def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> f
     return (now - ts.astimezone(IST)).total_seconds()
 
 
-def desk_snapshot() -> dict[str, Any]:
-    """Minimal Desk-page state. No scoreboard, no per-book live qty, no checklist."""
+def _live_book_row(
+    name: str,
+    *,
+    approved: list[str],
+    summaries: dict[str, dict[str, Any]],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sc = summaries.get(name) or {}
+    qualifies = name not in NEVER_LIVE_BOOKS and summary_qualifies_live(sc)
+    was_picked = name in approved and name not in NEVER_LIVE_BOOKS
+    closed = sc.get("closed")
+    try:
+        closed_n = int(closed or 0)
+    except (TypeError, ValueError):
+        closed_n = 0
+    wr = sc.get("win_rate_after_charges")
+    if wr is None or wr == "":
+        wr = sc.get("win_rate")
+    row = {
+        "strategy": name,
+        "live_approved": was_picked,
+        "live_eligible": bool(qualifies or was_picked),
+        "qualifies_live": bool(qualifies),
+        "closed": closed_n,
+        "win_rate_after_charges": wr,
+        "pnl_after_charges": sc.get("pnl_after_charges"),
+    }
+    if extra:
+        row.update(extra)
+    return row
+
+
+def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Minimal Desk-page state. No full scoreboard, no per-book live qty, no checklist."""
     st = load_state()
     env = read_live_env()
     dry = bool(env["dry_run"])
     live_ok, _why = is_live_mode_allowed()
     approved = list(st.live_approved or [])
-    armed = any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
+    stats = summaries if summaries is not None else paper_summaries_for_live()
+    armed = any(book_may_go_live(n, summaries=stats) for n in approved)
     from analytics.env_bridge import strategy_enable_snapshot
 
     enables_all = strategy_enable_snapshot()
     books = [
-        {
-            "strategy": name,
-            "live_approved": name in approved and name in LIVE_ELIGIBLE_BOOKS,
-            "live_eligible": name in LIVE_ELIGIBLE_BOOKS,
-        }
+        _live_book_row(name, approved=approved, summaries=stats)
         for name in paper_strategy_names()
     ]
     enables = {name: bool(enables_all.get(name)) for name in paper_strategy_names()}
@@ -354,6 +449,7 @@ def desk_snapshot() -> dict[str, Any]:
         "live_max_lots": env["live_max_lots"],
         "enables": enables,
         "books": books,
+        "live_wr_min_pct": LIVE_WR_MIN_PCT,
         "would_place_real_orders": bool(live_ok and not dry and armed),
     }
 
@@ -368,7 +464,8 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     bot_ok = age is not None and age <= 180
     cap = _live_max()
     approved = list(st.live_approved or [])
-    armed = any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
+    stats = paper_summaries_for_live()
+    armed = any(book_may_go_live(n, summaries=stats) for n in approved)
 
     steps = [
         {
@@ -404,9 +501,9 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "ok": armed,
             "label": "At least one strategy live-approved",
             "detail": (
-                ", ".join(n for n in approved if n in LIVE_ELIGIBLE_BOOKS)
-                if any(n in LIVE_ELIGIBLE_BOOKS for n in approved)
-                else "none — paper stays paper. First live test: S5, S8, S13, S16 only."
+                ", ".join(n for n in approved if book_may_go_live(n, summaries=stats))
+                if any(book_may_go_live(n, summaries=stats) for n in approved)
+                else "none — paper stays paper. Live tab lists books at ≥40% WR% AC."
             ),
         },
         {
@@ -438,20 +535,22 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     for name in paper_strategy_names():
         sb = plan.strategies.get(name)
         paper_lots = int(sb.max_lots) if sb is not None else 0
-        on_live = name in approved and name in LIVE_ELIGIBLE_BOOKS
+        on_live = name in approved and book_may_go_live(name, summaries=stats)
         qty = live_lots_for(name) if on_live else 0
         ram_key = name.split("_")[0]  # S14 from S14_WICK30_STRICT
         ram_pos = ram.get(ram_key) or ram.get(name) or "—"
         books.append(
-            {
-                "strategy": name,
-                "paper_max_lots": paper_lots,
-                "live_approved": on_live,
-                "live_eligible": name in LIVE_ELIGIBLE_BOOKS,
-                "live_qty": qty,
-                "ram": ram_pos,
-                "warn_100": paper_lots >= 100,
-            }
+            _live_book_row(
+                name,
+                approved=approved,
+                summaries=stats,
+                extra={
+                    "paper_max_lots": paper_lots,
+                    "live_qty": qty,
+                    "ram": ram_pos,
+                    "warn_100": paper_lots >= 100,
+                },
+            )
         )
 
     n_ok = sum(1 for s in steps if s["ok"])

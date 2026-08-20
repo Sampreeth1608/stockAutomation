@@ -662,12 +662,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
                 return
             if path == "/api/live/approved":
-                from live_readiness import LIVE_ELIGIBLE_BOOKS
+                from live_readiness import book_may_go_live
 
                 names = [
                     str(s).strip()
                     for s in (data.get("strategies") or [])
-                    if str(s).strip() in LIVE_ELIGIBLE_BOOKS
+                    if book_may_go_live(str(s).strip())
                 ]
                 st = set_live_approved(names, note="control panel live_approved")
                 self._send(
