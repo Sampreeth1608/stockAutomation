@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
 """AMISE — Adaptive Market Intelligence & Strategy Engine.
 
-One research system. Four brains + your approval.
+Invent challengers. Do not control paper books.
 
-  Market state → relationships / factory → strategy manager (fit) →
-  profit guardian → risk snapshot → YOU APPROVE → S21, S22, … paper → memory
+  Factory proposes → YOU APPROVE on Lab → S21, S22, … paper → memory
+
+Mood, regime, fit, guardian, and the hour-gate scores are observe-only.
+Each enabled book trades its own formula. This module never sets DRY_RUN=false.
 
 Desk ``GET /api/amise`` is read-only (never runs the factory).
-``POST /api/amise/lab`` starts the factory in the background (cheap-screen,
-then the strong lab) and writes Lab pending rows. Approve on Lab names the
-next slot (S21, then S22, then S25 after S24) and turns paper ENABLE on.
-This module never sets DRY_RUN=false.
-
-CLI:
-
-  python3 amise.py --db data/ticks.db
-  python3 amise.py --db data/ticks.db --lab --propose --fast
-  python3 amise.py --db data/ticks.db --lab --propose --full
+``POST /api/amise/lab`` starts the factory in the background.
 """
 
 from __future__ import annotations
@@ -427,11 +420,11 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         "enable_blocked": True,
         "dry_run_required": True,
         "brains": {
-            "market_state": "What is happening now?",
+            "market_state": "What is happening now? Observe only.",
             "relationships": "Which candle / flow atoms have edge on this tape?",
-            "factory": "Compose challengers. Validate. Never auto-deploy.",
-            "manager": "Which paper book fits this regime?",
-            "guardian": "Is the champion's edge intact?",
+            "factory": "Invent challengers. Validate. Never auto-deploy. Never skip a live book.",
+            "manager": "Fit is a label. It does not pick who may open.",
+            "guardian": "Is the champion's edge intact? Watch only. Never dump.",
             "risk": "Size / daily loss / emergency.",
             "you": "Approve / reject / paper. Capture what you see.",
         },
@@ -484,14 +477,12 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "MEMORY",
         ],
         "note": (
-            "AMISE reads the regime and lets fitting paper books trade (mood gate on). "
-            "It invents challengers on Run factory / auto lab across 3m…daily "
-            "(same-TF vs S16/S18, daily vs S13; screen, then strong gates). "
-            "You Approve on Lab — that names the next slot (S21, S22, … S25 after S24) "
-            "or overwrites a filled chair with a stronger genome. "
-            "Existing books keep learning from closed trades. Restart the bot. "
-            "This tab never sets DRY_RUN=false. Angel still needs Unlock + LIVE. "
-            "Does not rewrite S13/S16. Keep DRY_RUN=true until you type LIVE."
+            "AMISE invents challengers on Run factory / auto lab (3m…daily, "
+            "same-TF vs S16/S18, daily vs S13). It does not skip, flatten, or "
+            "hour-gate a paper book. You Approve on Lab — that names the next "
+            "slot (S21, S22, … S25 after S24) or overwrites a filled chair. "
+            "Restart the bot. This tab never sets DRY_RUN=false. Angel still "
+            "needs Unlock + LIVE. Does not rewrite S13/S16. Keep DRY_RUN=true."
         ),
     }
 

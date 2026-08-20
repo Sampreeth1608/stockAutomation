@@ -25,6 +25,8 @@ FILES=(
   goldpetal/market_mood.py
   goldpetal/portfolio.py
   goldpetal/run_strategy.py
+  goldpetal/trade_learner.py
+  goldpetal/entry_gates.py
   goldpetal/amise.py
   goldpetal/trade_analysis.py
   goldpetal/.env.example

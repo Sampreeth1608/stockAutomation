@@ -1,13 +1,7 @@
-"""Self-learning entry gate: this upcoming trade vs a learned base.
+"""Self-learning blotter scores — AMISE invents, it does not skip entries.
 
-Each strategy has a **base** (typical after-tax win rate). Each BUY/SHORT
-has a **this-trade** score (this hour, side, and recency-weighted model).
-The book enters only when this trade looks better than the base — a good
-upcoming win rate, not a coin flip.
-
-70% is a stretch goal used when some hour/side actually reaches it. If a
-book never prints 70%, it still trades its better-than-base setups.
-CLOSE / flatten is never gated.
+Each strategy still has a base and hour/side scores for the Lab. BUY/SHORT
+are never blocked here. CLOSE / flatten is never gated.
 """
 
 from __future__ import annotations
@@ -22,7 +16,6 @@ from typing import Any
 
 from control_state import all_strategy_names
 from quality_filters import (
-    expected_value,
     hour_cycle,
     kelly_fraction,
     tick_features,
@@ -516,80 +509,9 @@ class TradeLearner:
         }
 
     def allow(self, strategy: str, feat: dict[str, Any] | None = None) -> tuple[bool, str]:
-        if not _env_flag("EDGE_ML", True):
-            return True, "edge_ml_off"
-        feat = dict(feat or {})
-        feat.setdefault("strategy", strategy)
-        stats = self.by_book.get(
-            strategy,
-            {
-                "n": 0.0,
-                "wins": 0.0,
-                "p": 0.5,
-                "p_emp": 0.5,
-                "base": 0.5,
-                "recent_p": 0.5,
-                "recent_n": 0.0,
-                "wilson": 0.5,
-                "avg_win": 0.0,
-                "avg_loss": 0.0,
-                "kelly": 0.0,
-                "loss_streak": 0.0,
-            },
-        )
-        n = int(stats.get("n") or 0)
-        base = self._base_p(strategy)
-        need = self.need_p(strategy)
-        p_setup, extra = self._setup_p(strategy, feat)
-        if n == 0 or n < _warmup_max():
-            return True, (
-                f"ml_warmup n={n} this={p_setup:.2f} base={base:.2f} need={need:.2f}"
-            )
-        # S5/S8 already require expected-move / book rising-IMB. The hour
-        # ratchet was freezing them in quiet Gold while S13/S16 still fired.
-        if strategy in {"S5_MINEDGE", "S8_NET_ZIGZAG"}:
-            return True, f"own_gate n={n} this={p_setup:.2f} base={base:.2f}"
-
-        b_n = int(extra.get("bucket_n") or 0)
-        p_b = float(extra.get("bucket_p") or -1.0)
-        # This hour/side is the book's usual-or-worse: skip.
-        if b_n >= max(_bucket_min(), 8) and 0.0 <= p_b <= base + 1e-9:
-            return False, (
-                f"ml_hour this={p_b:.2f}<=base={base:.2f} n={n} bn={b_n}"
-            )
-        if p_setup < need:
-            return False, (
-                f"ml_p this={p_setup:.2f}<need={need:.2f} base={base:.2f} n={n}"
-            )
-        if p_setup + 1e-9 < base:
-            return False, (
-                f"ml_base this={p_setup:.2f}<base={base:.2f} n={n}"
-            )
-
-        bid = _bucket_id(strategy, _side_from_feat(feat), _hour_from_feat(feat))
-        bucket = self.buckets.get(bid, {})
-        avg_win = float(bucket.get("avg_win") or stats.get("avg_win") or 0.0)
-        avg_loss = float(bucket.get("avg_loss") or stats.get("avg_loss") or 0.0)
-        if b_n < _bucket_min():
-            avg_win = float(stats.get("avg_win") or 0.0)
-            avg_loss = float(stats.get("avg_loss") or 0.0)
-        if abs(avg_loss) > 1e-9:
-            ev = expected_value(p_setup, avg_win, avg_loss)
-            if ev <= 0:
-                return False, f"ml_ev={ev:.1f} p={p_setup:.2f} n={n}"
-            kel = kelly_fraction(p_setup, avg_win, avg_loss)
-            if kel <= 0:
-                return False, f"ml_kelly={kel:.2f} p={p_setup:.2f} n={n}"
-        else:
-            ev = p_setup * avg_win
-            kel = 1.0
-        streak = int(stats.get("loss_streak") or 0)
-        if streak >= 4 and p_setup < max(need, base + _above_base()):
-            return False, f"ml_streak={streak} this={p_setup:.2f} n={n}"
-        return True, (
-            f"ml_p={p_setup:.2f} base={base:.2f} need={need:.2f} "
-            f"ev={ev:.1f} k={kel:.2f} n={n}"
-        )
+        """Always True. AMISE invents challengers; it does not skip a formula."""
+        del feat, strategy
+        return True, "amise_invent_only"
 
     def snapshot(self) -> dict[str, Any]:
         books = {
@@ -620,8 +542,8 @@ class TradeLearner:
             "min_proba": floor,
             "target_winrate": stretch,
             "warmup_max": _warmup_max(),
-            "enabled": _env_flag("EDGE_ML", True),
-            "line": " · ".join(bits),
+            "enabled": False,
+            "line": " · ".join(bits) + " · amise_invent_only",
         }
 
     def status_line(self) -> str:

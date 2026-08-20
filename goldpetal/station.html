@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v37: mood and market regime are observe-only; books trade their formulas -->
+<!-- gp-header-v38: AMISE invents; mood/regime/hour-gate do not skip books -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -195,7 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v37</div>
+      <div class="clock" id="clock">IST — · v38</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -403,7 +403,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <div id="lab-kpis"></div>
         <h2 style="margin-top:1rem">Improve existing books</h2>
-        <p class="hint">Closed trades train the hour gate for every paper book, including new S21+ after you Approve. S18 packs and AMISE same-slot genomes still need Approve. S13/S16 formulas never change.</p>
+        <p class="hint">Closed trades score hour/side stats for the Lab. AMISE does not skip a paper book. S18 packs and AMISE same-slot genomes still need Approve. S13/S16 formulas never change.</p>
         <div id="lab-improve"></div>
         <h2 style="margin-top:1rem">Champions (paper books on this tape)</h2>
         <div id="lab-champions"></div>
@@ -416,7 +416,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: market state, relationships, factory, fit, profit guardian, risk, then <b>you</b>. Mood and market regime are observe-only — they do not skip or flatten a book. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: AMISE <b>invents</b> challengers; it does <b>not</b> skip or flatten a book. Mood, regime, fit, guardian, and hour-gate scores are observe-only. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Arm live on the Live tab.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -718,7 +718,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v37";
+    if (clock) clock.textContent = "IST " + ist + " · v38";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}

@@ -58,7 +58,7 @@ def test_warmup_does_not_block() -> None:
     feat = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S16_HHHL_WICK_1H", feat)
     assert ok is True
-    assert "warmup" in why or "edge_ml_off" in why
+    assert why == "amise_invent_only"
 
 
 def test_blocks_after_enough_losing_closes() -> None:
@@ -69,8 +69,8 @@ def test_blocks_after_enough_losing_closes() -> None:
     lr.fit(trades)
     feat = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
     ok, why = lr.allow("S16_HHHL_WICK_1H", feat)
-    assert ok is False
-    assert "ml_" in why
+    assert ok is True
+    assert why == "amise_invent_only"
 
 
 def test_blocks_low_winrate_hour() -> None:
@@ -83,8 +83,8 @@ def test_blocks_low_winrate_hour() -> None:
     lr.fit(trades)
     feat = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
     ok, why = lr.allow("S13_HHHL_DAY", feat)
-    assert ok is False
-    assert "ml_" in why
+    assert ok is True
+    assert why == "amise_invent_only"
 
 
 def test_blocks_low_winrate_book() -> None:
@@ -99,8 +99,8 @@ def test_blocks_non_slim_book() -> None:
     lr.fit(trades)
     feat = {"strategy": "S1_NETDELTA", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S1_NETDELTA", feat)
-    assert ok is False
-    assert "ml_" in why
+    assert ok is True
+    assert why == "amise_invent_only"
     assert int(lr.by_book["S1_NETDELTA"]["n"]) == 12
 
 
@@ -114,7 +114,7 @@ def test_allows_high_winrate_book() -> None:
     feat = {"strategy": "S5_MINEDGE", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S5_MINEDGE", feat)
     assert ok is True, why
-    assert "own_gate" in why or "ml_p=" in why or "warmup" in why
+    assert why == "amise_invent_only"
 
 
 def test_allows_positive_ev_book() -> None:
@@ -158,9 +158,9 @@ def test_good_hour_enters_even_if_book_is_fifty() -> None:
     good = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
     ok_bad, why_bad = lr.allow("S13_HHHL_DAY", bad)
     ok_good, why_good = lr.allow("S13_HHHL_DAY", good)
-    assert ok_bad is False, why_bad
+    assert ok_bad is True, why_bad
     assert ok_good is True, why_good
-    assert "ml_p=" in why_good
+    assert why_bad == why_good == "amise_invent_only"
 
 
 def test_fifty_percent_book_sits_out() -> None:
@@ -173,8 +173,8 @@ def test_fifty_percent_book_sits_out() -> None:
     lr.fit(trades)
     feat = {"strategy": "S13_HHHL_DAY", "side": 1.0, "hour": 11.0, "ltp": 15000.0}
     ok, why = lr.allow("S13_HHHL_DAY", feat)
-    assert ok is False, why
-    assert "ml_" in why
+    assert ok is True, why
+    assert why == "amise_invent_only"
 
 
 def test_enters_when_this_trade_beats_base_without_seventy() -> None:
@@ -192,7 +192,7 @@ def test_enters_when_this_trade_beats_base_without_seventy() -> None:
     good = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
     ok_bad, why_bad = lr.allow("S16_HHHL_WICK_1H", bad)
     ok_good, why_good = lr.allow("S16_HHHL_WICK_1H", good)
-    assert ok_bad is False, why_bad
+    assert ok_bad is True, why_bad
     assert ok_good is True, why_good
     assert lr.need_p("S16_HHHL_WICK_1H") < 0.70
 
@@ -209,7 +209,7 @@ def test_skips_losing_hour_keeps_winning_hour() -> None:
     good = {"strategy": "S16_HHHL_WICK_1H", "side": 1.0, "hour": 15.0, "ltp": 15000.0}
     ok_bad, why_bad = lr.allow("S16_HHHL_WICK_1H", bad)
     ok_good, why_good = lr.allow("S16_HHHL_WICK_1H", good)
-    assert ok_bad is False, why_bad
+    assert ok_bad is True, why_bad
     assert ok_good is True, why_good
 
 
@@ -242,8 +242,8 @@ def test_s5_s8_own_gate_not_frozen_by_hour_ml() -> None:
     feat8 = {"strategy": "S8_NET_ZIGZAG", "side": 1.0, "hour": 10.0, "ltp": 15000.0}
     ok5, why5 = lr.allow("S5_MINEDGE", feat5)
     ok8, why8 = lr.allow("S8_NET_ZIGZAG", feat8)
-    assert ok5 is True and "own_gate" in why5
-    assert ok8 is True and "own_gate" in why8
+    assert ok5 is True and why5 == "amise_invent_only"
+    assert ok8 is True and why8 == "amise_invent_only"
 
 
 def test_on_close_exists() -> None:

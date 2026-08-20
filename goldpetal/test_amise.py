@@ -59,6 +59,8 @@ def test_amise_desk_payload_empty_db(tmp_path: Path) -> None:
     assert d["engine"] == ENGINE_NAME
     assert d["live_blocked"] is True
     assert d["enable_blocked"] is True
+    assert "does not skip" in d["note"].lower() or "invent" in d["note"].lower()
+    assert "hour-gate" in d["note"] or "does not skip" in d["note"]
     assert "MARKET STATE" in d["pipeline"]
     assert "YOUR APPROVAL" in d["pipeline"]
     assert "fits" in d["manager"]
@@ -125,6 +127,8 @@ def test_not_a_paper_book() -> None:
     amise_src = (root / "amise.py").read_text(encoding="utf-8")
     assert "all_trades_cached" in amise_src
     assert "factory already running" in amise_src
+    assert "Invent challengers" in amise_src
+    assert "amise_invent_only" in (root / "trade_learner.py").read_text(encoding="utf-8")
     env = (root / ".env.example").read_text(encoding="utf-8")
     assert "amise.py" in env
     assert "ENABLE_AMISE=" not in env

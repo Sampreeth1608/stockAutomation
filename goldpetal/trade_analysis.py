@@ -170,11 +170,9 @@ def _notes(overall: dict[str, Any], books: list[dict[str, Any]]) -> list[str]:
         "This desk tape is at PAPER_LOTS (default 100), not 1 lot. "
     )
     notes.append(
-        "A desk-wide learner trains on every strategy and refits after each CLOSE. "
-        "Each book has a base (usual after-tax win rate). New BUY/SHORT only fire when "
-        "this hour/side looks better than that base — a good upcoming trade, not a "
-        "coin flip. 70% is a stretch used when some hour actually hits it; if 70% is "
-        "never available the book still takes its better-than-base setups. CLOSE is never gated."
+        "AMISE invents Lab challengers. It does not skip a paper book. "
+        "Hour/side scores stay on the Lab. Each enabled book trades its own formula. "
+        "CLOSE is never gated."
     )
     s16 = next((b for b in books if b["strategy"] == "S16_HHHL_WICK_1H"), None)
     if s16 and int(s16["closed"]) >= 8:
