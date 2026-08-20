@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parent
 def test_station_is_the_operator_page() -> None:
     html = (ROOT / "station.html").read_text(encoding="utf-8")
     assert "Gold Petal Station" in html
+    assert 'rel="manifest"' in html
+    assert "/manifest.webmanifest" in html
     assert "Start bot" in html
     assert "Stop bot" in html
     assert "Start feed only" in html
@@ -134,6 +136,7 @@ def test_station_is_the_operator_page() -> None:
 def test_lite_html_is_compact_controls() -> None:
     html = (ROOT / "lite.html").read_text(encoding="utf-8")
     assert "Start bot" in html
+    assert 'rel="manifest"' in html
     assert "Save strategies" in html
     assert "Trading station" in html
     assert "ML / S11 + S18" in html
@@ -218,6 +221,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/sheets/pack.zip" in text
     assert "/api/sheets/monitor.zip" in text
     assert "monitor_sheet_zip_bytes" in text
+    assert "/manifest.webmanifest" in text
+    assert "MANIFEST_PATH" in text
     sh = (ROOT / "scripts" / "run_desk_vm.sh").read_text(encoding="utf-8")
     assert "control_panel.py" in sh
     assert "8501" in sh
@@ -229,6 +234,18 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "Save strategies" in station
     mac = (ROOT / "scripts" / "print_open_on_mac.sh").read_text(encoding="utf-8")
     assert "trading station" in mac
+    assert "GoldPetal.command" in mac
+    launcher = (ROOT / "scripts" / "open_desk_mac.sh").read_text(encoding="utf-8")
+    assert "uname -s" in launcher
+    assert "Darwin" in launcher
+    assert "127.0.0.1:8501" in launcher
+    assert "--host 0.0.0.0" not in launcher
+    assert "DRY_RUN=true" in launcher
+    cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
+    assert "open_desk_mac.sh" in cmd
+    man = (ROOT / "manifest.webmanifest").read_text(encoding="utf-8")
+    assert '"display": "standalone"' in man
+    assert "Gold Petal" in man
 
 
 def test_desk_payload_includes_session() -> None:

@@ -172,6 +172,12 @@ Or on the desk Downloads tab: **Download phone monitor**.
 
 Keep `DRY_RUN=true`. Do not upload `.env` or `ticks.db` to Drive.
 
+### Gold Petal application (already built)
+
+The full trading app is the **station** on the VM (`control_panel.py` + `station.html`): quote, mood, books, blotter, You, Lab, AMISE, start/stop, Unlock live. Do not build a second public website or phone app that talks to Angel.
+
+On the **Mac**, the app wrapper is `goldpetal/scripts/GoldPetal.command` (double-click). It starts a private SSH tunnel and opens `http://127.0.0.1:8501/`. Chrome → Install / Add to Dock uses `manifest.webmanifest` (standalone window). Google Sheets is a phone **watch**, not this app.
+
 ### How to plan the week
 
 | When | What |

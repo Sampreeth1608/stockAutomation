@@ -111,6 +111,7 @@ S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 DESK_HTML_PATH = ROOT / "desk.html"
 LITE_HTML_PATH = ROOT / "lite.html"
 STATION_HTML_PATH = ROOT / "station.html"
+MANIFEST_PATH = ROOT / "manifest.webmanifest"
 
 
 def load_desk_html() -> bytes:
@@ -259,6 +260,16 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             if path in {"/full", "/full.html"}:
                 self._send(200, load_full_desk_html(), "text/html; charset=utf-8")
+                return
+            if path in {"/manifest.webmanifest", "/manifest.json"}:
+                if not MANIFEST_PATH.is_file():
+                    self._send(404, b"manifest missing", "text/plain; charset=utf-8")
+                    return
+                self._send(
+                    200,
+                    MANIFEST_PATH.read_bytes(),
+                    "application/manifest+json; charset=utf-8",
+                )
                 return
             if path in {"/s14-sheet", "/s14-sheet.html"}:
                 html_path = S14_SHEET_DIR / HTML_NAME

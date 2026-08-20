@@ -1,0 +1,11 @@
+{
+  "name": "Gold Petal",
+  "short_name": "Gold Petal",
+  "description": "Gold Petal trading station. Private localhost via SSH tunnel. Not a public site.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f1ea",
+  "theme_color": "#7a5314",
+  "lang": "en"
+}
