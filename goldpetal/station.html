@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v23: Live tab: no Paper-only button; wallet ₹ label -->
+<!-- gp-header-v24: Live tab is Angel-only; Approve already papers -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -194,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v23</div>
+      <div class="clock" id="clock">IST — · v24</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -267,7 +267,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-orders"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">Paper is already running. This tab is only to Arm live. Type LIVE, pick S5 / S8 / S13 / S16, set each book’s ₹ slice and lots, then type RESTART. S18 / S19 / S20 / AMISE stay paper.</p>
+        <p class="hint">Approve already papers every book. This tab is only Angel: pick S5 / S8 / S13 / S16, set Wallet ₹ / lots, type LIVE, Arm live, then RESTART. S18 / S19 / S20 / AMISE stay paper.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
           <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
@@ -286,26 +286,18 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">In = this book runs after Restart. Live = may send Angel after Arm live. ₹ on the row is that book’s live budget (₹50,000 default). Lots is how many contracts. Exit flattens one book. S5 / S8 / S13 / S16 only.</p>
+        <p class="hint">Live = may send Angel after Arm live. ₹ is that book’s live budget (₹50,000 default). Lots is contracts. Exit flattens one book. S5 / S8 / S13 / S16 only. Paper In is not on this tab.</p>
         <table>
           <thead>
-            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
+            <tr><th>Book</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
           </thead>
           <tbody id="live-books"></tbody>
         </table>
         <div class="row" style="margin-top:.55rem">
-          <button class="btn ok" id="btn-save-live" type="button">Save strategies + ₹</button>
+          <button class="btn ok" id="btn-save-live" type="button">Save strategies + live ₹</button>
           <button class="btn danger" id="btn-exit-all-live" type="button">Exit all</button>
         </div>
         <p class="flash" id="flash-live"></p>
-        <h2 style="margin-top:1rem">Paper-only books</h2>
-        <p class="hint" id="paper-only-line">S18 / S19 / S20 / AMISE never go live. In still puts them in the paper bot after Restart.</p>
-        <table>
-          <thead>
-            <tr><th>Book</th><th>In</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th></th></tr>
-          </thead>
-          <tbody id="paper-books"></tbody>
-        </table>
       </div>
       <div class="scroll" id="dl-panel" hidden>
         <h2>Downloads</h2>
@@ -632,7 +624,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v23";
+    if (clock) clock.textContent = "IST " + ist + " · v24";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1716,46 +1708,24 @@ function renderDesk(d) {
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
   if (!typing()) {
-    const enables = live.enables || {};
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
     const waitingAll = (d.flatten || {}).by_strategy || {};
     const liveRows = (live.books || []).filter((b) => b.live_eligible !== false);
-    const paperRows = (live.books || []).filter((b) => b.live_eligible === false);
     $("live-books").innerHTML = liveRows.map((b) => {
       const name = b.strategy;
       const sb = budgets[name] || {};
       const waiting = !!waitingAll[name];
-      const inOn = !!enables[name];
       const budget = sb.budget_inr != null ? sb.budget_inr : "";
       const lots = sb.max_lots != null ? Math.min(10, Number(sb.max_lots) || 1) : 1;
       return `<tr>
         <td>${esc(shortName(name))}</td>
-        <td><input type="checkbox" data-in="${name}" ${inOn ? "checked" : ""}/></td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""} ${inOn ? "" : "disabled"}/></td>
+        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
         <td class="num"><input class="cap" type="number" data-budget="${name}" min="0" step="1000" value="${esc(budget)}"/></td>
         <td class="num"><input class="cap" type="number" data-lots="${name}" min="1" max="10" value="${esc(lots)}"/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="6">no live-eligible books</td></tr>`;
-    const paperEl = $("paper-books");
-    if (paperEl) paperEl.innerHTML = paperRows.map((b) => {
-      const name = b.strategy;
-      const sc = scoreFor(name);
-      const wr = wrAfterCharges(sc);
-      const pnl = afterChargesInr(sc);
-      const waiting = !!waitingAll[name];
-      return `<tr>
-        <td>${esc(shortName(name))}</td>
-        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td class="num">${wr == null ? "—" : pct(wr)}</td>
-        <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
-        <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
-      </tr>`;
-    }).join("") || `<tr><td colspan="5">no paper-only books</td></tr>`;
-    $("paper-only-line").textContent = paperRows.length
-      ? ("Stay paper: " + paperRows.map((b) => shortName(b.strategy)).join(", ") + ". In still runs them after Restart.")
-      : "S18 / S19 / S20 / AMISE stay paper.";
+    }).join("") || `<tr><td colspan="5">no live-eligible books</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -2007,16 +1977,14 @@ $("btn-bot-restart").onclick = () => {
 };
 $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
 $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
-document.addEventListener("change", (ev) => {
-  const inEl = ev.target && ev.target.closest && ev.target.closest("input[data-in]");
-  if (!inEl) return;
-  const liveEl = document.querySelector('input[data-live="' + inEl.dataset.in + '"]');
-  if (!liveEl) return;
-  liveEl.disabled = !inEl.checked;
-  if (!inEl.checked) liveEl.checked = false;
-});
+function currentInBot(desk) {
+  const en = ((desk || {}).live_desk || {}).enables || {};
+  const names = Object.keys(en).filter((k) => en[k]);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  return [...new Set(names.concat(live))];
+}
 function collectArmBody(mode) {
-  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const in_bot = currentInBot(lastDesk);
   const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
   const allocations = [...document.querySelectorAll("input[data-budget]")].map((el) => {
     const name = el.dataset.budget;
@@ -2040,16 +2008,16 @@ function collectArmBody(mode) {
   };
 }
 function exitAll(flashId) {
-  if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Angel CLOSE only for live-armed books. Does not disable In.")) return;
+  if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Angel CLOSE only for live-armed books. Does not stop paper books.")) return;
   act(flashId, "/api/desk/flatten", { all: true }, "Exit all queued — bot CLOSEs each book on the next tick.");
 }
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
-  if (!btn.closest("#live-books") && !btn.closest("#paper-books")) return;
+  if (!btn.closest("#live-books")) return;
   const name = btn.dataset.exit;
   const label = shortName(name);
-  if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed. Uncheck In if you do not want it to re-open.")) return;
+  if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed.")) return;
   act("flash-live", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — bot CLOSEs on the next tick.");
 });
 $("btn-exit-all-live").onclick = () => exitAll("flash-live");
@@ -2057,7 +2025,7 @@ $("btn-save-live").onclick = () => {
   const body = collectArmBody("paper");
   body.mode = (lastDesk.live_desk && lastDesk.live_desk.dry_run === false) ? "live" : "paper";
   if (body.mode === "live") body.confirm = "LIVE";
-  act("flash-live", "/api/desk/arm", body, "Live books + ₹ saved. Type RESTART if In-bot changed.");
+  act("flash-live", "/api/desk/arm", body, "Live ₹ + lots saved. Type RESTART to load RAM.");
 };
 $("btn-arm-live").onclick = () => {
   const word = ($("live-word").value || "").trim();

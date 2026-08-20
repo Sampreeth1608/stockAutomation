@@ -64,8 +64,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v23" in html
-    assert " · v23" in html
+    assert "gp-header-v24" in html
+    assert " · v24" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -99,7 +99,12 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="ticks"' not in html
     assert 'data-tab="signals"' not in html
     assert 'id="books"' not in html
-    assert 'id="paper-books"' in html
+    assert "Approve already papers" in html
+    assert "only Angel" in html
+    assert 'id="paper-books"' not in html
+    assert "data-in=" not in html
+    assert "function currentInBot" in html
+    assert "Save strategies + live ₹" in html
     assert "Download signals CSV" in html
     assert "/api/export/signals.csv" in html
     assert "Copy signals → Sheets" in html
@@ -186,6 +191,12 @@ def test_lite_html_is_compact_controls() -> None:
     assert "/#amise" in html
     assert "AMISE" in html
     assert "after charges" in html
+    assert "Approve already papers" in html
+    assert "only Angel" in html
+    assert 'id="paper-books"' not in html
+    assert "data-in=" not in html
+    assert "function currentInBot" in html
+    assert "Save strategies + live ₹" in html
     assert "S5 / S8 / S13 / S16" in html
     assert "live_eligible" in html
     assert "data-exit=" in html

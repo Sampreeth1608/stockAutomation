@@ -408,6 +408,50 @@ def test_apply_desk_arm_paper_locks() -> None:
         capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
 
 
+def test_apply_desk_arm_empty_in_bot_keeps_paper_enables() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        import capital
+        import control_state
+        from live_readiness import apply_desk_arm
+
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S5=true\nENABLE_S16=true\nENABLE_S18=true\n"
+            "DRY_RUN=true\nLIVE_MAX_LOTS=1\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        cap = Path(td.name) / "capital.json"
+        control_state.STATE_PATH = state
+        capital.CAPITAL_PATH = cap
+        res = apply_desk_arm(
+            mode="paper",
+            confirm="",
+            live_max_lots=1,
+            in_bot=[],
+            live=["S5_MINEDGE"],
+            path=env,
+            state_path=state,
+            capital_path=cap,
+        )
+        assert res["ok"] is True
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_S5=true" in text
+        assert "ENABLE_S16=true" in text
+        assert "ENABLE_S18=true" in text
+        assert res["books"]["live_approved"] == ["S5_MINEDGE"]
+        assert "S16_HHHL_WICK_1H" in res["books"]["enabled"]
+        assert "S18_OHLC_VOL_HTF" in res["books"]["enabled"]
+    finally:
+        td.cleanup()
+        import capital as capital_mod
+        import control_state as cs
+
+        cs.STATE_PATH = cs.CONTROL_DIR / "state.json"
+        capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -441,4 +485,6 @@ if __name__ == "__main__":
     print("ok arm needs LIVE")
     test_apply_desk_arm_paper_locks()
     print("ok arm paper")
+    test_apply_desk_arm_empty_in_bot_keeps_paper_enables()
+    print("ok arm keeps paper In")
     print("ALL test_live_readiness OK")

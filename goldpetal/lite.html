@@ -82,27 +82,22 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
     <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live closes a round-trip. Desk Open / Closed / After charges stay paper 100 lots.</p>
-    <p class="hint">Paper is already running. In and Live both sit here. Live pick is S5 / S8 / S13 / S16 only. Arm live = type LIVE, then Restart.</p>
+    <p class="hint">Approve already papers every book. This page is only Angel: pick S5 / S8 / S13 / S16, Wallet ₹ / lots, type LIVE, Arm live, then Restart. S18 / S19 / S20 / AMISE stay paper.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
     </div>
-    <p class="hint">Wallet ₹ is the whole live pot. Each row’s ₹ is that book’s slice (default ₹50,000) — not lots.</p>
+    <p class="hint">Wallet ₹ is the whole live pot. Each row’s ₹ is that book’s slice (default ₹50,000) — not lots. Paper In is not here.</p>
     <table style="margin-top:.45rem">
-      <thead><tr><th>Book</th><th>In</th><th>Live</th><th>₹</th><th>Lots</th><th></th></tr></thead>
+      <thead><tr><th>Book</th><th>Live</th><th>₹</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
-    </table>
-    <p class="hint" style="margin-top:.55rem">Paper-only (never Angel)</p>
-    <table>
-      <thead><tr><th>Book</th><th>In</th><th></th></tr></thead>
-      <tbody id="paper-books"></tbody>
     </table>
     <div class="row" style="margin-top:.45rem">
       <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
       <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
       <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
-      <button class="btn ok" id="btn-save-books" type="button">Save strategies + ₹</button>
+      <button class="btn ok" id="btn-save-books" type="button">Save strategies + live ₹</button>
       <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
     <p class="flash" id="flash-money"></p>
@@ -202,33 +197,20 @@ function render(d) {
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
   if (!typing()) {
-    const enables = live.enables || {};
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
     $("live-books").innerHTML = (live.books || []).filter((b) => b.live_eligible !== false).map((b) => {
       const name = b.strategy;
       const sb = budgets[name] || {};
       const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
-      const inOn = !!enables[name];
       return `<tr>
         <td>${shortName(name)}</td>
-        <td><input type="checkbox" data-in="${name}" ${inOn ? "checked" : ""}/></td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""} ${inOn ? "" : "disabled"}/></td>
+        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
         <td><input type="number" data-budget="${name}" value="${esc(sb.budget_inr != null ? sb.budget_inr : "")}"/></td>
         <td><input type="number" data-lots="${name}" min="1" max="10" value="${esc(sb.max_lots != null ? sb.max_lots : 1)}"/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="6">none</td></tr>`;
-    const paperEl = $("paper-books");
-    if (paperEl) paperEl.innerHTML = (live.books || []).filter((b) => b.live_eligible === false).map((b) => {
-      const name = b.strategy;
-      const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
-      return `<tr>
-        <td>${shortName(name)}</td>
-        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
-      </tr>`;
-    }).join("") || `<tr><td colspan="3">none</td></tr>`;
+    }).join("") || `<tr><td colspan="5">none</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -326,7 +308,7 @@ $("btn-save-books").onclick = () => {
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
-  if (!btn.closest("#live-books") && !btn.closest("#paper-books")) return;
+  if (!btn.closest("#live-books")) return;
   const name = btn.dataset.exit;
   if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Paper CLOSE always. Angel CLOSE only if live-armed.")) return;
   act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — bot CLOSEs on the next tick.");
@@ -335,8 +317,14 @@ $("btn-exit-all").onclick = () => {
   if (!window.confirm("Flatten EVERY book now?")) return;
   act("flash-money", "/api/desk/flatten", { all: true }, "Exit all queued.");
 };
+function currentInBot(desk) {
+  const en = ((desk || {}).live_desk || {}).enables || {};
+  const names = Object.keys(en).filter((k) => en[k]);
+  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
+  return [...new Set(names.concat(live))];
+}
 function collectArmBody(mode) {
-  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
+  const in_bot = currentInBot(lastLite);
   const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
   const allocations = [...document.querySelectorAll("input[data-budget]")].map((el) => {
     const name = el.dataset.budget;

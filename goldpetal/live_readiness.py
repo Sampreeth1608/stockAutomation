@@ -124,6 +124,18 @@ def panel_restart_allowed(confirm: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+def current_in_bot_names(*, path: Path | None = None) -> list[str]:
+    """ENABLE_* true names already in paper. Live tab does not edit this list."""
+    from analytics.env_bridge import strategy_enable_snapshot
+
+    snap = strategy_enable_snapshot(path=path)
+    return [
+        name
+        for name in paper_strategy_names()
+        if snap.get(name) and name not in DESK_FORCE_OFF
+    ]
+
+
 def apply_desk_books(
     in_bot: list[str],
     live: list[str],
@@ -181,10 +193,12 @@ def apply_desk_arm(
     state_path: Path | None = None,
     capital_path: Path | None = None,
 ) -> dict[str, Any]:
-    """One save: books + ₹ per book + Paper or Live. Type LIVE to arm Angel.
+    """One save: live picks + ₹ per book + Paper or Live. Type LIVE to arm Angel.
 
     Paper: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
-    Does not restart the bot. Does not ENABLE new research books.
+    Does not restart the bot. Empty in_bot keeps current ENABLE_* (Approve
+    already papers). Live picks are unioned into in_bot so Angel is not skipped.
+    Does not ENABLE research books that are not live-eligible.
     """
     want = str(mode or "paper").strip().lower()
     if want in {"armed", "angel", "on"}:
@@ -197,9 +211,16 @@ def apply_desk_arm(
             "error": "Type LIVE to arm. Paper stays on until you do.",
         }
 
+    incoming = [str(n).strip() for n in (in_bot or []) if str(n).strip()]
+    live_names = [str(n).strip() for n in (live or []) if str(n).strip()]
+    if not incoming:
+        incoming = current_in_bot_names(path=path)
+    for name in live_names:
+        if name in LIVE_ELIGIBLE_BOOKS and name not in incoming:
+            incoming.append(name)
     books = apply_desk_books(
-        list(in_bot or []),
-        list(live or []),
+        incoming,
+        live_names,
         path=path,
         state_path=state_path,
     )
@@ -253,7 +274,7 @@ def apply_desk_arm(
     else:
         st = set_live_unlocked(False, path=state_path, note="desk Paper mode")
         live_note = (
-            "Paper mode saved. Angel is off. Type RESTART if you changed In-bot books."
+            "Paper mode saved. Angel is off. Type RESTART to load RAM."
         )
 
     return {
