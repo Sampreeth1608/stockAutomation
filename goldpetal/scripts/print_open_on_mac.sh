@@ -16,21 +16,24 @@ print_open_on_mac() {
   echo "The Google Cloud Console SSH button is also the VM."
   echo
   echo "On the Mac laptop (not this SSH tab):"
-  echo "  1. Click the desktop so the SSH window is not focused"
-  echo "  2. Press Cmd+Space, type Terminal, press Enter"
-  echo "  3. The new prompt must NOT say sampreeth-love-story"
-  echo "  4. Paste this and leave it running:"
+  echo "  Easiest on the Mac (not this SSH tab):"
+  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap"
+  echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
+  echo "  Or Terminal (IAP — not ssh to 8.231.125.120:22):"
   echo
-  echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --zone=asia-south1-c -- -N -L 8501:127.0.0.1:8501"
+  echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
   echo
-  echo "  5. Open Chrome on the Mac (not this SSH tab):"
+  echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
+  echo "  Do not open port 22 or 8501 to the internet."
+  echo
+  echo "  Then Chrome on the Mac (not this SSH tab):"
   echo "     http://127.0.0.1:8501/          trading station"
   echo "     http://127.0.0.1:8501/lite     compact controls"
   echo "     http://127.0.0.1:8501/full     archive / downloads"
   echo "     Hard-refresh: Cmd+Shift+R"
   echo "     This is a desktop trading station (not Streamlit)."
   echo
-  echo "If a tunnel from earlier is still on the Mac, skip step 4 and just open Chrome."
+  echo "If a tunnel from earlier is still on the Mac, just open Chrome."
   echo "=============================================="
   echo
 }
