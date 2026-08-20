@@ -1,8 +1,9 @@
 #!/bin/bash
 # Gold Petal — standalone Mac app. Put this file on the Desktop and double-click.
-# The real station stays on the VM. This only opens a private IAP SSH tunnel + Chrome.
+# The real station stays on the VM. This opens a private IAP SSH tunnel + Chrome.
+# If 8501 on the VM is down, it starts the station first (not the trading bot).
 # Run on the Mac. Never on the VM. Keep DRY_RUN=true.
-# GoldPetal.command v35 — tunnel first; do not restart the desk on every click.
+# GoldPetal.command v36
 #
 # Port 22 on the VM public IP is closed on purpose. Direct ssh to 8.231.125.120
 # times out. Always use --tunnel-through-iap. Do not open 22 or 8501 to the internet.
@@ -56,10 +57,60 @@ print_tunnel() {
   echo "  gcloud compute ssh ${VM_USER}@${VM_NAME} --project=${VM_PROJECT} --zone=${VM_ZONE} --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
 }
 
+print_start_desk() {
+  echo "  gcloud compute ssh ${VM_USER}@${VM_NAME} --project=${VM_PROJECT} --zone=${VM_ZONE} --tunnel-through-iap --command '$REMOTE_DESK'"
+}
+
 hold() {
   echo
   echo "Leave this window open while you use the desk. Press Enter to close."
   read -r _ || true
+}
+
+start_station_on_vm() {
+  echo "Starting the station on the VM (8501 only — not the trading bot)…"
+  echo "Connection refused on the tunnel means 8501 is down on the VM. This starts it."
+  set +e
+  gcloud compute ssh "${VM_USER}@${VM_NAME}" \
+    --project="${VM_PROJECT}" \
+    --zone="${VM_ZONE}" \
+    --tunnel-through-iap \
+    --command "$REMOTE_DESK"
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    echo
+    echo "Desk restart on the VM returned $rc."
+    echo "If you saw DESK_PASSWORD / DESK_AUTH, put a real password in ~/goldpetal/.env"
+    echo "or set DESK_AUTH=false only for recovery, then run:"
+    print_start_desk
+  else
+    echo "Station start finished on the VM."
+  fi
+  return 0
+}
+
+wait_and_open() {
+  local up=0
+  local i
+  for i in $(seq 1 40); do
+    if desk_answers; then
+      up=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$up" == "1" ]]; then
+    echo "Station UP  $DESK_URL"
+  else
+    echo "8501 still not answering. Chrome may stay blank until the station is up."
+    echo "Leave the tunnel window open. In another Mac Terminal:"
+    print_start_desk
+    echo "Then Chrome: $DESK_URL"
+  fi
+  open_browser
+  echo "Hard-refresh: Cmd+Shift+R"
+  echo "Unlock desk is the login page, not a crash."
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -73,19 +124,10 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-echo "======== Gold Petal v35 ========"
+echo "======== Gold Petal v36 ========"
 echo "This window is the private IAP tunnel. Leave it open. Closing it drops the desk."
 echo "Keep DRY_RUN=true. Do not open port 22 or 8501 to the internet."
 echo
-
-if desk_answers || port_busy; then
-  echo "Something is already on 8501 — opening Chrome. Do not start a second tunnel."
-  open_browser
-  echo "Hard-refresh: Cmd+Shift+R"
-  echo "If you see Unlock desk, that is the login, not a crash."
-  hold
-  exit 0
-fi
 
 if ! command -v gcloud >/dev/null 2>&1; then
   echo "gcloud not found on this Mac. Install Google Cloud SDK, then double-click again."
@@ -96,30 +138,32 @@ if ! command -v gcloud >/dev/null 2>&1; then
   exit 1
 fi
 
+if desk_answers; then
+  echo "Station already on $DESK_URL"
+  open_browser
+  echo "Hard-refresh Chrome: Cmd+Shift+R"
+  echo "If you see Unlock desk, that is the login, not a crash."
+  hold
+  exit 0
+fi
+
+if port_busy; then
+  echo "A tunnel is already using 8501 on this Mac. Not starting a second one."
+  echo "channel … Connection refused means the station is down on the VM."
+  start_station_on_vm
+  wait_and_open
+  hold
+  exit 0
+fi
+
+start_station_on_vm
+
+echo
 echo "Opening private IAP tunnel 8501 → VM localhost."
-echo "Chrome opens as soon as 8501 answers (Unlock desk still counts)."
-echo "This does not restart the bot and does not restart the desk."
+echo "Leave this window open."
 echo
 
-(
-  up=0
-  for _ in $(seq 1 20); do
-    if desk_answers; then
-      up=1
-      break
-    fi
-    sleep 1
-  done
-  if [[ "$up" == "1" ]]; then
-    echo "Station UP  $DESK_URL"
-  else
-    echo "Tunnel still connecting. Opening Chrome anyway — wait, then Cmd+Shift+R."
-    echo "If the page stays blank, the station on the VM is down. In another Mac Terminal:"
-    echo "  gcloud compute ssh ${VM_USER}@${VM_NAME} --project=${VM_PROJECT} --zone=${VM_ZONE} --tunnel-through-iap --command '$REMOTE_DESK'"
-  fi
-  open_browser
-  echo "Hard-refresh: Cmd+Shift+R"
-) &
+wait_and_open &
 
 set +e
 "${TUNNEL_CMD[@]}"
@@ -129,8 +173,7 @@ set -e
 echo
 if [[ "$tunnel_rc" -ne 0 ]]; then
   echo "Tunnel exited."
-  if desk_answers || port_busy; then
-    echo "8501 is already in use on this Mac — a tunnel is probably running in another window."
+  if desk_answers; then
     open_browser
   else
     echo "If the log said connect to host 8.231.125.120 port 22: Operation timed out,"
