@@ -66,6 +66,10 @@ def test_amise_desk_payload_empty_db(tmp_path: Path) -> None:
     assert "fits" in d["manager"]
     assert "books" in d["guardian"]
     assert d["dry_run_required"] is True
+    assert d["market"].get("amise_uses_market") is True
+    assert "layers" in d["market"]
+    assert "always reads market state" in d["note"].lower() or "enable only" in d["note"].lower()
+    assert "invent" in str(d["brains"].get("market_state") or "").lower()
 
 
 def test_similar_states_quiet(tmp_path: Path) -> None:

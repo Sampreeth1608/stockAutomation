@@ -370,8 +370,9 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
     path = db or resolve_desk_db()
     mood = _safe(
         lambda: __import__("market_mood", fromlist=["mood_desk_payload"]).mood_desk_payload(path),
-        {"ok": False, "mood": "UNKNOWN", "fits": [], "label": "mood unavailable"},
+        {"ok": False, "mood": "UNKNOWN", "fits": [], "label": "mood unavailable", "layers": []},
     )
+    mood["amise_uses_market"] = True
     lab = _safe(
         lambda: __import__("research_desk", fromlist=["research_desk_payload"]).research_desk_payload(),
         {"ok": False, "pending": [], "counts": {}, "challengers": []},
@@ -414,10 +415,10 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         "enable_blocked": True,
         "dry_run_required": True,
         "brains": {
-            "market_state": "What is happening now? Observe only.",
+            "market_state": "Always on for AMISE invent (80 ticks…week). Enable regime only gates your books.",
             "relationships": "Which candle / flow atoms have edge on this tape?",
-            "factory": "Invent challengers. Validate. Never auto-deploy. Never skip a live book.",
-            "manager": "Fit is a label. It does not pick who may open.",
+            "factory": "Invent challengers from this market state. Validate. Never auto-deploy. Never skip a live book.",
+            "manager": "Fit is a label for invent. Enable regime does not hide it. It does not pick who may open until you Enable.",
             "guardian": "Is the champion's edge intact? Watch only. Never dump.",
             "risk": "Size / daily loss / emergency.",
             "you": "Approve / reject / paper. Capture what you see.",
@@ -471,7 +472,9 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
             "MEMORY",
         ],
         "note": (
-            "AMISE invents challengers on Run factory / auto lab (3m…daily, "
+            "AMISE always reads market state (80 ticks + 5m…3h + day + week) "
+            "to invent challengers, even when Enable regime is off. Enable only "
+            "gates your own books. Factory: Run factory / auto lab (3m…daily, "
             "same-TF vs S16/S18, daily vs S13). It does not skip, flatten, or "
             "hour-gate a paper book. You Approve on Lab — that names the next "
             "slot (S21, S22, … S25 after S24) or overwrites a filled chair. "
@@ -501,6 +504,8 @@ def run_amise(
 
     path = db or resolve_desk_db()
     mood = snapshot_mood(path)
+    market = mood.to_dict()
+    market["amise_uses_market"] = True
     guardian = scan_guardian(db=path)
     similar = similar_states(path, mood)
     lab_payload: dict[str, Any] = {}
@@ -543,6 +548,7 @@ def run_amise(
                 fees=bool(fees),
                 params=FlowParams(),
                 propose=bool(propose),
+                market=market,
                 **lab_kw,
             )
             hours = []
@@ -558,6 +564,7 @@ def run_amise(
                 fees=bool(fees),
                 params=FlowParams(),
                 propose=bool(propose),
+                market=market,
                 **lab_kw,
             )
         lab_payload = {
@@ -613,6 +620,10 @@ def run_amise(
             "label": mood.label,
             "fits": mood.fits,
             "gate_on": mood.gate_on,
+            "layers": mood.layers,
+            "alignment": mood.alignment,
+            "structure": mood.structure,
+            "amise_uses_market": True,
         },
         "guardian": guardian,
         "similar": similar,
@@ -621,6 +632,7 @@ def run_amise(
         "note": (
             "AMISE run stored. Factory ran." if lab else "AMISE observe run (no factory). "
         )
+        + "AMISE used market state to invent (Enable off still feeds the factory). "
         + "Existing books also get an improve pass when the factory runs. "
         + "Not ENABLE. Keep DRY_RUN=true.",
     }

@@ -16,7 +16,9 @@ from research_factory import (
     FAST_LAB_KWARGS,
     LAB_NAME,
     MIN_PF,
+    AtomScore,
     Robustness,
+    bias_discovery_for_market,
     gate_failures,
     holdout_split,
     proposal_from_challenger,
@@ -38,6 +40,17 @@ from strategy_genome import (
     mutate_genome,
     research_env_patch,
 )
+
+
+def test_bias_discovery_for_market_prefers_trend() -> None:
+    scores = [
+        AtomScore("upper_wick", 20, 0.1, 1.20, "short"),
+        AtomScore("hh", 20, 0.1, 1.10, "long"),
+    ]
+    out = bias_discovery_for_market(scores, {"regime": "TRENDING", "mood": "HEAT"})
+    assert out[0].name == "hh"
+    fade = bias_discovery_for_market(scores, {"regime": "RANGE", "mood": "QUIET"})
+    assert fade[0].name == "upper_wick"
 
 
 def _b(
@@ -613,6 +626,7 @@ if __name__ == "__main__":
     import tempfile
 
     test_atoms_match_funcs()
+    test_bias_discovery_for_market_prefers_trend()
     test_hh_hl_and_no_trade_spread()
     test_genome_compile_long_on_hh_hl_bull()
     test_mutate_and_combine()

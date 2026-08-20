@@ -360,6 +360,85 @@ def cheap_min_trades(min_trades: int) -> int:
     return max(4, mt // 2)
 
 
+TREND_ATOM_NAMES = frozenset({
+    "hh", "hl", "hc", "brk20", "brk20_dn", "mom_up", "mom_dn",
+    "imb_buy", "imb_sell", "depth_buy", "depth_sell", "vol_up",
+    "bull", "bear", "close_high", "close_low", "px_gt_vwap", "px_lt_vwap",
+})
+FADE_ATOM_NAMES = frozenset({
+    "upper_wick", "lower_wick", "vol_dn", "body_strong",
+})
+TREND_RECIPE_NAMES = frozenset({"brk_flow", "imb_confirm", "depth_ltp", "candle"})
+FADE_RECIPE_NAMES = frozenset({"climax_vol", "fail_brk", "absorb", "flow_div", "vwap_flow"})
+
+
+def _market_is_trend(market: dict[str, Any] | None) -> bool:
+    if not market:
+        return False
+    regime = str(market.get("regime") or "").upper()
+    mood = str(market.get("mood") or "").upper()
+    return regime in {"TRENDING", "BREAKOUT", "BREAKDOWN", "HEAT", "BURST"} or mood in {
+        "HEAT",
+        "FALL_START",
+        "RISE_START",
+    }
+
+
+def _market_is_range(market: dict[str, Any] | None) -> bool:
+    if not market:
+        return False
+    regime = str(market.get("regime") or "").upper()
+    mood = str(market.get("mood") or "").upper()
+    return regime in {"CALM", "RANGE", "ACCUMULATION", "COOLDOWN", "EXHAUSTION"} or mood in {
+        "QUIET",
+        "COOL",
+    }
+
+
+def bias_discovery_for_market(
+    scores: list[AtomScore],
+    market: dict[str, Any] | None,
+) -> list[AtomScore]:
+    """Reorder discovery so AMISE invents into the live tape. Does not skip a book."""
+    if not scores or not market:
+        return list(scores)
+    trendish = _market_is_trend(market)
+    rangeish = _market_is_range(market)
+    fighting = str(market.get("alignment") or "") == "fighting"
+    if not trendish and not rangeish and not fighting:
+        return list(scores)
+    out: list[AtomScore] = []
+    for s in scores:
+        t = float(s.tstat)
+        if trendish and s.name in TREND_ATOM_NAMES:
+            t *= 1.35
+        elif rangeish and s.name in FADE_ATOM_NAMES:
+            t *= 1.35
+        if fighting and s.name in TREND_ATOM_NAMES:
+            t *= 0.85
+        out.append(AtomScore(s.name, s.n, s.mean_fwd_atr, t, s.side))
+    out.sort(key=lambda row: abs(row.tstat), reverse=True)
+    return out
+
+
+def prefer_recipes_for_market(
+    recs: tuple[Any, ...],
+    market: dict[str, Any] | None,
+) -> tuple[Any, ...]:
+    if not recs or not market:
+        return recs
+    want: frozenset[str]
+    if _market_is_trend(market):
+        want = TREND_RECIPE_NAMES
+    elif _market_is_range(market):
+        want = FADE_RECIPE_NAMES
+    else:
+        return recs
+    first = tuple(r for r in recs if getattr(r, "name", "") in want)
+    rest = tuple(r for r in recs if getattr(r, "name", "") not in want)
+    return first + rest
+
+
 def compose_from_discovery(
     scores: list[AtomScore],
     *,
@@ -906,6 +985,7 @@ def run_research_lab(
     beat_s18: bool = True,
     max_deep: int | None = None,
     write: bool = True,
+    market: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Closed research loop. ``propose=True`` writes pending rows only.
 
@@ -930,6 +1010,7 @@ def run_research_lab(
     s18 = champion_s18(bars, lots=lots, fees=fees) if beat_s18 else None
     s13 = champion_s13(bars, lots=lots, fees=fees) if use_s13 else None
     scores = discover_relationships(disc_bars, params=p, flags=flags)
+    scores = bias_discovery_for_market(scores, market)
     composed = compose_from_discovery(scores, flags=flags)[:max_compose]
     genomes: list[StrategyGenome] = list(composed)
     if include_recipes:
@@ -937,6 +1018,7 @@ def run_research_lab(
             recs = selected_recipes(None, flags=flags)
         except ValueError:
             recs = ()
+        recs = prefer_recipes_for_market(recs, market)
         for rec in recs:
             genomes.append(recipe_genome(rec, flags=flags))
 
@@ -1144,6 +1226,7 @@ def run_research_lab_multi(
     week_id: str = "",
     max_deep: int | None = None,
     timeframes: list[Any] | tuple[Any, ...] | None = None,
+    market: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the strong lab on every LAB_TIMEFRAME. Same-TF champions; daily vs S13."""
     if timeframes:
@@ -1176,6 +1259,7 @@ def run_research_lab_multi(
         library_path=library_path,
         max_deep=max_deep,
         write=False,
+        market=market,
     )
     for spec in specs:
         bars = lab_bars_for_tf(tick_rows, spec)

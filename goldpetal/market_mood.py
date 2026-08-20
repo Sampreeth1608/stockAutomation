@@ -1181,6 +1181,7 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
         d["note"] = (
             "Market regime is OFF. Books trade their formulas. "
             "The 80-tick + 5m…3h + day + week stack still calculates in RAM. "
+            "AMISE always uses that stack to invent. Enable only gates your books. "
             "Live labels stay off the GOLD LTP row until Enable regime. "
             "AMISE may still observe the tape. Type RESTART after you toggle. "
             "Does not ENABLE. Keep DRY_RUN=true."

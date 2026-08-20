@@ -81,10 +81,13 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v44" in html
-    assert " · v44" in html
+    assert "gp-header-v45" in html
+    assert " · v45" in html
     assert "mkt.layers" in html
     assert "80 ticks" in html
+    assert "reads this stack" in html
+    assert "AMISE invent" in html
+    assert "Enable regime is off — observe only" not in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -416,6 +419,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/trade_learner.py" in sync
     assert "goldpetal/entry_gates.py" in sync
     assert "goldpetal/amise.py" in sync
+    assert "goldpetal/research_factory.py" in sync
     assert "goldpetal/.env.example" in sync
     assert "goldpetal/portfolio.py" in sync
     assert "goldpetal/storage.py" in sync
@@ -431,7 +435,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v44" in cmd
+    assert "Gold Petal v45" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
