@@ -59,6 +59,22 @@ from live_readiness import (
     panel_restart_allowed,
     read_live_env,
 )
+from desk_http_auth import (
+    MAX_BODY_BYTES,
+    Access,
+    auth_status_payload,
+    check_access,
+    cookie_header,
+    dangerous_requires_totp,
+    desk_http_start_error,
+    desk_http_start_warning,
+    drop_session,
+    public_bind_blocked,
+    security_headers,
+    session_from_headers,
+    session_payload,
+    try_login,
+)
 from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import proposals_snapshot
@@ -125,6 +141,7 @@ S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 DESK_HTML_PATH = ROOT / "desk.html"
 LITE_HTML_PATH = ROOT / "lite.html"
 STATION_HTML_PATH = ROOT / "station.html"
+LOGIN_HTML_PATH = ROOT / "login.html"
 MANIFEST_PATH = ROOT / "manifest.webmanifest"
 
 
@@ -142,6 +159,15 @@ def load_lite_html() -> bytes:
 
 def load_full_desk_html() -> bytes:
     return DESK_HTML_PATH.read_bytes()
+
+
+def load_login_html() -> bytes:
+    if LOGIN_HTML_PATH.is_file():
+        return LOGIN_HTML_PATH.read_bytes()
+    return (
+        b"<!DOCTYPE html><html><body class='gp-desk-login'>"
+        b"<h1>Unlock desk</h1><p>login.html missing</p></body></html>"
+    )
 
 
 def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
@@ -266,28 +292,86 @@ class ControlHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.send_header("Pragma", "no-cache")
+        headers = dict(security_headers())
         if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
+            headers.update(extra_headers)
+        for k, v in headers.items():
+            self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if body:
+            self.wfile.write(body)
 
-    def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or 0)
+    def _header_map(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key in self.headers.keys():
+            out[str(key)] = str(self.headers.get(key) or "")
+        return out
+
+    def _client_ip(self) -> str:
+        if not self.client_address:
+            return ""
+        return str(self.client_address[0] or "")
+
+    def _apply_access(self, access: Access) -> bool:
+        """Send a block/login/redirect. True = caller may continue."""
+        if access.allow:
+            return True
+        extra: dict[str, str] = {}
+        if access.kind == "redirect" and access.location:
+            extra["Location"] = access.location
+            self._send(access.status or 302, b"", "text/plain; charset=utf-8", extra)
+            return False
+        if access.kind == "login_page":
+            self._send(200, load_login_html(), "text/html; charset=utf-8")
+            return False
+        payload = {"ok": False, "error": access.error or "forbidden", "login": "/login"}
+        self._send(*_json_bytes(payload, access.status or 401))
+        return False
+
+    def _read_json(self) -> dict[str, Any] | None:
+        """Parse JSON body. None means a 4xx was already sent."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length > MAX_BODY_BYTES:
+            self._send(*_json_bytes({"ok": False, "error": "body too large"}, 413))
+            return None
         if length <= 0:
             return {}
         raw = self.rfile.read(length)
         if not raw:
             return {}
-        return json.loads(raw.decode("utf-8"))
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send(*_json_bytes({"ok": False, "error": "invalid json"}, 400))
+            return None
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            self._send(*_json_bytes({"ok": False, "error": "json object required"}, 400))
+            return None
+        return data
 
     def do_GET(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parse_qs(parsed.query)
+            access = check_access(method="GET", path=path, headers=self._header_map())
+            if not self._apply_access(access):
+                return
+            if path in {"/login", "/login.html"}:
+                self._send(302, b"", "text/plain; charset=utf-8", {"Location": "/"})
+                return
+            if path == "/api/desk/auth":
+                self._send(*_json_bytes(auth_status_payload()))
+                return
+            if path == "/api/desk/session":
+                sess = access.session or session_from_headers(self._header_map())
+                self._send(*_json_bytes(session_payload(sess)))
+                return
             if path in {"/", "/index.html", "/station", "/station.html"}:
                 if not STATION_HTML_PATH.is_file() and not LITE_HTML_PATH.is_file() and not DESK_HTML_PATH.is_file():
                     self._send(500, b"station.html missing", "text/plain; charset=utf-8")
@@ -633,14 +717,59 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(status, body, ctype)
                 return
             self._send(*_json_bytes({"error": "not found"}, 404))
-        except Exception as exc:
-            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
+        except Exception:
+            traceback.print_exc()
+            self._send(*_json_bytes({"ok": False, "error": "internal error"}, 500))
 
     def do_POST(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             data = self._read_json()
+            if data is None:
+                return
+            if path == "/api/desk/login":
+                res = try_login(password=str(data.get("password") or ""), ip=self._client_ip())
+                if not res.ok:
+                    extra = {"Set-Cookie": cookie_header("", clear=True)}
+                    self._send(
+                        *_json_bytes(
+                            {"ok": False, "error": res.error or "login failed"},
+                            res.status or 401,
+                        ),
+                        extra_headers=extra,
+                    )
+                    return
+                if res.session is None:
+                    self._send(*_json_bytes({"ok": True, "auth_required": False, "csrf": ""}))
+                    return
+                extra = {"Set-Cookie": cookie_header(res.session.sid)}
+                self._send(
+                    *_json_bytes(
+                        {
+                            "ok": True,
+                            "csrf": res.session.csrf,
+                            "totp_required": dangerous_requires_totp(),
+                        }
+                    ),
+                    extra_headers=extra,
+                )
+                return
+            access = check_access(
+                method="POST",
+                path=path,
+                headers=self._header_map(),
+                data=data,
+            )
+            if not self._apply_access(access):
+                return
+            if path == "/api/desk/logout":
+                sess = access.session or session_from_headers(self._header_map())
+                if sess is not None:
+                    drop_session(sess.sid)
+                extra = {"Set-Cookie": cookie_header("", clear=True)}
+                self._send(*_json_bytes({"ok": True}), extra_headers=extra)
+                return
 
             if path == "/api/s14/refresh":
                 res = start_angel_refresh(
@@ -1026,8 +1155,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
 
             self._send(*_json_bytes({"error": "not found"}, 404))
-        except Exception as exc:
-            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
+        except Exception:
+            traceback.print_exc()
+            self._send(*_json_bytes({"ok": False, "error": "internal error"}, 500))
 
 
 def _amise_auto_loop() -> None:
@@ -1048,6 +1178,17 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
+    blocked = public_bind_blocked(args.host)
+    if blocked:
+        print(blocked, file=sys.stderr, flush=True)
+        sys.exit(2)
+    start_err = desk_http_start_error()
+    if start_err:
+        print(start_err, file=sys.stderr, flush=True)
+        sys.exit(2)
+    warn = desk_http_start_warning()
+    if warn:
+        print(warn, file=sys.stderr, flush=True)
     from desk_data import bind_live_ticks_db
 
     bound = bind_live_ticks_db()

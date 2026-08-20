@@ -1,6 +1,28 @@
 # Gold Petal desk on the VM (preferred)
 
-No Mac sync. Streamlit reads `data/` on the trading VM.
+No Mac sync. The HTML station on **8501** is the operator desk (Arm live, restart, capital).
+Streamlit is research only.
+
+## Application lock (HTML desk on 8501)
+
+The IAP tunnel only reaches `127.0.0.1`. The desk itself still needs a password — every
+`/api/*` route (Arm live, restart, flatten, capital) is behind it.
+
+```bash
+# ~/goldpetal/.env  (same file the bot reads)
+DESK_AUTH=true
+DESK_PASSWORD=your-strong-password
+# optional Authenticator OTP for Arm live / Start bot / Restart / DRY_RUN=false:
+# DESK_TOTP_SECRET=...
+```
+
+Chrome http://127.0.0.1:8501/ shows **Unlock desk**. After login, POSTs send a CSRF
+header. The desk refuses `--host 0.0.0.0` unless `DESK_BIND_PUBLIC=true` (do not).
+
+Do **not** set `DESK_AUTH=false` except recovery. Instant unblock: `DESK_AUTH=false`
+then `./scripts/run_desk_vm.sh --restart`.
+
+Sheets COMMANDS still cannot Arm live or raise lots.
 
 ## One operator desk: 8787
 
@@ -85,7 +107,8 @@ On the VM desk you can:
 - **Proposals** — prefer Station **ML** tab on 8501 (`/#ml`). This tab still works if you are on the VM.
 - **Deploy / Ops, Live Deploy, Capital** — read-only snapshots
 - **Control** — stop only (emergency / pause / lock live)
-- **Login** — set `DESK_PASSWORD` (and optional `DESK_TOTP_SECRET` for dangerous actions)
+- **Login** — `DESK_PASSWORD` gates **both** the HTML station on 8501 and Streamlit.
+  Optional `DESK_TOTP_SECRET` for Arm live / restart / DRY_RUN=false.
 
 ```bash
 # .env  (must live where the desk reads it — usually ~/goldpetal/.env)
@@ -99,9 +122,8 @@ DESK_PASSWORD=your-strong-password
 ```
 
 If login fails: the login screen shows `Secrets file:` and `password_len`. Type the password
-manually (browser autofill often does not update Streamlit). Confirm you are editing the
-same path shown on screen (or set `GP_ENV_PATH=~/goldpetal/.env`). Instant unblock:
-`DESK_AUTH=false` then restart the desk.
+manually. Confirm you are editing the same path shown on screen (or set `GP_ENV_PATH=~/goldpetal/.env`).
+Instant unblock: `DESK_AUTH=false` then restart the desk. Do not leave it off.
 
 Restart desk after pulling (use the folder shown as **Desk code** on the S14 tab):
 ```bash

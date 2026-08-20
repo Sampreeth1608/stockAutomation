@@ -68,8 +68,13 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v32" in html
-    assert " · v32" in html
+    assert "gp-header-v33" in html
+    assert " · v33" in html
+    assert "withDeskAuth" in html
+    assert "X-GP-CSRF" in html
+    assert "bootAuth" in html
+    assert 'id="desk-totp"' in html
+    assert 'id="btn-lock-desk"' in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -238,6 +243,10 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Arm live" in html
     assert "/api/desk/arm" in html
     assert "Unlock live" not in html
+    assert "withDeskAuth" in html
+    assert "X-GP-CSRF" in html
+    assert "bootAuth" in html
+    assert 'id="desk-totp"' in html
     assert "Live books + money" in html
     assert "live-pnl-line" in html
     assert 'id="live-pnl-open"' in html
@@ -275,6 +284,9 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "why-ml" in html
     assert "h.lots" in html
     assert "trading station" in html
+    assert "withDeskAuth" in html
+    assert "X-GP-CSRF" in html
+    assert "bootAuth" in html
 
 
 def test_control_panel_serves_station_on_8501() -> None:
@@ -309,6 +321,14 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "request_flatten_all" in text
     assert "/api/desk/arm" in text
     assert "apply_desk_arm" in text
+    assert "desk_http_auth" in text
+    assert "/api/desk/login" in text
+    assert "/api/desk/logout" in text
+    assert "/api/desk/session" in text
+    assert "public_bind_blocked" in text
+    assert "load_login_html" in text
+    assert '"trace": traceback' not in text
+    assert "internal error" in text
     runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
     assert "emit_desk_flatten" in runner
     assert "apply_pending_flattens" in runner
@@ -332,6 +352,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "8501" in sh
     assert "streamlit run analytics/app.py" not in sh.split("pkill")[0]
     assert "Save strategies" in sh
+    assert "Unlock desk" in sh
+    assert "gp-desk-login" in sh
+    assert "0.0.0.0" in sh
     assert "gp-header-v" in sh
     assert "old station.html on disk" not in sh
     station = (ROOT / "station.html").read_text(encoding="utf-8")
@@ -389,6 +412,19 @@ def test_desk_payload_includes_session() -> None:
     assert "by_strategy" in payload["flatten"]
 
 
+def test_login_html_is_the_gate() -> None:
+    html = (ROOT / "login.html").read_text(encoding="utf-8")
+    assert "gp-desk-login" in html
+    assert "Unlock desk" in html
+    assert "/api/desk/login" in html
+    assert "/api/desk/auth" in html
+    auth = (ROOT / "desk_http_auth.py").read_text(encoding="utf-8")
+    assert "COOKIE_NAME" in auth
+    assert "CSRF_HEADER" in auth
+    assert "PUBLIC_BIND_HOSTS" in auth
+    assert "path_requires_totp" in auth
+
+
 def test_streamlit_cannot_write() -> None:
     from operator_desk import streamlit_control_allowed, streamlit_write_blocked
 
@@ -405,5 +441,6 @@ if __name__ == "__main__":
     test_full_html_keeps_watch_downloads()
     test_control_panel_serves_station_on_8501()
     test_desk_payload_includes_session()
+    test_login_html_is_the_gate()
     test_streamlit_cannot_write()
     print("ALL test_desk OK")

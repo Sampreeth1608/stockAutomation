@@ -12,6 +12,14 @@ export GP_DESK_LOCAL=1
 export GP_DATA_DIR="${GP_DATA_DIR:-$PWD/data}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8501}"
+if [[ "$HOST" == "0.0.0.0" || "$HOST" == "::" || "$HOST" == "*" || "$HOST" == "[::]" ]]; then
+  bind_flag="$(echo "${DESK_BIND_PUBLIC:-}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$bind_flag" != "true" && "$bind_flag" != "1" && "$bind_flag" != "yes" ]]; then
+    echo "Refusing HOST=$HOST — desk stays on 127.0.0.1. Open it from the Mac IAP tunnel." >&2
+    echo "DESK_BIND_PUBLIC=true overrides (do not)." >&2
+    exit 2
+  fi
+fi
 LOG="data/control_panel.log"
 PY="./venv/bin/python"
 if [[ ! -x "$PY" ]]; then
@@ -33,20 +41,23 @@ stop_old() {
 wait_up() {
   local i code
   for i in 1 2 3 4 5 6; do
-    code="$(curl -s -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" || true)"
-    if [[ "${code:-}" == "200" ]] && grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
+    code="$(curl -sL -o /tmp/gp-desk-get.html -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" || true)"
+    if [[ "${code:-}" == "200" ]] && grep -qE "Save strategies|Unlock desk|gp-desk-login" /tmp/gp-desk-get.html 2>/dev/null; then
       echo "station UP  pid=$(pgrep -f 'control_panel.py' | head -n1)  $PWD  http://127.0.0.1:${PORT}/"
+      if grep -q "Unlock desk" /tmp/gp-desk-get.html 2>/dev/null; then
+        echo "login gate on — type DESK_PASSWORD, then Cmd+Shift+R"
+      fi
       hdr="$(grep -o 'gp-header-v[0-9]*' /tmp/gp-desk-get.html 2>/dev/null | head -n1 || true)"
       if [[ -n "${hdr:-}" ]]; then
         echo "header ${hdr} (clock must show · ${hdr#gp-header-} after Cmd+Shift+R)"
-      else
-        echo "WARNING: station.html has no gp-header-v* — copy station.html from origin/cursor/desk-session-header-a4b2"
+      elif grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
+        echo "WARNING: station.html has no gp-header-v* — copy station.html from origin/cursor/live-1lot-test-a4b2"
       fi
       return 0
     fi
     sleep 1
   done
-  echo "FAILED — expected station HTML (Gold Petal Station / Save strategies). HTTP ${code:-down}"
+  echo "FAILED — expected station HTML or Unlock desk login. HTTP ${code:-down}"
   tail -n 25 "$LOG" || true
   return 1
 }

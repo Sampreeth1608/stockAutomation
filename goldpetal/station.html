@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v32: Ceiling hard cap 1000; SIZE above 10; Sheets ANGEL tab -->
+<!-- gp-header-v33: HTML desk login, CSRF, TOTP, bind lock -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -195,8 +195,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v32</div>
+      <div class="clock" id="clock">IST — · v33</div>
       <div id="pills"></div>
+      <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
   </header>
   <div class="fit-strip" id="fit-strip">
@@ -300,6 +301,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           </div>
           <div class="row" style="margin-top:.45rem">
             <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
+            <input id="desk-totp" placeholder="OTP if asked" autocomplete="one-time-code" inputmode="numeric" hidden/>
             <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
             <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
           </div>
@@ -510,6 +512,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
           <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
         </div>
+        <p class="hint" id="totp-wrap" hidden>Authenticator OTP is required for Arm live, DRY_RUN=false, Start bot, and Restart. Same box on the Live tab.</p>
         <div class="row" style="margin-top:.35rem">
           <button class="btn" id="btn-feed-start" type="button">Start feed only</button>
           <button class="btn" id="btn-feed-stop" type="button">Stop feed only</button>
@@ -622,19 +625,68 @@ function liveBudgetDisplay(b, sb) {
   if (!Number.isFinite(n) || n <= 0) return "";
   return n;
 }
+function deskTotp() {
+  const el = document.getElementById("desk-totp");
+  return el ? String(el.value || "").trim() : "";
+}
+function withDeskAuth(opts) {
+  const o = Object.assign({}, opts || {});
+  const headers = Object.assign({ "Content-Type": "application/json" }, o.headers || {});
+  if (window.__GP_CSRF) headers["X-GP-CSRF"] = window.__GP_CSRF;
+  o.headers = headers;
+  o.credentials = "same-origin";
+  if (o.body && typeof o.body === "string") {
+    const totp = deskTotp();
+    if (totp) {
+      try {
+        const obj = JSON.parse(o.body);
+        if (obj && typeof obj === "object" && !Array.isArray(obj) && obj.totp == null) {
+          obj.totp = totp;
+          o.body = JSON.stringify(obj);
+        }
+      } catch (e) {}
+    }
+  }
+  return o;
+}
+async function bootAuth() {
+  try {
+    const r = await fetch("/api/desk/session", { credentials: "same-origin" });
+    if (r.status === 401) {
+      location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+      return false;
+    }
+    const d = await r.json().catch(() => ({}));
+    window.__GP_CSRF = d.csrf || "";
+    const totpEl = document.getElementById("desk-totp");
+    if (totpEl) totpEl.hidden = !d.totp_required;
+    const wrap = document.getElementById("totp-wrap");
+    if (wrap) wrap.hidden = !d.totp_required;
+    const lock = document.getElementById("btn-lock-desk");
+    if (lock) lock.hidden = !d.auth_required;
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
 async function api(path, opts) {
-  const o = opts || {};
+  const o = withDeskAuth(opts || {});
   const ctrl = new AbortController();
   const ms = Number(o.timeoutMs) || (o.method && String(o.method).toUpperCase() !== "GET" ? 60000 : 8000);
   const timer = setTimeout(() => {
     try { ctrl.abort("timeout"); } catch (err) { ctrl.abort(); }
   }, ms);
   try {
-    const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { signal: ctrl.signal }));
+    const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { signal: ctrl.signal, credentials: "same-origin" }));
+    if (res.status === 401) {
+      location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+      throw new Error("login required");
+    }
     const text = await res.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
     if (!res.ok) throw new Error(data.error || data.note || text || ("HTTP " + res.status));
+    if (data && data.csrf) window.__GP_CSRF = data.csrf;
     return data;
   } catch (e) {
     const msg = String((e && e.message) || e || "");
@@ -665,7 +717,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v32";
+    if (clock) clock.textContent = "IST " + ist + " · v33";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -2078,6 +2130,14 @@ $("btn-s14-zip").onclick = () => {
   flash("flash-dl", "Downloading S14 sheet ZIP (HTML + CSVs)");
 };
 $("hist-strat").onchange = () => loadHistory().catch(() => {});
+if ($("btn-lock-desk")) {
+  $("btn-lock-desk").onclick = async () => {
+    try {
+      await api("/api/desk/logout", { method: "POST", body: "{}" });
+    } catch (e) {}
+    location.replace("/login");
+  };
+}
 $("btn-kill").onclick = () => act("flash-stop", "/api/emergency", { off: true }, "Emergency off");
 $("btn-clear").onclick = () => act("flash-stop", "/api/emergency", { off: false }, "Emergency cleared");
 $("btn-trade-on").onclick = () => act("flash-stop", "/api/trading", { enabled: true }, "Trading on");
@@ -2231,9 +2291,12 @@ if (location.hash === "#live") {
   showMainTab();
 }
 bootExports().catch((e) => flash("flash-dl", String(e.message || e), true));
-loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
-loadTape().catch(() => {});
-loadMood().catch(() => {});
+bootAuth().then((ok) => {
+  if (ok === false) return;
+  loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
+  loadTape().catch(() => {});
+  loadMood().catch(() => {});
+});
 setTimeout(() => loadHistory().catch(() => {}), 10000);
 setTimeout(() => loadMl().catch(() => {}), 2000);
 setTimeout(() => loadLab().catch(() => {}), 4000);

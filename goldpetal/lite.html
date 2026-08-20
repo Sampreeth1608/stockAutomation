@@ -49,7 +49,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 </head>
 <body>
   <h1>Gold Petal Desk</h1>
-  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a></p>
+  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
   <p class="hint" id="mood-line">mood … · one tape read for all books · MOOD_GATE on: unfit books do not open</p>
 
@@ -70,6 +70,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
       <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
       <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <input id="desk-totp" placeholder="OTP if asked" autocomplete="one-time-code" inputmode="numeric" hidden/>
       <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
     </div>
     <div class="row" style="margin-top:.45rem">
@@ -174,12 +175,60 @@ function esc(s) {
 function pill(text, kind) {
   return `<span class="pill ${kind || ""}">${text}</span>`;
 }
+function deskTotp() {
+  const el = document.getElementById("desk-totp");
+  return el ? String(el.value || "").trim() : "";
+}
+function withDeskAuth(opts) {
+  const o = Object.assign({}, opts || {});
+  const headers = Object.assign({ "Content-Type": "application/json" }, o.headers || {});
+  if (window.__GP_CSRF) headers["X-GP-CSRF"] = window.__GP_CSRF;
+  o.headers = headers;
+  o.credentials = "same-origin";
+  if (o.body && typeof o.body === "string") {
+    const totp = deskTotp();
+    if (totp) {
+      try {
+        const obj = JSON.parse(o.body);
+        if (obj && typeof obj === "object" && !Array.isArray(obj) && obj.totp == null) {
+          obj.totp = totp;
+          o.body = JSON.stringify(obj);
+        }
+      } catch (e) {}
+    }
+  }
+  return o;
+}
+async function bootAuth() {
+  try {
+    const r = await fetch("/api/desk/session", { credentials: "same-origin" });
+    if (r.status === 401) {
+      location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+      return false;
+    }
+    const d = await r.json().catch(() => ({}));
+    window.__GP_CSRF = d.csrf || "";
+    const totpEl = document.getElementById("desk-totp");
+    if (totpEl) totpEl.hidden = !d.totp_required;
+    const lock = document.getElementById("btn-lock-desk");
+    if (lock) lock.hidden = !d.auth_required;
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
 async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const o = withDeskAuth(opts || {});
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { credentials: "same-origin" }));
+  if (res.status === 401) {
+    location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+    throw new Error("login required");
+  }
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
   if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  if (data && data.csrf) window.__GP_CSRF = data.csrf;
   return data;
 }
 function flash(id, msg, bad) {
@@ -385,6 +434,12 @@ async function act(id, path, body, okMsg) {
     await load();
   } catch (e) { flash(id, String(e.message || e), true); }
 }
+if ($("btn-lock-desk")) {
+  $("btn-lock-desk").onclick = async () => {
+    try { await api("/api/desk/logout", { method: "POST", body: "{}" }); } catch (e) {}
+    location.replace("/login");
+  };
+}
 $("btn-kill").onclick = () => act("flash-stop", "/api/emergency", { off: true }, "Emergency off");
 $("btn-clear").onclick = () => act("flash-stop", "/api/emergency", { off: false }, "Emergency cleared");
 $("btn-trade-on").onclick = () => act("flash-stop", "/api/trading", { enabled: true }, "Trading on");
@@ -498,9 +553,12 @@ $("btn-mode-paper").onclick = () => {
   body.confirm = "";
   act("flash-money", "/api/desk/arm", body, "Paper mode. Angel is off.");
 };
-load().catch((e) => flash("flash-engine", String(e.message || e), true));
-loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
-loadLab().catch(() => {});
+bootAuth().then((ok) => {
+  if (ok === false) return;
+  load().catch((e) => flash("flash-engine", String(e.message || e), true));
+  loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
+  loadLab().catch(() => {});
+});
 async function loadYou() {
   const d = await api("/api/capture");
   const s = (d && d.summary) || {};
