@@ -70,7 +70,9 @@ start_detached() {
     "export GP_DESK_LOCAL=1 GP_DATA_DIR='$GP_DATA_DIR'; ${CMD[*]} >> '$LOG' 2>&1; echo DESK_EXITED; sleep 5"
   echo "started tmux $session from $PWD"
   wait_up
-  print_open_on_mac
+  if [[ "${GP_QUIET_OPEN:-}" != "1" ]]; then
+    print_open_on_mac
+  fi
 }
 
 if [[ "${1:-}" == "--detach" || "${1:-}" == "--restart" || "${1:-}" == "" ]]; then

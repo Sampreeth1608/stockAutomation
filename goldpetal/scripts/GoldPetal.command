@@ -8,10 +8,10 @@ VM_USER="${GP_VM_USER:-sampreeth1608}"
 VM_NAME="${GP_VM_NAME:-sampreeth-love-story}"
 VM_ZONE="${GP_VM_ZONE:-asia-south1-c}"
 DESK_URL="${GP_DESK_URL:-http://127.0.0.1:8501/}"
-REMOTE_DESK="${GP_REMOTE_DESK:-cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart}"
+REMOTE_DESK="${GP_REMOTE_DESK:-cd ~/goldpetal && GP_QUIET_OPEN=1 ./scripts/run_desk_vm.sh --restart}"
 
 desk_http() {
-  curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$DESK_URL" 2>/dev/null || echo "000"
+  curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$DESK_URL" || true
 }
 
 open_browser() {
@@ -25,12 +25,10 @@ open_browser() {
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This file is the Mac app. You ran it on $(uname -s) $(hostname)."
   echo
-  echo "The fetch you just did was on the VM. /tmp/GoldPetal.command here cannot open Chrome."
   echo "On the VM:  ./scripts/run_desk_vm.sh --restart"
   echo "On the Mac Terminal (prompt must NOT say sampreeth-love-story):"
-  echo "  gcloud compute scp ${VM_USER}@${VM_NAME}:/home/${VM_USER}/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --zone=${VM_ZONE}"
-  echo "  chmod +x ~/Desktop/GoldPetal.command"
-  echo "  open ~/Desktop/GoldPetal.command"
+  echo "  gcloud compute ssh ${VM_USER}@${VM_NAME} --zone=${VM_ZONE} -- -N -L 8501:127.0.0.1:8501"
+  echo "Then Chrome: $DESK_URL"
   echo "Do not gcloud from the VM to itself."
   exit 1
 fi
@@ -45,6 +43,7 @@ if [[ "$code" == "200" ]]; then
   echo "Station already on $DESK_URL"
   open_browser
   echo "Hard-refresh Chrome: Cmd+Shift+R"
+  echo "This window can stay open if a tunnel is already running elsewhere."
   exit 0
 fi
 
@@ -59,25 +58,38 @@ fi
 echo "Starting the station on the VM (desk restart, not the bot)…"
 gcloud compute ssh "${VM_USER}@${VM_NAME}" --zone="${VM_ZONE}" --command "$REMOTE_DESK"
 
-echo "Opening private tunnel 8501 → VM localhost."
-gcloud compute ssh "${VM_USER}@${VM_NAME}" --zone="${VM_ZONE}" -- -N -L 8501:127.0.0.1:8501 &
+LOG="${TMPDIR:-/tmp}/goldpetal-tunnel.log"
+echo "Opening private tunnel 8501 → VM. This can take a minute…"
+gcloud compute ssh "${VM_USER}@${VM_NAME}" --zone="${VM_ZONE}" -- \
+  -N -L 8501:127.0.0.1:8501 -o ExitOnForwardFailure=yes >"$LOG" 2>&1 &
 TUNNEL_PID=$!
 trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
 
-for _ in $(seq 1 25); do
+up=0
+for _ in $(seq 1 90); do
+  if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+    echo "Tunnel process exited. Log:"
+    cat "$LOG" 2>/dev/null || true
+    echo
+    echo "Paste this in Mac Terminal and leave it running:"
+    echo "  gcloud compute ssh ${VM_USER}@${VM_NAME} --zone=${VM_ZONE} -- -N -L 8501:127.0.0.1:8501"
+    echo "Then Chrome: $DESK_URL"
+    exit 1
+  fi
   if [[ "$(desk_http)" == "200" ]]; then
-    echo "Station UP  $DESK_URL"
-    open_browser
-    echo "Hard-refresh: Cmd+Shift+R"
-    echo "Closing this window drops the tunnel."
-    wait "$TUNNEL_PID"
-    exit 0
+    up=1
+    break
   fi
   sleep 1
 done
 
-echo "Tunnel started but $DESK_URL is not 200 yet."
-echo "On the VM: ./scripts/run_desk_vm.sh --restart"
-echo "Then Chrome: $DESK_URL"
+if [[ "$up" == "1" ]]; then
+  echo "Station UP  $DESK_URL"
+else
+  echo "Tunnel still connecting. Opening Chrome anyway — wait a few seconds, then Cmd+Shift+R."
+  echo "If Chrome is refused, wait in this window; do not close it."
+fi
+open_browser
+echo "Hard-refresh: Cmd+Shift+R"
+echo "Closing this window drops the tunnel."
 wait "$TUNNEL_PID"
-exit 1
