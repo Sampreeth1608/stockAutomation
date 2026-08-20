@@ -61,8 +61,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v21" in html
-    assert " · v21" in html
+    assert "gp-header-v22" in html
+    assert " · v22" in html
     assert "data-exit=" in html
     assert "/api/desk/flatten" in html
     assert "Exit all" in html
@@ -84,7 +84,7 @@ def test_station_is_the_operator_page() -> None:
     assert "30m" in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
-    hist = html.split("async function loadHistory()")[1].split("async function loadWhy()")[0]
+    hist = html.split("async function loadHistory()")[1].split("async function act")[0]
     assert "tape_live" not in hist
     desk_fn = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "tape_live" not in desk_fn
@@ -92,6 +92,15 @@ def test_station_is_the_operator_page() -> None:
     assert "moneyEl" in desk_fn
     assert "tape dead" not in html
     assert "function tapeAgeSec" in html
+    assert 'data-tab="why"' not in html
+    assert 'data-tab="ticks"' not in html
+    assert 'data-tab="signals"' not in html
+    assert 'id="books"' not in html
+    assert 'id="paper-books"' in html
+    assert "Download signals CSV" in html
+    assert "/api/export/signals.csv" in html
+    assert "Copy signals → Sheets" in html
+    assert "function renderDlPreview" in html
     assert "Approve → paper" in html
     assert "AI Research Lab" in html
     assert "/api/research" in html
@@ -122,7 +131,6 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="dl"' in html
     assert "/api/tape" in html
     assert "/api/history" in html
-    assert "/api/analysis" in html
     assert "/api/s14/calc" not in html
     assert 'data-tab="s14"' not in html
     assert "S14 calc" not in html

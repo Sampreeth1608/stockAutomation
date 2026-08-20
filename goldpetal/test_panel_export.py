@@ -8,10 +8,12 @@ from pathlib import Path
 from panel_export import (
     default_date_range,
     export_pack_zip,
+    export_signals_csv,
     export_summary,
     export_ticks_csv,
     export_trades_csv,
     rows_to_tsv,
+    signals_in_range,
     ticks_in_range,
     trades_in_range,
 )
@@ -84,6 +86,11 @@ def test_ticks_and_trades_range_export() -> None:
 
         csv_tr = export_trades_csv("2026-08-10", "2026-08-11", db_path=db)
         assert "strategy" in csv_tr.splitlines()[0]
+        csv_s = export_signals_csv("2026-08-09", "2026-08-11", db_path=db)
+        assert "time_label" in csv_s.splitlines()[0]
+        assert "S5_MINEDGE" in csv_s
+        sigs = signals_in_range("2026-08-10", "2026-08-10", db_path=db)
+        assert len(sigs) >= 2
 
         tsv = rows_to_tsv(ticks, ["received_at", "ltp", "bp", "sp"])
         assert "\t" in tsv.splitlines()[0]
@@ -91,9 +98,16 @@ def test_ticks_and_trades_range_export() -> None:
         z = export_pack_zip("2026-08-09", "2026-08-11", db_path=db)
         assert z[:2] == b"PK"
         assert len(z) > 50
+        import zipfile
+        import io
+        with zipfile.ZipFile(io.BytesIO(z)) as zf:
+            names = zf.namelist()
+        assert "signals.csv" in names
+        assert "ticks.csv" in names
 
         s = export_summary("2026-08-09", "2026-08-11", db_path=db)
         assert s["tick_count"] == 3
+        assert s["signal_count"] >= 2
         assert s["trade_count"] >= 1
 
 

@@ -99,12 +99,15 @@ from s14_exchange_sheet import (
 from panel_export import (
     TRADE_CSV_FIELDS,
     TICK_CSV_FIELDS,
+    SIGNAL_CSV_FIELDS,
     default_date_range,
     export_pack_zip,
+    export_signals_csv,
     export_summary,
     export_ticks_csv,
     export_trades_csv,
     rows_to_tsv,
+    signals_in_range,
     ticks_in_range,
     trades_in_range,
 )
@@ -536,6 +539,18 @@ class ControlHandler(BaseHTTPRequestHandler):
                     {"Content-Disposition": f'attachment; filename="{name}"'},
                 )
                 return
+            if path == "/api/export/signals.csv":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                csv_text = export_signals_csv(d_from, d_to)
+                name = f"goldpetal_signals_{d_from}_to_{d_to}.csv"
+                self._send(
+                    200,
+                    csv_text.encode("utf-8"),
+                    "text/csv; charset=utf-8",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
             if path == "/api/export/trades.csv":
                 d_from = (qs.get("from") or [""])[0]
                 d_to = (qs.get("to") or [""])[0]
@@ -567,6 +582,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                 if kind == "ticks":
                     rows = ticks_in_range(d_from, d_to)
                     tsv = rows_to_tsv(rows, TICK_CSV_FIELDS)
+                elif kind == "signals":
+                    rows = signals_in_range(d_from, d_to)
+                    tsv = rows_to_tsv(rows, SIGNAL_CSV_FIELDS)
                 else:
                     rows = trades_in_range(d_from, d_to)
                     tsv = rows_to_tsv(rows, TRADE_CSV_FIELDS)

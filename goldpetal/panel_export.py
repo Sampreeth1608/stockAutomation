@@ -39,6 +39,20 @@ TICK_CSV_FIELDS = [
     "exchange_timestamp",
 ]
 
+SIGNAL_CSV_FIELDS = [
+    "time_label",
+    "symbol",
+    "strategy",
+    "action",
+    "position_after",
+    "reason",
+    "price_delta",
+    "net",
+    "net_delta",
+    "dry_run",
+    "cmp",
+]
+
 
 def _parse_day(day: str, *, end: bool = False) -> str:
     """Return ISO bound in IST for SQL string compare on received_at / time_label."""
@@ -117,6 +131,38 @@ def ticks_in_range(
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [{k: r[k] for k in r.keys()} for r in rows]
 
+
+def signals_in_range(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    init_db(db_path)
+    d0 = (date_from or "").strip()[:10]
+    d1 = (date_to or "").strip()[:10]
+    if not d0 or not d1:
+        raise ValueError("date_from and date_to required (YYYY-MM-DD)")
+    end_exclusive = (
+        datetime.strptime(d1, "%Y-%m-%d").date() + timedelta(days=1)
+    ).isoformat()
+    sql = f"""
+        SELECT time_label, symbol, strategy, action, position_after, reason,
+               price_delta, net, net_delta, dry_run, cmp
+        FROM signals
+        WHERE substr(time_label, 1, 10) >= ? AND substr(time_label, 1, 10) < ?
+        ORDER BY id ASC
+        {"LIMIT ?" if limit else ""}
+    """
+    params: list[Any] = [d0, end_exclusive]
+    if limit:
+        params.append(int(limit))
+    with connect(db_path) as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [{k: r[k] for k in r.keys()} for r in rows]
+
+
 def rows_to_csv(rows: list[dict[str, Any]], fields: list[str]) -> str:
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
@@ -146,6 +192,16 @@ def export_ticks_csv(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -
     return rows_to_csv(rows, TICK_CSV_FIELDS)
 
 
+def export_signals_csv(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+) -> str:
+    rows = signals_in_range(date_from, date_to, db_path=db_path)
+    return rows_to_csv(rows, SIGNAL_CSV_FIELDS)
+
+
 def export_trades_csv(
     date_from: str,
     date_to: str,
@@ -168,6 +224,8 @@ def export_pack_zip(
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         ticks = ticks_in_range(date_from, date_to, db_path=db_path)
         zf.writestr("ticks.csv", rows_to_csv(ticks, TICK_CSV_FIELDS))
+        signals = signals_in_range(date_from, date_to, db_path=db_path)
+        zf.writestr("signals.csv", rows_to_csv(signals, SIGNAL_CSV_FIELDS))
         all_trades = trades_in_range(date_from, date_to, db_path=db_path)
         zf.writestr("trades_all.csv", rows_to_csv(all_trades, TRADE_CSV_FIELDS))
         by_strat: dict[str, list[dict[str, Any]]] = {}
@@ -179,7 +237,7 @@ def export_pack_zip(
             zf.writestr(f"trades_{safe}.csv", rows_to_csv(rows, TRADE_CSV_FIELDS))
         readme = (
             f"Gold Petal export {date_from} → {date_to} (IST inclusive)\n"
-            f"ticks={len(ticks)} trades={len(all_trades)}\n"
+            f"ticks={len(ticks)} signals={len(signals)} trades={len(all_trades)}\n"
             "Import any CSV into Google Sheets: File → Import → Upload\n"
             "Or paste TSV from the control panel Copy button.\n"
         )
@@ -189,6 +247,7 @@ def export_pack_zip(
 
 def export_summary(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> dict[str, Any]:
     ticks = ticks_in_range(date_from, date_to, db_path=db_path)
+    signals = signals_in_range(date_from, date_to, db_path=db_path)
     trades = trades_in_range(date_from, date_to, db_path=db_path)
     by_strat: dict[str, int] = {}
     for t in trades:
@@ -198,6 +257,7 @@ def export_summary(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> 
         "date_from": date_from,
         "date_to": date_to,
         "tick_count": len(ticks),
+        "signal_count": len(signals),
         "trade_count": len(trades),
         "trades_by_strategy": by_strat,
     }

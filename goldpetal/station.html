@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v21: Live tab shows real Angel P&L -->
+<!-- gp-header-v22: no left books / Edge / Tape / Signals; Downloads has signals -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -75,7 +75,7 @@ button, input, select { font: inherit; }
 .pill.ok { color: var(--ok); border-color: #b7dcc8; background: #f4faf6; }
 .pill.bad { color: var(--bad); border-color: #efc4c0; background: #fdf6f5; }
 .pill.warn { color: var(--warn); border-color: #ead3a8; background: #fbf8f1; }
-.work { display: grid; grid-template-columns: 300px minmax(0,1fr) 318px; min-height: 0; }
+.work { display: grid; grid-template-columns: minmax(0,1fr) 318px; min-height: 0; }
 .col { display: flex; flex-direction: column; min-height: 0; min-width: 0;
   border-right: 1px solid var(--line); background: var(--panel); }
 .col:last-child { border-right: 0; }
@@ -194,7 +194,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v21</div>
+      <div class="clock" id="clock">IST — · v22</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -216,29 +216,6 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 
   <div class="work">
     <section class="col">
-      <div class="pane">
-        <h2>Books</h2>
-        <p class="hint">In = this book runs after Restart. Live ₹ and Angel are on the <b>Live</b> tab. Exit flattens one book. Exit all flattens every book.</p>
-      </div>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr><th>Book</th><th>In</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th>Fit</th><th></th></tr>
-          </thead>
-          <tbody id="books"></tbody>
-        </table>
-      </div>
-      <div class="pane">
-        <div class="row">
-          <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
-          <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
-          <button class="btn" id="btn-goto-live" type="button">Live tab</button>
-        </div>
-        <p class="flash" id="flash-books"></p>
-      </div>
-    </section>
-
-    <section class="col">
       <div class="kpis">
         <div class="kpi"><b>Paper open</b><span id="kpi-open">0</span></div>
         <div class="kpi"><b>Paper closed</b><span id="kpi-closed">0</span></div>
@@ -251,15 +228,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab on" type="button" data-tab="open">Positions</button>
           <button class="tab" type="button" data-tab="live">Live</button>
           <button class="tab" type="button" data-tab="trades">Blotter</button>
-          <button class="tab" type="button" data-tab="ticks">Tape</button>
-          <button class="tab" type="button" data-tab="signals">Signals</button>
           <button class="tab" type="button" data-tab="score">P&amp;L</button>
-          <button class="tab" type="button" data-tab="why">Edge</button>
+          <button class="tab" type="button" data-tab="dl">Downloads</button>
           <button class="tab" type="button" data-tab="ml">ML<span id="ml-badge"></span></button>
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
           <button class="tab" type="button" data-tab="amise">AMISE<span id="amise-badge"></span></button>
           <button class="tab" type="button" data-tab="you">You · trade<span id="you-badge"></span></button>
-          <button class="tab" type="button" data-tab="dl">Downloads</button>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
       </div>
@@ -312,7 +286,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">Check Live only for the books that may send Angel. Set how much ₹ and how many lots each one may use.</p>
+        <p class="hint">In = this book runs after Restart. Live = may send Angel after Arm live. Set ₹ and lots. Exit flattens one book. S5 / S8 / S13 / S16 only.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>In</th><th>Live</th><th class="num">₹ capital</th><th class="num">Lots</th><th></th></tr>
@@ -320,16 +294,22 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-books"></tbody>
         </table>
         <div class="row" style="margin-top:.55rem">
-          <button class="btn ok" id="btn-save-live" type="button">Save live books + ₹</button>
+          <button class="btn ok" id="btn-save-live" type="button">Save strategies + ₹</button>
           <button class="btn danger" id="btn-exit-all-live" type="button">Exit all</button>
         </div>
         <p class="flash" id="flash-live"></p>
         <h2 style="margin-top:1rem">Paper-only books</h2>
-        <p class="hint" id="paper-only-line">S18 / S19 / S20 / AMISE never go live from this desk.</p>
+        <p class="hint" id="paper-only-line">S18 / S19 / S20 / AMISE never go live. In still puts them in the paper bot after Restart.</p>
+        <table>
+          <thead>
+            <tr><th>Book</th><th>In</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th></th></tr>
+          </thead>
+          <tbody id="paper-books"></tbody>
+        </table>
       </div>
       <div class="scroll" id="dl-panel" hidden>
         <h2>Downloads</h2>
-        <p class="hint">CSV / ZIP for the laptop or Google Sheets. Date range is IST inclusive. Copy pastes TSV. Phone monitor ZIP is the 7-tab dashboard (LIVE / books after charges). Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live.</p>
+        <p class="hint">CSV / ZIP / Sheets for the laptop. Tape ticks and book signals live here (those tabs are gone). Date range is IST inclusive. Copy pastes TSV. Phone monitor ZIP is the 7-tab dashboard (LIVE / books after charges). Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live.</p>
         <div class="row" style="margin-top:.45rem">
           <label class="chk">From <input type="date" id="exp-from"/></label>
           <label class="chk">To <input type="date" id="exp-to"/></label>
@@ -339,8 +319,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
           <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
           <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+          <button class="btn" type="button" id="btn-dl-signals">Download signals CSV</button>
+        </div>
+        <div class="row" style="margin-top:.45rem">
           <button class="btn warn" type="button" id="btn-copy-trades">Copy trades → Sheets</button>
           <button class="btn warn" type="button" id="btn-copy-ticks">Copy ticks → Sheets</button>
+          <button class="btn warn" type="button" id="btn-copy-signals">Copy signals → Sheets</button>
         </div>
         <div class="row" style="margin-top:.45rem">
           <button class="btn" type="button" id="btn-sheets-pack">Download Sheets pack</button>
@@ -350,6 +334,22 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="btn" type="button" id="btn-s14-zip">Download S14 sheet ZIP</button>
         </div>
         <p class="flash" id="flash-dl"></p>
+        <h2 style="margin-top:1rem">Recent ticks</h2>
+        <p class="hint">Same feed that used to sit on Tape. Download ticks CSV for the date range above.</p>
+        <table>
+          <thead>
+            <tr><th>Time</th><th class="num">LTP</th><th class="num">Bid qty</th><th class="num">Ask qty</th></tr>
+          </thead>
+          <tbody id="dl-ticks-body"></tbody>
+        </table>
+        <h2 style="margin-top:1rem">Recent signals</h2>
+        <p class="hint">BUY / SHORT / CLOSE / HOLD from every book. Download signals CSV for the date range above.</p>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Book</th><th>Action</th><th>Pos</th><th class="num">CMP</th><th>Why</th></tr>
+          </thead>
+          <tbody id="dl-signals-body"></tbody>
+        </table>
       </div>
       <div class="scroll" id="ml-panel" hidden>
         <h2>ML approvals — S11 + S18</h2>
@@ -555,7 +555,6 @@ let lastTape = { ticks: [], signals: [], live_orders: [], live_pnl: {}, tick_cou
 let lastLtpSeen = null;
 let lastLtpChangeAt = 0;
 let lastHist = { trades: [], open: [], scoreboard: [], total_open: 0, total_closed: 0 };
-let lastWhy = null;
 let lastMl = null;
 let lastLab = null;
 let lastAmise = null;
@@ -633,7 +632,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v21";
+    if (clock) clock.textContent = "IST " + ist + " · v22";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -843,11 +842,10 @@ async function loadMood() {
 }
 function renderKpis() {
   const all = allScore();
-  const why = (lastWhy && lastWhy.overall) || {};
   $("kpi-open").textContent = lastHist.total_open || 0;
-  $("kpi-closed").textContent = lastHist.total_closed || why.closed || 0;
+  $("kpi-closed").textContent = lastHist.total_closed || 0;
   const pnl = afterChargesInr(all);
-  const wr = why.win_rate_after_charges != null ? why.win_rate_after_charges : wrAfterCharges(all);
+  const wr = wrAfterCharges(all);
   const pnlEl = $("kpi-pnl");
   pnlEl.textContent = pnl == null ? "—" : money(pnl);
   pnlEl.className = pnlClass(pnl);
@@ -888,7 +886,7 @@ function showMainTab() {
   $("you-panel").hidden = watchTab !== "you";
   $("live-panel").hidden = watchTab !== "live";
   $("hist-strat").style.visibility = extra ? "hidden" : "visible";
-  if (watchTab === "dl") $("grid-meta").textContent = "CSV / ZIP / Sheets — pick From and To (IST)";
+  if (watchTab === "dl") $("grid-meta").textContent = "Downloads — ticks, signals, trades, ZIP, Sheets. Pick From and To (IST).";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
   if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve a new S21+ slot or a same-chair improve. Never DRY_RUN=false";
   if (watchTab === "amise") $("grid-meta").textContent = "AMISE — regime + fit + factory. Run factory here. Approve on Lab.";
@@ -911,7 +909,7 @@ function downloadUrl(path) {
 async function refreshExportMeta() {
   try {
     const s = await api("/api/export/summary?" + rangeQs());
-    $("exp-meta").textContent = `${s.tick_count || 0} ticks · ${s.trade_count || 0} trades`;
+    $("exp-meta").textContent = `${s.tick_count || 0} ticks · ${s.signal_count || 0} signals · ${s.trade_count || 0} trades`;
   } catch (e) {
     $("exp-meta").textContent = String(e.message || e);
   }
@@ -1068,8 +1066,7 @@ async function loadMl() {
   setMlBadge(((lastMl.proposals || {}).pending || []).length);
   if (watchTab === "ml") renderMl();
   const n = ((lastMl.proposals || {}).pending || []).length;
-  const lr = (lastWhy && lastWhy.learner) || {};
-  $("foot-ml").textContent = (n ? ("ML pending " + n + " · ") : "") + (lr.line || lr.note || "learner cold");
+  $("foot-ml").textContent = (n ? ("ML pending " + n) : "learner cold");
 }
 function setLabBadge(n) {
   const el = $("lab-badge");
@@ -1608,55 +1605,36 @@ function renderGrid() {
     }).join("") || `<tr><td colspan="9">${h.trades_loading ? "Loading…" : (tab === "open" ? "No open positions" : "No trades")}</td></tr>`;
     return;
   }
-  if (tab === "ticks") {
-    thead(["time", "ltp", "bid qty", "ask qty"]);
-    $("grid-body").innerHTML = (h.ticks || []).map((t) => `<tr>
-      <td>${esc(t.received_at || "")}</td>
-      <td class="num">${money(t.ltp)}</td>
-      <td class="num">${fmt(t.bp, 0)}</td>
-      <td class="num">${fmt(t.sp, 0)}</td>
-    </tr>`).join("") || `<tr><td colspan="4">No ticks yet</td></tr>`;
-    return;
-  }
-  if (tab === "signals") {
-    thead(["time", "book", "action", "pos", "cmp", "reason"]);
-    $("grid-body").innerHTML = (h.signals || []).map((s) => `<tr>
-      <td>${esc(s.time_label || "")}</td>
-      <td>${esc(shortName(s.strategy))}</td>
-      <td>${esc(s.action || "")}</td>
-      <td>${esc(s.position_after || "")}</td>
-      <td class="num">${money(s.cmp)}</td>
-      <td>${esc(s.reason || "")}</td>
-    </tr>`).join("") || `<tr><td colspan="6">No signals</td></tr>`;
-    return;
-  }
-  if (tab === "score") {
-    thead(["book", "closed", "open", "win % AC", "gross ₹", "fees ₹", "after charges ₹"]);
-    $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
-      <td>${esc(shortName(r.strategy))}</td>
-      <td class="num">${fmt(r.closed, 0)}</td>
-      <td class="num">${fmt(r.open, 0)}</td>
-      <td class="num">${pct(wrAfterCharges(r))}</td>
-      <td class="num">${money(r.gross_pnl)}</td>
-      <td class="num">${money(r.charges)}</td>
-      <td class="num ${pnlClass(afterChargesInr(r))}">${money(afterChargesInr(r))}</td>
-    </tr>`).join("") || `<tr><td colspan="7">No P&L yet</td></tr>`;
-    return;
-  }
-  const d = lastWhy || {};
-  const o = d.overall || {};
-  thead(["book", "closed", "gross %", "after-tax %", "fee-killed", "after-tax ₹"]);
-  const rows = [o].concat(d.books || []).filter((b) => b && (b.strategy === "ALL" || (b.closed || 0) > 0 || (b.open || 0) > 0));
-  $("grid-body").innerHTML = rows.map((b) => `<tr>
-    <td>${esc(b.label || shortName(b.strategy))}</td>
-    <td class="num">${fmt(b.closed, 0)}</td>
-    <td class="num">${pct(b.win_rate_gross)}</td>
-    <td class="num ${pnlClass((b.win_rate_after_tax || 0) - 50)}">${pct(b.win_rate_after_tax)}</td>
-    <td class="num">${fmt(b.fee_killed, 0)}</td>
-    <td class="num ${pnlClass(b.pnl_after_tax)}">${money(b.pnl_after_tax)}</td>
-  </tr>`).join("") || `<tr><td colspan="6">No edge tape yet</td></tr>`;
-  const lr = d.learner || {};
-  $("foot-ml").textContent = lr.line || lr.note || "learner cold";
+  thead(["book", "closed", "open", "win % AC", "gross ₹", "fees ₹", "after charges ₹"]);
+  $("grid-body").innerHTML = (h.scoreboard || []).map((r) => `<tr>
+    <td>${esc(shortName(r.strategy))}</td>
+    <td class="num">${fmt(r.closed, 0)}</td>
+    <td class="num">${fmt(r.open, 0)}</td>
+    <td class="num">${pct(wrAfterCharges(r))}</td>
+    <td class="num">${money(r.gross_pnl)}</td>
+    <td class="num">${money(r.charges)}</td>
+    <td class="num ${pnlClass(afterChargesInr(r))}">${money(afterChargesInr(r))}</td>
+  </tr>`).join("") || `<tr><td colspan="7">No P&L yet</td></tr>`;
+}
+function renderDlPreview() {
+  const ticksEl = $("dl-ticks-body");
+  const sigEl = $("dl-signals-body");
+  if (!ticksEl || !sigEl) return;
+  const h = lastTape || {};
+  ticksEl.innerHTML = (h.ticks || []).map((t) => `<tr>
+    <td>${esc(t.received_at || "")}</td>
+    <td class="num">${money(t.ltp)}</td>
+    <td class="num">${fmt(t.bp, 0)}</td>
+    <td class="num">${fmt(t.sp, 0)}</td>
+  </tr>`).join("") || `<tr><td colspan="4">No ticks yet</td></tr>`;
+  sigEl.innerHTML = (h.signals || []).map((s) => `<tr>
+    <td>${esc(s.time_label || "")}</td>
+    <td>${esc(shortName(s.strategy))}</td>
+    <td>${esc(s.action || "")}</td>
+    <td>${esc(s.position_after || "")}</td>
+    <td class="num">${money(s.cmp)}</td>
+    <td>${esc(s.reason || "")}</td>
+  </tr>`).join("") || `<tr><td colspan="6">No signals yet</td></tr>`;
 }
 function livePnlPayload() {
   return (lastTape && lastTape.live_pnl) || (lastDesk && lastDesk.live_pnl) || {};
@@ -1742,21 +1720,6 @@ function renderDesk(d) {
     const cap = d.capital || {};
     const budgets = cap.strategies || {};
     const waitingAll = (d.flatten || {}).by_strategy || {};
-    $("books").innerHTML = (live.books || []).map((b) => {
-      const name = b.strategy;
-      const sc = scoreFor(name);
-      const wr = wrAfterCharges(sc);
-      const pnl = afterChargesInr(sc);
-      const waiting = !!waitingAll[name];
-      return `<tr>
-        <td>${esc(shortName(name))}</td>
-        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td class="num">${wr == null ? "—" : pct(wr)}</td>
-        <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
-        <td class="num" data-fit="${esc(name)}">${esc(fitLabel(fitFor(name)))}</td>
-        <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
-      </tr>`;
-    }).join("") || `<tr><td colspan="6">no books</td></tr>`;
     const liveRows = (live.books || []).filter((b) => b.live_eligible !== false);
     const paperRows = (live.books || []).filter((b) => b.live_eligible === false);
     $("live-books").innerHTML = liveRows.map((b) => {
@@ -1768,15 +1731,30 @@ function renderDesk(d) {
       const lots = sb.max_lots != null ? Math.min(10, Number(sb.max_lots) || 1) : 1;
       return `<tr>
         <td>${esc(shortName(name))}</td>
-        <td>${inOn ? "yes" : "off"}</td>
+        <td><input type="checkbox" data-in="${name}" ${inOn ? "checked" : ""}/></td>
         <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""} ${inOn ? "" : "disabled"}/></td>
         <td class="num"><input class="cap" type="number" data-budget="${name}" min="0" step="1000" value="${esc(budget)}"/></td>
         <td class="num"><input class="cap" type="number" data-lots="${name}" min="1" max="10" value="${esc(lots)}"/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
     }).join("") || `<tr><td colspan="6">no live-eligible books</td></tr>`;
+    const paperEl = $("paper-books");
+    if (paperEl) paperEl.innerHTML = paperRows.map((b) => {
+      const name = b.strategy;
+      const sc = scoreFor(name);
+      const wr = wrAfterCharges(sc);
+      const pnl = afterChargesInr(sc);
+      const waiting = !!waitingAll[name];
+      return `<tr>
+        <td>${esc(shortName(name))}</td>
+        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
+        <td class="num">${wr == null ? "—" : pct(wr)}</td>
+        <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
+        <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">no paper-only books</td></tr>`;
     $("paper-only-line").textContent = paperRows.length
-      ? ("Stay paper: " + paperRows.map((b) => shortName(b.strategy)).join(", "))
+      ? ("Stay paper: " + paperRows.map((b) => shortName(b.strategy)).join(", ") + ". In still runs them after Restart.")
       : "S18 / S19 / S20 / AMISE stay paper.";
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
@@ -1827,6 +1805,7 @@ function renderAll() {
   renderQuote();
   renderKpis();
   renderGrid();
+  renderDlPreview();
   renderLivePnl();
   if (lastDesk.live_desk) renderDesk(lastDesk);
 }
@@ -1859,13 +1838,6 @@ async function loadHistory() {
     renderAll();
   } finally { loadHistory.busy = false; }
 }
-async function loadWhy() {
-  lastWhy = await api("/api/analysis");
-  const lr = lastWhy.learner || {};
-  $("foot-ml").textContent = lr.line || lr.note || "learner cold";
-  renderKpis();
-  if (watchTab === "why") renderGrid();
-}
 async function act(id, path, body, okMsg) {
   try {
     const res = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
@@ -1879,11 +1851,12 @@ document.querySelectorAll("#tabs .tab").forEach((btn) => {
     document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b === btn));
     showMainTab();
     renderGrid();
-    if (watchTab === "why" && !lastWhy) loadWhy().catch(() => {});
+    renderDlPreview();
     if (watchTab === "ml") loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
     if (watchTab === "lab") loadLab().catch((e) => flash("flash-lab", String(e.message || e), true));
     if (watchTab === "amise") loadAmise().catch((e) => flash("flash-amise", String(e.message || e), true));
     if (watchTab === "you") loadYou().catch((e) => flash("flash-you", String(e.message || e), true));
+    if (watchTab === "dl") { location.hash = "dl"; refreshExportMeta().catch(() => {}); }
     if (watchTab === "live") location.hash = "live";
   };
 });
@@ -1926,7 +1899,6 @@ function gotoLive() {
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "live"));
   showMainTab();
 }
-$("btn-goto-live").onclick = gotoLive;
 $("btn-goto-live-side").onclick = gotoLive;
 $("lab-panel").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-lab]");
@@ -1965,7 +1937,7 @@ $("exp-to").onchange = () => refreshExportMeta().catch(() => {});
 $("btn-dl-pack").onclick = () => {
   try {
     downloadUrl("/api/export/pack.zip?" + rangeQs());
-    flash("flash-dl", "Downloading ZIP (ticks + all strategy trades)");
+    flash("flash-dl", "Downloading ZIP (ticks + signals + trades)");
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
 };
 $("btn-dl-trades").onclick = () => {
@@ -1980,8 +1952,15 @@ $("btn-dl-ticks").onclick = () => {
     flash("flash-dl", "Downloading ticks.csv");
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
 };
+$("btn-dl-signals").onclick = () => {
+  try {
+    downloadUrl("/api/export/signals.csv?" + rangeQs());
+    flash("flash-dl", "Downloading signals.csv");
+  } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
 $("btn-copy-trades").onclick = () => copyExport("trades").catch((e) => flash("flash-dl", String(e.message || e), true));
 $("btn-copy-ticks").onclick = () => copyExport("ticks").catch((e) => flash("flash-dl", String(e.message || e), true));
+$("btn-copy-signals").onclick = () => copyExport("signals").catch((e) => flash("flash-dl", String(e.message || e), true));
 $("btn-sheets-pack").onclick = () => {
   downloadUrl("/api/sheets/pack.zip");
   flash("flash-dl", "Downloading Sheets pack (scoreboard + trades + opens + signals)");
@@ -2026,11 +2005,14 @@ $("btn-bot-restart").onclick = () => {
 };
 $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
 $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
-$("btn-save-books").onclick = () => {
-  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
-  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
-  act("flash-books", "/api/desk/books", { in_bot, live }, "Saved. Type RESTART to load RAM.");
-};
+document.addEventListener("change", (ev) => {
+  const inEl = ev.target && ev.target.closest && ev.target.closest("input[data-in]");
+  if (!inEl) return;
+  const liveEl = document.querySelector('input[data-live="' + inEl.dataset.in + '"]');
+  if (!liveEl) return;
+  liveEl.disabled = !inEl.checked;
+  if (!inEl.checked) liveEl.checked = false;
+});
 function collectArmBody(mode) {
   const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
   const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
@@ -2062,14 +2044,12 @@ function exitAll(flashId) {
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
-  if (!btn.closest("#books") && !btn.closest("#live-books")) return;
+  if (!btn.closest("#live-books") && !btn.closest("#paper-books")) return;
   const name = btn.dataset.exit;
   const label = shortName(name);
   if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed. Uncheck In if you do not want it to re-open.")) return;
-  const flashId = btn.closest("#live-books") ? "flash-live" : "flash-books";
-  act(flashId, "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — bot CLOSEs on the next tick.");
+  act("flash-live", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — bot CLOSEs on the next tick.");
 });
-$("btn-exit-all").onclick = () => exitAll("flash-books");
 $("btn-exit-all-live").onclick = () => exitAll("flash-live");
 $("btn-save-live").onclick = () => {
   const body = collectArmBody("paper");
@@ -2114,6 +2094,11 @@ if (location.hash === "#you") {
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "you"));
   showMainTab();
 }
+if (location.hash === "#dl" || location.hash === "#ticks" || location.hash === "#signals") {
+  watchTab = "dl";
+  document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "dl"));
+  showMainTab();
+}
 if (location.hash === "#live") {
   watchTab = "live";
   document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "live"));
@@ -2124,7 +2109,6 @@ loadDesk().catch((e) => flash("flash-engine", String(e.message || e), true));
 loadTape().catch(() => {});
 loadMood().catch(() => {});
 setTimeout(() => loadHistory().catch(() => {}), 10000);
-setTimeout(() => loadWhy().catch(() => {}), 15000);
 setTimeout(() => loadMl().catch(() => {}), 2000);
 setTimeout(() => loadLab().catch(() => {}), 4000);
 setTimeout(() => loadAmise().catch(() => {}), 6000);
@@ -2132,7 +2116,6 @@ setTimeout(() => loadYou().catch(() => {}), 3000);
 setInterval(() => { if (!typing()) loadDesk().catch(() => {}); }, 5000);
 setInterval(() => { if (!typing()) loadTape().catch(() => {}); }, 3000);
 setInterval(() => { if (!typing()) loadHistory().catch(() => {}); }, 30000);
-setInterval(() => { if (!typing()) loadWhy().catch(() => {}); }, 60000);
 setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing()) loadLab().catch(() => {}); }, 30000);
 setInterval(() => { if (!typing() && watchTab === "amise") loadAmise().catch(() => {}); }, 20000);
