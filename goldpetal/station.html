@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v34: Overnight gap paper book (close → next open 09:05) -->
+<!-- gp-header-v35: Overnight gap can join Live tab at 40% WR% AC -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -195,7 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v34</div>
+      <div class="clock" id="clock">IST — · v35</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -288,7 +288,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-orders"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it has closed paper trades and WR% AC of 40 or more. Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. S18 / S19 / S20 / AMISE stay paper until they hit 40% WR% AC.</p>
+        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it has closed paper trades and WR% AC of 40 or more. Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. S18 / S19 / S20 / AMISE / overnight gap stay paper until they hit 40% WR% AC. You Arm live — the desk does not.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
           <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
@@ -718,7 +718,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v34";
+    if (clock) clock.textContent = "IST " + ist + " · v35";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}

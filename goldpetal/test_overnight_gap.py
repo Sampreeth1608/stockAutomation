@@ -1,4 +1,4 @@
-"""Overnight gap: close → next-open tape, paper-only, mood-exempt."""
+"""Overnight gap: close → next-open tape, paper until 40% WR% AC, then Live tab."""
 
 from __future__ import annotations
 
@@ -380,14 +380,18 @@ def test_wide_spread_allows() -> None:
     assert p.allows(BOOK, "QUIET")
 
 
-def test_paper_only_never_live() -> None:
+def test_paper_until_40_then_live_tab() -> None:
     assert BOOK in PAPER_ONLY_BOOKS
-    assert BOOK in NEVER_LIVE_BOOKS
+    assert BOOK not in NEVER_LIVE_BOOKS
     assert BOOK not in LIVE_ELIGIBLE_BOOKS
     assert book_may_go_live(
         BOOK,
-        summaries={BOOK: {"closed": 20, "win_rate_after_charges": 99.0}},
+        summaries={BOOK: {"closed": 20, "win_rate_after_charges": 39.9}},
     ) is False
+    assert book_may_go_live(
+        BOOK,
+        summaries={BOOK: {"closed": 20, "win_rate_after_charges": 40.0}},
+    ) is True
 
 
 def test_mood_exempt() -> None:
@@ -465,7 +469,7 @@ if __name__ == "__main__":
     test_rollover_blocks_entry()
     test_hydrate_uses_session_high_low()
     test_enable_default_false()
-    test_paper_only_never_live()
+    test_paper_until_40_then_live_tab()
     test_mood_exempt()
     test_on_desk_and_slim()
     test_wide_spread_allows()

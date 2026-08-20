@@ -349,7 +349,37 @@ def test_apply_desk_books_s20_stays_paper_only() -> None:
         td.cleanup()
 
 
-def test_apply_desk_books_overnight_gap_never_live() -> None:
+def test_apply_desk_books_overnight_gap_stays_paper_until_40() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S13=true\nENABLE_OVERNIGHT_GAP=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S13_HHHL_DAY", "OVERNIGHT_GAP"],
+            ["S13_HHHL_DAY", "OVERNIGHT_GAP"],
+            path=env,
+            state_path=state,
+            qualified=[],
+        )
+        assert res["ok"] is True
+        assert "OVERNIGHT_GAP" in res["enabled"]
+        assert "OVERNIGHT_GAP" not in res["live_approved"]
+        assert "S13_HHHL_DAY" in res["live_approved"]
+        assert "OVERNIGHT_GAP" in res["skipped_live_not_in_bot"]
+        text = env.read_text(encoding="utf-8")
+        assert "ENABLE_OVERNIGHT_GAP=true" in text
+        assert "DRY_RUN=true" in text
+    finally:
+        td.cleanup()
+
+
+def test_apply_desk_books_overnight_gap_live_when_wr_40() -> None:
     td = tempfile.TemporaryDirectory()
     try:
         env = Path(td.name) / ".env"
@@ -369,7 +399,7 @@ def test_apply_desk_books_overnight_gap_never_live() -> None:
         )
         assert res["ok"] is True
         assert "OVERNIGHT_GAP" in res["enabled"]
-        assert "OVERNIGHT_GAP" not in res["live_approved"]
+        assert "OVERNIGHT_GAP" in res["live_approved"]
         assert "S13_HHHL_DAY" in res["live_approved"]
         text = env.read_text(encoding="utf-8")
         assert "ENABLE_OVERNIGHT_GAP=true" in text
@@ -451,17 +481,25 @@ def test_desk_snapshot_lists_40pct_paper_books() -> None:
             },
             "S16_HHHL_WICK_1H": {"closed": 8, "win_rate_after_charges": 25.0},
             "S21_AMISE": {"closed": 4, "win_rate_after_charges": 50.0},
+            "OVERNIGHT_GAP": {
+                "closed": 6,
+                "win_rate_after_charges": 40.0,
+                "pnl_after_charges": 120.0,
+            },
         }
     )
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
     s21 = next(b for b in snap["books"] if b["strategy"] == "S21_AMISE")
+    gap = next(b for b in snap["books"] if b["strategy"] == "OVERNIGHT_GAP")
     s5 = next(b for b in snap["books"] if b["strategy"] == "S5_MINEDGE")
     assert s18["live_eligible"] is True
     assert s18["qualifies_live"] is True
     assert s18["closed"] == 10
     assert s16["live_eligible"] is False
     assert s21["live_eligible"] is True
+    assert gap["live_eligible"] is True
+    assert gap["qualifies_live"] is True
     assert s5["live_eligible"] is False
     assert snap["live_wr_min_pct"] == 40.0
 
@@ -618,8 +656,10 @@ if __name__ == "__main__":
     print("ok s19 paper only")
     test_apply_desk_books_s20_stays_paper_only()
     print("ok s20 paper only")
-    test_apply_desk_books_overnight_gap_never_live()
-    print("ok overnight gap never live")
+    test_apply_desk_books_overnight_gap_stays_paper_until_40()
+    print("ok overnight gap paper until 40")
+    test_apply_desk_books_overnight_gap_live_when_wr_40()
+    print("ok overnight gap live at 40")
     test_desk_snapshot_skips_checklist()
     print("ok desk snapshot")
     test_apply_desk_books_amise_not_live()

@@ -1380,7 +1380,7 @@ def run_once(
         emit_hour_book(strategy_s20, now, message)
 
     def emit_overnight_gap_if_changed(now: datetime, message: dict) -> None:
-        """OVERNIGHT_GAP: close→next-open. Mood/regime exempt. Paper only. Not S4 swing."""
+        """OVERNIGHT_GAP: close→next-open. Mood/regime exempt. Not S4 swing."""
         if not _strategy_active(strategy_og.name):
             return
         if latest["cmp"] is None:
@@ -1856,7 +1856,7 @@ def run_once(
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
-            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Paper only.
+            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Paper until you Arm live.
             emit_overnight_gap_if_changed(now, message)
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)

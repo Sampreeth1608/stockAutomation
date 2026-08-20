@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v34" in html
-    assert " · v34" in html
+    assert "gp-header-v35" in html
+    assert " · v35" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -103,7 +103,7 @@ def test_station_is_the_operator_page() -> None:
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
-    assert "S18 / S19 / S20 / AMISE stay paper" in html
+    assert "S18 / S19 / S20 / AMISE / overnight gap stay paper" in html
     assert "live_eligible" in html
     assert "exact IST click time" in html
     assert "tape_lag_ms" in html
@@ -150,6 +150,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S20_FADE_HL" in html
     assert "OVERNIGHT_GAP" in html
     assert "overnight gap" in html
+    assert "overnight gap stay paper until they hit 40%" in html
     assert "S21_AMISE" in html
     assert "Run factory" in html
     assert "After charges ₹" in html
@@ -226,6 +227,7 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Approve already papers" in html
     assert "only Angel" in html
     assert "40% WR% AC" in html
+    assert "overnight gap stay paper until they hit 40%" in html
     assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
@@ -404,8 +406,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
     assert "OVERNIGHT_GAP" in PAPER_ONLY_BOOKS
-    assert "OVERNIGHT_GAP" in NEVER_LIVE_BOOKS
+    assert "OVERNIGHT_GAP" not in NEVER_LIVE_BOOKS
     assert "OVERNIGHT_GAP" not in LIVE_ELIGIBLE_BOOKS
+    assert "FLOW_BRAIN" in NEVER_LIVE_BOOKS
     from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
 
     assert LIVE_WR_MIN_PCT == 40.0

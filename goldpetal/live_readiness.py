@@ -55,7 +55,7 @@ LIVE_ELIGIBLE_BOOKS = frozenset(
 )
 LIVE_WR_MIN_PCT = 40.0
 LIVE_MIN_CLOSED = 1
-NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN", "OVERNIGHT_GAP"})
+NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN"})
 
 
 def summary_qualifies_live(summary: dict[str, Any] | None) -> bool:
