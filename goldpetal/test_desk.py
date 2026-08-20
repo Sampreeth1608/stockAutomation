@@ -56,8 +56,11 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v17" in html
-    assert " · v17" in html
+    assert "gp-header-v18" in html
+    assert " · v18" in html
+    assert "data-exit=" in html
+    assert "/api/desk/flatten" in html
+    assert "Exit flattens that book only" in html
     assert "WR% AC" in html
     assert "S18 / S19 / S20 / AMISE stay paper" in html
     assert "live_eligible" in html
@@ -160,6 +163,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "after charges" in html
     assert "S5 / S8 / S13 / S16" in html
     assert "live_eligible" in html
+    assert "data-exit=" in html
+    assert "/api/desk/flatten" in html
+    assert "Exit flattens that book only" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
@@ -176,6 +182,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "Download phone monitor" in html
     assert "/api/sheets/monitor.zip" in html
     assert "Save strategies" in html
+    assert "data-exit=" in html
+    assert "/api/desk/flatten" in html
     assert "--bg:#ffffff" in html.replace(" ", "")
     assert "/api/tape" in html
     assert "loadTape" in html
@@ -216,6 +224,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/s14/calc" in text
     assert "/api/analysis" in text
     assert "/api/desk/books" in text
+    assert "/api/desk/flatten" in text
+    assert "request_flatten" in text
+    runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
+    assert "emit_desk_flatten" in runner
+    assert "apply_pending_flattens" in runner
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
     assert "session_status" in text
@@ -282,6 +295,8 @@ def test_desk_payload_includes_session() -> None:
     assert "ltp" in sess
     assert "goldpetal_running" in sess
     assert isinstance(sess["goldpetal_running"], bool)
+    assert "flatten" in payload
+    assert "by_strategy" in payload["flatten"]
 
 
 def test_streamlit_cannot_write() -> None:

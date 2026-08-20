@@ -1460,6 +1460,62 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    flatten_lock = threading.Lock()
+
+    def emit_desk_flatten(now: datetime) -> None:
+        """Operator Exit: flatten one book (paper CLOSE + Angel if live-armed)."""
+        from desk_flatten import apply_pending_flattens
+
+        with flatten_lock:
+            cmp = latest.get("cmp")
+            if cmp is None:
+                try:
+                    from storage import latest_ltp as _latest_ltp
+
+                    cmp = _latest_ltp()
+                except Exception:
+                    cmp = None
+            rows = apply_pending_flattens(
+                strat_map,
+                _record_signal,
+                now=now,
+                cmp=cmp,
+            )
+        if not rows:
+            return
+        for row in rows:
+            name = str(row.get("strategy") or "")
+            res = row.get("result") or {}
+            ts = now.isoformat(timespec="seconds")
+            if res.get("already_flat"):
+                line = f"[{ts}] [EXIT] {name} already flat"
+            elif row.get("status") == "done":
+                line = (
+                    f"[{ts}] [EXIT] CLOSE {name} was_{res.get('was_side')} "
+                    f"queued={row.get('id')}"
+                )
+            else:
+                line = f"[{ts}] [EXIT] {name} failed {row.get('error')}"
+            print(line, flush=True)
+            logger.info(line)
+        write_bot_health(
+            {
+                "event": "desk_exit",
+                "flattened": [
+                    {
+                        "strategy": r.get("strategy"),
+                        "status": r.get("status"),
+                        "was_side": (r.get("result") or {}).get("was_side"),
+                    }
+                    for r in rows
+                ],
+                "positions": {
+                    n: getattr(o, "position", "flat") for n, o in strat_map.items()
+                },
+                "runner": "run_strategy",
+            }
+        )
+
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
         """1h FLIP books. Mood gate via _may_enter. Block does not flatten a hold."""
         if not _strategy_active(strategy.name):
@@ -1558,8 +1614,9 @@ def run_once(
 
         try:
             now = datetime.now(IST)
-            # Skip night/weekend noise entirely.
+            # Skip night/weekend noise entirely. Still honour desk Exit.
             if not is_market_open(now):
+                emit_desk_flatten(now)
                 if now >= state["next_bar_at"]:
                     state["next_bar_at"] = _next_boundary(now, interval)
                 return
@@ -1719,6 +1776,9 @@ def run_once(
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)
 
+            # Desk Exit button: flatten that book only (after this tick's entries)
+            emit_desk_flatten(now)
+
             # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
             if in_eod_flatten_window(now, market_close=close_s):
@@ -1856,6 +1916,10 @@ def run_once(
             and not stop_flag.get("stop")
         ):
             time.sleep(5)
+            try:
+                emit_desk_flatten(datetime.now(IST))
+            except Exception as exc:
+                logger.warning("desk Exit poll failed: %s", exc)
             idle = time.monotonic() - float(feed_watch["t"])
             if not tick_feed_stale(
                 idle_sec=idle,

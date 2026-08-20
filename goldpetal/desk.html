@@ -115,7 +115,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <div class="scroll">
       <table>
         <thead>
-          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th></tr>
+          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th><th></th></tr>
         </thead>
         <tbody id="books"></tbody>
       </table>
@@ -646,8 +646,9 @@ function render(d) {
       <td><input type="checkbox" data-live="${name}" ${livePick ? "checked" : ""}/></td>
       <td>${b.ram || "—"}</td>
       <td>${b.live_approved ? b.live_qty : 0}${b.warn_100 && b.live_approved ? " · paper 100≠live" : ""}</td>
+      <td><button type="button" class="btn danger" data-exit="${name}">Exit</button></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="5">no books</td></tr>`;
+  }).join("") || `<tr><td colspan="6">no books</td></tr>`;
   const armed = live.would_place_real_orders
     ? "ARMED — next signal on a live-picked book hits Angel."
     : "Paper. Nothing hits Angel until Paper only is off, live is unlocked, a book is live-picked, and the bot is restarted.";
@@ -743,6 +744,17 @@ $("btn-save-books").onclick = async () => {
     await load();
   } catch (e) { flash("flash-books", String(e.message || e), true); }
 };
+$("books").addEventListener("click", async (ev) => {
+  const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
+  if (!btn) return;
+  const name = btn.dataset.exit;
+  if (!confirm("Flatten " + (SHORT[name] || name) + " now? This book only.")) return;
+  try {
+    const res = await api("/api/desk/flatten", { method: "POST", body: JSON.stringify({ strategy: name }) });
+    flash("flash-books", res.note || "Exit queued");
+    await load();
+  } catch (e) { flash("flash-books", String(e.message || e), true); }
+});
 $("btn-save-money").onclick = async () => {
   const paper = $("paper-only").checked;
   const lots = Number($("live-max").value || 1);

@@ -218,12 +218,19 @@ def desk_payload() -> dict[str, Any]:
     sess["last_tick_at"] = tape.get("last_tick_at") or ""
     sess["ltp"] = tape.get("ltp")
     sess["goldpetal_running"] = bool(sess.get("open")) and feed_on and bool(tape.get("tape_live"))
+    try:
+        from desk_flatten import flatten_desk_status
+
+        flatten = flatten_desk_status()
+    except Exception:
+        flatten = {"pending": [], "by_strategy": {}, "recent": [], "bot_running": False}
     return {
         "bot": bot,
         "live_desk": desk_snapshot(),
         "state": load_state().to_dict(),
         "capital": capital_snapshot(),
         "session": sess,
+        "flatten": flatten,
     }
 
 
@@ -681,6 +688,15 @@ class ControlHandler(BaseHTTPRequestHandler):
                 res = apply_desk_books(in_bot, live)
                 status = 200 if res.get("ok") else 400
                 res = {**res, "live_desk": live_readiness()}
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/desk/flatten":
+                from desk_flatten import flatten_desk_status, request_flatten
+
+                name = str(data.get("strategy") or "").strip()
+                res = request_flatten(name)
+                status = 200 if res.get("ok") else 400
+                res = {**res, "flatten": flatten_desk_status()}
                 self._send(*_json_bytes(res, status))
                 return
             if path == "/api/amise/lab":

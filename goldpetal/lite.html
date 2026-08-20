@@ -81,13 +81,13 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Strategies</h2>
     <table>
-      <thead><tr><th>Book</th><th>In bot</th><th>Live</th></tr></thead>
+      <thead><tr><th>Book</th><th>In bot</th><th>Live</th><th></th></tr></thead>
       <tbody id="books"></tbody>
     </table>
     <div class="row" style="margin-top:.55rem">
       <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
     </div>
-    <p class="hint">Live pick is S5 / S8 / S13 / S16 only. S18 / S19 / S20 / AMISE stay paper. Type RESTART after save.</p>
+    <p class="hint">Live pick is S5 / S8 / S13 / S16 only. S18 / S19 / S20 / AMISE stay paper. Exit flattens that book only. Type RESTART after save.</p>
     <p class="flash" id="flash-books"></p>
   </section>
 
@@ -205,12 +205,14 @@ function render(d) {
     const enables = live.enables || {};
     $("books").innerHTML = (live.books || []).map((b) => {
       const name = b.strategy;
+      const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
       return `<tr>
         <td>${shortName(name)}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
         <td>${b.live_eligible !== false ? `<input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/>` : "paper"}</td>
+        <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="3">no books</td></tr>`;
+    }).join("") || `<tr><td colspan="4">no books</td></tr>`;
     $("paper-only").checked = live.dry_run !== false;
     $("live-max").value = live.live_max_lots || 1;
     const cap = d.capital || {};
@@ -291,6 +293,13 @@ $("btn-save-books").onclick = () => {
   const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
   act("flash-books", "/api/desk/books", { in_bot, live }, "Saved. Type RESTART to load RAM.");
 };
+$("books").addEventListener("click", (ev) => {
+  const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
+  if (!btn || btn.disabled) return;
+  const name = btn.dataset.exit;
+  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Paper CLOSE always. Angel CLOSE only if live-armed.")) return;
+  act("flash-books", "/api/desk/flatten", { strategy: name }, "Exit queued — bot CLOSEs on the next tick.");
+});
 $("btn-save-money").onclick = () => {
   const paper = $("paper-only").checked;
   act("flash-money", "/api/live/env", {

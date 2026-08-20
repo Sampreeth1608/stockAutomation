@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v17: S5/S8 own gates in quiet; first live test 1 lot -->
+<!-- gp-header-v18: per-book Exit flatten -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -75,7 +75,7 @@ button, input, select { font: inherit; }
 .pill.ok { color: var(--ok); border-color: #b7dcc8; background: #f4faf6; }
 .pill.bad { color: var(--bad); border-color: #efc4c0; background: #fdf6f5; }
 .pill.warn { color: var(--warn); border-color: #ead3a8; background: #fbf8f1; }
-.work { display: grid; grid-template-columns: 270px minmax(0,1fr) 318px; min-height: 0; }
+.work { display: grid; grid-template-columns: 300px minmax(0,1fr) 318px; min-height: 0; }
 .col { display: flex; flex-direction: column; min-height: 0; min-width: 0;
   border-right: 1px solid var(--line); background: var(--panel); }
 .col:last-child { border-right: 0; }
@@ -91,6 +91,7 @@ button, input, select { font: inherit; }
 .btn.ok { background: #eef7f1; border-color: #b7dcc8; color: #0a6e3c; }
 .btn.warn { background: #fbf6ec; border-color: #ead3a8; color: #8a5200; }
 .btn.danger { background: #fbf0ee; border-color: #efc4c0; color: #b81c16; }
+.btn.tiny { padding: .22rem .42rem; font-size: 11px; letter-spacing: .03em; }
 .tab { appearance: none; border: 0; border-bottom: 2px solid transparent; background: transparent;
   color: var(--muted); font: 600 13px/1 var(--font); letter-spacing: .03em;
   padding: .7rem .55rem .55rem; cursor: pointer; }
@@ -182,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v17</div>
+      <div class="clock" id="clock">IST — · v18</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -206,12 +207,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <section class="col">
       <div class="pane">
         <h2>Books</h2>
-        <p class="hint">In bot loads after Restart. Live pick is S5 / S8 / S13 / S16 only. Rank is after Angel charges (tax excluded). S18 / S19 / S20 / AMISE stay paper.</p>
+        <p class="hint">In bot loads after Restart. Live pick is S5 / S8 / S13 / S16 only. Rank is after Angel charges (tax excluded). S18 / S19 / S20 / AMISE stay paper. Exit flattens that book only — press when you want out.</p>
       </div>
       <div class="scroll">
         <table>
           <thead>
-            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th>Fit</th></tr>
+            <tr><th>Book</th><th>In</th><th>Live</th><th class="num">WR% AC</th><th class="num">AC ₹</th><th>Fit</th><th></th></tr>
           </thead>
           <tbody id="books"></tbody>
         </table>
@@ -574,7 +575,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v17";
+    if (clock) clock.textContent = "IST " + ist + " · v18";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1634,6 +1635,7 @@ function renderDesk(d) {
       const wr = wrAfterCharges(sc);
       const pnl = afterChargesInr(sc);
       const liveOk = b.live_eligible !== false;
+      const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
       return `<tr>
         <td>${esc(shortName(name))}</td>
         <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
@@ -1641,8 +1643,9 @@ function renderDesk(d) {
         <td class="num">${wr == null ? "—" : pct(wr)}</td>
         <td class="num ${pnlClass(pnl)}">${money(pnl)}</td>
         <td class="num" data-fit="${esc(name)}">${esc(fitLabel(fitFor(name)))}</td>
+        <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="6">no books</td></tr>`;
+    }).join("") || `<tr><td colspan="7">no books</td></tr>`;
     $("paper-only").checked = live.dry_run !== false;
     $("live-max").value = live.live_max_lots || 1;
     const cap = d.capital || {};
@@ -1856,6 +1859,14 @@ $("btn-save-books").onclick = () => {
   const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
   act("flash-books", "/api/desk/books", { in_bot, live }, "Saved. Type RESTART to load RAM.");
 };
+$("books").addEventListener("click", (ev) => {
+  const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
+  if (!btn || btn.disabled) return;
+  const name = btn.dataset.exit;
+  const label = shortName(name);
+  if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed. Does not stop other books. Uncheck In if you do not want it to re-open.")) return;
+  act("flash-books", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — bot CLOSEs on the next tick.");
+});
 $("btn-save-money").onclick = () => {
   const paper = $("paper-only").checked;
   act("flash-money", "/api/live/env", {
