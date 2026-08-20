@@ -51,7 +51,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <h1>Gold Petal Desk</h1>
   <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
-  <p class="hint" id="mood-line">mood … · regime off · books trade their formulas</p>
+  <p class="hint" id="mood-line">regime off · books trade their formulas · press Enable regime</p>
   <div class="row">
     <button class="btn" type="button" id="btn-regime" title="Writes MOOD_GATE. Type RESTART after.">Enable regime</button>
     <span class="flash" id="flash-regime"></span>
@@ -643,19 +643,23 @@ async function loadMood() {
     const btn = $("btn-regime");
     if (!el) return;
     const on = d.gate_on === true;
-    const mode = on ? (d.flatten_on ? "regime ON · flatten" : "regime ON") : "regime off";
-    el.textContent = (d.label || d.mood || "mood") +
-      (d.regime ? " · " + d.regime : "") +
-      " · " + mode
-      + (d.reason ? " · " + d.reason : "")
-      + " · not a paper book";
-    const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
-    if (fits.length) {
-      el.textContent += " · " + fits.map((f) => {
-        const w = Math.round(Number(f.weight || 0) * 100);
-        const st = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
-        return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
-      }).join(" · ");
+    if (!on) {
+      el.textContent = "regime off · books trade their formulas · press Enable regime";
+    } else {
+      const mode = d.flatten_on ? "regime ON · flatten" : "regime ON";
+      el.textContent = (d.label || d.mood || "mood") +
+        (d.regime ? " · " + d.regime : "") +
+        " · " + mode
+        + (d.reason ? " · " + d.reason : "")
+        + " · not a paper book";
+      const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
+      if (fits.length) {
+        el.textContent += " · " + fits.map((f) => {
+          const w = Math.round(Number(f.weight || 0) * 100);
+          const st = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
+          return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
+        }).join(" · ");
+      }
     }
     if (btn) {
       btn.textContent = on ? "Regime on" : "Enable regime";

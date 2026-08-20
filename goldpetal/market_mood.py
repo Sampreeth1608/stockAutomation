@@ -1,6 +1,6 @@
 """Shared Gold Petal market state.
 
-Desk always shows Fit. Market regime is off until you press Enable regime.
+Desk header does not show live Fit / TRENDING until Enable regime.
 That writes MOOD_GATE and FLATTEN_ON_BAD_REGIME. Type RESTART on Engine.
 S13/overnight and S16 1h formula are never vetoed. Keep DRY_RUN=true.
 """
@@ -717,12 +717,18 @@ def mood_desk_payload(db: Path | None = None) -> dict[str, Any]:
     d = st.to_dict()
     d["ok"] = True
     d["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
-    d["note"] = (
-        "One market state for all books, plus a fit per book. "
-        "Gate is on: a book that does not fit will not open. "
-        "Held 1h shorts stay until the next hour close unless MOOD_FLATTEN=true. "
-        "S13/S4 ignore this tick window. "
-        "Does not ENABLE. Does not change S13/S16 formulas. "
-        "Does not auto-replace a champion. Keep DRY_RUN=true."
-    )
+    if st.gate_on:
+        d["note"] = (
+            "Market regime is ON. Unfit books will not open. "
+            "Held 1h shorts stay until the next hour close unless MOOD_FLATTEN=true. "
+            "S13/overnight and S16 1h formula never veto. "
+            "Does not ENABLE. Does not change S13/S16 formulas. Keep DRY_RUN=true."
+        )
+    else:
+        d["note"] = (
+            "Market regime is OFF. Books trade their formulas. "
+            "Live heat / TRENDING labels stay off the GOLD LTP row until Enable regime. "
+            "AMISE may still observe the tape. Type RESTART after you toggle. "
+            "Does not ENABLE. Keep DRY_RUN=true."
+        )
     return d

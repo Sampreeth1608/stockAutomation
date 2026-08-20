@@ -44,6 +44,15 @@ def test_station_is_the_operator_page() -> None:
     assert "Enable regime" in tabs
     assert 'id="btn-regime"' in tabs
     assert tabs.index('data-tab="you"') < tabs.index('id="btn-regime"')
+    assert 'id="mood-box"' in tabs
+    assert tabs.index('id="btn-regime"') < tabs.index('id="mood-box"')
+    header = html.split('<header class="top">')[1].split("</header>")[0]
+    assert 'id="mood-box"' not in header
+    assert 'id="mood-pill"' not in header
+    mood_fn = html.split("function renderMood")[1].split("function fitFor")[0]
+    assert "box.hidden = !on" in mood_fn
+    assert "if (!on)" in mood_fn
+    assert ".mood-box[hidden]" in html
     assert "You — trade and teach" in html
     assert "/api/capture" in html
     assert "/api/capture/learn" in html
@@ -72,8 +81,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v42" in html
-    assert " · v42" in html
+    assert "gp-header-v43" in html
+    assert " · v43" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -229,6 +238,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "/#you" in html
     assert "/api/mood" in html
     assert "id=\"mood-line\"" in html
+    assert "press Enable regime" in html
+    assert "regime off · books trade their formulas" in html
     assert "MOOD_GATE" in html
     assert "Enable regime" in html
     assert 'id="btn-regime"' in html
@@ -418,7 +429,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v42" in cmd
+    assert "Gold Petal v43" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

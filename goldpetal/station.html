@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v42: Drop Fit strip and You strip extras -->
+<!-- gp-header-v43: Live regime labels only after Enable regime; not next to LTP -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -55,8 +55,10 @@ button, input, select { font: inherit; }
 .quote .ltp.stale { color: var(--muted); }
 .quote .meta { font: 12px/1.3 var(--mono); color: var(--muted); }
 .mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
+.mood-box[hidden] { display: none !important; }
 .mood-box .pill { width: fit-content; }
 .mood-box .hint { margin: 0; font: 11px/1.35 var(--mono); color: var(--muted); }
+#tabs .mood-box { max-width: 26rem; margin: .2rem .2rem .25rem .1rem; }
 .top-right { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
 .clock { font: 500 12px/1 var(--mono); color: var(--muted); margin-right: .35rem; }
 .pill { font: 500 11px/1 var(--mono); padding: .28rem .5rem; border-radius: 999px;
@@ -180,13 +182,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <div class="ltp" id="ltp">—</div>
         <div class="meta" id="quote-meta">waiting for quote</div>
       </div>
-      <div class="mood-box" id="mood-box" title="Fit is a label until you press Enable regime. Then MOOD_GATE and TREND/CHOP/WIDE_SPREAD skip unfit books. Type RESTART. S16 1h formula and S13/overnight never veto. Not a paper book.">
-        <span class="pill" id="mood-pill">mood warming up</span>
-        <div class="hint" id="mood-hint">heat / cool / burst / low profile / fall starting · regime off</div>
-      </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v42</div>
+      <div class="clock" id="clock">IST — · v43</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -213,6 +211,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="amise">AMISE<span id="amise-badge"></span></button>
           <button class="tab" type="button" data-tab="you">You · trade<span id="you-badge"></span></button>
           <button class="btn warn" type="button" id="btn-regime" title="Turn market regime on or off. Type RESTART after. S16 formula and S13/overnight never veto.">Enable regime</button>
+          <div class="mood-box" id="mood-box" hidden title="Press Enable regime to show live Fit / TREND / CHOP. Off = books trade their formulas. heat / cool / burst / low profile / fall starting stay off the GOLD LTP row.">
+            <span class="pill" id="mood-pill">regime off</span>
+            <div class="hint" id="mood-hint">press Enable regime — books trade their formulas</div>
+          </div>
           <span class="flash" id="flash-regime"></span>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
@@ -406,6 +408,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <div id="amise-pipeline"></div>
         <h2 style="margin-top:1rem">Market state</h2>
+        <p class="hint">Live labels on the tab row only after <b>Enable regime</b>. This card is research. Off = observe only — it does not skip a book.</p>
         <div id="amise-market"></div>
         <h2 style="margin-top:1rem">Strategy manager — who fits this regime</h2>
         <div id="amise-fits"></div>
@@ -698,7 +701,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v42";
+    if (clock) clock.textContent = "IST " + ist + " · v43";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -851,19 +854,7 @@ function renderMood(d) {
   const btn = $("btn-regime");
   const box = $("mood-box");
   if (!pill) return;
-  const mood = lastMood.mood || "UNKNOWN";
   const on = lastMood.gate_on === true;
-  pill.className = "pill " + moodKind(mood);
-  const regime = lastMood.regime && lastMood.regime !== "UNKNOWN" ? lastMood.regime : mood;
-  pill.textContent = (lastMood.label || mood) + (lastMood.transition ? " · " + lastMood.transition : "");
-  const mode = on
-    ? (lastMood.flatten_on ? "regime ON · flatten" : "regime ON")
-    : "regime off";
-  const bits = [mode, regime];
-  if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
-  if (lastMood.reason) bits.push(lastMood.reason);
-  if (hint) hint.textContent = bits.join(" · ");
-  pill.title = bits.join(" · ");
   if (btn) {
     btn.textContent = on ? "Regime on" : "Enable regime";
     btn.classList.toggle("on", on);
@@ -873,10 +864,30 @@ function renderMood(d) {
       ? "Click to turn market regime OFF. Type RESTART after."
       : "Click to turn market regime ON. Type RESTART after.";
   }
+  if (box) box.hidden = !on;
+  if (!on) {
+    pill.className = "pill";
+    pill.textContent = "regime off";
+    pill.title = "Market regime is off. Books trade their formulas.";
+    if (hint) hint.textContent = "press Enable regime — books trade their formulas";
+    if (box) {
+      box.title = "Fit is a label until you press Enable regime. Then MOOD_GATE and TREND/CHOP/WIDE_SPREAD skip unfit books. Type RESTART. S16 1h formula and S13/overnight never veto.";
+    }
+    renderFits();
+    return;
+  }
+  const mood = lastMood.mood || "UNKNOWN";
+  pill.className = "pill " + moodKind(mood);
+  const regime = lastMood.regime && lastMood.regime !== "UNKNOWN" ? lastMood.regime : mood;
+  pill.textContent = (lastMood.label || mood) + (lastMood.transition ? " · " + lastMood.transition : "");
+  const mode = lastMood.flatten_on ? "regime ON · flatten" : "regime ON";
+  const bits = [mode, regime];
+  if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
+  if (lastMood.reason) bits.push(lastMood.reason);
+  if (hint) hint.textContent = bits.join(" · ");
+  pill.title = bits.join(" · ");
   if (box) {
-    box.title = on
-      ? "Regime on — Fit / TREND / CHOP / WIDE_SPREAD can skip books. Type RESTART. S16 1h formula and S13/overnight never veto."
-      : "Fit is a label until you press Enable regime. Then MOOD_GATE and TREND/CHOP/WIDE_SPREAD skip unfit books. Type RESTART. S16 1h formula and S13/overnight never veto.";
+    box.title = "Regime on — Fit / TREND / CHOP / WIDE_SPREAD can skip books. Type RESTART. S16 1h formula and S13/overnight never veto.";
   }
   renderFits();
 }
@@ -1327,10 +1338,13 @@ function renderAmise() {
     <p class="ml-meta">${esc((d.pipeline || []).join(" → "))}</p>
     <p class="hint">${esc(d.note || "")}</p>
   </div>`;
+  const gated = mkt.gate_on === true;
   $("amise-market").innerHTML = `<div class="ml-card">
-    <h3>${esc(mkt.label || mkt.mood || "mood")}</h3>
-    <p class="ml-meta">${esc(mkt.regime || "UNKNOWN")} · ${esc(mkt.transition || "")} · ${mkt.gate_on ? "regime ON" : "regime off"}</p>
-    <p class="hint">${esc(mkt.reason || "")}</p>
+    <h3>${esc(gated ? (mkt.label || mkt.mood || "mood") : "regime off")}</h3>
+    <p class="ml-meta">${gated
+      ? (esc(mkt.regime || "UNKNOWN") + " · " + esc(mkt.transition || "") + " · regime ON")
+      : "Enable regime is off — observe only. Books trade their formulas."}</p>
+    <p class="hint">${esc(gated ? (mkt.reason || "") : ("observed " + (mkt.label || mkt.mood || "") + (mkt.regime ? " · " + mkt.regime : "") + (mkt.reason ? " · " + mkt.reason : "")))}</p>
   </div>`;
   const fits = mgr.fits || mkt.fits || [];
   $("amise-fits").innerHTML = fits.length ? `<table>

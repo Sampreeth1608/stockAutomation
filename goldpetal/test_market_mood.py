@@ -287,7 +287,28 @@ def test_set_regime_gate_writes_env() -> None:
             os.environ.pop("FLATTEN_ON_BAD_REGIME", None)
 
 
-def test_not_a_paper_book() -> None:
+def test_mood_desk_payload_note_follows_gate() -> None:
+    import tempfile
+
+    from market_mood import mood_desk_payload
+
+    missing = Path(tempfile.mkdtemp()) / "no-ticks.db"
+    os.environ["MOOD_GATE"] = "false"
+    try:
+        d = mood_desk_payload(missing)
+        assert d["gate_on"] is False
+        assert "OFF" in d["note"]
+        assert "Gate is on" not in d["note"]
+    finally:
+        os.environ.pop("MOOD_GATE", None)
+    os.environ["MOOD_GATE"] = "true"
+    try:
+        d = mood_desk_payload(missing)
+        assert d["gate_on"] is True
+        assert "Market regime is ON" in d["note"]
+        assert "Market regime is OFF" not in d["note"]
+    finally:
+        os.environ.pop("MOOD_GATE", None)
     root = Path(__file__).resolve().parent
     assert "MARKET_MOOD" not in ALL_STRATEGY_NAMES
     assert "mood" not in SLIM_PAPER_STRATEGIES
@@ -340,5 +361,6 @@ if __name__ == "__main__":
     test_seed_from_db_blocks_short_on_rise()
     test_mood_gate_defaults_off()
     test_set_regime_gate_writes_env()
+    test_mood_desk_payload_note_follows_gate()
     test_not_a_paper_book()
     print("ALL test_market_mood OK")
