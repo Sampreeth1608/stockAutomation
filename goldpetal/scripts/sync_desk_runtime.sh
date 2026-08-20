@@ -22,6 +22,10 @@ FILES=(
   goldpetal/control_state.py
   goldpetal/desk_data.py
   goldpetal/capital.py
+  goldpetal/market_mood.py
+  goldpetal/portfolio.py
+  goldpetal/run_strategy.py
+  goldpetal/trade_analysis.py
   goldpetal/station.html
   goldpetal/lite.html
   goldpetal/login.html

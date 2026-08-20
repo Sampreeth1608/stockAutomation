@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v35" in html
-    assert " · v35" in html
+    assert "gp-header-v36" in html
+    assert " · v36" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -343,6 +343,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "apply_pending_flattens" in runner
     assert "mirror_positions_from_signals" in runner
     assert "live_only=not dry_run" in runner
+    assert "FORMULA_GATE_BOOKS" in runner
+    assert "MOOD_EXEMPT_BOOKS" in runner
     assert "/api/bot/start" in text
     assert "desk_snapshot" in text
     assert "session_status" in text
@@ -382,6 +384,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     sync = (ROOT / "scripts" / "sync_desk_runtime.sh").read_text(encoding="utf-8")
     assert "goldpetal/live_orders.py" in sync
     assert "goldpetal/live_readiness.py" in sync
+    assert "goldpetal/market_mood.py" in sync
+    assert "goldpetal/run_strategy.py" in sync
+    assert "goldpetal/portfolio.py" in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")

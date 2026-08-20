@@ -76,7 +76,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S20_FADE_HL",
         *AMISE_SLOT_BOOKS,
     },
-    "WIDE_SPREAD": {"OVERNIGHT_GAP"},
+    "WIDE_SPREAD": {"OVERNIGHT_GAP", "S16_HHHL_WICK_1H"},
     "UNKNOWN": {
         "S1_NETDELTA",
         "S2_BALANCE",

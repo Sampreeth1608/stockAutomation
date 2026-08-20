@@ -111,7 +111,11 @@ def test_quiet_stands_down_trend_books() -> None:
     s5 = st.fit_for("S5_MINEDGE")
     assert s5 is not None and s5["stance"] == "trade"
     s16 = st.fit_for("S16_HHHL_WICK_1H")
-    assert s16 is not None and s16["stance"] == "stand_down"
+    assert s16 is not None and s16["stance"] == "trade"
+    blocked16, why16 = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    assert blocked16 is False and why16 == "s16_1h_formula"
+    buy16, buy_why = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
+    assert buy16 is False and buy_why == "s16_1h_formula"
     fb = st.fit_for("FLOW_BRAIN")
     assert fb is not None and fb["stance"] == "stand_down"
     s13 = st.fit_for("S13_HHHL_DAY")
@@ -137,13 +141,21 @@ def test_fall_prefers_short_on_trend_books() -> None:
     assert blocked_long is True
     assert blocked_short is False
     assert why_s == "mood_ok"
+    buy16, why16 = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
+    short16, why_s16 = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    assert buy16 is False and why16 == "s16_1h_formula"
+    assert short16 is False and why_s16 == "s16_1h_formula"
 
 
 def test_burst_stands_down_intraday() -> None:
     st = classify_samples(_burst(), gate=True)
     assert st.mood == "BURST"
-    blocked, why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
     assert blocked and "stand_down" in why
+    s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    assert s16_blocked is False and s16_why == "s16_1h_formula"
+    flat16, flat_why = mood_wants_flatten(st, "short", strategy="S16_HHHL_WICK_1H")
+    assert flat16 is False and flat_why == "s16_1h_formula"
 
 
 def test_quiet_and_burst() -> None:
@@ -177,6 +189,8 @@ def test_warming_up_stands_down_and_blocks_shorts() -> None:
     assert blocked19 is True
     skipped, skip_why = mood_blocks_entry(st, "SHORT", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
+    s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    assert s16_blocked is False and s16_why == "s16_1h_formula"
 
 
 def test_rise_start_blocks_hour_book_shorts() -> None:
@@ -186,12 +200,13 @@ def test_rise_start_blocks_hour_book_shorts() -> None:
     for name in (
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
-        "S16_HHHL_WICK_1H",
         "S8_NET_ZIGZAG",
     ):
         blocked, why = mood_blocks_entry(st, "SHORT", strategy=name)
         assert blocked, (name, why)
         assert "prefers_long" in why or "block_short" in why, why
+    s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
+    assert s16_blocked is False and s16_why == "s16_1h_formula"
 
 
 def test_seed_from_db_blocks_short_on_rise() -> None:
@@ -266,6 +281,7 @@ def test_not_a_paper_book() -> None:
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert "mood_blocks_entry" in runner
     assert "OWN_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
+    assert "FORMULA_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
     assert "ENTRY BLOCKED" in runner

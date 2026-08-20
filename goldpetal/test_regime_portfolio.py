@@ -73,6 +73,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S5_MINEDGE" in p.enabled
     assert "S13_HHHL_DAY" in p.enabled
     assert "S16_HHHL_WICK_1H" in p.enabled
+    assert p.allows("S16_HHHL_WICK_1H", "WIDE_SPREAD")
     assert "S18_OHLC_VOL_HTF" in p.enabled
     assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled

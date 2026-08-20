@@ -22,7 +22,13 @@ from export_full_ticks import _depth_side
 from live_orders import broker_from_session, mirror_positions_from_signals
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
-from market_mood import MoodDetector, mood_blocks_entry, mood_wants_flatten
+from market_mood import (
+    FORMULA_GATE_BOOKS,
+    MOOD_EXEMPT_BOOKS,
+    MoodDetector,
+    mood_blocks_entry,
+    mood_wants_flatten,
+)
 from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
 from desk_data import tick_feed_stale
 from control_state import entries_blocked, is_live_mode_allowed, load_state
@@ -1596,12 +1602,16 @@ def run_once(
         )
 
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
-        """1h FLIP books. Mood gate via _may_enter. Block does not flatten a hold."""
+        """1h FLIP books. S16 uses its 1h formula; mood does not skip that close."""
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
             return
-        if int(getattr(mood_det.last, "n_samples", 0) or 0) < 8:
+        formula_gate = strategy.name in FORMULA_GATE_BOOKS
+        if (
+            not formula_gate
+            and int(getattr(mood_det.last, "n_samples", 0) or 0) < 8
+        ):
             return
         prev = strategy.position
         prev_entry = getattr(strategy, "entry_price", None)
@@ -1917,11 +1927,12 @@ def run_once(
                         }
                     )
 
-            # Optional mood flatten (MOOD_GATE + MOOD_FLATTEN). Never dumps S13/S4.
+            # Optional mood flatten (MOOD_GATE + MOOD_FLATTEN). Never dumps
+            # S13/S4/overnight or S16's 1h formula hold.
             if mood_det.last.gate_on and mood_det.last.flatten_on:
                 day_key = now.astimezone(IST).strftime("%Y-%m-%d")
                 for name, obj in strat_map.items():
-                    if name in {"S13_HHHL_DAY", "S4_OVERNIGHT", "OVERNIGHT_GAP"}:
+                    if name in MOOD_EXEMPT_BOOKS or name in FORMULA_GATE_BOOKS:
                         continue
                     pos = str(getattr(obj, "position", "flat") or "flat")
                     want, why = mood_wants_flatten(

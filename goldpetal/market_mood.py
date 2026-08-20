@@ -34,6 +34,9 @@ MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT", "OVERNIGHT_GAP"})
 # heat/fall/rise and still stands them down in a burst. Quiet/range/cool
 # must not freeze S5/S8 — portfolio already allows them in QUIET/CHOP.
 OWN_GATE_BOOKS = frozenset({"S5_MINEDGE", "S8_NET_ZIGZAG"})
+# S16 1h close-vs-prev (wick on down close, HH/LL on up close, FLIP). Mood
+# Fit is display only — stand-down / prefers-side must not skip a 1h signal.
+FORMULA_GATE_BOOKS = frozenset({"S16_HHHL_WICK_1H"})
 CORE_FIT_BOOKS: tuple[str, ...] = (
     "S5_MINEDGE",
     "S8_NET_ZIGZAG",
@@ -189,6 +192,16 @@ def _swing_only_fits(why: str, *, warming: bool = False) -> list[dict[str, Any]]
                     "why": "daily swing — tick regime does not dump",
                 }
             )
+        elif name in FORMULA_GATE_BOOKS:
+            out.append(
+                {
+                    "strategy": name,
+                    "weight": 0.82,
+                    "stance": "trade",
+                    "preferred_side": "none",
+                    "why": "1h close vs prev — wick/HHLL FLIP. Mood does not veto",
+                }
+            )
         elif warming:
             out.append(
                 {
@@ -282,10 +295,20 @@ def _fit_one(
                 "S13 or OVERNIGHT_GAP"
             ),
         }
+    if name in FORMULA_GATE_BOOKS:
+        return {
+            "strategy": name,
+            "weight": 0.82,
+            "stance": "trade",
+            "preferred_side": "none",
+            "why": (
+                "1h close vs prev — down close wick (upper SHORT / lower BUY), "
+                "up close HH/LL. Mood does not veto. FLIP"
+            ),
+        }
 
     trend_book = name in {
         "S8_NET_ZIGZAG",
-        "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "FLOW_BRAIN",
@@ -573,6 +596,8 @@ def mood_blocks_entry(
     """True = do not open. Ignored unless MOOD_GATE is on. S13/S4 skip."""
     if strategy in MOOD_EXEMPT_BOOKS:
         return False, "mood_exempt"
+    if strategy in FORMULA_GATE_BOOKS:
+        return False, "s16_1h_formula"
     if not state.gate_on:
         return False, "mood_observe"
     act = str(side or "").strip().lower()
@@ -604,6 +629,8 @@ def mood_wants_flatten(
     """True = flatten open. Needs MOOD_GATE and MOOD_FLATTEN. Never S13/S4."""
     if strategy in MOOD_EXEMPT_BOOKS:
         return False, "mood_exempt"
+    if strategy in FORMULA_GATE_BOOKS:
+        return False, "s16_1h_formula"
     if not state.gate_on or not state.flatten_on:
         return False, "mood_no_flatten"
     pos = str(position or "").strip().lower()
