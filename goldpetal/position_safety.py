@@ -29,6 +29,7 @@ INTRADAY_RESTORE = (
     "S4_OVERNIGHT",
     "S5_MINEDGE",
     "FLOW_BRAIN",
+    "OVERNIGHT_GAP",
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
     "S13_HHHL_DAY",
@@ -69,6 +70,7 @@ SESSION_CLOSE_OVERNIGHT = frozenset(
 EOD_FLATTEN_SKIP = frozenset(
     {
         "S4_OVERNIGHT",
+        "OVERNIGHT_GAP",
         "S12_HHHL30",
         "S13_HHHL_DAY",
         "S14_WICK30_STRICT",
@@ -177,6 +179,7 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        "OVERNIGHT_GAP",
     } or is_amise_slot(name)) and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]

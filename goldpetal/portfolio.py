@@ -28,6 +28,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -46,6 +47,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S10_LEGACY30",
         "S13_HHHL_DAY",
@@ -62,6 +64,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -73,7 +76,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S20_FADE_HL",
         *AMISE_SLOT_BOOKS,
     },
-    "WIDE_SPREAD": set(),
+    "WIDE_SPREAD": {"OVERNIGHT_GAP"},
     "UNKNOWN": {
         "S1_NETDELTA",
         "S2_BALANCE",
@@ -82,6 +85,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -160,6 +164,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S6_MIN30")
     if on("ENABLE_FLOW_BRAIN", "false"):
         enabled.add("FLOW_BRAIN")
+    if on("ENABLE_OVERNIGHT_GAP", "false"):
+        enabled.add("OVERNIGHT_GAP")
     if on("ENABLE_S8", "true"):
         enabled.add("S8_NET_ZIGZAG")
     if on("ENABLE_S9", "false"):

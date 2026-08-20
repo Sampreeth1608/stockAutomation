@@ -34,7 +34,13 @@ RESTART_CONFIRM_WORD = "RESTART"
 # S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
 DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
-    {"S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL", "FLOW_BRAIN"}
+    {
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
+        "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
+    }
 )
 # First live-capital test: 1 lot, these four. Other paper books may join
 # the Live tab (and Angel) only after closed trades and WR% AC ≥ 40.
@@ -43,7 +49,7 @@ LIVE_ELIGIBLE_BOOKS = frozenset(
 )
 LIVE_WR_MIN_PCT = 40.0
 LIVE_MIN_CLOSED = 1
-NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN"})
+NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN", "OVERNIGHT_GAP"})
 
 
 def summary_qualifies_live(summary: dict[str, Any] | None) -> bool:

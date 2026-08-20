@@ -64,6 +64,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S18", None)
     os.environ.pop("ENABLE_S19", None)
     os.environ.pop("ENABLE_S20", None)
+    os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" not in p.enabled
     assert "S2_BALANCE" not in p.enabled
@@ -75,6 +76,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S18_OHLC_VOL_HTF" in p.enabled
     assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled
+    assert "OVERNIGHT_GAP" not in p.enabled
     assert "FLOW_BRAIN" not in p.enabled
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
@@ -103,6 +105,13 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert p25.allows("S25_AMISE", "CHOP")
     assert not p25.allows("S25_AMISE", "WIDE_SPREAD")
     os.environ.pop("ENABLE_S25", None)
+
+    os.environ["ENABLE_OVERNIGHT_GAP"] = "true"
+    p_gap = portfolio_from_env()
+    assert "OVERNIGHT_GAP" in p_gap.enabled
+    assert p_gap.allows("OVERNIGHT_GAP", "WIDE_SPREAD")
+    assert p_gap.allows("OVERNIGHT_GAP", "CHOP")
+    os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
 
 
 if __name__ == "__main__":

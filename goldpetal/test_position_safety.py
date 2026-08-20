@@ -79,6 +79,25 @@ def test_apply_restore_s13_sets_entry_date() -> None:
     assert s.saved is True
 
 
+def test_apply_restore_overnight_gap_sets_entry_date() -> None:
+    s = _Fake("OVERNIGHT_GAP")
+    ok = apply_position_to_strategy(
+        s,
+        OpenPosition(
+            "OVERNIGHT_GAP",
+            "short",
+            90800.0,
+            "2026-08-20T23:20:00+05:30",
+            "SHORT",
+            90800.0,
+        ),
+    )
+    assert ok
+    assert s.position == "short"
+    assert s.entry_date == "2026-08-20"
+    assert s.saved is True
+
+
 def test_apply_restore_s4_sets_entry_date() -> None:
     s = _Fake("S4_OVERNIGHT")
     ok = apply_position_to_strategy(
@@ -166,6 +185,26 @@ def test_s4_not_eod_flattened() -> None:
     names = {r["strategy"] for r in rows}
     assert "S5_MINEDGE" in names
     assert "S4_OVERNIGHT" not in names
+
+
+def test_overnight_gap_not_eod_flattened() -> None:
+    class _Gap:
+        name = "OVERNIGHT_GAP"
+        position = "long"
+        entry_price = 90800.0
+        holds_overnight = True
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    rows = intraday_open_for_flatten(
+        {"OVERNIGHT_GAP": _Gap(), "S5_MINEDGE": _S5()}
+    )
+    names = {r["strategy"] for r in rows}
+    assert "S5_MINEDGE" in names
+    assert "OVERNIGHT_GAP" not in names
 
 
 def test_s16_is_eod_flattened() -> None:
@@ -446,11 +485,41 @@ def test_s20_overnight_is_closed_not_restored() -> None:
         ps.last_open_position = orig  # type: ignore[assignment]
 
 
+def test_overnight_gap_restores_overnight() -> None:
+    import position_safety as ps
+
+    def fake_last(name: str):
+        if name == "OVERNIGHT_GAP":
+            return OpenPosition(
+                name, "long", 90800.0, "2026-08-20T23:20:00", "BUY", 90800.0
+            )
+        return None
+
+    orig = ps.last_open_position
+    ps.last_open_position = fake_last  # type: ignore[assignment]
+    try:
+        gap = _Fake("OVERNIGHT_GAP")
+        gap.holds_overnight = True  # type: ignore[attr-defined]
+        res = startup_reconcile(
+            {"OVERNIGHT_GAP": gap},
+            mode="restore",
+            now=datetime(2026, 8, 21, 9, 2, tzinfo=IST),
+        )
+        assert gap.position == "long"
+        assert gap.entry_date == "2026-08-20"
+        assert len(res["restored"]) == 1
+        assert res["closes"] == []
+    finally:
+        ps.last_open_position = orig  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     test_apply_restore_s5()
     print("ok apply")
     test_apply_restore_s13_sets_entry_date()
     print("ok s13 restore")
+    test_apply_restore_overnight_gap_sets_entry_date()
+    print("ok overnight gap restore date")
     test_apply_restore_s4_sets_entry_date()
     print("ok s4 restore")
     test_disabled_not_restorable()
@@ -473,6 +542,8 @@ if __name__ == "__main__":
     print("ok daily AMISE overnight")
     test_s4_not_eod_flattened()
     print("ok s4 skip flatten")
+    test_overnight_gap_not_eod_flattened()
+    print("ok overnight gap skip flatten")
     test_startup_reconcile_restore()
     print("ok reconcile")
     test_s16_overnight_is_closed_not_restored()
@@ -483,4 +554,6 @@ if __name__ == "__main__":
     print("ok s19 overnight close")
     test_s20_overnight_is_closed_not_restored()
     print("ok s20 overnight close")
+    test_overnight_gap_restores_overnight()
+    print("ok overnight gap restore overnight")
     print("ALL test_position_safety OK")

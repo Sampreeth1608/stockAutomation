@@ -88,6 +88,8 @@ def test_rise_start_blocks_short_when_gated() -> None:
     assert blocked and "block_short" in why
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
     assert skipped is False and skip_why == "mood_exempt"
+    overnight, overnight_why = mood_blocks_entry(st, "SHORT", strategy="OVERNIGHT_GAP")
+    assert overnight is False and overnight_why == "mood_exempt"
 
 
 def test_s13_never_mood_flatten() -> None:
@@ -97,6 +99,7 @@ def test_s13_never_mood_flatten() -> None:
     assert why == "mood_exempt"
     assert "S13_HHHL_DAY" in MOOD_EXEMPT_BOOKS
     assert "S4_OVERNIGHT" in MOOD_EXEMPT_BOOKS
+    assert "OVERNIGHT_GAP" in MOOD_EXEMPT_BOOKS
 
 
 def test_quiet_stands_down_trend_books() -> None:
@@ -113,6 +116,8 @@ def test_quiet_stands_down_trend_books() -> None:
     assert fb is not None and fb["stance"] == "stand_down"
     s13 = st.fit_for("S13_HHHL_DAY")
     assert s13 is not None and s13["stance"] == "hold_swing"
+    gap = st.fit_for("OVERNIGHT_GAP")
+    assert gap is not None and gap["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
     assert blocked is False and why == "mood_ok"
     blocked5, why5 = mood_blocks_entry(st, "BUY", strategy="S5_MINEDGE")

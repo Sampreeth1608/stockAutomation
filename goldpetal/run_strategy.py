@@ -181,6 +181,7 @@ def run_once(
     strategy_s18: S18OhlcVolHtfStrategy,
     strategy_s19,
     strategy_s20,
+    strategy_og,
     portfolio,
     regime_det: RegimeDetector,
     mood_det: MoodDetector,
@@ -343,6 +344,8 @@ def run_once(
         strategy_s13.set_contract(contract)
     if hasattr(strategy_s4, "set_contract"):
         strategy_s4.set_contract(contract)
+    if hasattr(strategy_og, "set_contract"):
+        strategy_og.set_contract(contract)
     for slot in amise_slots:
         if hasattr(slot, "set_contract"):
             slot.set_contract(contract)
@@ -399,6 +402,12 @@ def run_once(
         f"FLOW     : ENABLE_FLOW_BRAIN paper tick LTP+TBQ+TSQ pressure "
         f"[{'ON' if portfolio.is_enabled(strategy_fb.name) else 'OFF'}] "
         f"{strategy_fb.status_line}",
+        flush=True,
+    )
+    print(
+        f"GAP      : ENABLE_OVERNIGHT_GAP close→next-open 09:05 "
+        f"[{'ON' if portfolio.is_enabled(strategy_og.name) else 'OFF'}] "
+        f"{strategy_og.status_line}",
         flush=True,
     )
     print(
@@ -502,6 +511,7 @@ def run_once(
         strategy_s18.name: strategy_s18,
         strategy_s19.name: strategy_s19,
         strategy_s20.name: strategy_s20,
+        strategy_og.name: strategy_og,
         **{s.name: s for s in amise_slots},
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
@@ -1369,6 +1379,75 @@ def run_once(
         """S20: 1h fade HL — buy bounced low / short rejected high. Paper only."""
         emit_hour_book(strategy_s20, now, message)
 
+    def emit_overnight_gap_if_changed(now: datetime, message: dict) -> None:
+        """OVERNIGHT_GAP: close→next-open. Mood/regime exempt. Paper only. Not S4 swing."""
+        if not _strategy_active(strategy_og.name):
+            return
+        if latest["cmp"] is None:
+            return
+        prev_pos = strategy_og.position
+        prev_entry = getattr(strategy_og, "entry_price", None)
+        prev_date = getattr(strategy_og, "entry_date", None)
+        result = strategy_og.on_tick(now, float(latest["cmp"]), message)
+        skip = getattr(strategy_og, "last_skip", None)
+        if result is None and state["tick_count"] % 50 == 0:
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} idle "
+                f"pos={strategy_og.position} skip={skip}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+        planned = wick_record_actions(prev_pos, result)
+        if not planned:
+            return
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = allow_new_entry(
+                strategy_og.name,
+                features=_entry_features(strategy_og.name, enter_action),
+            )
+            if not ok_enter:
+                strategy_og.position = prev_pos
+                strategy_og.entry_price = prev_entry
+                if hasattr(strategy_og, "entry_date"):
+                    strategy_og.entry_date = prev_date
+                if hasattr(strategy_og, "release_action_lock"):
+                    strategy_og.release_action_lock()
+                if hasattr(strategy_og, "_save_state"):
+                    strategy_og._save_state()
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} "
+                    f"ENTRY BLOCKED ({why}) — will retry in close window | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                return
+        fill_px = (
+            float(strategy_og.entry_price)
+            if getattr(strategy_og, "entry_price", None) is not None
+            else float(latest["cmp"])
+        )
+        for action, pos_after in planned:
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=result.reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy_og.name,
+                cmp=fill_px,
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} "
+                f"CMP={fill_px} => {action} "
+                f"(pos={pos_after}) | {result.reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+
     def emit_flow_brain_if_changed(now: datetime, message: dict) -> None:
         """FLOW_BRAIN: tick LTP+TBQ+TSQ pressure. Always feed ticks. Paper only. Not S7_HOURLY."""
         if not _strategy_active(strategy_fb.name):
@@ -1684,7 +1763,8 @@ def run_once(
                     f"s16={strategy_s16.position} "
                     f"s18={strategy_s18.position} "
                     f"s19={strategy_s19.position} "
-                    f"s20={strategy_s20.position}{s3_extra}"
+                    f"s20={strategy_s20.position} "
+                    f"gap={strategy_og.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -1704,6 +1784,7 @@ def run_once(
                             "S18": strategy_s18.position,
                             "S19": strategy_s19.position,
                             "S20": strategy_s20.position,
+                            "GAP": strategy_og.position,
                             "YOU": broker.positions.get("YOU_MANUAL", "flat"),
                         },
                         "skips": {
@@ -1752,6 +1833,8 @@ def run_once(
                         strategy_s13.set_contract(fresh)
                     if hasattr(strategy_s4, "set_contract"):
                         strategy_s4.set_contract(fresh)
+                    if hasattr(strategy_og, "set_contract"):
+                        strategy_og.set_contract(fresh)
                     for slot in amise_slots:
                         if hasattr(slot, "set_contract"):
                             slot.set_contract(fresh)
@@ -1773,6 +1856,8 @@ def run_once(
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
+            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Paper only.
+            emit_overnight_gap_if_changed(now, message)
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)
 
@@ -1836,7 +1921,7 @@ def run_once(
             if mood_det.last.gate_on and mood_det.last.flatten_on:
                 day_key = now.astimezone(IST).strftime("%Y-%m-%d")
                 for name, obj in strat_map.items():
-                    if name in {"S13_HHHL_DAY", "S4_OVERNIGHT"}:
+                    if name in {"S13_HHHL_DAY", "S4_OVERNIGHT", "OVERNIGHT_GAP"}:
                         continue
                     pos = str(getattr(obj, "position", "flat") or "flat")
                     want, why = mood_wants_flatten(
@@ -2036,6 +2121,10 @@ def main() -> None:
         "S20_FADE_HL",
         _optional_book("S20_FADE_HL", "strategy_s20", "s20_from_env"),
     )
+    strategy_og = _load(
+        "OVERNIGHT_GAP",
+        _optional_book("OVERNIGHT_GAP", "strategy_overnight_gap", "overnight_gap_from_env"),
+    )
     amise_slots = _load_amise_slots(portfolio)
     regime_det = RegimeDetector(window=60)
     mood_det = MoodDetector(window=80)
@@ -2058,12 +2147,13 @@ def main() -> None:
     print(f"S18_OHLC_VOL_HTF: {strategy_s18.status_line}", flush=True)
     print(f"S19_BODY_CLOSE_1H: {strategy_s19.status_line}", flush=True)
     print(f"S20_FADE_HL: {strategy_s20.status_line}", flush=True)
+    print(f"OVERNIGHT_GAP: {strategy_og.status_line}", flush=True)
     for slot in amise_slots:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
         f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
-        f"FLOW_BRAIN off, S20 off, AMISE S21+ after Lab Approve)",
+        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP off, AMISE S21+ after Lab Approve)",
         flush=True,
     )
 
@@ -2096,6 +2186,7 @@ def main() -> None:
                 strategy_s18,
                 strategy_s19,
                 strategy_s20,
+                strategy_og,
                 portfolio,
                 regime_det,
                 mood_det,
@@ -2126,6 +2217,7 @@ def main() -> None:
             f"s18={strategy_s18.position} "
             f"s19={strategy_s19.position} "
             f"s20={strategy_s20.position} "
+            f"gap={strategy_og.position} "
             f"amise={','.join(s.name.split('_')[0] + '=' + str(s.position) for s in amise_slots)} "
             f"regime={regime_det.last.regime})...",
             flush=True,

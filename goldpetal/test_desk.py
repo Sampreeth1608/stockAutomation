@@ -68,8 +68,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v33" in html
-    assert " · v33" in html
+    assert "gp-header-v34" in html
+    assert " · v34" in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
@@ -148,6 +148,8 @@ def test_station_is_the_operator_page() -> None:
     assert "S18_OHLC_VOL_HTF" in html
     assert "S19_BODY_CLOSE_1H" in html
     assert "S20_FADE_HL" in html
+    assert "OVERNIGHT_GAP" in html
+    assert "overnight gap" in html
     assert "S21_AMISE" in html
     assert "Run factory" in html
     assert "After charges ₹" in html
@@ -181,6 +183,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S18_OHLC_VOL_HTF" in paper
     assert "S19_BODY_CLOSE_1H" in paper
     assert "S20_FADE_HL" in paper
+    assert "OVERNIGHT_GAP" in paper
     assert "S21_AMISE" in paper
     assert "S24_AMISE" in paper
     assert "S13_HHHL_DAY" in paper
@@ -255,6 +258,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "function livePosRows" in html
     assert "Live positions" in html
     assert "Real Angel P&amp;L" in html
+    assert "OVERNIGHT_GAP" in html
+    assert "overnight gap" in html
     assert "weekly_s18.sh" in html
     assert "/api/ml" in html
     assert "Watch" not in html
@@ -287,6 +292,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
     assert "bootAuth" in html
+    assert "OVERNIGHT_GAP" in html
+    assert "overnight gap" in html
 
 
 def test_control_panel_serves_station_on_8501() -> None:
@@ -372,13 +379,16 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "--tunnel-through-iap" in cmd
     assert "8.231.125.120" in cmd
     assert 'cd "$(dirname "$0")/.."' not in cmd
-    from live_readiness import LIVE_ELIGIBLE_BOOKS, PAPER_ONLY_BOOKS
+    from live_readiness import LIVE_ELIGIBLE_BOOKS, NEVER_LIVE_BOOKS, PAPER_ONLY_BOOKS
 
     assert "S13_HHHL_DAY" in LIVE_ELIGIBLE_BOOKS
     assert "S16_HHHL_WICK_1H" in LIVE_ELIGIBLE_BOOKS
     assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
     assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
+    assert "OVERNIGHT_GAP" in PAPER_ONLY_BOOKS
+    assert "OVERNIGHT_GAP" in NEVER_LIVE_BOOKS
+    assert "OVERNIGHT_GAP" not in LIVE_ELIGIBLE_BOOKS
     from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
 
     assert LIVE_WR_MIN_PCT == 40.0

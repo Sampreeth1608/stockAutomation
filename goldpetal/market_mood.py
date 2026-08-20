@@ -29,7 +29,7 @@ from amise_slots import amise_books_now, is_amise_slot, load_slot_genome, slot_i
 
 IST = ZoneInfo("Asia/Kolkata")
 # Daily/overnight books: show mood, never flatten, skip tick-window entry gate.
-MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT"})
+MOOD_EXEMPT_BOOKS = frozenset({"S13_HHHL_DAY", "S4_OVERNIGHT", "OVERNIGHT_GAP"})
 # Tick books with their own edge/book gates. Mood still prefers a side in
 # heat/fall/rise and still stands them down in a burst. Quiet/range/cool
 # must not freeze S5/S8 — portfolio already allows them in QUIET/CHOP.
@@ -43,6 +43,7 @@ CORE_FIT_BOOKS: tuple[str, ...] = (
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
     "FLOW_BRAIN",
+    "OVERNIGHT_GAP",
 )
 FIT_BOOKS: tuple[str, ...] = CORE_FIT_BOOKS + (
     "S21_AMISE",
@@ -276,7 +277,10 @@ def _fit_one(
             "weight": 0.7,
             "stance": "hold_swing",
             "preferred_side": "none",
-            "why": "daily swing — tick regime does not dump or rewrite S13",
+            "why": (
+                "daily / overnight hold — tick regime does not dump or rewrite "
+                "S13 or OVERNIGHT_GAP"
+            ),
         }
 
     trend_book = name in {
