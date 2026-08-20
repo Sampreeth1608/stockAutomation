@@ -120,8 +120,18 @@ def test_apply_panel_live_env_caps_lots() -> None:
             sync_environ=False,
         )
         assert res["ok"] is False
-        assert "1–10" in res["error"] or "1-10" in res["error"]
+        assert "SIZE" in res["error"]
         assert "LIVE_MAX_LOTS=1" in env.read_text(encoding="utf-8")
+        too_big = apply_panel_live_env(
+            dry_run=True,
+            live_max_lots=1001,
+            confirm="",
+            size_confirm="SIZE",
+            path=env,
+            sync_environ=False,
+        )
+        assert too_big["ok"] is False
+        assert "1–1000" in too_big["error"] or "1-1000" in too_big["error"]
         res0 = apply_panel_live_env(
             dry_run=True,
             live_max_lots=0,
@@ -130,6 +140,16 @@ def test_apply_panel_live_env_caps_lots() -> None:
             sync_environ=False,
         )
         assert res0["ok"] is False
+        ok_size = apply_panel_live_env(
+            dry_run=True,
+            live_max_lots=1000,
+            confirm="",
+            size_confirm="SIZE",
+            path=env,
+            sync_environ=False,
+        )
+        assert ok_size["ok"] is True
+        assert ok_size["applied"]["LIVE_MAX_LOTS"] == "1000"
     finally:
         td.cleanup()
 

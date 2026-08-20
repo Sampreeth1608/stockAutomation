@@ -705,6 +705,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                     dry_run=dry_run,
                     live_max_lots=lots,
                     confirm=str(data.get("confirm") or ""),
+                    size_confirm=str(data.get("size_confirm") or data.get("size_word") or ""),
                 )
                 status = 200 if res.get("ok") else 400
                 res = {**res, "live_desk": live_readiness()}
@@ -785,6 +786,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                     daily_loss_limit_inr=day_loss,
                     allocations=allocations,
                     live_size_mode=str(data.get("live_size_mode") or "") or None,
+                    size_confirm=str(data.get("size_confirm") or data.get("size_word") or ""),
                 )
                 status = 200 if res.get("ok") else 400
                 self._send(*_json_bytes(res, status))

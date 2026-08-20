@@ -59,6 +59,16 @@ def test_live_lots_capped() -> None:
     assert live_lots() == 1
 
 
+def test_live_lots_hard_cap() -> None:
+    os.environ["LIVE_LOTS"] = "5000"
+    os.environ["LIVE_MAX_LOTS"] = "5000"
+    from live_orders import HARD_LIVE_MAX_LOTS
+
+    assert live_lots() == HARD_LIVE_MAX_LOTS
+    os.environ["LIVE_LOTS"] = "1"
+    os.environ["LIVE_MAX_LOTS"] = "1"
+
+
 def test_null_broker_when_dry_run() -> None:
     td, state, orders = _tmp_state()
     try:
@@ -300,6 +310,8 @@ def test_mirror_positions_skips_paper_when_live_only() -> None:
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
+    test_live_lots_hard_cap()
+    print("ok live_lots_hard_cap")
     test_null_broker_when_dry_run()
     print("ok null_broker")
     test_null_broker_logs_when_armed_but_bot_still_paper()

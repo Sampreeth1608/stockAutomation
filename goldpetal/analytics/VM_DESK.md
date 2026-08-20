@@ -16,7 +16,7 @@ cannot overwrite start/stop, feed, live picks, DRY_RUN, or capital.
 | Paper vs live money, lot cap, unlock | Live money |
 | Book ₹ / day-loss | Live money |
 
-Keep `DRY_RUN=true` until you intend Angel fills. LIVE_MAX_LOTS cap is 10.
+Keep `DRY_RUN=true` until you intend Angel fills. LIVE_MAX_LOTS hard cap is 1000 (type SIZE above 10).
 Paper 100 lots is not live size. Restart the **bot** (type RESTART) after Save strategies / Save money.
 
 ## ML / S11 approvals (station 8501)
@@ -281,7 +281,7 @@ Trades tab may still show **old** S9 history — filter to slim strategies.
 1. 8787 **Live money**: check Live? on the strategy. Paper 100 lots is not live size.
 2. 8787 **Capital**: set ₹ / max lots.
 3. Unlock live on 8787.
-4. Uncheck Paper only, type `LIVE`, Save .env (`DRY_RUN=false`, `LIVE_MAX_LOTS` 1–10).
+4. Uncheck Paper only, type `LIVE`, Save .env (`DRY_RUN=false`, `LIVE_MAX_LOTS` 1–1000; type SIZE if above 10).
 5. Type `RESTART` on 8787. Size = `min(strategy max_lots, LIVE_MAX_LOTS)`.
 
 Keep `DRY_RUN=true` until you are ready for real orders. Do not also save these on Streamlit.

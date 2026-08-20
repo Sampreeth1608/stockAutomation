@@ -146,15 +146,21 @@ def render_operator_desk(*, local: bool) -> None:
 
     paper = st.checkbox("Paper only (DRY_RUN)", value=bool(live.get("dry_run", True)))
     lots = st.number_input(
-        "LIVE_MAX_LOTS (1–10)",
+        "LIVE_MAX_LOTS (1–1000; type SIZE if >10)",
         min_value=1,
-        max_value=10,
+        max_value=1000,
         value=int(live.get("live_max_lots") or 1),
     )
     live_word = st.text_input("Type LIVE to set DRY_RUN=false", value="", key="op_live_word")
+    size_word = st.text_input("Type SIZE if ceiling > 10", value="", key="op_size_word")
     if st.button("Save money", disabled=not local):
         _set_flash(
-            apply_panel_live_env(dry_run=paper, live_max_lots=int(lots), confirm=live_word)
+            apply_panel_live_env(
+                dry_run=paper,
+                live_max_lots=int(lots),
+                confirm=live_word,
+                size_confirm=size_word,
+            )
         )
     u1, u2 = st.columns(2)
     if u1.button("Unlock live", disabled=not local):

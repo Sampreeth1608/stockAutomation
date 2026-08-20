@@ -95,11 +95,12 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     </table>
     <p class="hint">Approve already papers every book. This page is only Angel. A book appears at ≥40% WR% AC with closed trades — S5 / S8 / S13 / S16 and any other paper book. Tick <b>Lots</b> or <b>₹</b> to send that book live (one tick only). S18 / S19 / S20 / AMISE stay paper until they hit 40%.</p>
     <div class="row" style="margin-top:.5rem">
-      <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
+      <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="1000" value="1"/></label>
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
+      <input id="size-word" placeholder="SIZE if ceiling &gt; 10" autocomplete="off"/>
     </div>
-    <p class="hint">Tick Lots = contracts (1–ceiling). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). That number is live capital — not the paper wallet split.</p>
+    <p class="hint">Tick Lots = contracts (1–ceiling, hard max 1000). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). That number is live capital — not the paper wallet split. Ceiling above 10: type SIZE, Save, RESTART. Do not Arm live again if you are already armed.</p>
     <table style="margin-top:.45rem">
       <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Lots</th><th>qty</th><th>₹</th><th>amount</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
@@ -194,7 +195,7 @@ let liveMoneyDirty = false;
 function markLiveMoneyDirty(ev) {
   const t = ev.target;
   if (!t) return;
-  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word") {
+  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word" || t.id === "size-word") {
     liveMoneyDirty = true;
     return;
   }
@@ -262,7 +263,7 @@ function render(d) {
       const pos = posBy[name] || {};
       const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
       const budget = liveBudgetDisplay(b, sb);
-      const liveLots = Math.min(10, Math.max(1, Number(b.live_lots || sb.live_lots || 1) || 1));
+      const liveLots = Math.min(1000, Math.max(1, Number(b.live_lots || sb.live_lots || 1) || 1));
       const sizeMode = b.live_size_mode || "";
       const lotsOn = sizeMode === "lots";
       const capOn = sizeMode === "capital";
@@ -272,7 +273,7 @@ function render(d) {
         <td>${wrBit}</td>
         <td>${esc(b.closed == null ? "—" : b.closed)}</td>
         <td><input type="checkbox" data-size="lots" data-book="${esc(name)}" ${lotsOn ? "checked" : ""}/></td>
-        <td><input type="number" data-lots="${esc(name)}" min="1" max="10" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
+        <td><input type="number" data-lots="${esc(name)}" min="1" max="1000" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
         <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
         <td><input type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
@@ -472,6 +473,7 @@ function collectArmBody(mode) {
   const body = {
     mode,
     confirm: ($("live-word").value || "").trim(),
+    size_confirm: ($("size-word") && $("size-word").value || "").trim(),
     live_max_lots: Number($("live-max").value || 1),
     in_bot,
     live,

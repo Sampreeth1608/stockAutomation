@@ -21,7 +21,8 @@ _lock = threading.Lock()
 
 SIZE_LOTS = "lots"
 SIZE_CAPITAL = "capital"
-# Desk live qty is 1–10. Paper max_lots of 100 must not become Angel size.
+# Desk live qty box is 1–1000. Paper max_lots of 100 must not become Angel size
+# (legacy live qty used max_lots 1–10 only).
 LIVE_LOTS_UI_CAP = 10
 
 # Default Gold Petal paper sizing — 1g lot, quote ₹/1g → 1 pt ≈ ₹1.
@@ -139,7 +140,7 @@ def live_budget_amount(sb: StrategyBudget | None) -> float:
 
 
 def lots_from_budget(budget_inr: float, ltp: float | None, cap: int) -> int:
-    """Gold Petal 1g: 1 lot notional ≈ LTP ₹. Cap is LIVE_MAX_LOTS (1–10)."""
+    """Gold Petal 1g: 1 lot notional ≈ LTP ₹. Cap is LIVE_MAX_LOTS (hard max 1000)."""
     ceiling = max(1, int(cap))
     try:
         budget = float(budget_inr or 0)

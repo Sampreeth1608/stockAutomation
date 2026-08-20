@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v31: Live P&L by book; paper fill is not Angel -->
+<!-- gp-header-v32: Ceiling hard cap 1000; SIZE above 10; Sheets ANGEL tab -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -195,7 +195,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v31</div>
+      <div class="clock" id="clock">IST — · v32</div>
       <div id="pills"></div>
     </div>
   </header>
@@ -293,20 +293,21 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
           <ul class="steps" id="arm-steps"></ul>
           <div class="row">
-            <label class="chk">Ceiling lots <input class="cap" type="number" id="live-max" min="1" max="10" value="1"/></label>
+            <label class="chk">Ceiling lots <input class="cap" type="number" id="live-max" min="1" max="1000" value="1"/></label>
             <label class="chk">Wallet ₹ <input class="cap" type="number" id="cap-total" step="1000"/></label>
             <label class="chk">Day-loss ₹ <input class="cap" type="number" id="cap-dd" step="100"/></label>
+            <input id="size-word" placeholder="SIZE if ceiling &gt; 10" autocomplete="off"/>
           </div>
           <div class="row" style="margin-top:.45rem">
             <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
             <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
             <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
           </div>
-          <p class="hint">Tick <b>₹</b>, type that book’s money in <b>amount</b> (or Wallet if only one ₹ book), then Save. That number is live capital — not the paper wallet split. Ceiling lots still caps Angel size.</p>
+          <p class="hint">Tick <b>₹</b>, type that book’s money in <b>amount</b> (or Wallet if only one ₹ book), then Save. That number is live capital — not the paper wallet split. Ceiling lots caps Angel size (hard max 1000). Leave test size at 3. Ceiling above 10: type <b>SIZE</b>, Save, RESTART — do not Arm live again.</p>
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Lots = contracts (1–ceiling). ₹ amount is the money you type for that book; Angel lots = floor(₹ / LTP), then ceiling. Do not use the paper split. Then Save, type LIVE, Arm live, RESTART.</p>
+        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Lots = contracts (1–ceiling). ₹ amount is the money you type for that book; Angel lots = floor(₹ / LTP), then ceiling. Do not use the paper split. Then Save, type LIVE, Arm live, RESTART. After you are armed, only Save + RESTART to change size.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th></th></tr>
@@ -321,7 +322,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="dl-panel" hidden>
         <h2>Downloads</h2>
-        <p class="hint">CSV / ZIP / Sheets for the laptop. Tape ticks and book signals live here (those tabs are gone). Date range is IST inclusive. Copy pastes TSV. Phone monitor ZIP is the 7-tab dashboard (LIVE / books after charges). Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live.</p>
+        <p class="hint">CSV / ZIP / Sheets for the laptop. Tape ticks and book signals live here (those tabs are gone). Date range is IST inclusive. Copy pastes TSV. Phone monitor ZIP is LIVE / ANGEL / books after charges. Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live, not raise lots.</p>
         <div class="row" style="margin-top:.45rem">
           <label class="chk">From <input type="date" id="exp-from"/></label>
           <label class="chk">To <input type="date" id="exp-to"/></label>
@@ -605,7 +606,7 @@ let liveMoneyDirty = false;
 function markLiveMoneyDirty(ev) {
   const t = ev.target;
   if (!t) return;
-  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word") {
+  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word" || t.id === "size-word") {
     liveMoneyDirty = true;
     return;
   }
@@ -664,7 +665,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v31";
+    if (clock) clock.textContent = "IST " + ist + " · v32";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1822,7 +1823,7 @@ function renderDesk(d) {
       const sb = budgets[name] || {};
       const waiting = !!waitingAll[name];
       const budget = liveBudgetDisplay(b, sb);
-      const liveLots = b.live_lots != null ? Math.min(10, Math.max(1, Number(b.live_lots) || 1)) : (sb.live_lots > 0 ? Math.min(10, Number(sb.live_lots)) : 1);
+      const liveLots = b.live_lots != null ? Math.min(1000, Math.max(1, Number(b.live_lots) || 1)) : (sb.live_lots > 0 ? Math.min(1000, Number(sb.live_lots)) : 1);
       const wr = b.win_rate_after_charges;
       const closed = b.closed;
       const pos = posBy[name] || {};
@@ -1836,7 +1837,7 @@ function renderDesk(d) {
         <td class="num">${wr == null || wr === "" ? "—" : pct(wr)}</td>
         <td class="num">${closed == null || closed === "" ? "—" : esc(closed)}</td>
         <td><input type="checkbox" data-size="lots" data-book="${esc(name)}" ${lotsOn ? "checked" : ""}/></td>
-        <td class="num"><input class="cap" type="number" data-lots="${esc(name)}" min="1" max="10" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
+        <td class="num"><input class="cap" type="number" data-lots="${esc(name)}" min="1" max="1000" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
         <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
         <td class="num"><input class="cap" type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
@@ -2132,6 +2133,7 @@ function collectArmBody(mode) {
   const body = {
     mode: mode,
     confirm: ($("live-word").value || "").trim(),
+    size_confirm: ($("size-word") && $("size-word").value || "").trim(),
     live_max_lots: Number($("live-max").value || 1),
     in_bot,
     live,

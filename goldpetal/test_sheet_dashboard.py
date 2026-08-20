@@ -84,6 +84,7 @@ def test_live_dashboard_is_honest() -> None:
         live_rows = build_live_rows(db_path=db)
         live = {r["field"]: r["value"] for r in live_rows}
         assert "GOLDPETAL" in live["title"]
+        assert "PAPER DASHBOARD" not in live["title"]
         assert live["ltp"]
         assert "none" in live["ai_decision"].lower()
         assert "ENABLE_FLOW_BRAIN=false" in live["small_medium_large_move"]
@@ -109,6 +110,13 @@ def test_live_dashboard_is_honest() -> None:
         assert "micro_live" in names
         micro = next(r for r in cmds if r["command"] == "micro_live")
         assert micro["allowed"] == "NO"
+        from sheet_dashboard import build_angel_rows, desk_mode_label
+
+        assert desk_mode_label({"would_place_real_orders": True}) == "LIVE ARMED"
+        assert desk_mode_label({"dry_run": True}) == "PAPER"
+        angel = {r["field"]: r["value"] for r in build_angel_rows(db_path=db)}
+        assert "live_open" in angel
+        assert angel["hard_cap"] == "1000"
 
 
 if __name__ == "__main__":

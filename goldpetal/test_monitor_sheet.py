@@ -79,6 +79,7 @@ def test_write_monitor_pack() -> None:
             names = set(zf.namelist())
         for name in (
             "LIVE.csv",
+            "ANGEL.csv",
             "MARKET.csv",
             "STRATEGIES.csv",
             "SIGNALS.csv",
@@ -106,6 +107,7 @@ def test_write_monitor_pack() -> None:
         assert flow["in_bot"] == "NO"
         how = "\n".join(r["step"] for r in how_to_rows())
         assert "LIVE" in how
+        assert "ANGEL" in how
         assert "Unlock live" in how
         assert "GOOGLE_MONITOR_SHEET_ID" in how
         assert "micro_live" in how
@@ -120,6 +122,7 @@ def test_zip_bytes() -> None:
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             names = zf.namelist()
             assert "LIVE.csv" in names
+            assert "ANGEL.csv" in names
             assert "STRATEGIES.csv" in names
             assert "COMMANDS.csv" in names
 

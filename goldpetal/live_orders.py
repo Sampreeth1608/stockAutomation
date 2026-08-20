@@ -27,6 +27,7 @@ from control_state import CONTROL_DIR, ensure_control_dir, is_live_mode_allowed,
 IST = ZoneInfo("Asia/Kolkata")
 ORDERS_PATH = CONTROL_DIR / "live_orders.jsonl"
 _lock = threading.Lock()
+HARD_LIVE_MAX_LOTS = 1000
 
 Action = Literal["BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"]
 
@@ -61,18 +62,21 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _live_max_cap() -> int:
+    return max(1, min(HARD_LIVE_MAX_LOTS, _env_int("LIVE_MAX_LOTS", 1)))
+
+
 def live_lots() -> int:
-    lots = max(1, _env_int("LIVE_LOTS", 1))
-    cap = max(1, _env_int("LIVE_MAX_LOTS", 1))
-    return min(lots, cap)
+    lots = max(1, min(HARD_LIVE_MAX_LOTS, _env_int("LIVE_LOTS", 1)))
+    return min(lots, _live_max_cap())
 
 
 def live_lots_for(strategy: str) -> int:
     """Per-strategy Angel size. Lots tick = live_lots; ₹ tick = floor(budget / LTP).
 
-    Hard-capped by LIVE_MAX_LOTS. Paper 100 lots is never Angel size.
+    Hard-capped by LIVE_MAX_LOTS then 1000. Paper 100 lots is never Angel size.
     """
-    cap = max(1, _env_int("LIVE_MAX_LOTS", 1))
+    cap = _live_max_cap()
     default = live_lots()
     try:
         from capital import live_qty_for

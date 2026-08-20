@@ -1,8 +1,8 @@
 """Live-money readiness for the control panel (gates, size, .env writes).
 
 Paper 100 lots is not live size: tick Lots (contracts) or tick ₹ (budget / LTP).
-Both are capped by LIVE_MAX_LOTS (1–10).
-DRY_RUN=false from this panel requires typing LIVE. LIVE_MAX_LOTS is capped at 10.
+Both are capped by LIVE_MAX_LOTS (hard max 1000). Ceiling above 10 needs SIZE.
+DRY_RUN=false from this panel requires typing LIVE.
 Save writes .env only; Restart supervise loads it into the bot.
 """
 
@@ -21,12 +21,14 @@ from control_state import (
     set_live_unlocked,
 )
 from operator_desk import OPERATOR_PANEL, OPERATOR_URL
-from live_orders import live_lots, live_lots_for
+from live_orders import HARD_LIVE_MAX_LOTS, live_lots, live_lots_for
 from position_safety import read_bot_health
 
 IST = ZoneInfo("Asia/Kolkata")
-PANEL_LIVE_MAX_LOTS = 10
+PANEL_LIVE_MAX_LOTS = HARD_LIVE_MAX_LOTS
+SAFE_LIVE_MAX_LOTS = 10
 LIVE_CONFIRM_WORD = "LIVE"
+SIZE_CONFIRM_WORD = "SIZE"
 RESTART_CONFIRM_WORD = "RESTART"
 
 # S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
@@ -136,10 +138,11 @@ def apply_panel_live_env(
     dry_run: bool,
     live_max_lots: int,
     confirm: str = "",
+    size_confirm: str = "",
     path: Path | None = None,
     sync_environ: bool = True,
 ) -> dict[str, Any]:
-    """Write DRY_RUN + LIVE_MAX_LOTS. DRY_RUN=false requires confirm==LIVE. Lots 1–10."""
+    """Write DRY_RUN + LIVE_MAX_LOTS. DRY_RUN=false requires LIVE. Ceiling >10 needs SIZE."""
     try:
         lots = int(live_max_lots)
     except (TypeError, ValueError):
@@ -150,6 +153,14 @@ def apply_panel_live_env(
             "error": (
                 f"LIVE_MAX_LOTS from this panel must be 1–{PANEL_LIVE_MAX_LOTS} "
                 f"(got {lots}). Paper 100 is not live size."
+            ),
+        }
+    if lots > SAFE_LIVE_MAX_LOTS and str(size_confirm).strip() != SIZE_CONFIRM_WORD:
+        return {
+            "ok": False,
+            "error": (
+                f"Type SIZE to set ceiling above {SAFE_LIVE_MAX_LOTS} "
+                f"(got {lots}). Test size can stay 3. Then Save + RESTART — do not Arm live again."
             ),
         }
     if not dry_run and str(confirm).strip() != LIVE_CONFIRM_WORD:
@@ -256,6 +267,7 @@ def apply_desk_arm(
     daily_loss_limit_inr: float | None = None,
     allocations: list[dict[str, Any]] | None = None,
     live_size_mode: str | None = None,
+    size_confirm: str = "",
     path: Path | None = None,
     state_path: Path | None = None,
     capital_path: Path | None = None,
@@ -323,6 +335,7 @@ def apply_desk_arm(
         dry_run=dry,
         live_max_lots=live_max_lots,
         confirm=confirm,
+        size_confirm=size_confirm,
         path=path,
         sync_environ=path is None,
     )
@@ -473,6 +486,8 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
     return {
         "dry_run": dry,
         "live_max_lots": env["live_max_lots"],
+        "panel_live_max_lots": PANEL_LIVE_MAX_LOTS,
+        "safe_live_max_lots": SAFE_LIVE_MAX_LOTS,
         "enables": enables,
         "books": books,
         "live_wr_min_pct": LIVE_WR_MIN_PCT,
@@ -537,8 +552,9 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "ok": True,
             "label": f"LIVE_MAX_LOTS={cap} (hard ceiling)",
             "detail": (
-                "Start live at 1. Paper 100 lots on S12/S14/S15 is NOT live size. "
-                f"Live qty = min(strategy max_lots, {cap})."
+                "Start live at 1–3. Paper 100 lots is NOT live size. "
+                f"Live qty = min(book qty, {cap}). Hard cap {PANEL_LIVE_MAX_LOTS}. "
+                f"Ceiling above {SAFE_LIVE_MAX_LOTS} needs SIZE on the desk."
             ),
         },
         {
@@ -610,6 +626,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
             "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16 at LIVE_MAX_LOTS=1. "
-            "S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (panel cap 10), not paper 100."
+            "S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (hard cap "
+            f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS}), not paper 100."
         ),
     }

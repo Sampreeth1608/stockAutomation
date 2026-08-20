@@ -132,7 +132,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <div class="row" style="margin-top:.7rem">
       <label class="chk"><input type="checkbox" id="paper-only" checked/> Paper only (DRY_RUN)</label>
       <label class="chk">LIVE_MAX_LOTS
-        <input type="number" id="live-max" min="1" max="10" step="1" value="1"/>
+        <input type="number" id="live-max" min="1" max="1000" step="1" value="1"/>
       </label>
       <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
       <button class="btn" id="btn-save-money" type="button">Save money</button>
@@ -146,7 +146,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
       <button class="btn" id="btn-save-cap" type="button">Save capital</button>
     </div>
-    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–10.</p>
+    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–1000 (SIZE if above 10).</p>
     <p class="flash" id="flash-money"></p>
   </section>
 
