@@ -17,7 +17,7 @@ import json
 import os
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -84,6 +84,197 @@ def live_lots_for(strategy: str) -> int:
         return live_qty_for(strategy, cap=cap, default=default)
     except Exception:
         return min(default, cap)
+
+
+FILL_MATCH_SEC = 180.0
+FILL_LOOKBACK_SEC = 4 * 3600.0
+FILL_EXIT_SLACK_SEC = 120.0
+
+
+def _qty_int(raw: Any) -> int:
+    try:
+        n = int(float(raw))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(HARD_LIVE_MAX_LOTS, n))
+
+
+def _when_ist(raw: str) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
+def order_was_placed(row: dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if row.get("skipped") or row.get("dry_run"):
+        return False
+    if row.get("placed") is True:
+        return True
+    if row.get("ok") and (row.get("order_id") or str(row.get("reason") or "") == "placed"):
+        return True
+    return False
+
+
+def iter_placed_orders(*, path: Path | None = None) -> list[dict[str, Any]]:
+    """Angel fills from live_orders.jsonl. Quantity is the lots that went out, not today's arm."""
+    dest = path or ORDERS_PATH
+    if not dest.is_file():
+        return []
+    try:
+        lines = dest.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not order_was_placed(row):
+            continue
+        qty = _qty_int(row.get("quantity"))
+        if qty <= 0:
+            continue
+        name = str(row.get("strategy") or "").strip()
+        if not name:
+            continue
+        tx = str(row.get("transaction") or row.get("side") or "").strip().upper()
+        if tx in {"SHORT", "SELL"}:
+            tx = "SELL"
+        elif tx == "BUY":
+            tx = "BUY"
+        else:
+            continue
+        out.append(
+            {
+                "strategy": name,
+                "transaction": tx,
+                "quantity": qty,
+                "ts": _when_ist(str(row.get("ts_ist") or row.get("ts") or "")),
+            }
+        )
+    return out
+
+
+def _qty_near(
+    rows: list[tuple[datetime, int]],
+    anchor: datetime | None,
+    *,
+    window_sec: float,
+) -> int | None:
+    if not rows:
+        return None
+    if anchor is None:
+        return rows[-1][1]
+    window = float(window_sec)
+    in_win = [
+        (ts, qty)
+        for ts, qty in rows
+        if abs((ts - anchor).total_seconds()) <= window
+    ]
+    pool = in_win or rows
+    _ts, qty = min(pool, key=lambda item: abs((item[0] - anchor).total_seconds()))
+    return qty
+
+
+def lots_on_fill(
+    strategy: str,
+    entry_ts: str,
+    side: str,
+    *,
+    exit_ts: str = "",
+    orders: list[dict[str, Any]] | None = None,
+    path: Path | None = None,
+    window_sec: float = FILL_MATCH_SEC,
+    lookback_sec: float = FILL_LOOKBACK_SEC,
+) -> int | None:
+    """Lots on the Angel entry/close for this round-trip — not today's Live Lots arm.
+
+    None if that fill is not in the log. When both entry and close fills exist,
+    the smaller qty wins so a later 25-lot arm cannot rewrite a 3-lot close.
+    """
+    name = str(strategy or "").strip()
+    want = "BUY" if str(side or "").upper() in {"BUY", "LONG"} else "SELL"
+    exit_want = "SELL" if want == "BUY" else "BUY"
+    pool = orders if orders is not None else iter_placed_orders(path=path)
+    entry = _when_ist(entry_ts)
+    leave = _when_ist(exit_ts) if exit_ts else None
+    lookback = timedelta(seconds=float(lookback_sec))
+    slack = timedelta(seconds=FILL_EXIT_SLACK_SEC)
+    lo = (entry - lookback) if entry is not None else None
+    hi = (leave + slack) if leave is not None else (
+        (entry + lookback) if entry is not None else None
+    )
+
+    def _rows(tx: str, *, lo_ts: datetime | None, hi_ts: datetime | None) -> list[tuple[datetime, int]]:
+        out: list[tuple[datetime, int]] = []
+        untimed: list[int] = []
+        for row in pool:
+            if str(row.get("strategy") or "") != name:
+                continue
+            if str(row.get("transaction") or "") != tx:
+                continue
+            qty = int(row.get("quantity") or 0)
+            if qty <= 0:
+                continue
+            ts = row.get("ts")
+            if not isinstance(ts, datetime):
+                untimed.append(qty)
+                continue
+            if lo_ts is not None and ts < lo_ts:
+                continue
+            if hi_ts is not None and ts > hi_ts:
+                continue
+            out.append((ts, qty))
+        if out:
+            return out
+        if untimed and len(set(untimed)) == 1:
+            stamp = entry or leave or datetime.now(IST)
+            return [(stamp, untimed[0])]
+        return []
+
+    entry_qty = _qty_near(
+        _rows(want, lo_ts=lo, hi_ts=hi),
+        entry,
+        window_sec=window_sec,
+    )
+    exit_qty: int | None = None
+    if leave is not None or str(exit_ts or "").strip():
+        exit_lo = entry if entry is not None else lo
+        exit_qty = _qty_near(
+            _rows(exit_want, lo_ts=exit_lo, hi_ts=hi),
+            leave or entry,
+            window_sec=max(float(window_sec), FILL_EXIT_SLACK_SEC),
+        )
+    if entry_qty and exit_qty:
+        return min(entry_qty, exit_qty)
+    return entry_qty or exit_qty
+
+
+def lots_on_fill_for_trade(
+    info: dict[str, Any],
+    *,
+    orders: list[dict[str, Any]] | None = None,
+    path: Path | None = None,
+) -> float | None:
+    got = lots_on_fill(
+        str(info.get("strategy") or ""),
+        str(info.get("entry_ts") or ""),
+        str(info.get("side") or ""),
+        exit_ts=str(info.get("exit_ts") or ""),
+        orders=orders,
+        path=path,
+    )
+    return float(got) if got else None
 
 
 def mirror_positions_from_signals(

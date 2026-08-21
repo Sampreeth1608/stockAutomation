@@ -26,11 +26,11 @@ print_open_on_mac() {
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
   echo
-  echo "  2) Replace the Desktop file with v47 (~ window says Gold Petal v47):"
+  echo "  2) Replace the Desktop file with v48 (~ window says Gold Petal v48):"
   echo "     gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/GoldPetal.command' > ~/Desktop/GoldPetal.command"
   echo "     chmod +x ~/Desktop/GoldPetal.command"
   echo "     open ~/Desktop/GoldPetal.command"
-  echo "  Do not put chmod on the gcloud line. The window must say Gold Petal v47, not v46."
+  echo "  Do not put chmod on the gcloud line. The window must say Gold Petal v48, not v47."
   echo
   echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
   echo "  Do not open port 22 or 8501 to the internet."

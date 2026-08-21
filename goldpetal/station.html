@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v47: light desk — mood/AMISE on demand, not every poll -->
+<!-- gp-header-v48: live closed P&amp;L uses Angel fill lots, not today's arm -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v47</div>
+      <div class="clock" id="clock">IST — · v48</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -227,7 +227,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="blotter-extra" hidden>
         <h2>Live closed trades</h2>
-        <p class="hint">Angel-sized closed round-trips after charges (tax excluded), separate from paper closed above. ML reads these to improve. Paper 100-lot closes stay in the table above. Open live contracts stay on the Live tab.</p>
+        <p class="hint">Angel-sized closed round-trips after charges (tax excluded), separate from paper closed above. Lots and AC ₹ are the fill that closed — not today's Live Lots. ML reads these to improve. Paper 100-lot closes stay in the table above. Open live contracts stay on the Live tab.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th>In</th><th>Out</th><th class="num">Lots</th><th class="num">AC ₹</th><th>Why</th></tr>
@@ -237,7 +237,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="live-panel" hidden>
         <h2>Real Angel P&amp;L</h2>
-        <p class="hint" id="live-pnl-note">After you Arm live, this is the live-lot after-charges ₹ (tax excluded). Paper Positions / Blotter / Paper P&amp;L stay the 100-lot paper tape — a paper fill is not an Angel order. Angel app is the fill confirmation.</p>
+        <p class="hint" id="live-pnl-note">After you Arm live, this is after-charges ₹ on the lots that actually filled (tax excluded). Raising Live Lots does not rewrite yesterday's closes. Paper Positions / Blotter / Paper P&amp;L stay the 100-lot paper tape — a paper fill is not an Angel order. Angel app is the fill confirmation.</p>
         <div class="kpis">
           <div class="kpi"><b>Live open</b><span id="live-kpi-open">0</span></div>
           <div class="kpi"><b>Live closed</b><span id="live-kpi-closed">0</span></div>
@@ -246,7 +246,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <p class="hint">All live money is <b>Live AC ₹</b>. Each strategy is <b>Live P&amp;L by book</b>. Paper P&amp;L tab is 100 lots, not Angel.</p>
         <h2 style="margin-top:.85rem">Live P&amp;L by book</h2>
-        <p class="hint">Angel size after charges (tax excluded). Zeros until that book gets an Angel fill. WR% on the Live books table above is paper, not this.</p>
+        <p class="hint">Angel size after charges (tax excluded). Each closed row uses that fill's lots. Zeros until that book gets an Angel fill. WR% on the Live books table above is paper, not this.</p>
         <table>
           <thead>
             <tr><th>Book</th><th class="num">Open</th><th class="num">Closed</th><th class="num">WR% AC</th><th class="num">AC ₹</th></tr>
@@ -709,7 +709,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v47";
+    if (clock) clock.textContent = "IST " + ist + " · v48";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}

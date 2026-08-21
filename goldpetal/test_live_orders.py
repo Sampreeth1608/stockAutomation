@@ -307,6 +307,76 @@ def test_mirror_positions_skips_paper_when_live_only() -> None:
     assert live == {"S5_MINEDGE": "flat"}
 
 
+def test_lots_on_fill_uses_traded_qty_not_later_arm() -> None:
+    from live_orders import lots_on_fill
+
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "live_orders.jsonl"
+        rows = [
+            {
+                "ok": False,
+                "dry_run": False,
+                "skipped": True,
+                "reason": "dry_run_or_paper",
+                "quantity": 25,
+                "strategy": "S16_HHHL_WICK_1H",
+                "transaction": "BUY",
+                "ts_ist": "2026-08-20T14:00:00+05:30",
+            },
+            {
+                "ok": True,
+                "dry_run": False,
+                "skipped": False,
+                "reason": "placed",
+                "order_id": "1",
+                "quantity": 3,
+                "strategy": "S16_HHHL_WICK_1H",
+                "transaction": "BUY",
+                "ts_ist": "2026-08-20T14:00:02+05:30",
+            },
+            {
+                "ok": True,
+                "dry_run": False,
+                "skipped": False,
+                "reason": "placed",
+                "order_id": "2",
+                "quantity": 25,
+                "strategy": "S16_HHHL_WICK_1H",
+                "transaction": "SELL",
+                "ts_ist": "2026-08-20T15:00:03+05:30",
+            },
+            {
+                "ok": True,
+                "dry_run": False,
+                "skipped": False,
+                "reason": "placed",
+                "order_id": "3",
+                "quantity": 25,
+                "strategy": "S16_HHHL_WICK_1H",
+                "transaction": "BUY",
+                "ts_ist": "2026-08-21T10:00:00+05:30",
+            },
+        ]
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        got = lots_on_fill(
+            "S16_HHHL_WICK_1H",
+            "2026-08-20T14:00:00+05:30",
+            "BUY",
+            exit_ts="2026-08-20T15:00:00+05:30",
+            path=path,
+        )
+        assert got == 3
+        later = lots_on_fill(
+            "S16_HHHL_WICK_1H",
+            "2026-08-21T10:00:00+05:30",
+            "BUY",
+            path=path,
+        )
+        assert later == 25
+        missing = lots_on_fill("S5_MINEDGE", "2026-08-20T14:00:00+05:30", "BUY", path=path)
+        assert missing is None
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -332,4 +402,6 @@ if __name__ == "__main__":
     print("ok broker_from_session")
     test_mirror_positions_skips_paper_when_live_only()
     print("ok mirror_skips_paper")
+    test_lots_on_fill_uses_traded_qty_not_later_arm()
+    print("ok lots_on_fill")
     print("ALL test_live_orders OK")

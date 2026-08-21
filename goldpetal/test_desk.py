@@ -84,8 +84,10 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v47" in html
-    assert " · v47" in html
+    assert "gp-header-v48" in html
+    assert " · v48" in html
+    assert "not today's Live Lots" in html
+    assert "Raising Live Lots does not rewrite" in html
     assert "waiting for desk" in html
     assert "Gold Petal hours" in html
     assert "waiting for desk…" in html
@@ -445,7 +447,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v47" in cmd
+    assert "Gold Petal v48" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

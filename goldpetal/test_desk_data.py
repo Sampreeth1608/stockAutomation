@@ -281,20 +281,129 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
             cmp=15025.0,
             db_path=db,
         )
-        with patch("desk_data.live_lots_for", return_value=1):
+        with patch("desk_data.live_lots_for", return_value=25):
             pnl = live_pnl_payload(db_path=db)
         names = {t["strategy"] for t in pnl["trades"]}
         assert names == {"S5_MINEDGE"}
         assert int(pnl["summary"]["closed"]) == 1
         closed = pnl["trades"][0]
+        # No Angel fill log → 1-lot fallback, never today's 25-lot arm.
         assert float(closed.get("gross_pnl") or 0) == 15.0
         assert float(closed.get("lots") or 0) == 1.0
+        assert float(closed.get("gross_pnl") or 0) != 375.0
         assert closed.get("tape") == "live"
         hist = history_payload(db_path=db, limit=80)
         paper = [t for t in hist["trades"] if t.get("strategy") == "S16_HHHL_WICK_1H"]
         assert paper
         assert float(paper[0].get("gross_pnl") or 0) == 1500.0
         assert all(t.get("tape") != "live" for t in hist["trades"])
+
+
+def test_live_pnl_closed_uses_fill_lots_not_armed_size() -> None:
+    """S16 closed at 3 lots stays 3 after Live Lots is armed to 25."""
+    import live_orders
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        orders = Path(td) / "live_orders.jsonl"
+        init_db(db)
+        _tick(db, day="2026-08-20")
+        save_signal(
+            time_label="2026-08-20T14:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="BUY",
+            position_after="long",
+            reason="s16_live_in",
+            price_delta=1.0,
+            net=20.0,
+            net_delta=2.0,
+            dry_run=False,
+            strategy="S16_HHHL_WICK_1H",
+            cmp=15010.0,
+            db_path=db,
+        )
+        save_signal(
+            time_label="2026-08-20T15:00:00+05:30",
+            symbol="GOLDPETAL",
+            action="CLOSE",
+            position_after="flat",
+            reason="s16_live_out",
+            price_delta=1.0,
+            net=10.0,
+            net_delta=-2.0,
+            dry_run=False,
+            strategy="S16_HHHL_WICK_1H",
+            cmp=15025.0,
+            db_path=db,
+        )
+        orders.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "dry_run": False,
+                            "skipped": False,
+                            "reason": "placed",
+                            "order_id": "1001",
+                            "transaction": "BUY",
+                            "quantity": 3,
+                            "strategy": "S16_HHHL_WICK_1H",
+                            "ts_ist": "2026-08-20T14:00:02+05:30",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "dry_run": False,
+                            "skipped": False,
+                            "reason": "placed",
+                            "order_id": "1002",
+                            "transaction": "SELL",
+                            "quantity": 3,
+                            "strategy": "S16_HHHL_WICK_1H",
+                            "ts_ist": "2026-08-20T15:00:03+05:30",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "dry_run": False,
+                            "skipped": False,
+                            "reason": "placed",
+                            "order_id": "1003",
+                            "transaction": "BUY",
+                            "quantity": 25,
+                            "strategy": "S16_HHHL_WICK_1H",
+                            "ts_ist": "2026-08-21T10:00:00+05:30",
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        st = ControlState(live_approved=["S16_HHHL_WICK_1H"])
+        with (
+            patch.object(live_orders, "ORDERS_PATH", orders),
+            patch("desk_data.live_lots_for", return_value=25),
+            patch("control_state.load_state", return_value=st),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        closed = [t for t in pnl["closed"] if t.get("strategy") == "S16_HHHL_WICK_1H"]
+        assert len(closed) == 1
+        assert float(closed[0].get("lots") or 0) == 3.0
+        assert float(closed[0].get("gross_pnl") or 0) == 45.0
+        assert float(closed[0].get("gross_pnl") or 0) != 375.0
+        assert int(pnl["lots"]) == 3
+        assert int(pnl["summary"]["closed"]) == 1
+        note = str(pnl.get("note") or "")
+        assert "fill" in note.lower() or "Live Lots" in note
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S16_HHHL_WICK_1H"]["status"] == "FLAT"
+        assert int(by_name["S16_HHHL_WICK_1H"].get("lots") or 0) == 25
 
 
 def test_live_pnl_positions_one_row_per_open_book() -> None:
@@ -417,6 +526,7 @@ if __name__ == "__main__":
     test_history_payload_has_closed_trade_and_ticks()
     test_list_signals_limit_keeps_latest()
     test_live_pnl_excludes_paper_and_scales_live_lots()
+    test_live_pnl_closed_uses_fill_lots_not_armed_size()
     test_live_pnl_positions_one_row_per_open_book()
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
     test_latest_signals_live_only_skips_paper()

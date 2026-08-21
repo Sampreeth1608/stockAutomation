@@ -13,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
-from live_orders import live_lots_for, recent_orders
+from live_orders import live_lots_for, lots_on_fill_for_trade, recent_orders
 from paper_report import summarize_trades
 from storage import build_trades, latest_signals, latest_ticks, set_db_path
 import storage as _storage
@@ -393,25 +393,40 @@ def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]
     return rows
 
 
+def _live_fill_lot_size(info: dict[str, Any], *, orders: list[dict[str, Any]]) -> float | None:
+    return lots_on_fill_for_trade(info, orders=orders)
+
+
 def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     books = sorted(set(eligible) | set(_LIVE_PNL_BOOKS_EXTRA))
     rows: list[dict[str, Any]] = []
-    lot_used = 1
+    from live_orders import iter_placed_orders
+
+    fills = iter_placed_orders()
     try:
         for name in books:
-            lots = max(1, int(live_lots_for(name)))
-            lot_used = max(lot_used, lots)
             rows.extend(
                 build_trades(
                     strategy=name,
                     db_path=db,
                     signal_limit=_SIGNAL_WINDOW,
-                    lot_size=float(lots),
+                    lot_size=1.0,
                     live_only=True,
+                    lot_size_for=lambda info, _orders=fills: _live_fill_lot_size(
+                        info, orders=_orders
+                    ),
                 )
             )
     except Exception:
         rows = []
+    lot_used = 1
+    for trade in rows:
+        try:
+            n = int(float(trade.get("lots") or 1))
+        except (TypeError, ValueError):
+            n = 1
+        if n > lot_used:
+            lot_used = n
     open_t = [t for t in rows if t.get("status") == "OPEN"]
     closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
     closed_rev = list(reversed(closed))
@@ -463,8 +478,9 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
         )
     else:
         out["note"] = (
-            f"Live lot size (ceiling {lot_used}). After Angel charges, tax excluded. "
-            "Angel app is the fill confirmation. Top KPIs / Blotter / P&L stay paper 100 lots."
+            "Live AC ₹ uses lots on each Angel fill, not today's Live Lots. "
+            "A 3-lot close stays 3 lots after you arm 25. Angel app is the fill confirmation. "
+            "Top KPIs / Paper Blotter / Paper P&L stay paper 100 lots."
         )
     return out
 

@@ -431,12 +431,17 @@ class TradeLearner:
 
     def fit_from_db(self, db_path: Path | None = None) -> None:
         from charges import paper_lots
-        from live_orders import live_lots_for
+        from live_orders import iter_placed_orders, lots_on_fill_for_trade
         from storage import DB_PATH, build_trades
 
         db = db_path or DB_PATH
         refresh_learn_strategies()
         rows: list[dict[str, Any]] = []
+        fills = iter_placed_orders()
+
+        def _live_lots(info: dict[str, Any], _orders: list[dict[str, Any]] = fills) -> float | None:
+            return lots_on_fill_for_trade(info, orders=_orders)
+
         try:
             for name in LEARN_STRATEGIES:
                 paper = build_trades(
@@ -450,8 +455,9 @@ class TradeLearner:
                     strategy=name,
                     db_path=db,
                     signal_limit=1200,
-                    lot_size=float(max(1, int(live_lots_for(name)))),
+                    lot_size=1.0,
                     live_only=True,
+                    lot_size_for=_live_lots,
                 )
                 for t in live:
                     t = dict(t)
