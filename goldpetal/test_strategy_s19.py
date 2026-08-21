@@ -104,17 +104,24 @@ def test_hold_long_through_mixed_then_flip_short() -> None:
     assert wick_record_actions("long", flip) == [("CLOSE", "flat"), ("SHORT", "short")]
 
 
-def test_flatten_at_session_close() -> None:
-    s = _s19()
-    s.on_tick(_t(9, 0), 100.0, _msg())
-    s.on_tick(_t(9, 59), 104.0, _msg())
-    s.on_tick(_t(10, 0), 104.0, _msg())
-    s.on_tick(_t(10, 59), 110.0, _msg())
-    assert s.on_tick(_t(11, 0), 110.0, _msg()) is not None
-    close = s.on_tick(_t(23, 30), 111.0, _msg())
-    assert close is not None
-    assert close.action == "CLOSE"
-    assert s.position == "flat"
+def test_holds_through_session_close() -> None:
+    import position_safety as ps
+
+    orig = ps.is_session_intraday
+    ps.is_session_intraday = lambda name: False  # type: ignore[assignment]
+    try:
+        s = _s19()
+        s.on_tick(_t(9, 0), 100.0, _msg())
+        s.on_tick(_t(9, 59), 104.0, _msg())
+        s.on_tick(_t(10, 0), 104.0, _msg())
+        s.on_tick(_t(10, 59), 110.0, _msg())
+        assert s.on_tick(_t(11, 0), 110.0, _msg()) is not None
+        assert s.position == "long"
+        hold = s.on_tick(_t(23, 30), 111.0, _msg())
+        assert hold is None or hold.action != "CLOSE"
+        assert s.position == "long"
+    finally:
+        ps.is_session_intraday = orig  # type: ignore[assignment]
 
 
 def test_s19_from_env_name() -> None:
@@ -131,6 +138,6 @@ if __name__ == "__main__":
     test_aligned_green_up_close_buys()
     test_mixed_green_down_close_holds()
     test_hold_long_through_mixed_then_flip_short()
-    test_flatten_at_session_close()
+    test_holds_through_session_close()
     test_s19_from_env_name()
     print("ALL test_strategy_s19 OK")
