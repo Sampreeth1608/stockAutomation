@@ -139,7 +139,7 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S15": "false",
     "ENABLE_S16": "true",
     "ENABLE_S18": "true",
-        "ENABLE_S19": "false",
+    "ENABLE_S19": "true",
     "ENABLE_S20": "false",
     "ENABLE_S21": "false",
     "ENABLE_S22": "false",

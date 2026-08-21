@@ -20,8 +20,8 @@ does **not** reverse every mixed hour (that path is close-follow research
 only — round-trip charges eat 100-lot paper).
 
 100-lot + Angel-fees 1h backtest (GOLDPETAL Aug-26 contract, 2026-05-18→2026-08-18
-session hours) lost after charges vs S16 and vs S18. ENABLE_S19 stays false.
-Not S16/S17/S18. Not live.
+session hours) lost after charges vs S16 and vs S18. Desk lists it live-eligible —
+you Arm. Not S16/S17/S18.
 """
 
 from __future__ import annotations

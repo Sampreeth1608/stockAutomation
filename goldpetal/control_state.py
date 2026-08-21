@@ -266,16 +266,17 @@ CORE_SLIM_PAPER: tuple[str, ...] = (
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
+    "S19_BODY_CLOSE_1H",
     "OVERNIGHT_GAP",
 )
 ALL_STRATEGY_NAMES: tuple[str, ...] = CORE_STRATEGY_NAMES + AMISE_SLOT_BOOKS
 # AMISE names stay in this constant for research tests. The live desk list
-# is paper_strategy_names() — S5/S8/S13/S16/S18/overnight gap only.
+# is paper_strategy_names() — S5/S8/S13/S16/S18/S19/overnight gap.
 SLIM_PAPER_STRATEGIES: tuple[str, ...] = CORE_SLIM_PAPER + AMISE_SLOT_BOOKS
 
 
 def paper_strategy_names() -> tuple[str, ...]:
-    """Live desk books. No paper-only S19/S20, no AMISE slots."""
+    """Live desk books. S20 and AMISE stay off this list."""
     return CORE_SLIM_PAPER
 
 

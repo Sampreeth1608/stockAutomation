@@ -1,9 +1,9 @@
-"""S19_BODY_CLOSE_1H — paper 1h aligned green/red + close vs prev.
+"""S19_BODY_CLOSE_1H — 1h aligned green/red + close vs prev.
 
 LONG when the finished hour is green and closed up vs the previous same-session
 hour. SHORT when red and closed down. Mixed / doji / equal → hold.
 FLIP at that close. Delivery — holds overnight. Only S16 flattens at
-MARKET_CLOSE. Not live. Paper 100 lots ≠ live.
+MARKET_CLOSE. Live-eligible — you Arm.
 """
 
 from __future__ import annotations

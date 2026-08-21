@@ -58,7 +58,7 @@ def test_readiness_paper_by_default() -> None:
     names = [b["strategy"] for b in r["books"]]
     assert "S16_HHHL_WICK_1H" in names
     assert "S18_OHLC_VOL_HTF" in names
-    assert "S19_BODY_CLOSE_1H" not in names
+    assert "S19_BODY_CLOSE_1H" in names
     assert "S20_FADE_HL" not in names
     assert "OVERNIGHT_GAP" in names
     assert "S14_WICK30_STRICT" not in names
@@ -70,12 +70,14 @@ def test_readiness_paper_by_default() -> None:
     assert s16["intraday"] is True
     s18 = next(b for b in r["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     assert s18["intraday"] is False
+    s19 = next(b for b in r["books"] if b["strategy"] == "S19_BODY_CLOSE_1H")
+    assert s19["intraday"] is False
     gap = next(b for b in r["books"] if b["strategy"] == "OVERNIGHT_GAP")
     assert gap["intraday"] is False
     assert "enables" in r
     assert "S16_HHHL_WICK_1H" in r["enables"]
     assert "S18_OHLC_VOL_HTF" in r["enables"]
-    assert "S19_BODY_CLOSE_1H" not in r["enables"]
+    assert "S19_BODY_CLOSE_1H" in r["enables"]
     assert "S20_FADE_HL" not in r["enables"]
     assert "OVERNIGHT_GAP" in r["enables"]
 
@@ -295,7 +297,7 @@ def test_apply_desk_books_s18_live_eligible_without_40() -> None:
         td.cleanup()
 
 
-def test_apply_desk_books_s19_stays_off() -> None:
+def test_apply_desk_books_s19_live_eligible_without_40() -> None:
     td = tempfile.TemporaryDirectory()
     try:
         env = Path(td.name) / ".env"
@@ -311,13 +313,15 @@ def test_apply_desk_books_s19_stays_off() -> None:
             ["S13_HHHL_DAY", "S19_BODY_CLOSE_1H"],
             path=env,
             state_path=state,
+            qualified=[],
         )
         assert res["ok"] is True
-        assert "S19_BODY_CLOSE_1H" not in res["enabled"]
-        assert "S19_BODY_CLOSE_1H" not in res["live_approved"]
+        assert "S19_BODY_CLOSE_1H" in res["enabled"]
+        assert "S19_BODY_CLOSE_1H" in res["live_approved"]
         assert "S13_HHHL_DAY" in res["live_approved"]
+        assert "S19_BODY_CLOSE_1H" not in res["skipped_live_not_in_bot"]
         text = env.read_text(encoding="utf-8")
-        assert "ENABLE_S19=false" in text
+        assert "ENABLE_S19=true" in text
         assert "DRY_RUN=true" in text
         assert "SECRET=keep" in text
     finally:
@@ -437,17 +441,19 @@ def test_desk_snapshot_skips_checklist() -> None:
     assert "steps" not in snap
     assert "S16_HHHL_WICK_1H" in snap["enables"]
     assert "S18_OHLC_VOL_HTF" in snap["enables"]
-    assert "S19_BODY_CLOSE_1H" not in snap["enables"]
+    assert "S19_BODY_CLOSE_1H" in snap["enables"]
     assert "S20_FADE_HL" not in snap["enables"]
     assert "OVERNIGHT_GAP" in snap["enables"]
     assert any(b["strategy"] == "S16_HHHL_WICK_1H" for b in snap["books"])
     assert any(b["strategy"] == "S18_OHLC_VOL_HTF" for b in snap["books"])
-    assert not any(b["strategy"] == "S19_BODY_CLOSE_1H" for b in snap["books"])
+    assert any(b["strategy"] == "S19_BODY_CLOSE_1H" for b in snap["books"])
     assert not any(b["strategy"] == "S20_FADE_HL" for b in snap["books"])
     gap = next(b for b in snap["books"] if b["strategy"] == "OVERNIGHT_GAP")
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
+    s19 = next(b for b in snap["books"] if b["strategy"] == "S19_BODY_CLOSE_1H")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
     assert s18["live_eligible"] is True
+    assert s19["live_eligible"] is True
     assert s16["live_eligible"] is True
     assert gap["live_eligible"] is True
     assert "S4_OVERNIGHT" not in snap["enables"]
@@ -517,6 +523,31 @@ def test_apply_desk_books_s18_live_when_wr_40() -> None:
         )
         assert res["ok"] is True
         assert "S18_OHLC_VOL_HTF" in res["live_approved"]
+        assert "S13_HHHL_DAY" in res["live_approved"]
+    finally:
+        td.cleanup()
+
+
+def test_apply_desk_books_s19_live_when_wr_40() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S13=true\nENABLE_S19=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S13_HHHL_DAY", "S19_BODY_CLOSE_1H"],
+            ["S13_HHHL_DAY", "S19_BODY_CLOSE_1H"],
+            path=env,
+            state_path=state,
+            qualified=["S19_BODY_CLOSE_1H"],
+        )
+        assert res["ok"] is True
+        assert "S19_BODY_CLOSE_1H" in res["live_approved"]
         assert "S13_HHHL_DAY" in res["live_approved"]
     finally:
         td.cleanup()
@@ -819,8 +850,8 @@ if __name__ == "__main__":
     print("ok desk books")
     test_apply_desk_books_s18_live_eligible_without_40()
     print("ok s18 live eligible")
-    test_apply_desk_books_s19_stays_off()
-    print("ok s19 off")
+    test_apply_desk_books_s19_live_eligible_without_40()
+    print("ok s19 live eligible")
     test_apply_desk_books_s20_stays_off()
     print("ok s20 off")
     test_apply_desk_books_overnight_gap_live_eligible_without_40()
@@ -837,6 +868,8 @@ if __name__ == "__main__":
     print("ok snapshot 40pct")
     test_apply_desk_books_s18_live_when_wr_40()
     print("ok s18 live at 40")
+    test_apply_desk_books_s19_live_when_wr_40()
+    print("ok s19 live at 40")
     test_apply_desk_arm_rejects_live_without_word()
     print("ok arm needs LIVE")
     test_apply_desk_arm_paper_locks()

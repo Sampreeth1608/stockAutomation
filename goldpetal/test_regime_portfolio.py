@@ -84,7 +84,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S16_HHHL_WICK_1H" in p.enabled
     assert p.allows("S16_HHHL_WICK_1H", "WIDE_SPREAD")
     assert "S18_OHLC_VOL_HTF" in p.enabled
-    assert "S19_BODY_CLOSE_1H" not in p.enabled
+    assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled
     assert "OVERNIGHT_GAP" in p.enabled
     assert "FLOW_BRAIN" not in p.enabled

@@ -41,12 +41,11 @@ RESTART_CONFIRM_WORD = "RESTART"
 DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
     {
-        "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
         "FLOW_BRAIN",
     }
 )
-# Live desk books. S19/S20/FLOW stay off — no paper path. You Arm live.
+# Live desk books. S20/FLOW stay off. You Arm live.
 LIVE_ELIGIBLE_BOOKS = frozenset(
     {
         "S5_MINEDGE",
@@ -54,6 +53,7 @@ LIVE_ELIGIBLE_BOOKS = frozenset(
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
         "OVERNIGHT_GAP",
     }
 )
@@ -251,7 +251,7 @@ def apply_desk_books(
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
-    Live pick is the live desk set (S5/S8/S13/S16/S18/overnight gap).
+    Live pick is the live desk set (S5/S8/S13/S16/S18/S19/overnight gap).
     """
     from control_state import paper_strategy_names, set_intraday_books, set_live_approved
 
@@ -419,7 +419,7 @@ def apply_desk_arm(
         st = set_live_unlocked(True, path=state_path, note="desk Arm live")
         live_note = (
             "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
-            "Angel fires only on live-picked books (S5/S8/S13/S16/S18/overnight gap)."
+            "Angel fires only on live-picked books (S5/S8/S13/S16/S18/S19/overnight gap)."
         )
         if not books.get("live_approved"):
             live_note += " No live book is picked yet — check Live on those rows first."
@@ -716,8 +716,8 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "note": (
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
-            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16/overnight gap. "
-            "You Arm live. S19/S20/AMISE stay off. Size is LIVE_MAX_LOTS (hard cap "
+            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16/S18/S19/overnight gap. "
+            "You Arm live. S20/AMISE stay off. Size is LIVE_MAX_LOTS (hard cap "
             f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS})."
         ),
     }
