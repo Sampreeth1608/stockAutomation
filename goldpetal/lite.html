@@ -340,7 +340,7 @@ function render(d) {
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
     : (angelOpen
-      ? "Paper mode — leftover Angel contracts show below. Type LIVE, Arm live, RESTART, then Exit to square."
+      ? "Paper mode — leftover Angel contracts show below. Exit on an OPEN row squares leftover Angel even in Paper. Does not Arm live."
       : "Paper is already running. New Angel orders stay off until you Arm live.");
   const paperBtn = $("btn-mode-paper");
   if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;
@@ -470,8 +470,8 @@ document.addEventListener("click", (ev) => {
   if (!btn || btn.disabled) return;
   if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
-  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Paper CLOSE always. Angel CLOSE only if live-armed.")) return;
-  act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — bot CLOSEs on the next tick.");
+  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Leftover Angel squares even in Paper. Does not Arm live.")) return;
+  act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — leftover Angel squares even in Paper.");
 });
 $("btn-exit-all").onclick = () => {
   if (!window.confirm("Flatten EVERY book now?")) return;

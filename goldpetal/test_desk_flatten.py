@@ -149,6 +149,98 @@ def test_apply_already_flat_skips_record(tmp_path: Path) -> None:
     assert recorded == []
 
 
+def test_apply_flat_leftover_squares_angel(tmp_path: Path) -> None:
+    """Paper RAM flat + fill leftover must still send Angel square, not already_flat."""
+    path = tmp_path / "flatten_leftover.json"
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=IST)
+    request_flatten("S5_MINEDGE", path=path, now=now)
+    obj = SimpleNamespace(position="flat")
+    recorded: list[dict] = []
+    squared: list[tuple] = []
+
+    def record_close(**kwargs):
+        recorded.append(kwargs)
+        return {"ok": True}
+
+    def square(name, leftover):
+        squared.append((name, leftover))
+        return SimpleNamespace(
+            ok=True,
+            skipped=False,
+            dry_run=False,
+            reason="placed",
+            transaction="BUY",
+            quantity=3,
+            order_id="9003",
+            to_dict=lambda: {
+                "ok": True,
+                "skipped": False,
+                "dry_run": False,
+                "reason": "placed",
+                "transaction": "BUY",
+                "quantity": 3,
+                "order_id": "9003",
+            },
+        )
+
+    leftover = {
+        "S5_MINEDGE": {
+            "strategy": "S5_MINEDGE",
+            "side": "SHORT",
+            "status": "OPEN",
+            "lots": 3,
+            "source": "angel_fill",
+        }
+    }
+    from unittest.mock import patch
+
+    with patch("live_orders.net_open_from_fills", return_value=leftover):
+        rows = apply_pending_flattens(
+            {"S5_MINEDGE": obj},
+            record_close,
+            now=now,
+            cmp=15889.0,
+            path=path,
+            square_leftover=square,
+        )
+    assert len(rows) == 1
+    assert rows[0]["status"] == "done"
+    assert rows[0]["result"]["leftover_squared"] is True
+    assert squared[0][0] == "S5_MINEDGE"
+    assert int(squared[0][1]["lots"]) == 3
+    assert recorded == []
+
+
+def test_apply_leftover_square_error_is_not_already_flat(tmp_path: Path) -> None:
+    path = tmp_path / "flatten_leftover_fail.json"
+    now = datetime(2026, 8, 21, 12, 1, tzinfo=IST)
+    request_flatten("S5_MINEDGE", path=path, now=now)
+    from unittest.mock import patch
+
+    def square(_name, _leftover):
+        return SimpleNamespace(
+            ok=False,
+            skipped=True,
+            reason="emergency_off",
+            to_dict=lambda: {"ok": False, "skipped": True, "reason": "emergency_off"},
+        )
+
+    with patch(
+        "live_orders.net_open_from_fills",
+        return_value={"S5_MINEDGE": {"strategy": "S5_MINEDGE", "side": "SHORT", "lots": 3}},
+    ):
+        rows = apply_pending_flattens(
+            {"S5_MINEDGE": SimpleNamespace(position="flat")},
+            lambda **k: None,
+            now=now,
+            cmp=1.0,
+            path=path,
+            square_leftover=square,
+        )
+    assert rows[0]["status"] == "error"
+    assert "emergency_off" in str(rows[0].get("error") or "")
+
+
 def test_apply_missing_ram(tmp_path: Path) -> None:
     path = tmp_path / "flatten_missing.json"
     now = datetime(2026, 8, 20, 12, 0, tzinfo=IST)
@@ -192,6 +284,8 @@ if __name__ == "__main__":
     test_flatten_ram_uses_flatten_method()
     test_apply_records_close(p)
     test_apply_already_flat_skips_record(p)
+    test_apply_flat_leftover_squares_angel(p)
+    test_apply_leftover_square_error_is_not_already_flat(p)
     test_apply_missing_ram(p)
     test_stale_pending_is_error(p)
     test_known_includes_desk_books()

@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v52: drop duplicate PAPER pill; tape/desk polls do not block GOLD LTP -->
+<!-- gp-header-v53: Exit squares leftover Angel even in Paper -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v52</div>
+      <div class="clock" id="clock">IST — · v53</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -242,7 +242,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:.85rem">Live positions</h2>
-        <p class="hint">One row per live-picked book. OPEN is Angel size from the fill log (not paper 100 lots). Leftover contracts stay OPEN even if Paper Positions went FLAT. Exit flattens that book only after you Arm live. Tick <b>Intraday</b> on Live-eligible books and Save to flatten that book at MARKET_CLOSE. Unticked books are delivery and hold overnight. Overnight gap still exits at next open. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
+        <p class="hint">One row per live-picked book. OPEN is Angel size from the fill log (not paper 100 lots). Leftover contracts stay OPEN even if Paper Positions went FLAT. <b>Exit</b> squares leftover Angel even in Paper — it does not Arm live. Tick <b>Intraday</b> on Live-eligible books and Save to flatten that book at MARKET_CLOSE. Unticked books are delivery and hold overnight. Overnight gap still exits at next open. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -693,7 +693,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v52";
+    if (clock) clock.textContent = "IST " + ist + " · v53";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1839,7 +1839,7 @@ function renderDesk(d) {
   if (moneyEl) moneyEl.textContent = armed
     ? ("ARMED — live-picked books send Angel orders" + (liveNames.length ? (": " + liveNames.join(", ")) : "."))
     : (angelOpen
-      ? "Paper mode — new Angel orders are off. Live positions show leftover Angel contracts. Type LIVE, Arm live, RESTART, then Exit to square."
+      ? "Paper mode — new Angel orders are off. Live positions show leftover Angel. Exit on an OPEN row squares leftover Angel even in Paper. Does not Arm live."
       : "Paper is already running. New Angel orders stay off until you Arm live.");
   if (modeLine) {
     modeLine.textContent = statusText;
@@ -2143,8 +2143,8 @@ function collectArmBody(mode) {
   return body;
 }
 function exitAll(flashId) {
-  if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Angel CLOSE only for live-armed books. Does not stop paper books.")) return;
-  act(flashId, "/api/desk/flatten", { all: true }, "Exit all queued — bot CLOSEs each book on the next tick.");
+  if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Leftover Angel squares even in Paper. Does not Arm live. Does not stop paper books.")) return;
+  act(flashId, "/api/desk/flatten", { all: true }, "Exit all queued — leftover Angel squares even in Paper.");
 }
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
@@ -2152,8 +2152,8 @@ document.addEventListener("click", (ev) => {
   if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
   const label = shortName(name);
-  if (!window.confirm("Flatten " + label + " now? This book only. Paper CLOSE always. Angel CLOSE only if this book is live-armed.")) return;
-  act("flash-live", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — bot CLOSEs on the next tick.");
+  if (!window.confirm("Flatten " + label + " now? This book only. Leftover Angel squares even in Paper. Does not Arm live.")) return;
+  act("flash-live", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — leftover Angel squares even in Paper.");
 });
 $("btn-exit-all-live").onclick = () => exitAll("flash-live");
 $("btn-save-live").onclick = () => {

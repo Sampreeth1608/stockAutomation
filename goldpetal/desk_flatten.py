@@ -1,9 +1,9 @@
 """Per-book Exit on the desk — queue a flatten for the running bot.
 
-One click = one strategy. Paper CLOSE always records. Angel CLOSE only if
-that book is already live-armed (same gates as any other CLOSE). This
-module never sets DRY_RUN=false, never ENABLE's a book, and never
-Emergency-stops the rest of the desk.
+One click = one strategy. Paper CLOSE always records when RAM is open.
+Leftover Angel from the fill log squares even in Paper (CLOSE only).
+That does not Arm live and does not ENABLE a book. Emergency off still
+blocks leftover square. This module never sets DRY_RUN=false.
 """
 
 from __future__ import annotations
@@ -123,8 +123,8 @@ def flatten_desk_status(
         "bot_running": bot_ok,
         "note": (
             "Exit flattens that book only. Bot must be ON so CLOSE can fire. "
-            "Paper CLOSE always records. Angel CLOSE only if that book is live-armed. "
-            "Does not disable the book — uncheck In if you do not want it to re-open."
+            "Paper CLOSE records when RAM is open. Leftover Angel squares even "
+            "in Paper — Exit does not Arm live. Emergency off still blocks."
         ),
     }
 
@@ -186,9 +186,9 @@ def request_flatten(
     save_flatten_file({"requests": rows}, path)
     bot_ok = bot_is_running(now=clock)
     note = (
-        "queued — bot will CLOSE this book on the next tick"
+        "queued — leftover Angel squares on the next tick even in Paper"
         if bot_ok
-        else "queued — Start bot / type RESTART so CLOSE can fire"
+        else "queued — Start bot / type RESTART so leftover Angel can square"
     )
     return {
         "ok": True,
@@ -365,14 +365,86 @@ def apply_pending_flattens(
     now: datetime,
     cmp: float | None,
     path: Path = REQUEST_PATH,
+    square_leftover: Callable[..., Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Claim pending Exits, flatten RAM, record CLOSE. Used by the runner."""
+    """Claim pending Exits, flatten RAM, square leftover Angel, record CLOSE."""
     jobs = take_flatten_requests(path=path, now=now)
     out: list[dict[str, Any]] = []
     ts = now.isoformat(timespec="seconds")
+    leftover_by: dict[str, dict[str, Any]] = {}
+    if square_leftover is not None:
+        try:
+            from live_orders import net_open_from_fills
+
+            leftover_by = dict(net_open_from_fills() or {})
+        except Exception:
+            leftover_by = {}
     for job in jobs:
         name = str(job.get("strategy") or "")
+        leftover = leftover_by.get(name) if name else None
         obj = strat_map.get(name)
+        if obj is None and leftover is None:
+            row = finish_flatten(
+                job,
+                {"ok": False, "error": "not in runner RAM — is this book In + Restarted?"},
+                path=path,
+            )
+            out.append(row)
+            continue
+        info = {"already_flat": True, "was_side": "flat"}
+        if obj is not None:
+            info = flatten_ram(obj, px=cmp, why=REASON)
+        if leftover is not None and square_leftover is not None:
+            try:
+                res = square_leftover(name, leftover)
+            except Exception as exc:
+                row = finish_flatten(
+                    job,
+                    {
+                        "ok": False,
+                        "error": f"leftover square failed: {exc}",
+                        "was_side": info.get("was_side"),
+                    },
+                    path=path,
+                )
+                out.append(row)
+                continue
+            raw = (
+                res.to_dict()
+                if hasattr(res, "to_dict")
+                else (dict(res) if isinstance(res, dict) else {"ok": True})
+            )
+            reason = str(raw.get("reason") or "")
+            if reason == "no_fill_leftover":
+                leftover = None
+            elif not bool(raw.get("ok")) or bool(raw.get("skipped")):
+                row = finish_flatten(
+                    job,
+                    {
+                        "ok": False,
+                        "error": reason or "leftover Angel square skipped",
+                        "was_side": info.get("was_side"),
+                        "broker": raw,
+                    },
+                    path=path,
+                )
+                out.append(row)
+                continue
+            else:
+                row = finish_flatten(
+                    job,
+                    {
+                        "ok": True,
+                        "already_flat": bool(info.get("already_flat")),
+                        "leftover_squared": True,
+                        "was_side": str(leftover.get("side") or info.get("was_side") or ""),
+                        "lots": leftover.get("lots"),
+                        "broker": raw,
+                    },
+                    path=path,
+                )
+                out.append(row)
+                continue
         if obj is None:
             row = finish_flatten(
                 job,
@@ -381,7 +453,6 @@ def apply_pending_flattens(
             )
             out.append(row)
             continue
-        info = flatten_ram(obj, px=cmp, why=REASON)
         if info.get("already_flat"):
             row = finish_flatten(
                 job,

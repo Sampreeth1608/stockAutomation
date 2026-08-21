@@ -524,7 +524,8 @@ def test_live_pnl_fill_leftover_shows_open_when_tape_flat() -> None:
         assert int(pnl["summary"]["open"]) >= 1
         note = str(pnl.get("note") or "")
         assert "leftover" in note.lower() or "Angel still has" in note
-        assert "Arm live" in note
+        assert "squares leftover Angel even in Paper" in note
+        assert "Does not Arm live" in note
 
 
 def test_live_pnl_wait_false_uses_leftover_without_rebuild() -> None:

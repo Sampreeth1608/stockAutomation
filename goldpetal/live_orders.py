@@ -7,6 +7,10 @@ Safety stack (all required unless noted):
   4. strategy listed in live_approved (8787 Live money checkboxes)
   5. quantity = strategy capital.max_lots capped by LIVE_MAX_LOTS
 
+Exception: desk Exit on a fill-log leftover squares that book's leftover
+lots even in Paper (DRY_RUN / live locked). That is CLOSE only — it does
+not Arm live and does not open a new book. Emergency off still blocks.
+
 Paper remains the default. This module places MARKET DAY CARRYFORWARD
 orders on MCX when gates pass.
 """
@@ -547,6 +551,99 @@ class LiveBroker:
             return res
 
         qty = self._quantity(strategy) * max(1, int(mult))
+        return self._submit(
+            strategy=strategy,
+            tx=tx,
+            qty=qty,
+            new_pos=new_pos,
+            tag=tag,
+            price=price,
+        )
+
+    def place_leftover_square(
+        self,
+        *,
+        strategy: str,
+        leftover: dict[str, Any],
+        tag: str = "leftoverExit",
+    ) -> OrderResult:
+        """CLOSE leftover Angel lots. Paper/live-lock does not block this."""
+        try:
+            st = load_state()
+        except Exception:
+            st = None
+        if st is not None and bool(getattr(st, "emergency_off", False)):
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason="emergency_off",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log({**res.to_dict(), "leftover_square": True})
+            return res
+        try:
+            lots = abs(int(leftover.get("lots") or 0))
+        except (TypeError, ValueError):
+            lots = 0
+        lots = max(0, min(HARD_LIVE_MAX_LOTS, lots))
+        side = str(leftover.get("side") or "").upper()
+        if side in {"BUY", "LONG"}:
+            tx = "SELL"
+        elif side in {"SHORT", "SELL"}:
+            tx = "BUY"
+        else:
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason=f"bad_leftover_side={side}",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log({**res.to_dict(), "leftover_square": True})
+            return res
+        if lots <= 0:
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason="bad_leftover_lots",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log({**res.to_dict(), "leftover_square": True})
+            return res
+        return self._submit(
+            strategy=strategy,
+            tx=tx,
+            qty=lots,
+            new_pos="flat",
+            tag=tag,
+            extra_log={"leftover_square": True},
+        )
+
+    def _submit(
+        self,
+        *,
+        strategy: str,
+        tx: str,
+        qty: int,
+        new_pos: str,
+        tag: str = "",
+        price: float | None = None,
+        extra_log: dict[str, Any] | None = None,
+    ) -> OrderResult:
         params = {
             "variety": self.variety,
             "tradingsymbol": self.symbol,
@@ -616,7 +713,10 @@ class LiveBroker:
             )
 
         self.last_result = res
-        _append_order_log({**res.to_dict(), "params": params})
+        logged = {**res.to_dict(), "params": params}
+        if extra_log:
+            logged.update(extra_log)
+        _append_order_log(logged)
         return res
 
 
@@ -660,6 +760,38 @@ class NullBroker:
         return res
 
 
+def square_fill_leftover(
+    strategy: str,
+    *,
+    leftover: dict[str, Any] | None = None,
+    broker: Any = None,
+    path: Path | None = None,
+) -> OrderResult:
+    """Square one book's Angel fill leftover. Does not Arm live."""
+    name = str(strategy or "").strip()
+    row = leftover
+    if row is None:
+        row = net_open_from_fills(path=path).get(name)
+    if not row:
+        return OrderResult(
+            ok=True,
+            dry_run=True,
+            skipped=True,
+            reason="no_fill_leftover",
+            strategy=name,
+        )
+    fn = getattr(broker, "place_leftover_square", None)
+    if not callable(fn):
+        return OrderResult(
+            ok=False,
+            dry_run=False,
+            skipped=True,
+            reason="no_live_broker_for_leftover",
+            strategy=name,
+        )
+    return fn(strategy=name, leftover=row)
+
+
 def broker_from_session(
     session: Any,
     contract: dict[str, Any],
@@ -671,9 +803,10 @@ def broker_from_session(
     Actual per-order gating still happens inside LiveBroker.place_signal.
     We construct LiveBroker whenever DRY_RUN=false so unlock can take
     effect without restart; place_signal re-checks live_unlocked each time.
+    force_live=True builds LiveBroker even in Paper so leftover Exit can square.
     """
     dry = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes", "y"}
-    if force_live is False or dry:
+    if force_live is False or (force_live is not True and dry):
         return NullBroker(symbol=str(contract.get("symbol") or ""), token=str(contract.get("token") or ""))
     lot = contract.get("lotsize") or 1
     try:

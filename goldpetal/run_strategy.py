@@ -1551,8 +1551,9 @@ def run_once(
     flatten_lock = threading.Lock()
 
     def emit_desk_flatten(now: datetime) -> None:
-        """Operator Exit: flatten one book (paper CLOSE + Angel if live-armed)."""
+        """Operator Exit: flatten RAM + square leftover Angel even in Paper."""
         from desk_flatten import apply_pending_flattens
+        from live_orders import square_fill_leftover
 
         with flatten_lock:
             cmp = latest.get("cmp")
@@ -1563,11 +1564,23 @@ def run_once(
                     cmp = _latest_ltp()
                 except Exception:
                     cmp = None
+            leftover_broker_box: dict[str, Any] = {"b": None}
+
+            def _square_leftover(name: str, leftover: dict) -> Any:
+                b = leftover_broker_box["b"]
+                if b is None:
+                    b = broker
+                    if not hasattr(b, "place_leftover_square"):
+                        b = broker_from_session(session, contract, force_live=True)
+                    leftover_broker_box["b"] = b
+                return square_fill_leftover(name, leftover=leftover, broker=b)
+
             rows = apply_pending_flattens(
                 strat_map,
                 _record_signal,
                 now=now,
                 cmp=cmp,
+                square_leftover=_square_leftover,
             )
         if not rows:
             return
@@ -1575,7 +1588,14 @@ def run_once(
             name = str(row.get("strategy") or "")
             res = row.get("result") or {}
             ts = now.isoformat(timespec="seconds")
-            if res.get("already_flat"):
+            if res.get("leftover_squared"):
+                broker_res = res.get("broker") or {}
+                line = (
+                    f"[{ts}] [EXIT] leftover SQUARE {name} "
+                    f"tx={broker_res.get('transaction')} qty={res.get('lots')} "
+                    f"ok={broker_res.get('ok')} order={broker_res.get('order_id')}"
+                )
+            elif res.get("already_flat"):
                 line = f"[{ts}] [EXIT] {name} already flat"
             elif row.get("status") == "done":
                 line = (

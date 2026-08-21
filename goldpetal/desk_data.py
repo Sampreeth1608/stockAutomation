@@ -433,7 +433,8 @@ def _leftover_live_pnl() -> dict[str, Any]:
     if angel_open:
         out["note"] = (
             f"Angel still has {len(angel_open)} open book(s) on the fill log. "
-            "Live AC ₹ is still loading. Type LIVE, Arm live, RESTART, then Exit to square."
+            "Live AC ₹ is still loading. Exit on that OPEN row squares leftover "
+            "Angel even in Paper. Does not Arm live."
         )
     return out
 
@@ -549,8 +550,9 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
                 pass
         out["note"] = (
             f"Angel still has {n_open} open book(s), {lots_n} lots on the fill log. "
-            "Paper mode does not send new Angel orders. Type LIVE, Arm live, RESTART, "
-            "then Exit to square. Save strategies does not switch you to Paper."
+            "Paper mode does not send new Angel orders. Exit on that OPEN row "
+            "squares leftover Angel even in Paper. Does not Arm live. "
+            "Save strategies does not switch you to Paper."
         )
     elif "bot_still_paper_restart_required" in skip_reasons:
         out["note"] = (

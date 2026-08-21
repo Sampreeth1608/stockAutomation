@@ -18,7 +18,7 @@ from control_state import (
     set_live_unlocked,
     set_trading_enabled,
 )
-from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots, mirror_positions_from_signals
+from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots, mirror_positions_from_signals, square_fill_leftover
 
 
 class _FakeApi:
@@ -417,6 +417,67 @@ def test_net_open_from_fills_leftover_and_reverse() -> None:
         assert rev["S5_MINEDGE"]["lots"] == 3
 
 
+def test_leftover_square_sends_buy_in_paper() -> None:
+    """Exit leftover SHORT 3 must BUY 3 even when DRY_RUN and live locked."""
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "true"
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(False, path=state)
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        leftover = {"strategy": "S5_MINEDGE", "side": "SHORT", "lots": 3}
+        res = square_fill_leftover("S5_MINEDGE", leftover=leftover, broker=broker)
+        assert res.ok and not res.skipped and res.dry_run is False
+        assert res.transaction == "BUY"
+        assert res.quantity == 3
+        assert broker.positions["S5_MINEDGE"] == "flat"
+        assert api.calls[0]["transactiontype"] == "BUY"
+        assert api.calls[0]["quantity"] == "3"
+        logged = json.loads(orders.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert logged.get("leftover_square") is True
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+def test_leftover_square_blocked_by_emergency() -> None:
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "true"
+        set_emergency(True, path=state)
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="X", token="1")
+        res = square_fill_leftover(
+            "S5_MINEDGE",
+            leftover={"side": "SHORT", "lots": 3},
+            broker=broker,
+        )
+        assert res.skipped and res.reason == "emergency_off"
+        assert not api.calls
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+def test_broker_from_session_force_live_in_paper() -> None:
+    os.environ["DRY_RUN"] = "true"
+    session = MagicMock()
+    session.api = _FakeApi()
+    contract = {"symbol": "GOLDPETAL26APRFUT", "token": "1", "exchange": "MCX", "lotsize": 1}
+    assert isinstance(broker_from_session(session, contract), NullBroker)
+    b = broker_from_session(session, contract, force_live=True)
+    assert isinstance(b, LiveBroker)
+    os.environ["DRY_RUN"] = "true"
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -446,4 +507,10 @@ if __name__ == "__main__":
     print("ok lots_on_fill")
     test_net_open_from_fills_leftover_and_reverse()
     print("ok net_open_from_fills")
+    test_leftover_square_sends_buy_in_paper()
+    print("ok leftover_square_paper")
+    test_leftover_square_blocked_by_emergency()
+    print("ok leftover_square_emergency")
+    test_broker_from_session_force_live_in_paper()
+    print("ok force_live_in_paper")
     print("ALL test_live_orders OK")
