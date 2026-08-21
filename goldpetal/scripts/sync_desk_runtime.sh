@@ -39,6 +39,8 @@ FILES=(
   goldpetal/analytics/env_bridge.py
   goldpetal/overnight_gap.py
   goldpetal/strategy_overnight_gap.py
+  goldpetal/panel_export.py
+  goldpetal/export_full_ticks.py
   goldpetal/.env.example
   goldpetal/station.html
   goldpetal/lite.html

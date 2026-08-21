@@ -82,11 +82,11 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v59" in html
-    assert " · v59" in html
+    assert "gp-header-v60" in html
+    assert " · v60" in html
     assert 'id="desk-ver"' in html
-    assert ">v59</span>" in html
-    assert "<title>Gold Petal v59</title>" in html
+    assert ">v60</span>" in html
+    assert "<title>Gold Petal v60</title>" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -203,6 +203,13 @@ def test_station_is_the_operator_page() -> None:
     assert "overnight gap" in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "S19 / S20 stay paper until they hit 40%" in html
+    assert "Download ticks CSV" in html
+    assert "every stored Angel snap-quote tick" in html
+    assert "bid 1–5 price+qty" in html
+    assert "ask 1–5 price+qty" in html
+    assert "last traded qty" in html
+    assert "total buy qty" in html
+    assert "not 1h OHLC bars" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -457,6 +464,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/analytics/env_bridge.py" in sync
     assert "goldpetal/overnight_gap.py" in sync
     assert "goldpetal/strategy_overnight_gap.py" in sync
+    assert "goldpetal/panel_export.py" in sync
+    assert "goldpetal/export_full_ticks.py" in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
@@ -466,8 +475,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v59" in cmd
-    assert "?v=59" in cmd
+    assert "Gold Petal v60" in cmd
+    assert "?v=60" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -518,7 +527,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v59"
+    assert payload["desk_build"] == "v60"
 
 
 def test_login_html_is_the_gate() -> None:

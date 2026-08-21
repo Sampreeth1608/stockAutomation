@@ -884,10 +884,15 @@ def export_sheet_csv(
 
 
 def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) -> int:
+    """Write every stored tick with LTP, OHLC, volume, TBQ/TSQ, LTQ, depth 1-5, OI."""
+    import csv
+
+    from export_full_ticks import FULL_TICK_CSV_FIELDS, full_tick_row
+
     init_db(db_path)
     query = """
         SELECT received_at, exchange_timestamp, symbol, token,
-               ltp, open, high, low, close, volume, bp, sp
+               ltp, open, high, low, close, volume, bp, sp, raw_json
         FROM ticks
         ORDER BY id ASC
     """
@@ -896,32 +901,30 @@ def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) ->
         query += " LIMIT ?"
         params = (limit,)
 
-    with connect(db_path) as conn:
-        rows = list(conn.execute(query, params))
-
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        handle.write(
-            "received_at,exchange_timestamp,symbol,token,ltp,open,high,low,close,volume,bp,sp\n"
+    n = 0
+    with connect(db_path) as conn, path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=FULL_TICK_CSV_FIELDS, extrasaction="ignore", lineterminator="\n"
         )
-        for row in rows:
-            handle.write(
-                ",".join(
-                    [
-                        str(row["received_at"] or ""),
-                        str(row["exchange_timestamp"] or ""),
-                        str(row["symbol"] or ""),
-                        str(row["token"] or ""),
-                        str(row["ltp"] or ""),
-                        str(row["open"] or ""),
-                        str(row["high"] or ""),
-                        str(row["low"] or ""),
-                        str(row["close"] or ""),
-                        str(row["volume"] or ""),
-                        str(row["bp"] or ""),
-                        str(row["sp"] or ""),
-                    ]
+        writer.writeheader()
+        for row in conn.execute(query, params):
+            writer.writerow(
+                full_tick_row(
+                    received_at=row["received_at"],
+                    exchange_ts=row["exchange_timestamp"],
+                    raw_json=row["raw_json"] or "",
+                    symbol=row["symbol"] or "",
+                    token=row["token"] or "",
+                    ltp=row["ltp"],
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row["volume"],
+                    bp=row["bp"],
+                    sp=row["sp"],
                 )
-                + "\n"
             )
-    return len(rows)
+            n += 1
+    return n
