@@ -26,17 +26,17 @@ print_open_on_mac() {
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
   echo
-  echo "  2) Replace the Desktop file with v54 (~ window says Gold Petal v54):"
+  echo "  2) Replace the Desktop file with v55 (~ window says Gold Petal v55):"
   echo "     gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/GoldPetal.command' > ~/Desktop/GoldPetal.command"
   echo "     chmod +x ~/Desktop/GoldPetal.command"
   echo "     open ~/Desktop/GoldPetal.command"
-  echo "  Do not put chmod on the gcloud line. The window must say Gold Petal v54, not v53."
+  echo "  Do not put chmod on the gcloud line. The window must say Gold Petal v55, not v53."
   echo
   echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
   echo "  Do not open port 22 or 8501 to the internet."
   echo
   echo "  Then Chrome on the Mac (not this SSH tab):"
-  echo "     http://127.0.0.1:8501/?v=54     Gold Petal desk — gold v54 badge next to the title"
+  echo "     http://127.0.0.1:8501/?v=55     Gold Petal desk — gold v55 badge next to the title"
   echo "     http://127.0.0.1:8501/lite     compact controls"
   echo "     http://127.0.0.1:8501/full     archive / downloads"
   echo "     Hard-refresh: Cmd+Shift+R"

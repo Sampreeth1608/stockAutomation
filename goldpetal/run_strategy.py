@@ -1587,6 +1587,30 @@ def run_once(
                     cmp = None
             leftover_broker_box: dict[str, Any] = {"b": None}
 
+            try:
+                from live_orders import reconcile_fill_leftovers_with_angel
+
+                cleared = reconcile_fill_leftovers_with_angel(
+                    getattr(session, "api", None),
+                    symbol=str(contract.get("symbol") or ""),
+                    token=str(contract.get("token") or ""),
+                )
+                if cleared:
+                    try:
+                        from desk_data import invalidate_live_pnl_cache
+
+                        invalidate_live_pnl_cache()
+                    except Exception:
+                        pass
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] [EXIT] "
+                        f"Angel already flat — cleared leftover {', '.join(cleared)}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
+            except Exception:
+                pass
+
             def _square_leftover(name: str, leftover: dict) -> Any:
                 b = leftover_broker_box["b"]
                 if b is None:

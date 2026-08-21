@@ -83,13 +83,13 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <section class="card">
     <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
-    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live. Live closed trades are on the full desk Blotter (separate from paper). Angel order ids are on Downloads. Desk Open / Closed / After charges stay paper 100 lots.</p>
-    <p class="hint">All live money = Live AC ₹. Each strategy = Live P&amp;L by book (zeros until an Angel fill). Paper P&amp;L on the full desk is 100 lots.</p>
+    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live. After charges, tax excluded. Live closed trades are on Blotter. Angel order ids are on Downloads. Open contracts are on Live Open Positions.</p>
+    <p class="hint">All live money = Live AC ₹. Each strategy = Live P&amp;L by book (zeros until an Angel fill). Open contracts are on Live Open Positions. Closed round-trips are on Blotter.</p>
     <table style="margin-top:.35rem">
       <thead><tr><th>Book</th><th>Open</th><th>Closed</th><th>WR%</th><th>AC ₹</th></tr></thead>
       <tbody id="live-pnl-books"></tbody>
     </table>
-    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel fill leftover or live tape, FLAT = none). Paper FLAT does not hide an Angel leftover.</p>
+    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel leftover or live tape, FLAT = none). If you already squared in the Angel app, OPEN clears when the bot sees Angel flat.</p>
     <table style="margin-top:.35rem">
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-pnl-open"></tbody>
@@ -322,7 +322,7 @@ function render(d) {
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
     : (angelOpen
-      ? "Paper mode — leftover Angel contracts show below. Exit on an OPEN row squares leftover Angel even in Paper. Does not Arm live."
+      ? "Paper mode — leftover Angel shows below until Angel is flat. Exit squares leftover even in Paper, or clears it if you already squared in the Angel app. Does not Arm live."
       : "Paper is already running. New Angel orders stay off until you Arm live.");
   const paperBtn = $("btn-mode-paper");
   if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;

@@ -13,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
-from live_orders import live_lots_for, lots_on_fill_for_trade, net_open_from_fills, recent_orders
+from live_orders import live_lots_for, lots_on_fill_for_trade, net_open_from_fills, recent_orders, angel_net_cache_is_flat
 from paper_report import summarize_trades
 from storage import build_trades, latest_signals, latest_ticks, set_db_path
 import storage as _storage
@@ -293,6 +293,11 @@ def _kick_live_pnl(db: Path) -> None:
     threading.Thread(target=run, name="gp-live-pnl", daemon=True).start()
 
 
+def invalidate_live_pnl_cache() -> None:
+    _LIVE_PNL_CACHE["at"] = 0.0
+    _LIVE_PNL_CACHE["payload"] = None
+
+
 def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[str, Any]:
     """Angel-sized P&L from dry_run=0 signals on live-eligible books.
 
@@ -365,16 +370,22 @@ def _live_positions_by_book(
     summaries: dict[str, dict[str, Any]] | None = None,
     live_gate: bool = True,
 ) -> list[dict[str, Any]]:
-    """One row per live-picked book: OPEN trade if any, else Angel fill leftover, else FLAT."""
+    """One row per live-picked book: OPEN trade if any, else Angel fill leftover, else FLAT.
+
+    If Angel Gold Petal is already flat, leftover OPEN is a ghost — show FLAT.
+    """
     from control_state import load_state
     from live_readiness import NEVER_LIVE_BOOKS, book_may_go_live
 
     open_by: dict[str, dict[str, Any]] = {}
-    for trade in open_t:
-        name = str(trade.get("strategy") or "").strip()
-        if name:
-            open_by[name] = trade
     fill_open = net_open_from_fills()
+    if angel_net_cache_is_flat():
+        fill_open = {}
+    else:
+        for trade in open_t:
+            name = str(trade.get("strategy") or "").strip()
+            if name:
+                open_by[name] = trade
     for name, row in fill_open.items():
         if name not in open_by:
             open_by[name] = dict(row)
@@ -434,7 +445,9 @@ def _leftover_live_pnl() -> dict[str, Any]:
         out["note"] = (
             f"Angel still has {len(angel_open)} open book(s) on the fill log. "
             "Live AC ₹ is still loading. Exit on that OPEN row squares leftover "
-            "Angel even in Paper. Does not Arm live."
+            "Angel even in Paper. If you already squared in the Angel app, the "
+            "bot clears this OPEN when Angel is flat — it does not send a new order. "
+            "Does not Arm live."
         )
     return out
 
@@ -551,7 +564,9 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
         out["note"] = (
             f"Angel still has {n_open} open book(s), {lots_n} lots on the fill log. "
             "Paper mode does not send new Angel orders. Exit on that OPEN row "
-            "squares leftover Angel even in Paper. Does not Arm live. "
+            "squares leftover Angel even in Paper. If you already squared in the "
+            "Angel app, the bot clears this OPEN when Angel is flat — it does not "
+            "open a new book. Does not Arm live. "
             "Save strategies does not switch you to Paper."
         )
     elif "bot_still_paper_restart_required" in skip_reasons:

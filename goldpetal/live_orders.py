@@ -10,6 +10,8 @@ Safety stack (all required unless noted):
 Exception: desk Exit on a fill-log leftover squares that book's leftover
 lots even in Paper (DRY_RUN / live locked). That is CLOSE only — it does
 not Arm live and does not open a new book. Emergency off still blocks.
+If Angel is already flat (you squared in the app), Exit records the fill
+log closed and does not send a new BUY/SELL.
 
 Paper remains the default. This module places MARKET DAY CARRYFORWARD
 orders on MCX when gates pass.
@@ -20,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,7 +33,9 @@ from control_state import CONTROL_DIR, ensure_control_dir, is_live_mode_allowed,
 
 IST = ZoneInfo("Asia/Kolkata")
 ORDERS_PATH = CONTROL_DIR / "live_orders.jsonl"
+ANGEL_NET_PATH = CONTROL_DIR / "angel_net.json"
 _lock = threading.Lock()
+_angel_fetch_at = 0.0
 HARD_LIVE_MAX_LOTS = 1000
 
 Action = Literal["BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"]
@@ -302,6 +307,237 @@ def net_open_from_fills(*, path: Path | None = None) -> dict[str, dict[str, Any]
     return out
 
 
+def _angel_row_net(row: dict[str, Any]) -> int:
+    if not isinstance(row, dict):
+        return 0
+    for key in ("netqty", "netQty", "net_qty", "cfnetqty"):
+        raw = row.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            continue
+    buy = 0
+    sell = 0
+    try:
+        buy = int(float(row.get("buyqty") or row.get("buyQty") or 0))
+    except (TypeError, ValueError):
+        buy = 0
+    try:
+        sell = int(float(row.get("sellqty") or row.get("sellQty") or 0))
+    except (TypeError, ValueError):
+        sell = 0
+    return buy - sell
+
+
+def _angel_row_symbol(row: dict[str, Any]) -> str:
+    return str(
+        row.get("tradingsymbol")
+        or row.get("tradingSymbol")
+        or row.get("symbol")
+        or ""
+    ).strip().upper()
+
+
+def _angel_row_token(row: dict[str, Any]) -> str:
+    return str(
+        row.get("symboltoken") or row.get("symbolToken") or row.get("token") or ""
+    ).strip()
+
+
+def _pick_angel_rows(
+    rows: list[Any], *, symbol: str, token: str
+) -> list[dict[str, Any]]:
+    want_sym = str(symbol or "").strip().upper()
+    want_tok = str(token or "").strip()
+    dicts = [r for r in rows if isinstance(r, dict)]
+    exact: list[dict[str, Any]] = []
+    for row in dicts:
+        tok = _angel_row_token(row)
+        ts = _angel_row_symbol(row)
+        if want_tok and tok and tok == want_tok:
+            exact.append(row)
+            continue
+        if want_sym and ts and ts == want_sym:
+            exact.append(row)
+    if exact:
+        return exact
+    fuzzy = [
+        r
+        for r in dicts
+        if "GOLDPETAL" in _angel_row_symbol(r) and "GOLDPETAL" in want_sym
+    ]
+    if len(fuzzy) == 1:
+        return fuzzy
+    return []
+
+
+def angel_net_lots_from_book(
+    payload: Any, *, symbol: str, token: str
+) -> tuple[str, int | None]:
+    """Parse Angel positionBook JSON. ok + signed lots, or error/missing."""
+    if not isinstance(payload, dict):
+        return "error", None
+    if payload.get("status") is False:
+        return "error", None
+    data = payload.get("data")
+    if data in (None, "", [], {}):
+        return "ok", 0
+    if isinstance(data, str):
+        text = data.strip().lower()
+        if not text or "no data" in text or text in {"null", "none"}:
+            return "ok", 0
+        return "error", None
+    if isinstance(data, dict):
+        rows: list[Any] = [data]
+    elif isinstance(data, list):
+        rows = list(data)
+    else:
+        return "error", None
+    matched = _pick_angel_rows(rows, symbol=symbol, token=token)
+    return "ok", sum(_angel_row_net(r) for r in matched)
+
+
+def fetch_angel_net_lots(
+    api: Any, *, symbol: str, token: str
+) -> tuple[str, int | None]:
+    """Read Gold Petal net lots from Angel. missing = no position API on this stub."""
+    if api is None:
+        return "missing", None
+    fn = getattr(api, "positionBook", None)
+    if not callable(fn):
+        fn = getattr(api, "getPosition", None)
+    if not callable(fn):
+        return "missing", None
+    try:
+        raw = fn()
+    except Exception:
+        return "error", None
+    return angel_net_lots_from_book(raw, symbol=symbol, token=token)
+
+
+def load_angel_net_cache(*, path: Path | None = None) -> dict[str, Any]:
+    dest = path or ANGEL_NET_PATH
+    if not dest.is_file():
+        return {}
+    try:
+        row = json.loads(dest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return row if isinstance(row, dict) else {}
+
+
+def save_angel_net_cache(
+    net: int,
+    *,
+    symbol: str,
+    token: str,
+    path: Path | None = None,
+) -> None:
+    dest = path or ANGEL_NET_PATH
+    ensure_control_dir(dest)
+    payload = {
+        "ok": True,
+        "net": int(net),
+        "symbol": symbol,
+        "token": str(token),
+        "at_ist": datetime.now(IST).isoformat(timespec="seconds"),
+        "at_unix": time.time(),
+    }
+    dest.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+
+def angel_net_cache_is_flat(*, path: Path | None = None, max_age_sec: float = 90.0) -> bool:
+    row = load_angel_net_cache(path=path)
+    if not row.get("ok"):
+        return False
+    try:
+        age = time.time() - float(row.get("at_unix") or 0)
+    except (TypeError, ValueError):
+        return False
+    if age < 0 or age > float(max_age_sec):
+        return False
+    try:
+        return int(row.get("net") or 0) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def leftover_close_tx(leftover: dict[str, Any]) -> tuple[str, int]:
+    """Opposite BUY/SELL and lots needed to flatten a fill-log leftover."""
+    try:
+        lots = abs(int(leftover.get("lots") or 0))
+    except (TypeError, ValueError):
+        lots = 0
+    lots = max(0, min(HARD_LIVE_MAX_LOTS, lots))
+    side = str(leftover.get("side") or "").upper()
+    if side in {"BUY", "LONG"}:
+        return "SELL", lots
+    if side in {"SHORT", "SELL"}:
+        return "BUY", lots
+    return "", lots
+
+
+def record_leftover_already_flat(
+    strategy: str,
+    leftover: dict[str, Any],
+    *,
+    path: Path | None = None,
+) -> OrderResult:
+    """Zero the fill-log leftover. Angel is already flat — no new order."""
+    name = str(strategy or leftover.get("strategy") or "").strip()
+    tx, lots = leftover_close_tx(leftover)
+    res = OrderResult(
+        ok=True,
+        dry_run=False,
+        skipped=False,
+        reason="angel_already_flat",
+        order_id="angel-already-flat",
+        transaction=tx or None,
+        quantity=lots,
+        strategy=name,
+    )
+    logged = {
+        **res.to_dict(),
+        "placed": True,
+        "leftover_square": True,
+        "reconciled": True,
+    }
+    _append_order_log(logged, path=path)
+    return res
+
+
+def reconcile_fill_leftovers_with_angel(
+    api: Any,
+    *,
+    symbol: str,
+    token: str,
+    path: Path | None = None,
+    min_interval_sec: float = 15.0,
+) -> list[str]:
+    """If Angel Gold Petal is flat, close ghost leftover rows. No new order."""
+    global _angel_fetch_at
+    leftover = net_open_from_fills(path=path)
+    if not leftover:
+        return []
+    now = time.time()
+    if now - float(_angel_fetch_at or 0) < float(min_interval_sec):
+        return []
+    _angel_fetch_at = now
+    kind, net = fetch_angel_net_lots(api, symbol=symbol, token=token)
+    if kind != "ok" or net is None:
+        return []
+    save_angel_net_cache(int(net), symbol=symbol, token=token)
+    if int(net) != 0:
+        return []
+    cleared: list[str] = []
+    for name, row in leftover.items():
+        record_leftover_already_flat(name, row, path=path)
+        cleared.append(name)
+    return cleared
+
+
 def lots_on_fill_for_trade(
     info: dict[str, Any],
     *,
@@ -407,12 +643,13 @@ def _null_skip_reason() -> tuple[str, bool]:
     return "dry_run_or_paper", True
 
 
-def _append_order_log(row: dict[str, Any]) -> None:
-    ensure_control_dir(ORDERS_PATH)
+def _append_order_log(row: dict[str, Any], *, path: Path | None = None) -> None:
+    dest = path or ORDERS_PATH
+    ensure_control_dir(dest)
     row = dict(row)
-    row["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
+    row.setdefault("ts_ist", datetime.now(IST).isoformat(timespec="seconds"))
     with _lock:
-        with ORDERS_PATH.open("a", encoding="utf-8") as fh:
+        with dest.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, default=str) + "\n")
 
 
@@ -617,6 +854,50 @@ class LiveBroker:
                 dry_run=False,
                 skipped=True,
                 reason="bad_leftover_lots",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log({**res.to_dict(), "leftover_square": True})
+            return res
+        kind, net = fetch_angel_net_lots(
+            self.api, symbol=self.symbol, token=self.token
+        )
+        if kind == "ok" and net is not None:
+            save_angel_net_cache(int(net), symbol=self.symbol, token=self.token)
+            if int(net) == 0:
+                res = record_leftover_already_flat(strategy, leftover)
+                self.positions[strategy] = "flat"
+                self.last_result = res
+                return res
+            same_side = (tx == "SELL" and int(net) > 0) or (
+                tx == "BUY" and int(net) < 0
+            )
+            if not same_side:
+                self.skip_count += 1
+                res = OrderResult(
+                    ok=False,
+                    dry_run=False,
+                    skipped=True,
+                    reason="angel_side_mismatch",
+                    strategy=strategy,
+                    symbol=self.symbol,
+                    token=self.token,
+                    transaction=tx,
+                    quantity=lots,
+                )
+                self.last_result = res
+                _append_order_log({**res.to_dict(), "leftover_square": True})
+                return res
+            lots = min(lots, abs(int(net)))
+        elif kind == "error":
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason="angel_position_unknown",
                 strategy=strategy,
                 symbol=self.symbol,
                 token=self.token,

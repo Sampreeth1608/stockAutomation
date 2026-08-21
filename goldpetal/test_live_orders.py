@@ -445,6 +445,166 @@ def test_leftover_square_sends_buy_in_paper() -> None:
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
+class _FakeBookApi(_FakeApi):
+    def __init__(self, payload: dict) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def positionBook(self):
+        return self.payload
+
+
+def test_angel_net_empty_book_is_zero() -> None:
+    from live_orders import angel_net_lots_from_book
+
+    kind, net = angel_net_lots_from_book(
+        {"status": True, "data": None},
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "ok" and net == 0
+    kind, net = angel_net_lots_from_book(
+        {
+            "status": True,
+            "data": [
+                {
+                    "tradingsymbol": "GOLDPETAL26APRFUT",
+                    "symboltoken": "99",
+                    "netqty": "-3",
+                }
+            ],
+        },
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "ok" and net == -3
+    kind, net = angel_net_lots_from_book(
+        {"status": False, "message": "fail"},
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "error" and net is None
+
+
+def test_leftover_square_clears_when_angel_already_flat() -> None:
+    """You already squared in the Angel app — Exit must not send a new BUY."""
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.ANGEL_NET_PATH = Path(td.name) / "angel_net.json"
+        live_orders._angel_fetch_at = 0.0
+        os.environ["DRY_RUN"] = "true"
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(False, path=state)
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "1",
+                    "transaction": "SELL",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-20T23:00:00+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        api = _FakeBookApi({"status": True, "data": []})
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        leftover = {"strategy": "S5_MINEDGE", "side": "SHORT", "lots": 3}
+        res = square_fill_leftover("S5_MINEDGE", leftover=leftover, broker=broker)
+        assert res.ok and not res.skipped
+        assert res.reason == "angel_already_flat"
+        assert not api.calls
+        from live_orders import net_open_from_fills
+
+        assert net_open_from_fills(path=orders) == {}
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+def test_leftover_square_sends_when_angel_still_short() -> None:
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.ANGEL_NET_PATH = Path(td.name) / "angel_net.json"
+        live_orders._angel_fetch_at = 0.0
+        os.environ["DRY_RUN"] = "true"
+        set_emergency(False, path=state)
+        set_trading_enabled(True, path=state)
+        set_live_unlocked(False, path=state)
+        api = _FakeBookApi(
+            {
+                "status": True,
+                "data": [
+                    {
+                        "tradingsymbol": "GOLDPETAL26APRFUT",
+                        "symboltoken": "99",
+                        "netqty": "-3",
+                    }
+                ],
+            }
+        )
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        leftover = {"strategy": "S5_MINEDGE", "side": "SHORT", "lots": 3}
+        res = square_fill_leftover("S5_MINEDGE", leftover=leftover, broker=broker)
+        assert res.ok and not res.skipped
+        assert api.calls[0]["transactiontype"] == "BUY"
+        assert api.calls[0]["quantity"] == "3"
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+def test_reconcile_fill_leftovers_when_angel_flat() -> None:
+    from live_orders import net_open_from_fills, reconcile_fill_leftovers_with_angel
+
+    td, state, orders = _tmp_state()
+    try:
+        live_orders.ORDERS_PATH = orders
+        live_orders.ANGEL_NET_PATH = Path(td.name) / "angel_net.json"
+        live_orders._angel_fetch_at = 0.0
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "1",
+                    "transaction": "SELL",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-20T23:00:00+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        assert net_open_from_fills(path=orders)["S5_MINEDGE"]["status"] == "OPEN"
+        api = _FakeBookApi({"status": True, "data": None})
+        cleared = reconcile_fill_leftovers_with_angel(
+            api,
+            symbol="GOLDPETAL26APRFUT",
+            token="99",
+            path=orders,
+            min_interval_sec=0,
+        )
+        assert cleared == ["S5_MINEDGE"]
+        assert net_open_from_fills(path=orders) == {}
+        assert not api.calls
+    finally:
+        td.cleanup()
+
+
 def test_leftover_square_blocked_by_emergency() -> None:
     td, state, orders = _tmp_state()
     try:
@@ -509,6 +669,14 @@ if __name__ == "__main__":
     print("ok net_open_from_fills")
     test_leftover_square_sends_buy_in_paper()
     print("ok leftover_square_paper")
+    test_angel_net_empty_book_is_zero()
+    print("ok angel_net_parse")
+    test_leftover_square_clears_when_angel_already_flat()
+    print("ok leftover_already_flat")
+    test_leftover_square_sends_when_angel_still_short()
+    print("ok leftover_still_short")
+    test_reconcile_fill_leftovers_when_angel_flat()
+    print("ok reconcile_flat")
     test_leftover_square_blocked_by_emergency()
     print("ok leftover_square_emergency")
     test_broker_from_session_force_live_in_paper()

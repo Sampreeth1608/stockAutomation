@@ -528,6 +528,57 @@ def test_live_pnl_fill_leftover_shows_open_when_tape_flat() -> None:
         assert "Does not Arm live" in note
 
 
+def test_live_pnl_hides_leftover_when_angel_already_flat() -> None:
+    """Fill-log leftover must not stay OPEN after Angel is flat."""
+    import live_orders
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        orders = Path(td) / "live_orders.jsonl"
+        cache = Path(td) / "angel_net.json"
+        init_db(db)
+        _tick(db)
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "9001",
+                    "transaction": "SELL",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-21T10:00:02+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cache.write_text(
+            json.dumps({"ok": True, "net": 0, "at_unix": time.time(), "symbol": "X", "token": "1"})
+            + "\n",
+            encoding="utf-8",
+        )
+        st = ControlState(live_approved=["S5_MINEDGE"])
+        with (
+            patch.object(live_orders, "ORDERS_PATH", orders),
+            patch.object(live_orders, "ANGEL_NET_PATH", cache),
+            patch("desk_data.live_lots_for", return_value=3),
+            patch("control_state.load_state", return_value=st),
+            patch(
+                "live_readiness.read_live_env",
+                return_value={"dry_run": True, "live_max_lots": 3},
+            ),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S5_MINEDGE"]["status"] == "FLAT"
+        assert int(pnl["summary"]["open"] or 0) == 0
+
+
 def test_live_pnl_wait_false_uses_leftover_without_rebuild() -> None:
     """Desk/tape polls must not rebuild Live P&L or GOLD LTP freezes."""
     import live_orders
@@ -650,6 +701,7 @@ if __name__ == "__main__":
     test_live_pnl_positions_one_row_per_open_book()
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
     test_live_pnl_fill_leftover_shows_open_when_tape_flat()
+    test_live_pnl_hides_leftover_when_angel_already_flat()
     test_live_pnl_wait_false_uses_leftover_without_rebuild()
     test_paper_summaries_wait_false_does_not_rebuild()
     test_latest_signals_live_only_skips_paper()

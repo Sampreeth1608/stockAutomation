@@ -26,12 +26,14 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="live"' in html
     assert "Exit all" in html
     assert "/api/desk/arm" in html
-    assert 'data-tab="open">Paper Positions</button>' in html
-    assert "No paper positions" in html
+    assert 'data-tab="liveopen">Live Open Positions</button>' in html
+    assert 'data-tab="live">Live</button>' in html
+    assert 'data-tab="open">Paper Positions</button>' not in html
+    assert "No paper positions" not in html
     assert "Blotter" in html
-    assert 'data-tab="score">Paper P&amp;L</button>' in html
-    assert "paper AC ₹" in html
-    assert "No paper P&L yet" in html
+    assert 'data-tab="score">Paper P&amp;L</button>' not in html
+    assert "No paper P&L yet" not in html
+    assert "paper AC ₹" not in html
     assert "Downloads" in html
     assert 'data-tab="you"' in html
     assert 'id="you-strip"' not in html
@@ -80,16 +82,18 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v54" in html
-    assert " · v54" in html
+    assert "gp-header-v55" in html
+    assert " · v55" in html
     assert 'id="desk-ver"' in html
-    assert ">v54</span>" in html
-    assert "<title>Gold Petal v54</title>" in html
+    assert ">v55</span>" in html
+    assert "<title>Gold Petal v55</title>" in html
     assert "books_health" in html
     assert "function renderBooksWhy" in html
     assert "waiting_1h_close" in html
     assert "need_prev_1h" in html
     assert "squares leftover Angel even in Paper" in html
+    assert "already squared in the Angel app" in html
+    assert "Exit will not open a new book" in html
     assert "Exit flattens that book only after you Arm live" not in html
     assert "Angel CLOSE only if this book is live-armed" not in html
     assert "not today's Live Lots" in html
@@ -134,14 +138,16 @@ def test_station_is_the_operator_page() -> None:
     assert "SIZE if ceiling" in html
     assert "size_confirm" in html
     assert "WR% AC" in html
-    assert "Paper AC" in html
+    assert "Live AC ₹" in html
+    assert "Paper AC" not in html
     assert "live-kpi-pnl" in html
     assert 'id="live-pnl-open"' in html
     assert 'id="live-pnl-books"' in html
     assert "Live P&amp;L by book" in html
     assert "function livePosRows" in html
     assert "function liveBookScoreRows" in html
-    assert "Live positions" in html
+    assert "Live Open Positions" in html
+    assert 'id="liveopen-panel"' in html
     assert "Live round-trips" not in html
     assert 'id="blotter-live-closed"' in html
     assert 'id="dl-orders-body"' in html
@@ -257,7 +263,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "collectArmBody(\"keep\")" in html
     assert "live path" not in html
     assert "live_unlocked && live.dry_run" not in html
-    assert "squares leftover Angel even in Paper" in html
+    assert "Exit squares leftover even in Paper" in html
+    assert "already squared in the Angel app" in html
     assert "Angel CLOSE only if live-armed" not in html
     assert "AMISE" not in html
     assert "loadMl" not in html
@@ -457,8 +464,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v54" in cmd
-    assert "?v=54" in cmd
+    assert "Gold Petal v55" in cmd
+    assert "?v=55" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -508,7 +515,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v54"
+    assert payload["desk_build"] == "v55"
 
 
 def test_login_html_is_the_gate() -> None:
