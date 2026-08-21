@@ -131,7 +131,9 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
             return datetime.now(IST)
 
     def _session_flatten_why(self, now: datetime) -> str | None:
-        if self.holds_overnight:
+        from position_safety import is_session_intraday
+
+        if self.holds_overnight and not is_session_intraday(self.name):
             return None
         lo, hi, _mask = self._you_hours()
         if hi is not None and self.position != "flat":
@@ -140,8 +142,7 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
                 return f"you hours end {hi // 60:02d}:{hi % 60:02d}"
             if lo is not None and t < lo:
                 return f"preopen leftover before you hours {lo // 60:02d}:{lo % 60:02d}"
-        # Delivery: only S16 flattens at MARKET_CLOSE. Do not inherit S18's old EOD close.
-        return None
+        return super()._session_flatten_why(now)
 
     def _already_decided_close(self, closed_key: datetime) -> bool:
         if self._last_signal_at is None:

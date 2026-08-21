@@ -131,7 +131,24 @@ class S18OhlcVolHtfStrategy:
             self._prev = None
 
     def _session_flatten_why(self, now: datetime) -> str | None:
-        """S18/S19/S20 are delivery. Only S16 flattens at MARKET_CLOSE."""
+        if self.position == "flat":
+            return None
+        from position_safety import is_session_intraday
+
+        if not is_session_intraday(self.name):
+            return None
+        if now.weekday() >= 5:
+            return "weekend flatten"
+        oh, om = self._hhmm(self.market_open)
+        ch, cm = self._hhmm(self.market_close)
+        t = now.hour * 60 + now.minute
+        if t >= ch * 60 + cm:
+            return f"session close {self.market_close}"
+        if t < oh * 60 + om:
+            return f"preopen leftover before {self.market_open}"
+        today = now.strftime("%Y-%m-%d")
+        if self.entry_date and self.entry_date < today:
+            return f"overnight leftover {self.entry_date} flatten at {self.market_open}"
         return None
 
     def _flatten(self, px: float, why: str) -> SignalResult:

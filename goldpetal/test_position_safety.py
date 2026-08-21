@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from position_safety import (
@@ -15,6 +15,20 @@ from position_safety import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+S16 = "S16_HHHL_WICK_1H"
+
+
+@contextmanager
+def _intra_names(*names: str):
+    import position_safety as ps
+
+    orig = ps.session_intraday_names
+    wanted = frozenset(names)
+    ps.session_intraday_names = lambda: wanted  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        ps.session_intraday_names = orig  # type: ignore[assignment]
 
 
 class _Fake:
@@ -137,7 +151,8 @@ def test_s12_not_eod_flattened() -> None:
         position = "short"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten({"S12_HHHL30": _S12(), "S5_MINEDGE": _S5()})
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten({"S12_HHHL30": _S12(), "S5_MINEDGE": _S5()})
     names = {r["strategy"] for r in rows}
     assert names == set()
 
@@ -154,13 +169,14 @@ def test_s14_s15_not_eod_flattened() -> None:
         position = "short"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten(
-        {
-            "S14_WICK30_STRICT": _W("S14_WICK30_STRICT"),
-            "S15_WICK30_NOWICK": _W("S15_WICK30_NOWICK"),
-            "S5_MINEDGE": _S5(),
-        }
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {
+                "S14_WICK30_STRICT": _W("S14_WICK30_STRICT"),
+                "S15_WICK30_NOWICK": _W("S15_WICK30_NOWICK"),
+                "S5_MINEDGE": _S5(),
+            }
+        )
     names = {r["strategy"] for r in rows}
     assert names == set()
 
@@ -176,9 +192,10 @@ def test_s4_not_eod_flattened() -> None:
         position = "short"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten(
-        {"S4_OVERNIGHT": _S4(), "S5_MINEDGE": _S5()}
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {"S4_OVERNIGHT": _S4(), "S5_MINEDGE": _S5()}
+        )
     names = {r["strategy"] for r in rows}
     assert names == set()
 
@@ -195,9 +212,10 @@ def test_overnight_gap_not_eod_flattened() -> None:
         position = "short"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten(
-        {"OVERNIGHT_GAP": _Gap(), "S5_MINEDGE": _S5()}
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {"OVERNIGHT_GAP": _Gap(), "S5_MINEDGE": _S5()}
+        )
     names = {r["strategy"] for r in rows}
     assert names == set()
 
@@ -218,13 +236,14 @@ def test_s16_is_eod_flattened() -> None:
         position = "long"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten(
-        {
-            "S16_HHHL_WICK_1H": _S16(),
-            "S5_MINEDGE": _S5(),
-            "S8_NET_ZIGZAG": _S8(),
-        }
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {
+                "S16_HHHL_WICK_1H": _S16(),
+                "S5_MINEDGE": _S5(),
+                "S8_NET_ZIGZAG": _S8(),
+            }
+        )
     names = {r["strategy"] for r in rows}
     assert names == {"S16_HHHL_WICK_1H"}
 
@@ -241,9 +260,10 @@ def test_s18_is_not_eod_flattened() -> None:
         position = "long"
         entry_price = 15400.0
 
-    rows = intraday_open_for_flatten(
-        {"S18_OHLC_VOL_HTF": _S18(), "S16_HHHL_WICK_1H": _S16()}
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {"S18_OHLC_VOL_HTF": _S18(), "S16_HHHL_WICK_1H": _S16()}
+        )
     names = {r["strategy"] for r in rows}
     assert names == {"S16_HHHL_WICK_1H"}
 
@@ -255,7 +275,8 @@ def test_s19_is_not_eod_flattened() -> None:
         entry_price = 15400.0
         holds_overnight = True
 
-    rows = intraday_open_for_flatten({"S19_BODY_CLOSE_1H": _S19()})
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten({"S19_BODY_CLOSE_1H": _S19()})
     assert {r["strategy"] for r in rows} == set()
 
 
@@ -266,7 +287,8 @@ def test_s20_is_not_eod_flattened() -> None:
         entry_price = 15400.0
         holds_overnight = True
 
-    rows = intraday_open_for_flatten({"S20_FADE_HL": _S20()})
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten({"S20_FADE_HL": _S20()})
     assert {r["strategy"] for r in rows} == set()
 
 
@@ -288,9 +310,10 @@ def test_daily_amise_skips_eod_flatten_and_restores_overnight() -> None:
         position = "short"
         entry_price = 15100.0
 
-    rows = intraday_open_for_flatten(
-        {"S21_AMISE": _Daily(), "S22_AMISE": _Intra(), "S5_MINEDGE": _S5()}
-    )
+    with _intra_names(S16):
+        rows = intraday_open_for_flatten(
+            {"S21_AMISE": _Daily(), "S22_AMISE": _Intra(), "S5_MINEDGE": _S5()}
+        )
     names = {r["strategy"] for r in rows}
     assert names == set()
 
@@ -308,11 +331,12 @@ def test_daily_amise_skips_eod_flatten_and_restores_overnight() -> None:
     try:
         daily = _Daily()
         daily.position = "flat"
-        res = startup_reconcile(
-            {"S21_AMISE": daily},
-            mode="restore",
-            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"S21_AMISE": daily},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
         assert daily.position == "long"
         assert len(res["restored"]) == 1
         assert res["closes"] == []
@@ -380,11 +404,12 @@ def test_s16_overnight_is_closed_not_restored() -> None:
     ps.last_open_position = fake_last  # type: ignore[assignment]
     try:
         s16 = _Fake("S16_HHHL_WICK_1H")
-        res = startup_reconcile(
-            {"S16_HHHL_WICK_1H": s16},
-            mode="restore",
-            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"S16_HHHL_WICK_1H": s16},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
         assert s16.position == "flat"
         assert len(res["closes"]) == 1
         assert res["restored"] == []
@@ -407,11 +432,12 @@ def test_s18_overnight_is_restored() -> None:
     try:
         s18 = _Fake("S18_OHLC_VOL_HTF")
         s18.holds_overnight = True  # type: ignore[attr-defined]
-        res = startup_reconcile(
-            {"S18_OHLC_VOL_HTF": s18},
-            mode="restore",
-            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"S18_OHLC_VOL_HTF": s18},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
         assert s18.position == "short"
         assert len(res["restored"]) == 1
         assert res["closes"] == []
@@ -434,11 +460,12 @@ def test_s19_overnight_is_restored() -> None:
     try:
         s19 = _Fake("S19_BODY_CLOSE_1H")
         s19.holds_overnight = True  # type: ignore[attr-defined]
-        res = startup_reconcile(
-            {"S19_BODY_CLOSE_1H": s19},
-            mode="restore",
-            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"S19_BODY_CLOSE_1H": s19},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
         assert s19.position == "long"
         assert len(res["restored"]) == 1
         assert res["closes"] == []
@@ -461,11 +488,12 @@ def test_s20_overnight_is_restored() -> None:
     try:
         s20 = _Fake("S20_FADE_HL")
         s20.holds_overnight = True  # type: ignore[attr-defined]
-        res = startup_reconcile(
-            {"S20_FADE_HL": s20},
-            mode="restore",
-            now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"S20_FADE_HL": s20},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
         assert s20.position == "long"
         assert len(res["restored"]) == 1
         assert res["closes"] == []
@@ -488,15 +516,83 @@ def test_overnight_gap_restores_overnight() -> None:
     try:
         gap = _Fake("OVERNIGHT_GAP")
         gap.holds_overnight = True  # type: ignore[attr-defined]
-        res = startup_reconcile(
-            {"OVERNIGHT_GAP": gap},
-            mode="restore",
-            now=datetime(2026, 8, 21, 9, 2, tzinfo=IST),
-        )
+        with _intra_names(S16):
+            res = startup_reconcile(
+                {"OVERNIGHT_GAP": gap},
+                mode="restore",
+                now=datetime(2026, 8, 21, 9, 2, tzinfo=IST),
+            )
         assert gap.position == "long"
         assert gap.entry_date == "2026-08-20"
         assert len(res["restored"]) == 1
         assert res["closes"] == []
+    finally:
+        ps.last_open_position = orig  # type: ignore[assignment]
+
+
+def test_live_tab_intraday_tick_flattens_s5_not_s8() -> None:
+    class _S16:
+        name = S16
+        position = "long"
+        entry_price = 15400.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    class _S8:
+        name = "S8_NET_ZIGZAG"
+        position = "long"
+        entry_price = 15100.0
+
+    with _intra_names(S16, "S5_MINEDGE"):
+        rows = intraday_open_for_flatten(
+            {S16: _S16(), "S5_MINEDGE": _S5(), "S8_NET_ZIGZAG": _S8()}
+        )
+    assert {r["strategy"] for r in rows} == {S16, "S5_MINEDGE"}
+
+
+def test_empty_intraday_ticks_are_all_delivery() -> None:
+    class _S16:
+        name = S16
+        position = "long"
+        entry_price = 15400.0
+
+    class _S5:
+        name = "S5_MINEDGE"
+        position = "short"
+        entry_price = 15100.0
+
+    with _intra_names():
+        rows = intraday_open_for_flatten({S16: _S16(), "S5_MINEDGE": _S5()})
+    assert rows == []
+
+
+def test_ticked_s5_leftover_is_closed_not_restored() -> None:
+    import position_safety as ps
+
+    def fake_last(name: str):
+        if name == "S5_MINEDGE":
+            return OpenPosition(
+                name, "short", 15100.0, "2026-08-17T22:00:00", "SHORT", 15100.0
+            )
+        return None
+
+    orig = ps.last_open_position
+    ps.last_open_position = fake_last  # type: ignore[assignment]
+    try:
+        s5 = _Fake("S5_MINEDGE")
+        with _intra_names(S16, "S5_MINEDGE"):
+            res = startup_reconcile(
+                {"S5_MINEDGE": s5},
+                mode="restore",
+                now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
+            )
+        assert s5.position == "flat"
+        assert len(res["closes"]) == 1
+        assert res["restored"] == []
+        assert "Intraday" in res["closes"][0]["reason"]
     finally:
         ps.last_open_position = orig  # type: ignore[assignment]
 
@@ -544,4 +640,10 @@ if __name__ == "__main__":
     print("ok s20 overnight restore")
     test_overnight_gap_restores_overnight()
     print("ok overnight gap restore overnight")
+    test_live_tab_intraday_tick_flattens_s5_not_s8()
+    print("ok live-tab tick flatten")
+    test_empty_intraday_ticks_are_all_delivery()
+    print("ok empty ticks delivery")
+    test_ticked_s5_leftover_is_closed_not_restored()
+    print("ok ticked s5 leftover close")
     print("ALL test_position_safety OK")

@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v49: S16 is the only EOD flatten; other books are delivery -->
+<!-- gp-header-v50: Live-tab Intraday tick flattens that book at MARKET_CLOSE -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v49</div>
+      <div class="clock" id="clock">IST — · v50</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -254,7 +254,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:.85rem">Live positions</h2>
-        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only. <b>S16</b> is the only session book — it flattens at MARKET_CLOSE. S5/S8/S13 and the rest are delivery and hold overnight. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
+        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only. Tick <b>Intraday</b> on Live-eligible books and Save to flatten that book at MARKET_CLOSE. Unticked books are delivery and hold overnight. Overnight gap still exits at next open. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -283,10 +283,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Lots = contracts (1–ceiling). ₹ amount is the money you type for that book; Angel lots = floor(₹ / LTP), then ceiling. Do not use the paper split. Then Save, type LIVE, Arm live, RESTART. After you are armed, only Save + RESTART to change size.</p>
+        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked; new books get the same box). Unticked = delivery overnight. Then Save, type LIVE, Arm live, RESTART. After you are armed, only Save + RESTART to change size.</p>
         <table>
           <thead>
-            <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th></th></tr>
+            <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th>Intraday</th><th></th></tr>
           </thead>
           <tbody id="live-books"></tbody>
         </table>
@@ -709,7 +709,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v49";
+    if (clock) clock.textContent = "IST " + ist + " · v50";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1956,6 +1956,8 @@ function renderDesk(d) {
       const sizeMode = b.live_size_mode || "";
       const lotsOn = sizeMode === "lots";
       const capOn = sizeMode === "capital";
+      const intraOn = !!b.intraday;
+      const gap = name === "OVERNIGHT_GAP";
       return `<tr>
         <td>${esc(shortName(name))}</td>
         <td>${esc(posBit)}</td>
@@ -1965,9 +1967,10 @@ function renderDesk(d) {
         <td class="num"><input class="cap" type="number" data-lots="${esc(name)}" min="1" max="1000" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
         <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
         <td class="num"><input class="cap" type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
+        <td><input type="checkbox" data-intraday="${esc(name)}" ${intraOn ? "checked" : ""} ${gap ? "disabled" : ""} title="${gap ? "closes at next open" : "flatten at MARKET_CLOSE"}"/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="9">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="10">no book at 40% WR% AC yet</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -2230,6 +2233,15 @@ function currentInBot(desk) {
 function collectLivePicks() {
   return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
 }
+function collectIntraday() {
+  const boxes = [...document.querySelectorAll("input[data-intraday]")];
+  if (!boxes.length) return null;
+  const visible = new Set(boxes.map((el) => el.dataset.intraday));
+  const checked = boxes.filter((el) => el.checked && !el.disabled).map((el) => el.dataset.intraday);
+  const prev = ((lastDesk || {}).live_desk || {}).intraday_books || [];
+  const kept = prev.filter((n) => n && !visible.has(n));
+  return [...new Set(checked.concat(kept))];
+}
 function collectAllocations() {
   const capBooks = [...document.querySelectorAll('input[data-size="capital"]:checked')];
   const wallet = Number(($("cap-total") && $("cap-total").value) || 0);
@@ -2265,6 +2277,8 @@ function collectArmBody(mode) {
     live,
     allocations: collectAllocations(),
   };
+  const intra = collectIntraday();
+  if (intra !== null) body.intraday = intra;
   const wallet = $("cap-total") && $("cap-total").value;
   if (wallet !== "" && wallet != null) body.total_capital_inr = Number(wallet);
   const dayLoss = $("cap-dd") && $("cap-dd").value;

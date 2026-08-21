@@ -27,6 +27,7 @@ FILES=(
   goldpetal/portfolio.py
   goldpetal/run_strategy.py
   goldpetal/position_safety.py
+  goldpetal/strategy_s16.py
   goldpetal/strategy_s18.py
   goldpetal/strategy_s19.py
   goldpetal/strategy_s20.py

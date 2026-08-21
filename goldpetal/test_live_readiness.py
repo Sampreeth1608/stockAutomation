@@ -67,6 +67,11 @@ def test_readiness_paper_by_default() -> None:
     s16 = next(b for b in r["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
     assert s16["live_approved"] is False
     assert s16["live_qty"] == 0
+    assert s16["intraday"] is True
+    s18 = next(b for b in r["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
+    assert s18["intraday"] is False
+    gap = next(b for b in r["books"] if b["strategy"] == "OVERNIGHT_GAP")
+    assert gap["intraday"] is False
     assert "enables" in r
     assert "S16_HHHL_WICK_1H" in r["enables"]
     assert "S18_OHLC_VOL_HTF" in r["enables"]
@@ -649,6 +654,134 @@ def test_apply_desk_arm_empty_in_bot_keeps_paper_enables() -> None:
         capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
 
 
+def test_load_state_intraday_default_vs_empty() -> None:
+    import json
+
+    from control_state import DEFAULT_INTRADAY_BOOKS, load_state
+
+    td = tempfile.TemporaryDirectory()
+    try:
+        p = Path(td.name) / "state.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "emergency_off": False,
+                    "trading_enabled": True,
+                    "live_unlocked": False,
+                    "paper_approved": [],
+                    "live_approved": [],
+                    "force_disabled": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        st = load_state(path=p)
+        assert st.intraday_books == list(DEFAULT_INTRADAY_BOOKS)
+
+        p.write_text(json.dumps({"intraday_books": []}), encoding="utf-8")
+        st = load_state(path=p)
+        assert st.intraday_books == []
+    finally:
+        td.cleanup()
+
+
+def test_apply_desk_books_intraday_ticks() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S5=true\nENABLE_S16=true\nDRY_RUN=true\nSECRET=keep\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        from control_state import load_state
+        from live_readiness import apply_desk_books
+
+        res = apply_desk_books(
+            ["S5_MINEDGE", "S16_HHHL_WICK_1H"],
+            ["S5_MINEDGE"],
+            path=env,
+            state_path=state,
+            intraday=[
+                "S16_HHHL_WICK_1H",
+                "S5_MINEDGE",
+                "OVERNIGHT_GAP",
+                "S25_AMISE",
+            ],
+        )
+        assert res["ok"] is True
+        books = list(load_state(path=state).intraday_books)
+        assert "S16_HHHL_WICK_1H" in books
+        assert "S5_MINEDGE" in books
+        assert "S25_AMISE" in books
+        assert "OVERNIGHT_GAP" not in books
+        assert books == res["intraday_books"]
+
+        kept = apply_desk_books(
+            ["S5_MINEDGE", "S16_HHHL_WICK_1H"],
+            ["S5_MINEDGE"],
+            path=env,
+            state_path=state,
+        )
+        assert kept["ok"] is True
+        assert load_state(path=state).intraday_books == books
+
+        cleared = apply_desk_books(
+            ["S5_MINEDGE", "S16_HHHL_WICK_1H"],
+            ["S5_MINEDGE"],
+            path=env,
+            state_path=state,
+            intraday=[],
+        )
+        assert cleared["ok"] is True
+        assert load_state(path=state).intraday_books == []
+        assert cleared["intraday_books"] == []
+    finally:
+        td.cleanup()
+
+
+def test_apply_desk_arm_intraday_ticks() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        import capital
+        import control_state
+        from live_readiness import apply_desk_arm
+
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S5=true\nENABLE_S16=true\nDRY_RUN=true\nLIVE_MAX_LOTS=1\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        cap = Path(td.name) / "capital.json"
+        control_state.STATE_PATH = state
+        capital.CAPITAL_PATH = cap
+        res = apply_desk_arm(
+            mode="paper",
+            confirm="",
+            live_max_lots=1,
+            in_bot=["S5_MINEDGE", "S16_HHHL_WICK_1H"],
+            live=["S5_MINEDGE"],
+            intraday=["S5_MINEDGE", "S16_HHHL_WICK_1H", "OVERNIGHT_GAP"],
+            path=env,
+            state_path=state,
+            capital_path=cap,
+        )
+        assert res["ok"] is True
+        st = control_state.load_state(path=state)
+        assert "S5_MINEDGE" in st.intraday_books
+        assert "S16_HHHL_WICK_1H" in st.intraday_books
+        assert "OVERNIGHT_GAP" not in st.intraday_books
+        assert st.intraday_books == res["books"]["intraday_books"]
+    finally:
+        td.cleanup()
+        import capital as capital_mod
+        import control_state as cs
+
+        cs.STATE_PATH = cs.CONTROL_DIR / "state.json"
+        capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -696,4 +829,10 @@ if __name__ == "__main__":
     print("ok arm paper")
     test_apply_desk_arm_empty_in_bot_keeps_paper_enables()
     print("ok arm keeps paper In")
+    test_load_state_intraday_default_vs_empty()
+    print("ok intraday default vs empty")
+    test_apply_desk_books_intraday_ticks()
+    print("ok desk books intraday")
+    test_apply_desk_arm_intraday_ticks()
+    print("ok arm intraday")
     print("ALL test_live_readiness OK")

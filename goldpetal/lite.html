@@ -105,9 +105,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
       <input id="size-word" placeholder="SIZE if ceiling &gt; 10" autocomplete="off"/>
     </div>
-    <p class="hint">Tick Lots = contracts (1–ceiling, hard max 1000). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). That number is live capital — not the paper wallet split. Ceiling above 10: type SIZE, Save, RESTART. Do not Arm live again if you are already armed.</p>
+    <p class="hint">Tick Lots = contracts (1–ceiling, hard max 1000). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked). Unticked = delivery overnight.</p>
     <table style="margin-top:.45rem">
-      <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Lots</th><th>qty</th><th>₹</th><th>amount</th><th></th></tr></thead>
+      <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Lots</th><th>qty</th><th>₹</th><th>amount</th><th>Intraday</th><th></th></tr></thead>
       <tbody id="live-books"></tbody>
     </table>
     <div class="row" style="margin-top:.45rem">
@@ -322,6 +322,8 @@ function render(d) {
       const sizeMode = b.live_size_mode || "";
       const lotsOn = sizeMode === "lots";
       const capOn = sizeMode === "capital";
+      const intraOn = !!b.intraday;
+      const gap = name === "OVERNIGHT_GAP";
       return `<tr>
         <td>${shortName(name)}</td>
         <td>${esc(posBit)}</td>
@@ -331,9 +333,10 @@ function render(d) {
         <td><input type="number" data-lots="${esc(name)}" min="1" max="1000" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
         <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
         <td><input type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
+        <td><input type="checkbox" data-intraday="${esc(name)}" ${intraOn ? "checked" : ""} ${gap ? "disabled" : ""} title="${gap ? "closes at next open" : "flatten at MARKET_CLOSE"}"/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="9">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="10">no book at 40% WR% AC yet</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -505,6 +508,15 @@ function currentInBot(desk) {
 function collectLivePicks() {
   return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
 }
+function collectIntraday() {
+  const boxes = [...document.querySelectorAll("input[data-intraday]")];
+  if (!boxes.length) return null;
+  const visible = new Set(boxes.map((el) => el.dataset.intraday));
+  const checked = boxes.filter((el) => el.checked && !el.disabled).map((el) => el.dataset.intraday);
+  const prev = ((lastLite || {}).live_desk || {}).intraday_books || [];
+  const kept = prev.filter((n) => n && !visible.has(n));
+  return [...new Set(checked.concat(kept))];
+}
 function collectAllocations() {
   const capBooks = [...document.querySelectorAll('input[data-size="capital"]:checked')];
   const wallet = Number(($("cap-total") && $("cap-total").value) || 0);
@@ -540,6 +552,8 @@ function collectArmBody(mode) {
     live,
     allocations: collectAllocations(),
   };
+  const intra = collectIntraday();
+  if (intra !== null) body.intraday = intra;
   const wallet = $("cap-total") && $("cap-total").value;
   if (wallet !== "" && wallet != null) body.total_capital_inr = Number(wallet);
   const dayLoss = $("cap-dd") && $("cap-dd").value;

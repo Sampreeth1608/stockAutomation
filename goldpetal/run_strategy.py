@@ -458,7 +458,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S16      : 1h HH/LL-or-wick, only session book — flatten at MARKET_CLOSE "
+        f"S16      : 1h HH/LL-or-wick, Live-tab Intraday (default on) — flatten at MARKET_CLOSE "
         f"[{'ON' if portfolio.is_enabled(strategy_s16.name) else 'OFF'}] "
         f"{strategy_s16.status_line}",
         flush=True,
@@ -1876,7 +1876,7 @@ def run_once(
             # Desk Exit button: flatten that book only (after this tick's entries)
             emit_desk_flatten(now)
 
-            # EOD flatten: S16 only (session book). S5/S8/S13/S18/… are delivery.
+            # EOD flatten: Live-tab Intraday ticks (S16 default). Delivery books hold.
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
             if in_eod_flatten_window(now, market_close=close_s):
                 opens = intraday_open_for_flatten(strat_map)
@@ -1901,7 +1901,7 @@ def run_once(
                         action="CLOSE",
                         position_after="flat",
                         reason=(
-                            f"EOD flatten S16 session was_{side} "
+                            f"EOD flatten Intraday was_{side} "
                             f"(last {os.getenv('EOD_FLATTEN_MINUTES', '5')}m "
                             f"before {close_s})"
                         ),

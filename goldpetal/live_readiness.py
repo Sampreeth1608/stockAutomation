@@ -242,13 +242,14 @@ def apply_desk_books(
     path: Path | None = None,
     state_path: Path | None = None,
     qualified: list[str] | frozenset[str] | None = None,
+    intraday: list[str] | None = None,
 ) -> dict[str, Any]:
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
     Live pick is seed four, or a paper book that currently qualifies at 40% WR% AC.
     """
-    from control_state import load_state, paper_strategy_names, set_live_approved
+    from control_state import load_state, paper_strategy_names, set_intraday_books, set_live_approved
 
     known = list(paper_strategy_names())
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
@@ -268,10 +269,17 @@ def apply_desk_books(
         path=state_path,
         note="desk books: live picks (still need unlock + DRY_RUN=false)",
     )
+    if intraday is not None:
+        st = set_intraday_books(
+            [str(n).strip() for n in intraday if str(n).strip()],
+            path=state_path,
+            note="desk books: Live-tab Intraday ticks (flatten at MARKET_CLOSE)",
+        )
     return {
         "ok": bool(en.get("ok")),
         "enabled": in_set,
         "live_approved": list(st.live_approved),
+        "intraday_books": list(st.intraday_books or []),
         "skipped_live_not_in_bot": skipped,
         "restart_needed": True,
         "applied": en.get("applied") or {},
@@ -294,6 +302,7 @@ def apply_desk_arm(
     live_max_lots: int = 1,
     in_bot: list[str] | None = None,
     live: list[str] | None = None,
+    intraday: list[str] | None = None,
     total_capital_inr: float | None = None,
     daily_loss_limit_inr: float | None = None,
     allocations: list[dict[str, Any]] | None = None,
@@ -336,6 +345,7 @@ def apply_desk_arm(
         live_names,
         path=path,
         state_path=state_path,
+        intraday=intraday,
     )
     if not books.get("ok"):
         return {**books, "ok": False}
@@ -483,6 +493,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
     dry = bool(env["dry_run"])
     live_ok, _why = is_live_mode_allowed()
     approved = list(st.live_approved or [])
+    intra = set(st.intraday_books or [])
     stats = summaries if summaries is not None else paper_summaries_for_live()
     armed = any(book_may_go_live(n, summaries=stats) for n in approved)
     from analytics.env_bridge import strategy_enable_snapshot
@@ -510,6 +521,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
                 "live_budget_inr": float(sb.live_budget_inr or 0) if sb is not None else 0.0,
                 "live_qty": live_qty_for(name, cap=cap, plan=plan) if name in approved else 0,
             }
+        extra["intraday"] = name in intra and name not in {"OVERNIGHT_GAP"}
         books.append(
             _live_book_row(name, approved=approved, summaries=stats, extra=extra or None)
         )
@@ -521,6 +533,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
         "safe_live_max_lots": SAFE_LIVE_MAX_LOTS,
         "enables": enables,
         "books": books,
+        "intraday_books": sorted(intra),
         "live_wr_min_pct": LIVE_WR_MIN_PCT,
         "would_place_real_orders": bool(live_ok and not dry and armed),
     }
@@ -536,6 +549,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     bot_ok = age is not None and age <= 180
     cap = _live_max()
     approved = list(st.live_approved or [])
+    intra = set(st.intraday_books or [])
     stats = paper_summaries_for_live()
     armed = any(book_may_go_live(n, summaries=stats) for n in approved)
 
@@ -622,6 +636,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
                     "live_qty": qty,
                     "ram": ram_pos,
                     "warn_100": paper_lots >= 100,
+                    "intraday": name in intra and name not in {"OVERNIGHT_GAP"},
                 },
             )
         )
@@ -644,6 +659,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "steps": steps,
         "enables": enables,
         "books": books,
+        "intraday_books": sorted(intra),
         "bot_health": {
             "event": health.get("event"),
             "ts_ist": health.get("ts_ist"),

@@ -873,7 +873,15 @@ class ControlHandler(BaseHTTPRequestHandler):
                     for s in (data.get("live") or [])
                     if str(s).strip()
                 ]
-                res = apply_desk_books(in_bot, live)
+                intra_raw = data.get("intraday")
+                intra = None
+                if intra_raw is not None:
+                    intra = [
+                        str(s).strip()
+                        for s in (intra_raw or [])
+                        if str(s).strip()
+                    ]
+                res = apply_desk_books(in_bot, live, intraday=intra)
                 status = 200 if res.get("ok") else 400
                 res = {**res, "live_desk": live_readiness()}
                 self._send(*_json_bytes(res, status))
@@ -933,6 +941,15 @@ class ControlHandler(BaseHTTPRequestHandler):
                         for s in (data.get("live") or [])
                         if str(s).strip()
                     ],
+                    intraday=(
+                        [
+                            str(s).strip()
+                            for s in (data.get("intraday") or [])
+                            if str(s).strip()
+                        ]
+                        if data.get("intraday") is not None
+                        else None
+                    ),
                     total_capital_inr=total,
                     daily_loss_limit_inr=day_loss,
                     allocations=allocations,

@@ -124,29 +124,43 @@ def test_on_bar_row_uses_prev() -> None:
 
 
 def test_flatten_at_market_close() -> None:
-    s = _s16()
-    s.on_tick(_t(9, 0), 100.0)
-    s.on_tick(_t(9, 59), 104.0)
-    s.on_tick(_t(10, 0), 100.0)
-    s.on_tick(_t(10, 10), 120.0)
-    s.on_tick(_t(10, 59), 110.0)
-    buy = s.on_tick(_t(11, 0), 110.0)
-    assert buy is not None and buy.action == "BUY"
-    close = s.on_tick(_t(23, 30), 111.0)
-    assert close is not None and close.action == "CLOSE"
-    assert s.position == "flat"
-    assert "session close" in (close.reason or "")
+    import position_safety as ps
+
+    orig = ps.is_session_intraday
+    ps.is_session_intraday = lambda name: str(name) == "S16_HHHL_WICK_1H"  # type: ignore[assignment]
+    try:
+        s = _s16()
+        s.on_tick(_t(9, 0), 100.0)
+        s.on_tick(_t(9, 59), 104.0)
+        s.on_tick(_t(10, 0), 100.0)
+        s.on_tick(_t(10, 10), 120.0)
+        s.on_tick(_t(10, 59), 110.0)
+        buy = s.on_tick(_t(11, 0), 110.0)
+        assert buy is not None and buy.action == "BUY"
+        close = s.on_tick(_t(23, 30), 111.0)
+        assert close is not None and close.action == "CLOSE"
+        assert s.position == "flat"
+        assert "session close" in (close.reason or "")
+    finally:
+        ps.is_session_intraday = orig  # type: ignore[assignment]
 
 
 def test_overnight_leftover_closes_at_next_open() -> None:
-    s = _s16()
-    s.position = "long"
-    s.entry_price = 110.0
-    s.entry_date = "2026-08-16"
-    close = s.on_tick(_t(9, 0), 112.0)
-    assert close is not None and close.action == "CLOSE"
-    assert s.position == "flat"
-    assert "overnight leftover" in (close.reason or "")
+    import position_safety as ps
+
+    orig = ps.is_session_intraday
+    ps.is_session_intraday = lambda name: str(name) == "S16_HHHL_WICK_1H"  # type: ignore[assignment]
+    try:
+        s = _s16()
+        s.position = "long"
+        s.entry_price = 110.0
+        s.entry_date = "2026-08-16"
+        close = s.on_tick(_t(9, 0), 112.0)
+        assert close is not None and close.action == "CLOSE"
+        assert s.position == "flat"
+        assert "overnight leftover" in (close.reason or "")
+    finally:
+        ps.is_session_intraday = orig  # type: ignore[assignment]
 
 
 def test_yesterday_prev_does_not_fill_first_hour() -> None:

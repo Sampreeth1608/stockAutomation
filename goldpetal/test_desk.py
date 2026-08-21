@@ -84,11 +84,15 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v49" in html
-    assert " · v49" in html
+    assert "gp-header-v50" in html
+    assert " · v50" in html
     assert "not today's Live Lots" in html
     assert "Raising Live Lots does not rewrite" in html
-    assert "is the only session book" in html
+    assert "data-intraday" in html
+    assert "Intraday" in html
+    assert "function collectIntraday" in html
+    assert "intra !== null" in html
+    assert "lastDesk" in html.split("function collectIntraday")[1].split("function collectAllocations")[0]
     assert "waiting for desk" in html
     assert "Gold Petal hours" in html
     assert "waiting for desk…" in html
@@ -276,6 +280,11 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Save strategies + live size" in html
     assert 'data-size="lots"' in html
     assert 'data-size="capital"' in html
+    assert "data-intraday" in html
+    assert "Intraday" in html
+    assert "function collectIntraday" in html
+    assert "intra !== null" in html
+    assert "lastLite" in html.split("function collectIntraday")[1].split("function collectAllocations")[0]
     assert "Tick Lots" in html
     assert "liveMoneyDirty" in html
     assert "liveBudgetDisplay" in html
@@ -427,9 +436,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     sync = (ROOT / "scripts" / "sync_desk_runtime.sh").read_text(encoding="utf-8")
     assert "goldpetal/live_orders.py" in sync
     assert "goldpetal/live_readiness.py" in sync
+    assert "goldpetal/control_state.py" in sync
     assert "goldpetal/market_mood.py" in sync
     assert "goldpetal/run_strategy.py" in sync
     assert "goldpetal/position_safety.py" in sync
+    assert "goldpetal/strategy_s16.py" in sync
     assert "goldpetal/strategy_s18.py" in sync
     assert "goldpetal/trade_learner.py" in sync
     assert "goldpetal/entry_gates.py" in sync
@@ -450,7 +461,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v49" in cmd
+    assert "Gold Petal v50" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

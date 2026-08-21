@@ -21,6 +21,11 @@ IST = ZoneInfo("Asia/Kolkata")
 CONTROL_DIR = Path(__file__).resolve().parent / "data" / "control"
 STATE_PATH = CONTROL_DIR / "state.json"
 
+# Live-tab Intraday ticks. S16 starts ticked; operator Save can add/remove any book.
+DEFAULT_INTRADAY_BOOKS: tuple[str, ...] = ("S16_HHHL_WICK_1H",)
+# Overnight gap exits at next open — never EOD-flatten even if ticked.
+EOD_NEVER_BOOKS: frozenset[str] = frozenset({"OVERNIGHT_GAP"})
+
 _lock = threading.Lock()
 
 
@@ -38,6 +43,8 @@ class ControlState:
     paper_approved: list[str] = field(default_factory=list)
     # Strategies approved to go live (still need live_unlocked + DRY_RUN=false).
     live_approved: list[str] = field(default_factory=list)
+    # Live-tab Intraday ticks: flatten these at MARKET_CLOSE. Default S16.
+    intraday_books: list[str] = field(default_factory=lambda: list(DEFAULT_INTRADAY_BOOKS))
     # Strategies force-disabled from the panel (overrides ENABLE_* for entries).
     force_disabled: list[str] = field(default_factory=list)
     updated_at_ist: str = ""
@@ -74,12 +81,21 @@ def load_state(path: Path | None = None) -> ControlState:
         return st
     with _lock:
         raw = json.loads(path.read_text(encoding="utf-8"))
+    if "intraday_books" in raw:
+        intra = [
+            str(s).strip()
+            for s in (raw.get("intraday_books") or [])
+            if str(s).strip() and str(s).strip() not in EOD_NEVER_BOOKS
+        ]
+    else:
+        intra = list(DEFAULT_INTRADAY_BOOKS)
     return ControlState(
         emergency_off=bool(raw.get("emergency_off", False)),
         trading_enabled=bool(raw.get("trading_enabled", True)),
         live_unlocked=bool(raw.get("live_unlocked", False)),
         paper_approved=list(raw.get("paper_approved") or []),
         live_approved=list(raw.get("live_approved") or []),
+        intraday_books=intra,
         force_disabled=list(raw.get("force_disabled") or []),
         updated_at_ist=str(raw.get("updated_at_ist") or ""),
         note=str(raw.get("note") or ""),
@@ -197,6 +213,32 @@ def set_live_approved(
     return save_state(st, path=path)
 
 
+def set_intraday_books(
+    strategies: list[str],
+    *,
+    path: Path | None = None,
+    note: str = "",
+) -> ControlState:
+    """Replace Live-tab Intraday ticks. Those books flatten at MARKET_CLOSE.
+
+    Overnight gap is never stored (it exits at next open). Missing key on
+    old state.json still defaults to S16.
+    """
+    st = load_state(path)
+    seen: list[str] = []
+    for raw in strategies:
+        name = str(raw or "").strip()
+        if not name or name in EOD_NEVER_BOOKS:
+            continue
+        if name not in seen:
+            seen.append(name)
+    st.intraday_books = seen
+    st.note = note or (
+        f"intraday_books set: {', '.join(seen)}" if seen else "intraday_books cleared (all delivery)"
+    )
+    return save_state(st, path=path)
+
+
 # Known strategy ids (paper + live). Used for allowlist lock.
 # S11 stays in ALL (ML tab / packs) but is off the slim paper path.
 CORE_STRATEGY_NAMES: tuple[str, ...] = (
@@ -278,6 +320,7 @@ def reject_strategy(strategy: str, path: Path | None = None) -> ControlState:
     st = load_state(path)
     st.paper_approved = [s for s in st.paper_approved if s != strategy]
     st.live_approved = [s for s in st.live_approved if s != strategy]
+    st.intraday_books = [s for s in (st.intraday_books or []) if s != strategy]
     if strategy not in st.force_disabled:
         st.force_disabled.append(strategy)
     st.note = f"rejected / force-disabled: {strategy}"
