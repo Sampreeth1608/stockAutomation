@@ -1,8 +1,9 @@
 """AMISE slot books S21, S22, … — compiled factory genomes on the genome TF.
 
-FLIP at the finished bar close. Intraday flattens at MARKET_CLOSE. Daily
-swing holds overnight and flattens on the Gold Petal roll (same rule as
-S13). Paper ENABLE is written only after Lab Approve. Not a live unlock.
+FLIP at the finished bar close. Delivery — holds overnight (only S16
+flattens at MARKET_CLOSE). Daily swing also flattens on the Gold Petal
+roll (same rule as S13). You-hours mimic still exits when that window ends.
+Paper ENABLE is written only after Lab Approve. Not a live unlock.
 Keep DRY_RUN=true.
 """
 
@@ -93,7 +94,7 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
 
     @property
     def status_line(self) -> str:
-        hold = "overnight" if self.holds_overnight else "flatten-at-close"
+        hold = "overnight" if self.holds_overnight else "delivery"
         return (
             f"TF={self._tf.label} AMISE {self.genome.name} "
             f"{self.genome.direction} FLIP {hold} "
@@ -139,7 +140,8 @@ class AmiseSlotStrategy(S18OhlcVolHtfStrategy):
                 return f"you hours end {hi // 60:02d}:{hi % 60:02d}"
             if lo is not None and t < lo:
                 return f"preopen leftover before you hours {lo // 60:02d}:{lo % 60:02d}"
-        return super()._session_flatten_why(now)
+        # Delivery: only S16 flattens at MARKET_CLOSE. Do not inherit S18's old EOD close.
+        return None
 
     def _already_decided_close(self, closed_key: datetime) -> bool:
         if self._last_signal_at is None:

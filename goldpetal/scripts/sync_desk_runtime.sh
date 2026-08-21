@@ -26,6 +26,11 @@ FILES=(
   goldpetal/market_mood.py
   goldpetal/portfolio.py
   goldpetal/run_strategy.py
+  goldpetal/position_safety.py
+  goldpetal/strategy_s18.py
+  goldpetal/strategy_s19.py
+  goldpetal/strategy_s20.py
+  goldpetal/strategy_amise.py
   goldpetal/trade_learner.py
   goldpetal/entry_gates.py
   goldpetal/amise.py

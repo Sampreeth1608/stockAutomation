@@ -2,8 +2,8 @@
 
 Base AND: green/red, C vs prevC, HH/LL, vol up, C vs completed day.
 The learner may replace that pack from data/learn/s18/active.json.
-FLIP at the finished hour close. Flatten at MARKET_CLOSE. Not live.
-Paper 100 lots ≠ live.
+FLIP at the finished hour close. Delivery — holds overnight. Only S16
+flattens at MARKET_CLOSE. Not live. Paper 100 lots ≠ live.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 class S18OhlcVolHtfStrategy:
     name = S18_NAME
+    holds_overnight = True
 
     def __init__(
         self,
@@ -81,7 +82,7 @@ class S18OhlcVolHtfStrategy:
     def status_line(self) -> str:
         return (
             f"TF={self.bar_minutes}m pack={self.pack.name} "
-            f"1h AND+ticks FLIP flatten-at-close "
+            f"1h AND+ticks FLIP delivery "
             f"{self.market_open}-{self.market_close} "
             f"{self.bar_debug} skip={self.last_skip or '-'} pos={self.position}"
         )
@@ -130,20 +131,7 @@ class S18OhlcVolHtfStrategy:
             self._prev = None
 
     def _session_flatten_why(self, now: datetime) -> str | None:
-        if self.position == "flat":
-            return None
-        if now.weekday() >= 5:
-            return "weekend flatten"
-        oh, om = self._hhmm(self.market_open)
-        ch, cm = self._hhmm(self.market_close)
-        t = now.hour * 60 + now.minute
-        if t >= ch * 60 + cm:
-            return f"session close {self.market_close}"
-        if t < oh * 60 + om:
-            return f"preopen leftover before {self.market_open}"
-        today = now.strftime("%Y-%m-%d")
-        if self.entry_date and self.entry_date < today:
-            return f"overnight leftover {self.entry_date} flatten at {self.market_open}"
+        """S18/S19/S20 are delivery. Only S16 flattens at MARKET_CLOSE."""
         return None
 
     def _flatten(self, px: float, why: str) -> SignalResult:

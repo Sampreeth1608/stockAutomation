@@ -395,7 +395,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S5       : min-edge "
+        f"S5       : min-edge (delivery — not EOD flattened) "
         f"[{'ON' if portfolio.is_enabled(strategy_s5.name) else 'OFF'}] "
         f"{strategy_s5.status_line}",
         flush=True,
@@ -419,7 +419,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S8       : ALIGN E/H/X models (default fat_tp_flip@50t) "
+        f"S8       : ALIGN E/H/X models (delivery — not EOD flattened) "
         f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
         f"{strategy_s8.status_line}",
         flush=True,
@@ -458,7 +458,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S16      : 1h HH/LL-or-wick, intraday flatten at close "
+        f"S16      : 1h HH/LL-or-wick, only session book — flatten at MARKET_CLOSE "
         f"[{'ON' if portfolio.is_enabled(strategy_s16.name) else 'OFF'}] "
         f"{strategy_s16.status_line}",
         flush=True,
@@ -1876,7 +1876,7 @@ def run_once(
             # Desk Exit button: flatten that book only (after this tick's entries)
             emit_desk_flatten(now)
 
-            # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
+            # EOD flatten: S16 only (session book). S5/S8/S13/S18/… are delivery.
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
             if in_eod_flatten_window(now, market_close=close_s):
                 opens = intraday_open_for_flatten(strat_map)
@@ -1901,7 +1901,7 @@ def run_once(
                         action="CLOSE",
                         position_after="flat",
                         reason=(
-                            f"EOD flatten intraday was_{side} "
+                            f"EOD flatten S16 session was_{side} "
                             f"(last {os.getenv('EOD_FLATTEN_MINUTES', '5')}m "
                             f"before {close_s})"
                         ),

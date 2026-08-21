@@ -139,8 +139,7 @@ def test_s12_not_eod_flattened() -> None:
 
     rows = intraday_open_for_flatten({"S12_HHHL30": _S12(), "S5_MINEDGE": _S5()})
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S12_HHHL30" not in names
+    assert names == set()
 
 
 def test_s14_s15_not_eod_flattened() -> None:
@@ -163,9 +162,7 @@ def test_s14_s15_not_eod_flattened() -> None:
         }
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S14_WICK30_STRICT" not in names
-    assert "S15_WICK30_NOWICK" not in names
+    assert names == set()
 
 
 def test_s4_not_eod_flattened() -> None:
@@ -183,8 +180,7 @@ def test_s4_not_eod_flattened() -> None:
         {"S4_OVERNIGHT": _S4(), "S5_MINEDGE": _S5()}
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S4_OVERNIGHT" not in names
+    assert names == set()
 
 
 def test_overnight_gap_not_eod_flattened() -> None:
@@ -203,8 +199,7 @@ def test_overnight_gap_not_eod_flattened() -> None:
         {"OVERNIGHT_GAP": _Gap(), "S5_MINEDGE": _S5()}
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "OVERNIGHT_GAP" not in names
+    assert names == set()
 
 
 def test_s16_is_eod_flattened() -> None:
@@ -218,69 +213,61 @@ def test_s16_is_eod_flattened() -> None:
         position = "short"
         entry_price = 15100.0
 
+    class _S8:
+        name = "S8_NET_ZIGZAG"
+        position = "long"
+        entry_price = 15100.0
+
     rows = intraday_open_for_flatten(
-        {"S16_HHHL_WICK_1H": _S16(), "S5_MINEDGE": _S5()}
+        {
+            "S16_HHHL_WICK_1H": _S16(),
+            "S5_MINEDGE": _S5(),
+            "S8_NET_ZIGZAG": _S8(),
+        }
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S16_HHHL_WICK_1H" in names
+    assert names == {"S16_HHHL_WICK_1H"}
 
 
-def test_s18_is_eod_flattened() -> None:
+def test_s18_is_not_eod_flattened() -> None:
     class _S18:
         name = "S18_OHLC_VOL_HTF"
         position = "short"
         entry_price = 15400.0
+        holds_overnight = True
 
-    class _S5:
-        name = "S5_MINEDGE"
-        position = "short"
-        entry_price = 15100.0
+    class _S16:
+        name = "S16_HHHL_WICK_1H"
+        position = "long"
+        entry_price = 15400.0
 
     rows = intraday_open_for_flatten(
-        {"S18_OHLC_VOL_HTF": _S18(), "S5_MINEDGE": _S5()}
+        {"S18_OHLC_VOL_HTF": _S18(), "S16_HHHL_WICK_1H": _S16()}
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S18_OHLC_VOL_HTF" in names
+    assert names == {"S16_HHHL_WICK_1H"}
 
 
-def test_s19_is_eod_flattened() -> None:
+def test_s19_is_not_eod_flattened() -> None:
     class _S19:
         name = "S19_BODY_CLOSE_1H"
         position = "long"
         entry_price = 15400.0
+        holds_overnight = True
 
-    class _S5:
-        name = "S5_MINEDGE"
-        position = "short"
-        entry_price = 15100.0
-
-    rows = intraday_open_for_flatten(
-        {"S19_BODY_CLOSE_1H": _S19(), "S5_MINEDGE": _S5()}
-    )
-    names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S19_BODY_CLOSE_1H" in names
+    rows = intraday_open_for_flatten({"S19_BODY_CLOSE_1H": _S19()})
+    assert {r["strategy"] for r in rows} == set()
 
 
-def test_s20_is_eod_flattened() -> None:
+def test_s20_is_not_eod_flattened() -> None:
     class _S20:
         name = "S20_FADE_HL"
         position = "long"
         entry_price = 15400.0
+        holds_overnight = True
 
-    class _S5:
-        name = "S5_MINEDGE"
-        position = "short"
-        entry_price = 15100.0
-
-    rows = intraday_open_for_flatten(
-        {"S20_FADE_HL": _S20(), "S5_MINEDGE": _S5()}
-    )
-    names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S20_FADE_HL" in names
+    rows = intraday_open_for_flatten({"S20_FADE_HL": _S20()})
+    assert {r["strategy"] for r in rows} == set()
 
 
 def test_daily_amise_skips_eod_flatten_and_restores_overnight() -> None:
@@ -305,9 +292,7 @@ def test_daily_amise_skips_eod_flatten_and_restores_overnight() -> None:
         {"S21_AMISE": _Daily(), "S22_AMISE": _Intra(), "S5_MINEDGE": _S5()}
     )
     names = {r["strategy"] for r in rows}
-    assert "S5_MINEDGE" in names
-    assert "S22_AMISE" in names
-    assert "S21_AMISE" not in names
+    assert names == set()
 
     import position_safety as ps
 
@@ -407,7 +392,7 @@ def test_s16_overnight_is_closed_not_restored() -> None:
         ps.last_open_position = orig  # type: ignore[assignment]
 
 
-def test_s18_overnight_is_closed_not_restored() -> None:
+def test_s18_overnight_is_restored() -> None:
     import position_safety as ps
 
     def fake_last(name: str):
@@ -421,19 +406,20 @@ def test_s18_overnight_is_closed_not_restored() -> None:
     ps.last_open_position = fake_last  # type: ignore[assignment]
     try:
         s18 = _Fake("S18_OHLC_VOL_HTF")
+        s18.holds_overnight = True  # type: ignore[attr-defined]
         res = startup_reconcile(
             {"S18_OHLC_VOL_HTF": s18},
             mode="restore",
             now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
         )
-        assert s18.position == "flat"
-        assert len(res["closes"]) == 1
-        assert res["restored"] == []
+        assert s18.position == "short"
+        assert len(res["restored"]) == 1
+        assert res["closes"] == []
     finally:
         ps.last_open_position = orig  # type: ignore[assignment]
 
 
-def test_s19_overnight_is_closed_not_restored() -> None:
+def test_s19_overnight_is_restored() -> None:
     import position_safety as ps
 
     def fake_last(name: str):
@@ -447,19 +433,20 @@ def test_s19_overnight_is_closed_not_restored() -> None:
     ps.last_open_position = fake_last  # type: ignore[assignment]
     try:
         s19 = _Fake("S19_BODY_CLOSE_1H")
+        s19.holds_overnight = True  # type: ignore[attr-defined]
         res = startup_reconcile(
             {"S19_BODY_CLOSE_1H": s19},
             mode="restore",
             now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
         )
-        assert s19.position == "flat"
-        assert len(res["closes"]) == 1
-        assert res["restored"] == []
+        assert s19.position == "long"
+        assert len(res["restored"]) == 1
+        assert res["closes"] == []
     finally:
         ps.last_open_position = orig  # type: ignore[assignment]
 
 
-def test_s20_overnight_is_closed_not_restored() -> None:
+def test_s20_overnight_is_restored() -> None:
     import position_safety as ps
 
     def fake_last(name: str):
@@ -473,14 +460,15 @@ def test_s20_overnight_is_closed_not_restored() -> None:
     ps.last_open_position = fake_last  # type: ignore[assignment]
     try:
         s20 = _Fake("S20_FADE_HL")
+        s20.holds_overnight = True  # type: ignore[attr-defined]
         res = startup_reconcile(
             {"S20_FADE_HL": s20},
             mode="restore",
             now=datetime(2026, 8, 18, 9, 5, tzinfo=IST),
         )
-        assert s20.position == "flat"
-        assert len(res["closes"]) == 1
-        assert res["restored"] == []
+        assert s20.position == "long"
+        assert len(res["restored"]) == 1
+        assert res["closes"] == []
     finally:
         ps.last_open_position = orig  # type: ignore[assignment]
 
@@ -532,12 +520,12 @@ if __name__ == "__main__":
     print("ok s14/s15 skip flatten")
     test_s16_is_eod_flattened()
     print("ok s16 eod flatten")
-    test_s18_is_eod_flattened()
-    print("ok s18 eod flatten")
-    test_s19_is_eod_flattened()
-    print("ok s19 eod flatten")
-    test_s20_is_eod_flattened()
-    print("ok s20 eod flatten")
+    test_s18_is_not_eod_flattened()
+    print("ok s18 skip flatten")
+    test_s19_is_not_eod_flattened()
+    print("ok s19 skip flatten")
+    test_s20_is_not_eod_flattened()
+    print("ok s20 skip flatten")
     test_daily_amise_skips_eod_flatten_and_restores_overnight()
     print("ok daily AMISE overnight")
     test_s4_not_eod_flattened()
@@ -548,12 +536,12 @@ if __name__ == "__main__":
     print("ok reconcile")
     test_s16_overnight_is_closed_not_restored()
     print("ok s16 overnight close")
-    test_s18_overnight_is_closed_not_restored()
-    print("ok s18 overnight close")
-    test_s19_overnight_is_closed_not_restored()
-    print("ok s19 overnight close")
-    test_s20_overnight_is_closed_not_restored()
-    print("ok s20 overnight close")
+    test_s18_overnight_is_restored()
+    print("ok s18 overnight restore")
+    test_s19_overnight_is_restored()
+    print("ok s19 overnight restore")
+    test_s20_overnight_is_restored()
+    print("ok s20 overnight restore")
     test_overnight_gap_restores_overnight()
     print("ok overnight gap restore overnight")
     print("ALL test_position_safety OK")

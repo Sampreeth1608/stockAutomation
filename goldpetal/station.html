@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v48: live closed P&amp;L uses Angel fill lots, not today's arm -->
+<!-- gp-header-v49: S16 is the only EOD flatten; other books are delivery -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v48</div>
+      <div class="clock" id="clock">IST — · v49</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -254,7 +254,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:.85rem">Live positions</h2>
-        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
+        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only. <b>S16</b> is the only session book — it flattens at MARKET_CLOSE. S5/S8/S13 and the rest are delivery and hold overnight. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -709,7 +709,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v48";
+    if (clock) clock.textContent = "IST " + ist + " · v49";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}

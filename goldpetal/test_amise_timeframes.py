@@ -150,7 +150,7 @@ def test_amise_slot_uses_genome_tf_not_env_hour(monkeypatch=None) -> None:
     assert s.holds_overnight is False
     s.position = "long"
     why = s._session_flatten_why(datetime(2026, 8, 18, 23, 30, tzinfo=IST))
-    assert why is not None
+    assert why is None
     daily = AmiseSlotStrategy("S21_AMISE", _g(timeframe="1d"), seed=False)
     assert daily.bar_minutes == 1440
     assert daily.holds_overnight is True
