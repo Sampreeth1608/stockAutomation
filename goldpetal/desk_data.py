@@ -13,7 +13,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
-from live_orders import live_lots_for, lots_on_fill_for_trade, net_open_from_fills, recent_orders, angel_net_cache_is_flat
+from live_orders import (
+    angel_cache_fresh,
+    angel_net_cache_is_flat,
+    live_lots_for,
+    lots_on_fill_for_trade,
+    net_open_from_fills,
+    recent_orders,
+)
 from paper_report import summarize_trades
 from storage import build_trades, latest_signals, latest_ticks, set_db_path
 import storage as _storage
@@ -313,22 +320,22 @@ def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[
     same = _LIVE_PNL_CACHE.get("db") == str(db) and cached is not None
     fresh = same and float(_LIVE_PNL_CACHE.get("at") or 0) > 0 and now - float(_LIVE_PNL_CACHE["at"]) < 8
     if fresh:
-        return dict(cached)
+        return _apply_angel_snapshot(dict(cached))
     if not wait:
         if same:
             _kick_live_pnl(db)
-            return dict(cached)
+            return _apply_angel_snapshot(dict(cached))
         _kick_live_pnl(db)
         return _leftover_live_pnl()
     if not _LIVE_PNL_LOCK.acquire(blocking=False):
-        return dict(cached) if same else _leftover_live_pnl()
+        return _apply_angel_snapshot(dict(cached)) if same else _leftover_live_pnl()
     try:
         now = time.time()
         cached = _LIVE_PNL_CACHE.get("payload")
         same = _LIVE_PNL_CACHE.get("db") == str(db) and cached is not None
         fresh = same and float(_LIVE_PNL_CACHE.get("at") or 0) > 0 and now - float(_LIVE_PNL_CACHE["at"]) < 8
         if fresh:
-            return dict(cached)
+            return _apply_angel_snapshot(dict(cached))
         approved = [
             n
             for n in (load_state().live_approved or [])
@@ -336,7 +343,7 @@ def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[
         ]
         payload = _build_live_pnl(db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved))
         _LIVE_PNL_CACHE.update({"at": time.time(), "payload": payload, "db": str(db)})
-        return dict(payload)
+        return _apply_angel_snapshot(dict(payload))
     finally:
         _LIVE_PNL_LOCK.release()
 
@@ -360,7 +367,7 @@ def _empty_live_pnl() -> dict[str, Any]:
             "pnl_after_charges": 0.0,
             "win_rate_after_charges": 0.0,
         },
-        "note": "Paper tape stays 100 lots. Angel orders are on Downloads. Live closed round-trips are on Blotter (separate from paper closed).",
+        "note": "Angel Gold Petal after charges (tax excluded). Open contracts are on Live Open Positions. Closed round-trips are on Blotter.",
     }
 
 
@@ -449,6 +456,56 @@ def _leftover_live_pnl() -> dict[str, Any]:
             "bot clears this OPEN when Angel is flat — it does not send a new order. "
             "Does not Arm live."
         )
+    return _apply_angel_snapshot(out)
+
+
+def _apply_angel_snapshot(out: dict[str, Any]) -> dict[str, Any]:
+    """Live open + Live AC follow Angel Gold Petal, not a stale fill log."""
+    snap = angel_cache_fresh()
+    if not snap:
+        return out
+    try:
+        net = int(snap.get("net") or 0)
+    except (TypeError, ValueError):
+        net = 0
+    pnl = snap.get("pnl")
+    if pnl is None:
+        pnl = snap.get("pnl_after_charges")
+    summary = dict(out.get("summary") or {})
+    summary["angel_net"] = net
+    if angel_net_cache_is_flat():
+        flat_rows: list[dict[str, Any]] = []
+        for row in list(out.get("positions") or []):
+            r = dict(row)
+            r["status"] = "FLAT"
+            r["side"] = "FLAT"
+            r["lots"] = 0
+            if str(r.get("source") or "") in {"angel_fill", "angel_book"}:
+                r["entry_reason"] = ""
+            flat_rows.append(r)
+        out["positions"] = flat_rows
+        out["open"] = []
+        summary["open"] = 0
+        if pnl is not None:
+            out["note"] = (
+                "Angel Gold Petal is flat. Live AC ₹ is Angel after charges (tax excluded). "
+                "Does not Arm live."
+            )
+        else:
+            out["note"] = (
+                "Angel Gold Petal is flat — no open live contracts. "
+                "Live AC ₹ still loading from Angel. Does not Arm live."
+            )
+    if pnl is not None and (angel_net_cache_is_flat() or net != 0):
+        try:
+            p = round(float(pnl), 2)
+        except (TypeError, ValueError):
+            p = None
+        if p is not None:
+            summary["pnl_after_charges"] = p
+            summary["pnl_after_tax"] = p
+            summary["angel_pnl"] = p
+    out["summary"] = summary
     return out
 
 
@@ -530,7 +587,7 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     out.update(
         {
             "trades": (open_t + closed_rev)[:80],
-            "open": open_t,
+            "open": list(angel_open),
             "positions": positions,
             "closed": closed_rev[:80],
             "scoreboard": scoreboard + [summary],
@@ -584,9 +641,9 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
         out["note"] = (
             "Live AC ₹ uses lots on each Angel fill, not today's Live Lots. "
             "A 3-lot close stays 3 lots after you arm 25. Angel app is the fill confirmation. "
-            "Top KPIs / Paper Blotter / Paper P&L stay paper 100 lots."
+            "Top KPIs are Angel after charges (tax excluded)."
         )
-    return out
+    return _apply_angel_snapshot(out)
 
 
 def parse_tick_at(raw: str) -> datetime | None:

@@ -558,7 +558,16 @@ def test_live_pnl_hides_leftover_when_angel_already_flat() -> None:
             encoding="utf-8",
         )
         cache.write_text(
-            json.dumps({"ok": True, "net": 0, "at_unix": time.time(), "symbol": "X", "token": "1"})
+            json.dumps(
+                {
+                    "ok": True,
+                    "net": 0,
+                    "pnl": -1280.5,
+                    "at_unix": time.time(),
+                    "symbol": "X",
+                    "token": "1",
+                }
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -577,6 +586,70 @@ def test_live_pnl_hides_leftover_when_angel_already_flat() -> None:
         by_name = {t["strategy"]: t for t in pnl["positions"]}
         assert by_name["S5_MINEDGE"]["status"] == "FLAT"
         assert int(pnl["summary"]["open"] or 0) == 0
+        assert pnl["open"] == []
+        assert float(pnl["summary"]["pnl_after_charges"]) == -1280.5
+        assert float(pnl["summary"]["angel_pnl"]) == -1280.5
+
+
+def test_live_pnl_leftover_newer_than_flat_cache_stays_open() -> None:
+    """A new Angel fill after a flat snapshot must not be hidden as 0 OPEN."""
+    import live_orders
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        orders = Path(td) / "live_orders.jsonl"
+        cache = Path(td) / "angel_net.json"
+        init_db(db)
+        _tick(db)
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "9100",
+                    "transaction": "BUY",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-21T13:10:00+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cache.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "net": 0,
+                    "pnl": 0,
+                    "at_unix": 1.0,
+                    "symbol": "X",
+                    "token": "1",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        st = ControlState(live_approved=["S5_MINEDGE"])
+        with (
+            patch.object(live_orders, "ORDERS_PATH", orders),
+            patch.object(live_orders, "ANGEL_NET_PATH", cache),
+            patch("desk_data.live_lots_for", return_value=3),
+            patch("control_state.load_state", return_value=st),
+            patch(
+                "live_readiness.read_live_env",
+                return_value={"dry_run": True, "live_max_lots": 3},
+            ),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S5_MINEDGE"]["status"] == "OPEN"
+        assert int(pnl["summary"]["open"] or 0) >= 1
+        assert str(pnl["open"][0].get("status") or "") == "OPEN"
 
 
 def test_live_pnl_wait_false_uses_leftover_without_rebuild() -> None:
@@ -702,6 +775,7 @@ if __name__ == "__main__":
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
     test_live_pnl_fill_leftover_shows_open_when_tape_flat()
     test_live_pnl_hides_leftover_when_angel_already_flat()
+    test_live_pnl_leftover_newer_than_flat_cache_stays_open()
     test_live_pnl_wait_false_uses_leftover_without_rebuild()
     test_paper_summaries_wait_false_does_not_rebuild()
     test_latest_signals_live_only_skips_paper()

@@ -307,27 +307,88 @@ def net_open_from_fills(*, path: Path | None = None) -> dict[str, dict[str, Any]
     return out
 
 
+def _parse_num(raw: Any) -> float | None:
+    if raw in (None, ""):
+        return None
+    text = str(raw).replace(",", "").replace(" ", "")
+    if not text or text.lower() in {"null", "none", "-"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _angel_no_data(payload: dict[str, Any]) -> bool:
+    code = str(payload.get("errorcode") or payload.get("errorCode") or "").upper()
+    msg = str(payload.get("message") or payload.get("error") or "").lower()
+    return "AB1019" in code or "no data" in msg or "no record" in msg
+
+
+def _as_row_list(chunk: Any) -> list[dict[str, Any]]:
+    if isinstance(chunk, list):
+        return [r for r in chunk if isinstance(r, dict)]
+    if isinstance(chunk, dict):
+        return [chunk]
+    return []
+
+
+def _angel_payload_rows(payload: Any) -> tuple[str, list[dict[str, Any]]]:
+    """ok + rows, including empty. error if the payload is a real failure."""
+    if not isinstance(payload, dict):
+        return "error", []
+    if payload.get("status") is False:
+        if _angel_no_data(payload):
+            return "ok", []
+        return "error", []
+    data = payload.get("data")
+    if data in (None, "", [], {}):
+        return "ok", []
+    if isinstance(data, str):
+        text = data.strip().lower()
+        if not text or "no data" in text or text in {"null", "none"}:
+            return "ok", []
+        return "error", []
+    if isinstance(data, dict) and any(
+        k in data for k in ("net", "day", "Net", "Day")
+    ):
+        rows: list[dict[str, Any]] = []
+        for key in ("net", "day", "Net", "Day"):
+            rows.extend(_as_row_list(data.get(key)))
+        return "ok", rows
+    if isinstance(data, dict):
+        return "ok", [data]
+    if isinstance(data, list):
+        return "ok", [r for r in data if isinstance(r, dict)]
+    return "error", []
+
+
+def _angel_net_day_rows(
+    payload: Any,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split Angel getPosition into net vs day so lots are not double-counted."""
+    kind, rows = _angel_payload_rows(payload)
+    if kind != "ok":
+        return kind, [], []
+    if not isinstance(payload, dict):
+        return "ok", rows, []
+    data = payload.get("data")
+    if isinstance(data, dict) and any(k in data for k in ("net", "day", "Net", "Day")):
+        net_raw = data.get("net") if data.get("net") is not None else data.get("Net")
+        day_raw = data.get("day") if data.get("day") is not None else data.get("Day")
+        return "ok", _as_row_list(net_raw), _as_row_list(day_raw)
+    return "ok", rows, []
+
+
 def _angel_row_net(row: dict[str, Any]) -> int:
     if not isinstance(row, dict):
         return 0
     for key in ("netqty", "netQty", "net_qty", "cfnetqty"):
-        raw = row.get(key)
-        if raw in (None, ""):
-            continue
-        try:
-            return int(float(raw))
-        except (TypeError, ValueError):
-            continue
-    buy = 0
-    sell = 0
-    try:
-        buy = int(float(row.get("buyqty") or row.get("buyQty") or 0))
-    except (TypeError, ValueError):
-        buy = 0
-    try:
-        sell = int(float(row.get("sellqty") or row.get("sellQty") or 0))
-    except (TypeError, ValueError):
-        sell = 0
+        n = _parse_num(row.get(key))
+        if n is not None:
+            return int(n)
+    buy = int(_parse_num(row.get("buyqty") if row.get("buyqty") is not None else row.get("buyQty")) or 0)
+    sell = int(_parse_num(row.get("sellqty") if row.get("sellqty") is not None else row.get("sellQty")) or 0)
     return buy - sell
 
 
@@ -376,45 +437,117 @@ def _pick_angel_rows(
 def angel_net_lots_from_book(
     payload: Any, *, symbol: str, token: str
 ) -> tuple[str, int | None]:
-    """Parse Angel positionBook JSON. ok + signed lots, or error/missing."""
-    if not isinstance(payload, dict):
-        return "error", None
-    if payload.get("status") is False:
-        return "error", None
-    data = payload.get("data")
-    if data in (None, "", [], {}):
-        return "ok", 0
-    if isinstance(data, str):
-        text = data.strip().lower()
-        if not text or "no data" in text or text in {"null", "none"}:
-            return "ok", 0
-        return "error", None
-    if isinstance(data, dict):
-        rows: list[Any] = [data]
-    elif isinstance(data, list):
-        rows = list(data)
-    else:
-        return "error", None
-    matched = _pick_angel_rows(rows, symbol=symbol, token=token)
-    return "ok", sum(_angel_row_net(r) for r in matched)
+    """Parse Angel position JSON. ok + signed lots, or error/missing."""
+    kind, net_rows, day_rows = _angel_net_day_rows(payload)
+    if kind != "ok":
+        return kind, None
+    matched_net = _pick_angel_rows(net_rows, symbol=symbol, token=token)
+    if matched_net:
+        return "ok", sum(_angel_row_net(r) for r in matched_net)
+    matched_day = _pick_angel_rows(day_rows, symbol=symbol, token=token)
+    if matched_day:
+        return "ok", sum(_angel_row_net(r) for r in matched_day)
+    return "ok", 0
+
+
+def _row_pnl(row: dict[str, Any]) -> float | None:
+    real = _parse_num(row.get("realised") if row.get("realised") is not None else row.get("realized"))
+    unrl = _parse_num(
+        row.get("unrealised") if row.get("unrealised") is not None else row.get("unrealized")
+    )
+    if real is not None or unrl is not None:
+        return float(real or 0.0) + float(unrl or 0.0)
+    return _parse_num(row.get("pnl") if row.get("pnl") is not None else row.get("profitandloss"))
+
+
+def angel_pnl_from_book(payload: Any, *, symbol: str, token: str) -> float | None:
+    kind, net_rows, day_rows = _angel_net_day_rows(payload)
+    if kind != "ok":
+        return None
+    matched_net = _pick_angel_rows(net_rows, symbol=symbol, token=token)
+    net_got = [v for v in (_row_pnl(r) for r in matched_net) if v is not None]
+    if net_got:
+        return round(sum(net_got), 2)
+    matched_day = _pick_angel_rows(day_rows, symbol=symbol, token=token)
+    day_got = [v for v in (_row_pnl(r) for r in matched_day) if v is not None]
+    if day_got:
+        return round(sum(day_got), 2)
+    return None
+
+
+def _first_angel_call(api: Any, names: tuple[str, ...]) -> tuple[str, Any]:
+    if api is None:
+        return "missing", None
+    saw = False
+    for name in names:
+        fn = getattr(api, name, None)
+        if not callable(fn):
+            continue
+        saw = True
+        try:
+            return "ok", fn()
+        except Exception:
+            continue
+    return ("missing", None) if not saw else ("error", None)
 
 
 def fetch_angel_net_lots(
     api: Any, *, symbol: str, token: str
 ) -> tuple[str, int | None]:
-    """Read Gold Petal net lots from Angel. missing = no position API on this stub."""
-    if api is None:
-        return "missing", None
-    fn = getattr(api, "positionBook", None)
-    if not callable(fn):
-        fn = getattr(api, "getPosition", None)
-    if not callable(fn):
-        return "missing", None
-    try:
-        raw = fn()
-    except Exception:
-        return "error", None
+    """Read Gold Petal net lots from Angel. SmartConnect uses position(), not positionBook."""
+    kind, raw = _first_angel_call(api, ("position", "positionBook", "getPosition"))
+    if kind != "ok":
+        return kind, None
     return angel_net_lots_from_book(raw, symbol=symbol, token=token)
+
+
+def _closed_pnl_from_trades(rows: list[dict[str, Any]]) -> float | None:
+    buy_qty = 0.0
+    buy_val = 0.0
+    sell_qty = 0.0
+    sell_val = 0.0
+    for row in rows:
+        tx = str(row.get("transactiontype") or row.get("transaction") or "").upper()
+        qty = _parse_num(row.get("fillsize") if row.get("fillsize") is not None else row.get("fillqty"))
+        if qty is None:
+            qty = _parse_num(row.get("quantity"))
+        px = _parse_num(row.get("fillprice") if row.get("fillprice") is not None else row.get("averageprice"))
+        if qty is None or px is None or qty <= 0:
+            continue
+        if tx in {"BUY", "B"}:
+            buy_qty += qty
+            buy_val += px * qty
+        elif tx in {"SELL", "S"}:
+            sell_qty += qty
+            sell_val += px * qty
+    closed = min(buy_qty, sell_qty)
+    if closed <= 0 or buy_qty <= 0 or sell_qty <= 0:
+        return None
+    buy_avg = buy_val / buy_qty
+    sell_avg = sell_val / sell_qty
+    gross = (sell_avg - buy_avg) * closed
+    try:
+        from charges import apply_charges_and_tax
+
+        ac = apply_charges_and_tax(
+            gross, side="BUY", entry_price=buy_avg, exit_price=sell_avg
+        )
+        return float(ac.get("pnl_after_charges"))
+    except Exception:
+        return round(gross, 2)
+
+
+def fetch_angel_trade_pnl(api: Any, *, symbol: str, token: str) -> float | None:
+    kind, raw = _first_angel_call(api, ("tradeBook", "getTradeBook"))
+    if kind != "ok":
+        return None
+    row_kind, rows = _angel_payload_rows(raw)
+    if row_kind != "ok":
+        return None
+    matched = _pick_angel_rows(rows, symbol=symbol, token=token)
+    if not matched:
+        return None
+    return _closed_pnl_from_trades(matched)
 
 
 def load_angel_net_cache(*, path: Path | None = None) -> dict[str, Any]:
@@ -433,11 +566,12 @@ def save_angel_net_cache(
     *,
     symbol: str,
     token: str,
+    pnl: float | None = None,
     path: Path | None = None,
 ) -> None:
     dest = path or ANGEL_NET_PATH
     ensure_control_dir(dest)
-    payload = {
+    payload: dict[str, Any] = {
         "ok": True,
         "net": int(net),
         "symbol": symbol,
@@ -445,23 +579,88 @@ def save_angel_net_cache(
         "at_ist": datetime.now(IST).isoformat(timespec="seconds"),
         "at_unix": time.time(),
     }
+    if pnl is not None:
+        payload["pnl"] = float(pnl)
+        payload["pnl_after_charges"] = float(pnl)
     dest.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
-def angel_net_cache_is_flat(*, path: Path | None = None, max_age_sec: float = 90.0) -> bool:
+def angel_cache_fresh(*, path: Path | None = None, max_age_sec: float = 90.0) -> dict[str, Any]:
     row = load_angel_net_cache(path=path)
     if not row.get("ok"):
-        return False
+        return {}
     try:
         age = time.time() - float(row.get("at_unix") or 0)
     except (TypeError, ValueError):
-        return False
+        return {}
     if age < 0 or age > float(max_age_sec):
+        return {}
+    return row
+
+
+def angel_net_cache_is_flat(*, path: Path | None = None, max_age_sec: float = 90.0) -> bool:
+    """True when a fresh Angel snapshot says 0 net and no newer fill-log leftover."""
+    row = angel_cache_fresh(path=path, max_age_sec=max_age_sec)
+    if not row:
         return False
     try:
-        return int(row.get("net") or 0) == 0
+        net = int(row.get("net") or 0)
     except (TypeError, ValueError):
         return False
+    if net != 0:
+        return False
+    leftover_at = leftover_newest_unix()
+    try:
+        cache_at = float(row.get("at_unix") or 0)
+    except (TypeError, ValueError):
+        cache_at = 0.0
+    if leftover_at > cache_at:
+        return False
+    return True
+
+
+def invalidate_angel_snapshot(*, path: Path | None = None) -> None:
+    """Drop a stale Angel snapshot so a new fill is not hidden as flat."""
+    global _angel_fetch_at
+    _angel_fetch_at = 0.0
+    dest = path or ANGEL_NET_PATH
+    if dest.is_file():
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+
+
+def _fill_unix(row: dict[str, Any]) -> float:
+    raw = row.get("ts_ist") or row.get("ts") or row.get("time") or ""
+    if isinstance(raw, (int, float)):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+    text = str(raw).strip()
+    if not text:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    return dt.timestamp()
+
+
+def leftover_newest_unix(*, path: Path | None = None) -> float:
+    leftover = net_open_from_fills(path=path)
+    if not leftover:
+        return 0.0
+    names = set(leftover)
+    latest = 0.0
+    for row in iter_placed_orders(path=path):
+        if str(row.get("strategy") or "") not in names:
+            continue
+        latest = max(latest, _fill_unix(row))
+    return latest
 
 
 def leftover_close_tx(leftover: dict[str, Any]) -> tuple[str, int]:
@@ -508,6 +707,42 @@ def record_leftover_already_flat(
     return res
 
 
+def refresh_angel_snapshot(
+    api: Any,
+    *,
+    symbol: str,
+    token: str,
+    path: Path | None = None,
+    min_interval_sec: float = 15.0,
+) -> dict[str, Any]:
+    """Ask Angel for Gold Petal net + P&L. Clear fill-log leftover when Angel is flat."""
+    global _angel_fetch_at
+    now = time.time()
+    if now - float(_angel_fetch_at or 0) < float(min_interval_sec):
+        return load_angel_net_cache()
+    _angel_fetch_at = now
+    kind, raw = _first_angel_call(api, ("position", "positionBook", "getPosition"))
+    if kind != "ok":
+        return {}
+    net_kind, net = angel_net_lots_from_book(raw, symbol=symbol, token=token)
+    if net_kind != "ok" or net is None:
+        return {}
+    pnl = angel_pnl_from_book(raw, symbol=symbol, token=token)
+    if pnl is None:
+        pnl = fetch_angel_trade_pnl(api, symbol=symbol, token=token)
+    save_angel_net_cache(int(net), symbol=symbol, token=token, pnl=pnl)
+    cleared: list[str] = []
+    if int(net) == 0:
+        leftover = net_open_from_fills(path=path)
+        for name, row in leftover.items():
+            record_leftover_already_flat(name, row, path=path)
+            cleared.append(name)
+    snap = load_angel_net_cache()
+    if cleared:
+        snap["cleared"] = cleared
+    return snap
+
+
 def reconcile_fill_leftovers_with_angel(
     api: Any,
     *,
@@ -517,25 +752,14 @@ def reconcile_fill_leftovers_with_angel(
     min_interval_sec: float = 15.0,
 ) -> list[str]:
     """If Angel Gold Petal is flat, close ghost leftover rows. No new order."""
-    global _angel_fetch_at
-    leftover = net_open_from_fills(path=path)
-    if not leftover:
-        return []
-    now = time.time()
-    if now - float(_angel_fetch_at or 0) < float(min_interval_sec):
-        return []
-    _angel_fetch_at = now
-    kind, net = fetch_angel_net_lots(api, symbol=symbol, token=token)
-    if kind != "ok" or net is None:
-        return []
-    save_angel_net_cache(int(net), symbol=symbol, token=token)
-    if int(net) != 0:
-        return []
-    cleared: list[str] = []
-    for name, row in leftover.items():
-        record_leftover_already_flat(name, row, path=path)
-        cleared.append(name)
-    return cleared
+    snap = refresh_angel_snapshot(
+        api,
+        symbol=symbol,
+        token=token,
+        path=path,
+        min_interval_sec=min_interval_sec,
+    )
+    return list(snap.get("cleared") or [])
 
 
 def lots_on_fill_for_trade(
@@ -963,6 +1187,7 @@ class LiveBroker:
             if ok:
                 self.positions[strategy] = new_pos
                 self.placed_count += 1
+                invalidate_angel_snapshot()
             else:
                 self.skip_count += 1
 

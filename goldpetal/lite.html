@@ -247,14 +247,7 @@ let lastLite = {};
 function livePosRows(p, d) {
   const fromPnl = (p.positions && p.positions.length) ? p.positions
     : ((p.open && p.open.length) ? p.open : []);
-  if (fromPnl.length) return fromPnl;
-  const books = ((d || lastLite || {}).live_desk || {}).books || [];
-  return books.filter((b) => b.live_approved || b.live_size_mode === "lots" || b.live_size_mode === "capital").map((b) => ({
-    strategy: b.strategy,
-    side: "FLAT",
-    status: "FLAT",
-    lots: b.live_qty || b.live_lots || "",
-  }));
+  return fromPnl.filter((t) => t && String(t.status || "") === "OPEN");
 }
 function liveBookScoreRows(p, d) {
   const rows = (p.scoreboard || []).filter((r) => r && r.strategy && r.strategy !== "LIVE" && r.strategy !== "ALL");

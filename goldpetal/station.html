@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v55</title>
+<title>Gold Petal v56</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v55: leftover OPEN clears when Angel is already flat; Exit will not open a new book -->
+<!-- gp-header-v56: Angel position() is the open count; AB1019 / empty book is flat; Live AC ₹ from Angel -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -172,7 +172,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v55</span>
+        <span class="ver" id="desk-ver">v56</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v55</div>
+      <div class="clock" id="clock">IST — · v56</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -217,7 +217,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="liveopen-panel">
         <h2>Live Open Positions</h2>
-        <p class="hint">Angel contracts still open. OPEN is fill-log size, not paper 100 lots. If you already squared in the Angel app, this OPEN clears when the bot sees Angel flat — Exit will not open a new book. <b>Exit</b> squares leftover Angel even in Paper — it does not Arm live. Closed round-trips are on Blotter. Arm / size stay on Live.</p>
+        <p class="hint">Angel is the open count. If you already squared in the Angel app, this tab is empty once the bot reads Angel flat — Exit will not open a new book. <b>Exit</b> squares leftover Angel even in Paper — it does not Arm live. Closed round-trips are on Blotter. Arm / size stay on Live.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -617,8 +617,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v55";
-    document.title = "Gold Petal v55";
+    if (clock) clock.textContent = "IST " + ist + " · v56";
+    document.title = "Gold Petal v56";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -801,7 +801,8 @@ function renderKpis() {
   const pnl = afterChargesInr(sum);
   const wr = wrAfterCharges(sum);
   const pnlEl = $("kpi-pnl");
-  pnlEl.textContent = (sum.closed || p.placed_count) ? money(pnl == null ? 0 : pnl) : "—";
+  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || sum.closed || p.placed_count;
+  pnlEl.textContent = showPnl ? money(pnl == null ? 0 : pnl) : "—";
   pnlEl.className = pnlClass(pnl);
   $("kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
 }
@@ -1117,16 +1118,7 @@ function livePnlPayload() {
 function livePosRows(p) {
   const fromPnl = (p.positions && p.positions.length) ? p.positions
     : ((p.open && p.open.length) ? p.open : []);
-  if (fromPnl.length) return fromPnl;
-  const books = ((lastDesk || {}).live_desk || {}).books || [];
-  return books.filter((b) => b.live_approved || b.live_size_mode === "lots" || b.live_size_mode === "capital").map((b) => ({
-    strategy: b.strategy,
-    side: "FLAT",
-    status: "FLAT",
-    lots: b.live_qty || b.live_lots || "",
-    entry_price: "",
-    pnl_after_charges: "",
-  }));
+  return fromPnl.filter((t) => t && String(t.status || "") === "OPEN");
 }
 function liveBookScoreRows(p) {
   const rows = (p.scoreboard || []).filter((r) => r && r.strategy && r.strategy !== "LIVE" && r.strategy !== "ALL");
@@ -1150,7 +1142,8 @@ function renderLivePnl() {
   $("live-kpi-closed").textContent = sum.closed || 0;
   const pnl = afterChargesInr(sum);
   const pnlEl = $("live-kpi-pnl");
-  pnlEl.textContent = (sum.closed || p.placed_count) ? money(pnl == null ? 0 : pnl) : "—";
+  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || sum.closed || p.placed_count;
+  pnlEl.textContent = showPnl ? money(pnl == null ? 0 : pnl) : "—";
   pnlEl.className = pnlClass(pnl);
   const wr = wrAfterCharges(sum);
   $("live-kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
@@ -1188,7 +1181,7 @@ function renderLivePnl() {
         <td class="num ${open ? "" : pnlClass(ac)}">${open ? "—" : (t.status === "FLAT" ? "—" : money(ac))}</td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting || !open ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="7">No live positions — pick a book, Arm live, then a live-picked book opens here (one row per strategy).</td></tr>`;
+    }).join("") || `<tr><td colspan="7">Angel is flat — no open live contracts.</td></tr>`;
   }
   fillLiveClosed(p);
   fillAngelOrders(p);
@@ -1344,9 +1337,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v55"];
+  const foot = ["v56"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v55";
+  if (ver) ver.textContent = d.desk_build || "v56";
   if (lastHist.lots) foot.push(lastHist.lots + " lots");
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";

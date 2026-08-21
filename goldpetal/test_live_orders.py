@@ -484,6 +484,71 @@ def test_angel_net_empty_book_is_zero() -> None:
         token="99",
     )
     assert kind == "error" and net is None
+    kind, net = angel_net_lots_from_book(
+        {
+            "status": False,
+            "errorcode": "AB1019",
+            "message": "AB1019 No Data",
+        },
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "ok" and net == 0
+    kind, net = angel_net_lots_from_book(
+        {
+            "status": True,
+            "data": {
+                "net": [
+                    {
+                        "tradingsymbol": "GOLDPETAL26APRFUT",
+                        "symboltoken": "99",
+                        "netqty": "-3",
+                    }
+                ],
+                "day": [
+                    {
+                        "tradingsymbol": "GOLDPETAL26APRFUT",
+                        "symboltoken": "99",
+                        "netqty": "-3",
+                    }
+                ],
+            },
+        },
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "ok" and net == -3
+    from live_orders import angel_pnl_from_book
+
+    pnl = angel_pnl_from_book(
+        {
+            "status": True,
+            "data": {
+                "net": [],
+                "day": [
+                    {
+                        "tradingsymbol": "GOLDPETAL26APRFUT",
+                        "symboltoken": "99",
+                        "netqty": "0",
+                        "realised": "-1280.50",
+                        "unrealised": "0",
+                    }
+                ],
+            },
+        },
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert pnl == -1280.50
+
+
+class _FakePositionApi(_FakeApi):
+    def __init__(self, payload: dict) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def position(self):
+        return self.payload
 
 
 def test_leftover_square_clears_when_angel_already_flat() -> None:
@@ -605,6 +670,56 @@ def test_reconcile_fill_leftovers_when_angel_flat() -> None:
         td.cleanup()
 
 
+def test_reconcile_uses_position_method_and_ab1019() -> None:
+    """SmartConnect.position() + AB1019 must clear leftover, not keep 1 OPEN."""
+    from live_orders import net_open_from_fills, reconcile_fill_leftovers_with_angel
+
+    td, state, orders = _tmp_state()
+    try:
+        live_orders.ORDERS_PATH = orders
+        live_orders.ANGEL_NET_PATH = Path(td.name) / "angel_net.json"
+        live_orders._angel_fetch_at = 0.0
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "1",
+                    "transaction": "SELL",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-20T23:00:00+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        api = _FakePositionApi(
+            {
+                "status": False,
+                "errorcode": "AB1019",
+                "message": "AB1019 No Data",
+            }
+        )
+        cleared = reconcile_fill_leftovers_with_angel(
+            api,
+            symbol="GOLDPETAL26APRFUT",
+            token="99",
+            path=orders,
+            min_interval_sec=0,
+        )
+        assert cleared == ["S5_MINEDGE"]
+        assert net_open_from_fills(path=orders) == {}
+        snap = json.loads((Path(td.name) / "angel_net.json").read_text(encoding="utf-8"))
+        assert int(snap["net"]) == 0
+        assert snap.get("ok") is True
+        assert not api.calls
+    finally:
+        td.cleanup()
+
+
 def test_leftover_square_blocked_by_emergency() -> None:
     td, state, orders = _tmp_state()
     try:
@@ -677,6 +792,8 @@ if __name__ == "__main__":
     print("ok leftover_still_short")
     test_reconcile_fill_leftovers_when_angel_flat()
     print("ok reconcile_flat")
+    test_reconcile_uses_position_method_and_ab1019()
+    print("ok reconcile_position_ab1019")
     test_leftover_square_blocked_by_emergency()
     print("ok leftover_square_emergency")
     test_broker_from_session_force_live_in_paper()
