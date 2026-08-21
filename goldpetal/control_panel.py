@@ -260,6 +260,13 @@ def desk_payload() -> dict[str, Any]:
     except Exception:
         flatten = {"pending": [], "by_strategy": {}, "recent": [], "bot_running": False}
     try:
+        from position_safety import read_bot_health
+
+        health = read_bot_health()
+        books_health = dict(health.get("books") or {})
+    except Exception:
+        books_health = {}
+    try:
         from desk_data import live_pnl_payload
 
         live_pnl = live_pnl_payload(wait=False)
@@ -301,6 +308,7 @@ def desk_payload() -> dict[str, Any]:
         "session": sess,
         "flatten": flatten,
         "live_pnl": live_pnl,
+        "books_health": books_health,
     }
 
 

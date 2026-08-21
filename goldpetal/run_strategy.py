@@ -1548,6 +1548,27 @@ def run_once(
         print(line, flush=True)
         logger.info(line)
 
+    def book_health() -> dict[str, dict[str, Any]]:
+        """Per-book pos + why-idle so the desk can answer "why is S16 flat?"."""
+        out: dict[str, dict[str, Any]] = {}
+        for name, obj in strat_map.items():
+            row: dict[str, Any] = {
+                "position": str(getattr(obj, "position", "flat") or "flat"),
+                "enabled": bool(portfolio.is_enabled(name)),
+                "skip": str(getattr(obj, "last_skip", "") or ""),
+            }
+            bar = getattr(obj, "bar_debug", "")
+            if bar:
+                row["bar"] = str(bar)
+            tf = getattr(getattr(obj, "cfg", None), "bar_minutes", None)
+            if tf:
+                row["bar_minutes"] = int(tf)
+                row["next_decision_ist"] = _next_boundary(
+                    datetime.now(IST), int(tf)
+                ).isoformat(timespec="seconds")
+            out[name] = row
+        return out
+
     flatten_lock = threading.Lock()
 
     def emit_desk_flatten(now: datetime) -> None:
@@ -1823,6 +1844,7 @@ def run_once(
                             "S5": strategy_s5.last_skip,
                             "S8": strategy_s8.last_skip,
                         },
+                        "books": book_health(),
                         "runner": "run_strategy",
                     }
                 )

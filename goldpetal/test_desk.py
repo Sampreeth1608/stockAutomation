@@ -83,8 +83,12 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v53" in html
-    assert " · v53" in html
+    assert "gp-header-v54" in html
+    assert " · v54" in html
+    assert "books_health" in html
+    assert "function renderBooksWhy" in html
+    assert "waiting_1h_close" in html
+    assert "need_prev_1h" in html
     assert "squares leftover Angel even in Paper" in html
     assert "Exit flattens that book only after you Arm live" not in html
     assert "Angel CLOSE only if this book is live-armed" not in html
@@ -401,6 +405,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "apply_pending_flattens" in runner
     assert "square_fill_leftover" in runner
     assert "force_live=True" in runner
+    assert "def book_health" in runner
+    assert '"books": book_health()' in runner
     assert "mirror_positions_from_signals" in runner
     assert "live_only=not dry_run" in runner
     assert "FORMULA_GATE_BOOKS" in runner
@@ -469,7 +475,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v53" in cmd
+    assert "Gold Petal v54" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -518,6 +524,7 @@ def test_desk_payload_includes_session() -> None:
     assert isinstance(sess["goldpetal_running"], bool)
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
+    assert isinstance(payload["books_health"], dict)
 
 
 def test_login_html_is_the_gate() -> None:

@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v53: Exit squares leftover Angel even in Paper -->
+<!-- gp-header-v54: Exit squares leftover Angel in Paper; Engine shows why each book is idle -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v53</div>
+      <div class="clock" id="clock">IST — · v54</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -472,6 +472,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="pane">
         <h2>Engine</h2>
         <p class="mono" id="engine-line">waiting for desk…</p>
+        <p class="hint" id="books-why">Why each book is idle — waiting for desk…</p>
+        <p class="hint">1h books (S16 / S18 / S19) only decide on the finished hour. Between hours they say waiting_1h_close. need_prev_1h means this session has no earlier hour yet, so the first decision is the second hour close.</p>
         <div class="row" style="margin-top:.4rem">
           <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
           <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
@@ -693,7 +695,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v53";
+    if (clock) clock.textContent = "IST " + ist + " · v54";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -844,6 +846,29 @@ function renderQuote() {
     else if (!tapeIsLive()) meta.textContent = "quote stale — waiting for next tick";
     else meta.textContent = "";
   }
+}
+function renderBooksWhy(d) {
+  const el = $("books-why");
+  if (!el) return;
+  const books = (d && d.books_health) || {};
+  const names = Object.keys(books);
+  if (!names.length) {
+    el.textContent = "Why each book is idle — no heartbeat yet. Start bot, then wait one tick.";
+    return;
+  }
+  const order = paperBookNames();
+  names.sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  el.textContent = names.map((name) => {
+    const b = books[name] || {};
+    const bits = [shortName(name), b.position || "flat"];
+    if (b.enabled === false) bits.push("OFF");
+    if (b.skip) bits.push(b.skip);
+    if (b.next_decision_ist) bits.push("next " + String(b.next_decision_ist).slice(11, 16));
+    return bits.join(" ");
+  }).join(" · ");
 }
 function renderKpis() {
   const all = allScore();
@@ -1786,6 +1811,7 @@ function renderDesk(d) {
   $("engine-line").textContent = (bot.running ? "bot running" : "bot stopped")
     + " · feed " + feed
     + (bot.pid ? " · pid " + bot.pid : "");
+  renderBooksWhy(d);
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
   if (!typing() && !liveMoneyDirty) {
