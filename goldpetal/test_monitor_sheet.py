@@ -84,7 +84,6 @@ def test_write_monitor_pack() -> None:
             "STRATEGIES.csv",
             "SIGNALS.csv",
             "TRADES.csv",
-            "LAB.csv",
             "RISK.csv",
             "COMMANDS.csv",
             "STATUS.csv",

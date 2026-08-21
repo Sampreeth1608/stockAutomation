@@ -21,10 +21,6 @@ SHORT = {
     "S19_BODY_CLOSE_1H": "S19 body+close 1h",
     "S20_FADE_HL": "S20 fade low/high",
     "OVERNIGHT_GAP": "overnight gap",
-    "S21_AMISE": "S21 AMISE",
-    "S22_AMISE": "S22 AMISE",
-    "S23_AMISE": "S23 AMISE",
-    "S24_AMISE": "S24 AMISE",
 }
 
 WHAT_IT_GUESSES = {
@@ -43,10 +39,6 @@ WHAT_IT_GUESSES = {
     "S19_BODY_CLOSE_1H": "Wait for the 1h to finish. LONG = green and C>prevC. SHORT = red and C<prevC. Mixed / doji / equal close: hold. FLIP only on the opposite aligned hour. Delivery — holds overnight. Paper-wired but ENABLE_S19 defaults off — 100-lot + fees 1h backtest lost after charges vs S16/S18. Not live.",
     "S20_FADE_HL": "Wait for the 1h to finish. LONG = lower low (not also HH) and green — buy the bounced low. SHORT = higher high (not also LL) and red — sell/short the rejected high. Inside / outside / knife / chase: hold. FLIP at that close. Delivery — holds overnight. Same formula scored on 30m/2h/4h/1d in the backtest. Paper-wired but ENABLE_S20 defaults off until a tape beats S16/S18 or S13 after charges. Not live.",
     "OVERNIGHT_GAP": "Read today's Gold Petal tape near MARKET_CLOSE (day return, close in the day's range, last 45m return, late TBQ/TSQ). BUY if that read says tomorrow's open is up; SHORT if it says down; skip if mixed. CLOSE in the first 5 minutes after next MARKET_OPEN (09:00–09:05 IST). Independent of mood/regime. Not S4 daily swing. Not S7. ENABLE_OVERNIGHT_GAP defaults true (papers). Live tab after closed trades and WR% AC ≥ 40 — you Arm live.",
-    "S21_AMISE": "AMISE challenger slot. Genome comes from Lab Approve (must beat S16+S18 after charges, walk-forward, 2× costs). FLIP. Delivery hold overnight — only S16 flattens at MARKET_CLOSE. Paper ENABLE on Approve. Angel still needs Unlock + LIVE. Mood gate picks when it may open.",
-    "S22_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
-    "S23_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
-    "S24_AMISE": "AMISE challenger slot. Same as S21 — next Lab Approve fills the next free slot.",
 }
 
 

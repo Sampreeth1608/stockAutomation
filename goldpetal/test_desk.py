@@ -33,9 +33,6 @@ def test_station_is_the_operator_page() -> None:
     assert "paper AC ₹" in html
     assert "No paper P&L yet" in html
     assert "Downloads" in html
-    assert 'data-tab="ml"' in html
-    assert 'data-tab="lab"' in html
-    assert 'data-tab="amise"' in html
     assert 'data-tab="you"' in html
     assert 'id="you-strip"' not in html
     assert 'id="fit-strip"' not in html
@@ -103,8 +100,13 @@ def test_station_is_the_operator_page() -> None:
     assert "Gold Petal hours" in html
     assert "waiting for desk…" in html
     assert "lastMood" not in html
-    assert "setTimeout(() => loadAmise" not in html
-    assert "AMISE — invents challengers" in html
+    assert "loadAmise" not in html
+    assert "loadMl" not in html
+    assert "loadLab" not in html
+    assert 'data-tab="ml"' not in html
+    assert 'data-tab="lab"' not in html
+    assert 'data-tab="amise"' not in html
+    assert "AMISE" not in html
     assert "collectArmBody(\"keep\")" in html
     assert "PAPER · Angel open" in html
     assert "Save does not switch you to Paper" in html
@@ -149,7 +151,7 @@ def test_station_is_the_operator_page() -> None:
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
     assert "Overnight gap papers now" in html
-    assert "S18 / S19 / S20 / AMISE / overnight gap stay paper" in html
+    assert "S18 / S19 / S20 / overnight gap stay paper" in html
     assert "live_eligible" in html
     assert "exact IST click time" in html
     assert "tape_lag_ms" in html
@@ -184,28 +186,12 @@ def test_station_is_the_operator_page() -> None:
     assert "/api/export/signals.csv" in html
     assert "Copy signals → Sheets" in html
     assert "function renderDlPreview" in html
-    assert "Approve → paper" in html
-    assert "AI Research Lab" in html
-    assert "/api/research" in html
-    assert "/api/amise" in html
-    assert "AMISE" in html
-    assert "Profit Guardian" in html
-    assert "RESEARCH_FACTORY" not in html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S18_OHLC_VOL_HTF" in html
     assert "S19_BODY_CLOSE_1H" in html
     assert "S20_FADE_HL" in html
     assert "OVERNIGHT_GAP" in html
     assert "overnight gap" in html
     assert "overnight gap stay paper until they hit 40%" in html
-    assert "S21_AMISE" in html
-    assert "Run factory" in html
-    assert "After charges ₹" in html
-    assert "weekly_s18.sh" in html
-    assert 'value="S18_OHLC_VOL_HTF"' in html
-    assert "/api/ml" in html
-    assert "/api/s11/activate" in html
-    assert "/api/proposals/" in html
-    assert "S11_PACK_PATH" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -231,8 +217,6 @@ def test_station_is_the_operator_page() -> None:
     assert "S19_BODY_CLOSE_1H" in paper
     assert "S20_FADE_HL" in paper
     assert "OVERNIGHT_GAP" in paper
-    assert "S21_AMISE" in paper
-    assert "S24_AMISE" in paper
     assert "S13_HHHL_DAY" in paper
     assert "S11_DISCOVERED" not in paper
     assert "S4_OVERNIGHT" not in paper
@@ -254,8 +238,6 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Save strategies" in html
     assert "Gold Petal Desk" in html
     assert "href=\"/\"" in html
-    assert "ML / S11 + S18" in html
-    assert "Research Lab" in html
     assert "You — trade" in html
     assert "whole day" in html
     assert "30m" in html
@@ -274,10 +256,10 @@ def test_lite_html_is_compact_controls() -> None:
     assert "live_unlocked && live.dry_run" not in html
     assert "squares leftover Angel even in Paper" in html
     assert "Angel CLOSE only if live-armed" not in html
-    assert "/#lab" in html
-    assert "/#amise" in html
-    assert "AMISE" in html
-    assert "after charges" in html
+    assert "AMISE" not in html
+    assert "loadMl" not in html
+    assert "loadLab" not in html
+    assert "After charges" in html
     assert "Approve already papers" in html
     assert "only Angel" in html
     assert "40% WR% AC" in html
@@ -322,8 +304,7 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Real Angel P&amp;L" in html
     assert "OVERNIGHT_GAP" in html
     assert "overnight gap" in html
-    assert "weekly_s18.sh" in html
-    assert "/api/ml" in html
+    assert "/api/ml" not in html
     assert "Watch" not in html
     assert "Download all (ZIP)" not in html
     assert "/api/history" not in html
@@ -365,10 +346,12 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "LITE_HTML_PATH" in text
     assert "/lite" in text
     assert "/api/desk" in text
-    assert "/api/ml" in text
-    assert "/api/research" in text
-    assert "/api/amise" in text
-    assert "amise_desk_payload" in text
+    assert "/api/ml" not in text
+    assert "/api/research" not in text
+    assert "/api/amise" not in text
+    assert "/api/s11" not in text
+    assert "s11_desk" not in text
+    assert "research_desk" not in text
     assert "/api/capture" in text
     assert "/api/capture/learn" in text
     assert "/api/capture/go" in text
@@ -378,9 +361,6 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/mood" in text
     assert "mood_desk_payload" in text
     assert "record_human" in text
-    assert "decide_research" in text
-    assert "/api/s11/activate" in text
-    assert "decide_proposal_for_desk" in text
     assert "/api/tape" in text
     assert "/api/s14/calc" in text
     assert "/api/analysis" in text
@@ -399,7 +379,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert '"trace": traceback' not in text
     assert "internal error" in text
     assert "_internal_error_bytes" in text
-    assert "time.sleep(300)" in text
+    assert "_amise_auto_loop" not in text
     runner = (ROOT / "run_strategy.py").read_text(encoding="utf-8")
     assert "emit_desk_flatten" in runner
     assert "apply_pending_flattens" in runner
@@ -458,8 +438,6 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/strategy_s18.py" in sync
     assert "goldpetal/trade_learner.py" in sync
     assert "goldpetal/entry_gates.py" in sync
-    assert "goldpetal/amise.py" in sync
-    assert "goldpetal/research_factory.py" in sync
     assert "goldpetal/.env.example" in sync
     assert "goldpetal/portfolio.py" in sync
     assert "goldpetal/storage.py" in sync

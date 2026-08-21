@@ -50,7 +50,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 </head>
 <body>
   <h1>Gold Petal Desk</h1>
-  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
+  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
 
   <section class="card">
@@ -94,7 +94,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-pnl-open"></tbody>
     </table>
-    <p class="hint">Approve already papers every book. This page is only Angel. A book appears at ≥40% WR% AC with closed trades — S5 / S8 / S13 / S16 and any other paper book. Tick <b>Lots</b> or <b>₹</b> to send that book live (one tick only). Overnight gap papers now. S18 / S19 / S20 / AMISE / overnight gap stay paper until they hit 40%. You Arm live.</p>
+    <p class="hint">Approve already papers every book. This page is only Angel. A book appears at ≥40% WR% AC with closed trades — S5 / S8 / S13 / S16 and any other paper book. Tick <b>Lots</b> or <b>₹</b> to send that book live (one tick only). Overnight gap papers now. S18 / S19 / S20 / overnight gap stay paper until they hit 40%. You Arm live.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="1000" value="1"/></label>
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
@@ -114,21 +114,6 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
     <p class="flash" id="flash-money"></p>
-  </section>
-
-  <section class="card">
-    <h2>ML / S11 + S18</h2>
-    <p class="hint" id="ml-s11-line">Loading S11 pack…</p>
-    <p class="hint" id="ml-s18-line">Loading S18 pack…</p>
-    <div id="ml-pending"></div>
-    <p class="hint">S11 and S18 rank after Angel charges (tax excluded). After the first S11 pack is approved, a new row appears only if it beats that pack. Approve → paper, then type RESTART. Full inspector: <a href="/#ml">desk ML tab</a>.</p>
-    <p class="flash" id="flash-ml"></p>
-  </section>
-
-  <section class="card">
-    <h2>Research Lab</h2>
-    <p class="hint" id="lab-line">Loading lab…</p>
-    <p class="hint">AI can propose. You decide on the <a href="/#lab">desk Lab tab</a>. This phone page does not approve, ENABLE, or arm live.</p>
   </section>
 
   <section class="card">
@@ -161,13 +146,10 @@ const SHORT = {
   S19_BODY_CLOSE_1H: "S19 body+close 1h",
   S20_FADE_HL: "S20 fade low/high",
   OVERNIGHT_GAP: "overnight gap",
-  S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
 };
 function shortName(name) {
   const n = String(name || "");
   if (SHORT[n]) return SHORT[n];
-  const m = n.match(/^S(\d+)_AMISE$/);
-  if (m) return "S" + m[1] + " AMISE";
   return n;
 }
 function esc(s) {
@@ -389,47 +371,6 @@ function render(d) {
     }).join("") || `<tr><td colspan="5">No live positions</td></tr>`;
   }
 }
-function renderMl(d) {
-  const s11 = (d && d.s11) || {};
-  const s18 = (d && d.s18) || {};
-  const pending = ((d && d.proposals) || {}).pending || [];
-  $("ml-s11-line").textContent = s11.load_hint || (s11.pack_path || "S11_PACK_PATH not set");
-  $("ml-s18-line").textContent = s18.load_hint || ("S18 pack " + (s18.pack_name || "base") + " — after charges, tax excluded");
-  $("ml-pending").innerHTML = pending.map((p) => {
-    const paper = p.paper || {};
-    const extra = p.extra || (paper.extra || {});
-    const isS18 = p.strategy === "S18_OHLC_VOL_HTF";
-    const isS11 = p.strategy === "S11_DISCOVERED";
-    const pnl = p.pnl_value != null ? p.pnl_value : ((isS18 || isS11) ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
-    const pnlLabel = p.pnl_label || ((isS18 || isS11) ? "after charges ₹" : "after-tax ₹");
-    return `<div style="border-top:1px solid var(--line);padding:.55rem 0">
-      <div><b>${esc(p.title || p.strategy)}</b></div>
-      <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ${esc(pnlLabel)} ${esc(pnl ?? "—")}</div>
-      ${p.safety_ok === false ? `<label class="chk"><input type="checkbox" data-unsafe="${esc(p.id)}"/> Accept risk</label>` : ""}
-      <div class="row" style="margin-top:.35rem">
-        <button class="btn ok" type="button" data-ml="approve" data-id="${esc(p.id)}">Approve → paper</button>
-        <button class="btn danger" type="button" data-ml="reject" data-id="${esc(p.id)}">Reject</button>
-      </div>
-    </div>`;
-  }).join("") || `<p class="hint">No pending. Run weekly_discover.sh (S11) or ./weekly_s18.sh (S18) on the VM.</p>`;
-}
-async function loadMl() {
-  renderMl(await api("/api/ml"));
-}
-async function loadLab() {
-  try {
-    const d = await api("/api/research");
-    const c = (d && d.counts) || {};
-    const n = (d.pending || []).length;
-    $("lab-line").textContent = (d.last_run_at || "no lab run yet") +
-      " · found " + (c.found || 0) +
-      " · passed " + (c.passed_validation || 0) +
-      " · awaiting " + n +
-      " · rejected " + (c.rejected || 0);
-  } catch (e) {
-    $("lab-line").textContent = String(e.message || e);
-  }
-}
 async function load() {
   render(await api("/api/desk"));
 }
@@ -574,8 +515,6 @@ $("btn-mode-paper").onclick = () => {
 bootAuth().then((ok) => {
   if (ok === false) return;
   load().catch((e) => flash("flash-engine", String(e.message || e), true));
-  loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
-  loadLab().catch(() => {});
 });
 async function loadYou() {
   const d = await api("/api/capture");
@@ -647,22 +586,7 @@ if ($("btn-you-go")) {
   };
 }
 loadYou().catch(() => {});
-$("ml-pending").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("button[data-ml]");
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const unsafe = document.querySelector(`[data-unsafe="${id}"]`);
-  const decision = btn.dataset.ml === "reject" ? "rejected" : "approved_paper";
-  api("/api/proposals/" + encodeURIComponent(id) + "/decide", {
-    method: "POST",
-    body: JSON.stringify({ decision, accept_unsafe: !!(unsafe && unsafe.checked) }),
-  }).then((res) => {
-    flash("flash-ml", res.reminder || res.note || "ok");
-    return loadMl();
-  }).catch((e) => flash("flash-ml", String(e.message || e), true));
-});
 setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
-setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
 </script>
 </body>
 </html>

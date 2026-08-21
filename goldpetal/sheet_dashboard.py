@@ -45,18 +45,6 @@ STRATEGY_FIELDS = [
     "in_bot",
     "note",
 ]
-LAB_FIELDS = [
-    "id",
-    "strategy",
-    "title",
-    "status",
-    "n_trades",
-    "after_charges_₹",
-    "profit_factor",
-    "win_rate",
-    "safety_ok",
-    "approve",
-]
 RISK_FIELDS = ["key", "value", "enforced_in"]
 COMMAND_FIELDS = ["command", "request", "allowed", "last_result", "note"]
 
@@ -476,73 +464,6 @@ def build_strategy_rows(
             }
         )
     rows.sort(key=lambda r: _num(r.get("after_charges_₹")), reverse=True)
-    return rows
-
-
-def build_lab_rows() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    pending: list[dict[str, Any]] = []
-    try:
-        from research_desk import research_desk_payload
-
-        lab = research_desk_payload()
-        pending.extend(list(lab.get("pending") or []))
-    except Exception:
-        lab = {}
-    try:
-        from proposals import proposals_snapshot
-
-        snap = proposals_snapshot()
-        seen = {str(p.get("id")) for p in pending}
-        for p in snap.get("pending") or []:
-            if str(p.get("id")) not in seen:
-                pending.append(p)
-    except Exception:
-        pass
-    if not pending:
-        rows.append(
-            {
-                "id": "",
-                "strategy": "",
-                "title": "No pending lab/ML proposals",
-                "status": "",
-                "n_trades": "",
-                "after_charges_₹": "",
-                "profit_factor": "",
-                "win_rate": "",
-                "safety_ok": "",
-                "approve": "Approve / Reject / Paper test stay on desk Lab + ML tabs",
-            }
-        )
-        return rows
-    for p in pending:
-        paper = p.get("paper") or {}
-        if not isinstance(paper, dict):
-            paper = {}
-        extra = paper.get("extra") if isinstance(paper.get("extra"), dict) else {}
-        metrics = extra.get("metrics") if isinstance(extra.get("metrics"), dict) else extra
-        if not isinstance(metrics, dict):
-            metrics = {}
-        ac = (
-            metrics.get("after_charges")
-            if isinstance(metrics, dict)
-            else None
-        )
-        pf = metrics.get("profit_factor") if isinstance(metrics, dict) else None
-        rows.append(
-            {
-                "id": p.get("id") or "",
-                "strategy": p.get("strategy") or "",
-                "title": p.get("title") or p.get("summary") or "",
-                "status": p.get("status") or "pending",
-                "n_trades": paper.get("n_trades") or metrics.get("n_trades") or "",
-                "after_charges_₹": _round(ac if ac is not None else paper.get("gross_pnl_inr"), 1),
-                "profit_factor": _round(pf, 3) if pf is not None else "",
-                "win_rate": _round(paper.get("win_rate"), 1),
-                "safety_ok": _yn(p.get("safety_ok")),
-                "approve": "desk Lab/ML — Sheets cannot Approve / micro-live / Unlock",
-            }
-        )
     return rows
 
 

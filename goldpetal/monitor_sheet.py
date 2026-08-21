@@ -49,13 +49,11 @@ from sheet_dashboard import (
     ANGEL_FIELDS,
     COMMAND_FIELDS,
     DASHBOARD_TABS,
-    LAB_FIELDS,
     LIVE_FIELDS,
     MARKET_FIELDS,
     RISK_FIELDS,
     STRATEGY_FIELDS,
     build_angel_rows,
-    build_lab_rows,
     build_live_rows,
     build_market_rows,
     build_risk_rows,
@@ -509,7 +507,6 @@ def _pack_csvs(
     market = build_market_rows(db_path=db_path)
     strategies = build_strategy_rows(blotter, db_path=db_path)
     trades = build_trade_rows(limit=closed_limit, trades=blotter)
-    lab = build_lab_rows()
     risk = build_risk_rows()
     commands = command_template_rows(results=command_results)
     return {
@@ -519,7 +516,6 @@ def _pack_csvs(
         "STRATEGIES": (STRATEGY_FIELDS, strategies),
         "SIGNALS": (SIGNAL_FIELDS, signals),
         "TRADES": (CLOSED_FIELDS, trades),
-        "LAB": (LAB_FIELDS, lab),
         "RISK": (RISK_FIELDS, risk),
         "COMMANDS": (COMMAND_FIELDS, commands),
         "HOW_TO": (HOW_TO_FIELDS, how),

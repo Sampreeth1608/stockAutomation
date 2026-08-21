@@ -456,33 +456,6 @@ def test_desk_snapshot_skips_checklist() -> None:
     assert snap["would_place_real_orders"] is False
 
 
-def test_apply_desk_books_amise_not_live() -> None:
-    td = tempfile.TemporaryDirectory()
-    try:
-        env = Path(td.name) / ".env"
-        env.write_text(
-            "ENABLE_S13=true\nENABLE_S21=true\nDRY_RUN=true\nSECRET=keep\n",
-            encoding="utf-8",
-        )
-        state = Path(td.name) / "state.json"
-        from live_readiness import apply_desk_books
-
-        res = apply_desk_books(
-            ["S13_HHHL_DAY", "S21_AMISE"],
-            ["S13_HHHL_DAY", "S21_AMISE"],
-            path=env,
-            state_path=state,
-        )
-        assert res["ok"] is True
-        assert "S21_AMISE" in res["enabled"]
-        assert "S21_AMISE" not in res["live_approved"]
-        assert "S13_HHHL_DAY" in res["live_approved"]
-        assert "S21_AMISE" in res["skipped_live_not_in_bot"]
-        assert "DRY_RUN=true" in env.read_text(encoding="utf-8")
-    finally:
-        td.cleanup()
-
-
 def test_summary_qualifies_live_needs_closed_and_40pct() -> None:
     from live_readiness import summary_qualifies_live
 
@@ -503,7 +476,6 @@ def test_desk_snapshot_lists_40pct_paper_books() -> None:
                 "pnl_after_charges": 250.0,
             },
             "S16_HHHL_WICK_1H": {"closed": 8, "win_rate_after_charges": 25.0},
-            "S21_AMISE": {"closed": 4, "win_rate_after_charges": 50.0},
             "OVERNIGHT_GAP": {
                 "closed": 6,
                 "win_rate_after_charges": 40.0,
@@ -513,14 +485,12 @@ def test_desk_snapshot_lists_40pct_paper_books() -> None:
     )
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
-    s21 = next(b for b in snap["books"] if b["strategy"] == "S21_AMISE")
     gap = next(b for b in snap["books"] if b["strategy"] == "OVERNIGHT_GAP")
     s5 = next(b for b in snap["books"] if b["strategy"] == "S5_MINEDGE")
     assert s18["live_eligible"] is True
     assert s18["qualifies_live"] is True
     assert s18["closed"] == 10
     assert s16["live_eligible"] is False
-    assert s21["live_eligible"] is True
     assert gap["live_eligible"] is True
     assert gap["qualifies_live"] is True
     assert s5["live_eligible"] is False
@@ -861,8 +831,6 @@ if __name__ == "__main__":
     print("ok overnight gap enable write")
     test_desk_snapshot_skips_checklist()
     print("ok desk snapshot")
-    test_apply_desk_books_amise_not_live()
-    print("ok amise not live")
     test_summary_qualifies_live_needs_closed_and_40pct()
     print("ok wr 40 gate")
     test_desk_snapshot_lists_40pct_paper_books()

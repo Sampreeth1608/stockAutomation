@@ -118,10 +118,6 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S18_OHLC_VOL_HTF": "ENABLE_S18",
     "S19_BODY_CLOSE_1H": "ENABLE_S19",
     "S20_FADE_HL": "ENABLE_S20",
-    "S21_AMISE": "ENABLE_S21",
-    "S22_AMISE": "ENABLE_S22",
-    "S23_AMISE": "ENABLE_S23",
-    "S24_AMISE": "ENABLE_S24",
 }
 
 SLIM_ENABLE_DEFAULTS: dict[str, str] = {

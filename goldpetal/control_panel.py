@@ -78,13 +78,6 @@ from desk_http_auth import (
 from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import proposals_snapshot
-from s11_desk import (
-    activate_s11_pack,
-    decide_proposal_for_desk,
-    ml_desk_payload,
-    pack_summary,
-)
-from research_desk import decide_research, research_desk_payload
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
 try:
     from monitor_sheet import (
@@ -540,18 +533,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                 )
                 self._send(status, body, ctype)
                 return
-            if path == "/api/proposals":
-                status, body, ctype = _json_bytes(proposals_snapshot())
-                self._send(status, body, ctype)
-                return
-            if path == "/api/ml":
-                status, body, ctype = _json_bytes(ml_desk_payload())
-                self._send(status, body, ctype)
-                return
-            if path == "/api/research":
-                status, body, ctype = _json_bytes(research_desk_payload())
-                self._send(status, body, ctype)
-                return
             if path == "/api/capture":
                 from human_capture import capture_desk_payload
 
@@ -577,40 +558,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                         ),
                     }
                 status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-            if path == "/api/amise":
-                try:
-                    from amise import amise_desk_payload
-
-                    payload = amise_desk_payload()
-                except Exception as exc:
-                    payload = {
-                        "ok": False,
-                        "engine": "AMISE",
-                        "error": str(exc),
-                        "live_blocked": True,
-                        "enable_blocked": True,
-                        "note": (
-                            "Desk still runs. AMISE invents challengers; you Approve. "
-                            "Never DRY_RUN=false. Keep DRY_RUN=true."
-                        ),
-                    }
-                status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-            if path == "/api/amise/lab":
-                try:
-                    from amise import amise_lab_status
-
-                    payload = amise_lab_status()
-                except Exception as exc:
-                    payload = {"ok": False, "error": str(exc), "running": False}
-                status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-                raw = ((qs.get("path") or [""])[0] or "").strip()
-                status, body, ctype = _json_bytes(pack_summary(raw))
                 self._send(status, body, ctype)
                 return
             if path == "/api/capital":
@@ -974,23 +921,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                 res = set_regime_gate(on)
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
-            if path == "/api/amise/lab":
-                from amise import start_amise_lab
-
-                res = start_amise_lab(propose=True)
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path == "/api/amise/gate":
-                from amise import ensure_mood_gate
-
-                res = ensure_mood_gate()
-                res["gate_on"] = bool(res.get("gate_on"))
-                res["note"] = (
-                    "Market regime was removed. This path does not rewrite .env. "
-                    "Books trade their formulas. Keep DRY_RUN=true."
-                )
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
             if path == "/api/bot/start":
                 from analytics.bot_ops import start_bot
 
@@ -1072,42 +1002,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                     enabled=bool(data["enabled"]) if "enabled" in data else None,
                 )
                 self._send(*_json_bytes({"ok": True, "capital": capital_snapshot()}))
-                return
-            if path.startswith("/api/proposals/") and path.endswith("/decide"):
-                proposal_id = path[len("/api/proposals/") : -len("/decide")]
-                decision = str(data.get("decision") or "")
-                note = str(data.get("note") or "")
-                accept_unsafe = bool(data.get("accept_unsafe"))
-                apply_env = bool(data.get("apply_env", True))
-                try:
-                    res = decide_proposal_for_desk(
-                        proposal_id,
-                        decision,
-                        note=note,
-                        apply_env=apply_env,
-                        accept_unsafe=accept_unsafe,
-                    )
-                except KeyError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path.startswith("/api/research/") and path.endswith("/decide"):
-                proposal_id = path[len("/api/research/") : -len("/decide")]
-                decision = str(data.get("decision") or "")
-                note = str(data.get("note") or "")
-                try:
-                    res = decide_research(proposal_id, decision, note=note)
-                except KeyError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/capture":
                 from human_capture import capture_desk_payload, mark_example_order, record_human
@@ -1194,36 +1088,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                     return
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
-            if path == "/api/s11/activate":
-                pack_path = str(data.get("pack_path") or data.get("path") or "")
-                accept_unsafe = bool(data.get("accept_unsafe"))
-                try:
-                    res = activate_s11_pack(pack_path, accept_unsafe=accept_unsafe)
-                except FileNotFoundError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except ValueError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
 
             self._send(*_json_bytes({"error": "not found"}, 404))
         except Exception as exc:
             self._send(*_internal_error_bytes(exc))
-
-
-def _amise_auto_loop() -> None:
-    import time
-
-    from amise import maybe_start_auto_lab
-
-    while True:
-        time.sleep(300)
-        try:
-            maybe_start_auto_lab()
-        except Exception:
-            continue
 
 
 def main() -> None:
@@ -1256,14 +1124,11 @@ def main() -> None:
     load_state()
     load_capital()
     try:
-        from amise import ensure_mood_gate
         from live_readiness import ensure_overnight_gap_enable
 
-        ensure_mood_gate()
         ensure_overnight_gap_enable()
     except Exception:
         pass
-    threading.Thread(target=_amise_auto_loop, name="amise-auto-lab", daemon=True).start()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
     print(f"cwd {ROOT}  Gold Petal station → http://{args.host}:{args.port}/", flush=True)
     try:

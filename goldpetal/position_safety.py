@@ -41,10 +41,6 @@ INTRADAY_RESTORE = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -73,10 +69,6 @@ EOD_FLATTEN_SKIP = frozenset(
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
         "FLOW_BRAIN",
-        "S21_AMISE",
-        "S22_AMISE",
-        "S23_AMISE",
-        "S24_AMISE",
     }
 )
 

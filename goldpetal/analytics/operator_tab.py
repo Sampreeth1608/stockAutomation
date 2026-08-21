@@ -18,10 +18,6 @@ SHORT = {
     "S19_BODY_CLOSE_1H": "S19 body+close 1h",
     "S20_FADE_HL": "S20 fade low/high",
     "OVERNIGHT_GAP": "overnight gap",
-    "S21_AMISE": "S21 AMISE",
-    "S22_AMISE": "S22 AMISE",
-    "S23_AMISE": "S23 AMISE",
-    "S24_AMISE": "S24 AMISE",
 }
 
 

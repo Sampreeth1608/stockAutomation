@@ -41,10 +41,6 @@ CORE_FIT_BOOKS: tuple[str, ...] = (
     "OVERNIGHT_GAP",
 )
 FIT_BOOKS: tuple[str, ...] = CORE_FIT_BOOKS + (
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
 )
 
 

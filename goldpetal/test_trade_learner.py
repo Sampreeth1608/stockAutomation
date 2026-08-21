@@ -41,7 +41,6 @@ def test_learns_every_strategy_name() -> None:
     assert "S9_STATE30" in tl.STRAT_INDEX
     assert "S13_HHHL_DAY" in tl.STRAT_INDEX
     assert "S16_HHHL_WICK_1H" in tl.STRAT_INDEX
-    assert "S21_AMISE" in tl.STRAT_INDEX
 
 
 def test_learns_new_amise_slot_after_approve() -> None:

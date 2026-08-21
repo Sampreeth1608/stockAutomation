@@ -34,8 +34,6 @@ FILES=(
   goldpetal/strategy_amise.py
   goldpetal/trade_learner.py
   goldpetal/entry_gates.py
-  goldpetal/amise.py
-  goldpetal/research_factory.py
   goldpetal/trade_analysis.py
   goldpetal/analytics/env_bridge.py
   goldpetal/overnight_gap.py
