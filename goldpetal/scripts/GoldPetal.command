@@ -13,7 +13,7 @@ VM_USER="${GP_VM_USER:-sampreeth1608}"
 VM_NAME="${GP_VM_NAME:-sampreeth-love-story}"
 VM_ZONE="${GP_VM_ZONE:-asia-south1-c}"
 VM_PROJECT="${GP_VM_PROJECT:-sampreethlovestory}"
-DESK_URL="${GP_DESK_URL:-http://127.0.0.1:8501/}"
+DESK_URL="${GP_DESK_URL:-http://127.0.0.1:8501/?v=54}"
 REMOTE_DESK="${GP_REMOTE_DESK:-cd ~/goldpetal && GP_QUIET_OPEN=1 ./scripts/run_desk_vm.sh --restart}"
 
 TUNNEL_CMD=(gcloud compute ssh "${VM_USER}@${VM_NAME}"

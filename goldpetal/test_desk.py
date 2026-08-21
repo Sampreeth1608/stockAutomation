@@ -82,6 +82,9 @@ def test_station_is_the_operator_page() -> None:
     assert "live_unlocked && live.dry_run" not in desk_pills
     assert "gp-header-v54" in html
     assert " · v54" in html
+    assert 'id="desk-ver"' in html
+    assert ">v54</span>" in html
+    assert "<title>Gold Petal v54</title>" in html
     assert "books_health" in html
     assert "function renderBooksWhy" in html
     assert "waiting_1h_close" in html
@@ -433,6 +436,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/control_state.py" in sync
     assert "goldpetal/market_mood.py" in sync
     assert "goldpetal/run_strategy.py" in sync
+    assert "goldpetal/desk_flatten.py" in sync
     assert "goldpetal/position_safety.py" in sync
     assert "goldpetal/strategy_s16.py" in sync
     assert "goldpetal/strategy_s18.py" in sync
@@ -454,6 +458,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
     assert "Gold Petal v54" in cmd
+    assert "?v=54" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -503,6 +508,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
+    assert payload["desk_build"] == "v54"
 
 
 def test_login_html_is_the_gate() -> None:

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal Desk</title>
+<title>Gold Petal v54</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -46,7 +46,10 @@ input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--gold
 }
 .brand { display: flex; flex-direction: column; gap: 2px; min-width: 0;
   padding-left: .7rem; border-left: 3px solid #c9a45a; }
+.brand-row { display: flex; align-items: baseline; gap: .5rem; }
 .brand h1 { margin: 0; font: 600 18px/1.15 var(--serif); letter-spacing: .01em; color: var(--gold); }
+.ver { font: 700 15px/1 var(--mono); color: #fff; background: var(--gold);
+  padding: .2rem .48rem; border-radius: 6px; letter-spacing: .06em; }
 .brand .sub { color: var(--muted); font: 500 12px/1.25 var(--mono); }
 .brand .sub.running { color: var(--ok); }
 .brand .sub.stopped { color: var(--warn); }
@@ -167,7 +170,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 <div class="station">
   <header class="top">
     <div class="brand">
-      <h1>Gold Petal Desk</h1>
+      <div class="brand-row">
+        <h1>Gold Petal Desk</h1>
+        <span class="ver" id="desk-ver">v54</span>
+      </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
     <div class="quote">
@@ -607,6 +613,7 @@ function tickClock() {
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
     if (clock) clock.textContent = "IST " + ist + " · v54";
+    document.title = "Gold Petal v54";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1371,7 +1378,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = [];
+  const foot = ["v54"];
+  const ver = $("desk-ver");
+  if (ver) ver.textContent = d.desk_build || "v54";
   if (lastHist.lots) foot.push(lastHist.lots + " lots");
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
