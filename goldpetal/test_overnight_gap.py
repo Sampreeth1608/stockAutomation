@@ -386,17 +386,17 @@ def test_wide_spread_allows() -> None:
     assert p.allows(BOOK, "QUIET")
 
 
-def test_paper_until_40_then_live_tab() -> None:
-    assert BOOK in PAPER_ONLY_BOOKS
+def test_live_eligible_without_40() -> None:
+    assert BOOK not in PAPER_ONLY_BOOKS
     assert BOOK not in NEVER_LIVE_BOOKS
-    assert BOOK not in LIVE_ELIGIBLE_BOOKS
+    assert BOOK in LIVE_ELIGIBLE_BOOKS
+    assert book_may_go_live(
+        BOOK,
+        summaries={BOOK: {"closed": 0, "win_rate_after_charges": 0.0}},
+    ) is True
     assert book_may_go_live(
         BOOK,
         summaries={BOOK: {"closed": 20, "win_rate_after_charges": 39.9}},
-    ) is False
-    assert book_may_go_live(
-        BOOK,
-        summaries={BOOK: {"closed": 20, "win_rate_after_charges": 40.0}},
     ) is True
 
 
@@ -475,7 +475,7 @@ if __name__ == "__main__":
     test_rollover_blocks_entry()
     test_hydrate_uses_session_high_low()
     test_enable_default_true()
-    test_paper_until_40_then_live_tab()
+    test_live_eligible_without_40()
     test_mood_exempt()
     test_on_desk_and_slim()
     test_wide_spread_allows()

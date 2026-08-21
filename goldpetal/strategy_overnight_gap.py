@@ -3,8 +3,8 @@
 Read today's tape near MARKET_CLOSE. BUY if the session looks like a gap-up
 open tomorrow; SHORT if it looks like a gap-down. CLOSE in the first minutes
 after next MARKET_OPEN (default 09:00–09:05 IST). Mood-exempt. ENABLE defaults
-true (papers with the slim books). Paper 100 lots ≠ live. Live tab after
-40% WR% AC — you Arm live.
+true (papers with the slim books). Paper 100 lots ≠ live. Live-eligible —
+tick Lots or ₹, then you Arm live. Next-open exit, never EOD flatten.
 """
 
 from __future__ import annotations

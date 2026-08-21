@@ -45,13 +45,18 @@ PAPER_ONLY_BOOKS = frozenset(
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
         "FLOW_BRAIN",
-        "OVERNIGHT_GAP",
     }
 )
-# First live-capital test: 1 lot, these four. Other paper books may join
-# the Live tab (and Angel) only after closed trades and WR% AC ≥ 40.
+# Seed live books plus overnight gap. Other paper books (S18/S19/S20) join
+# the Live tab only after closed trades and WR% AC ≥ 40. You Arm live.
 LIVE_ELIGIBLE_BOOKS = frozenset(
-    {"S5_MINEDGE", "S8_NET_ZIGZAG", "S13_HHHL_DAY", "S16_HHHL_WICK_1H"}
+    {
+        "S5_MINEDGE",
+        "S8_NET_ZIGZAG",
+        "S13_HHHL_DAY",
+        "S16_HHHL_WICK_1H",
+        "OVERNIGHT_GAP",
+    }
 )
 LIVE_WR_MIN_PCT = 40.0
 LIVE_MIN_CLOSED = 1
@@ -105,7 +110,7 @@ def book_may_go_live(
     *,
     summaries: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
-    """Angel may use this book: seed four, or any paper book at ≥40% WR% AC."""
+    """Angel may use this book: seed live set, or any paper book at ≥40% WR% AC."""
     n = str(name).strip()
     if n in NEVER_LIVE_BOOKS or n not in set(paper_strategy_names()):
         return False
@@ -115,7 +120,7 @@ def book_may_go_live(
 
 
 def ensure_overnight_gap_enable(*, path: Path | None = None) -> dict[str, Any]:
-    """Paper overnight gap so closed trades can reach 40% WR% AC for the Live tab.
+    """Keep overnight gap on. Tick Lots or ₹, then you Arm live. Next-open exit.
 
     Does not Arm live. Does not set DRY_RUN=false. Type RESTART on Engine.
     """
@@ -127,8 +132,9 @@ def ensure_overnight_gap_enable(*, path: Path | None = None) -> dict[str, Any]:
     out = dict(res)
     out["enabled"] = True
     out["note"] = (
-        "Overnight gap papers. Live tab after closed trades and WR% AC ≥ 40. "
-        "You Arm live. Type RESTART on Engine. Keep DRY_RUN=true. Stay at 3 lots."
+        "Overnight gap is on. Tick Lots or ₹ on Live, then you Arm live. "
+        "Closes at next open, not MARKET_CLOSE. Type RESTART on Engine. "
+        "Does not Arm live."
     )
     return out
 
@@ -247,7 +253,7 @@ def apply_desk_books(
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
-    Live pick is seed four, or a paper book that currently qualifies at 40% WR% AC.
+    Live pick is the seed live set (incl. overnight gap), or a paper book at 40% WR% AC.
     """
     from control_state import load_state, paper_strategy_names, set_intraday_books, set_live_approved
 
@@ -469,6 +475,20 @@ def apply_panel_enables(
     return res
 
 
+def bot_is_running(*, now: datetime | None = None) -> bool:
+    """True when the engine has a recent heartbeat or a live ticks.db."""
+    health = read_bot_health()
+    age = bot_age_seconds(health, now=now)
+    if age is not None and age <= 180.0:
+        return True
+    try:
+        from desk_data import bot_live_ticks_db
+
+        return bot_live_ticks_db() is not None
+    except Exception:
+        return False
+
+
 def bot_age_seconds(health: dict[str, Any], *, now: datetime | None = None) -> float | None:
     raw = str(health.get("ts_ist") or "")
     if not raw:
@@ -493,6 +513,7 @@ def _live_book_row(
     sc = summaries.get(name) or {}
     qualifies = name not in NEVER_LIVE_BOOKS and summary_qualifies_live(sc)
     was_picked = name in approved and name not in NEVER_LIVE_BOOKS
+    may = book_may_go_live(name, summaries=summaries)
     closed = sc.get("closed")
     try:
         closed_n = int(closed or 0)
@@ -504,7 +525,7 @@ def _live_book_row(
     row = {
         "strategy": name,
         "live_approved": was_picked,
-        "live_eligible": bool(qualifies or was_picked),
+        "live_eligible": bool(may or was_picked),
         "qualifies_live": bool(qualifies),
         "closed": closed_n,
         "win_rate_after_charges": wr,
@@ -701,8 +722,8 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "note": (
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
-            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16 at LIVE_MAX_LOTS=1. "
-            "S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (hard cap "
+            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16/overnight gap. "
+            "You Arm live. S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (hard cap "
             f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS}), not paper 100."
         ),
     }

@@ -220,15 +220,6 @@ def run_once(
             print("Broker positions seeded: {} (paper opens are not live)", flush=True)
     except Exception as exc:
         logger.warning("Could not seed broker positions: %s", exc)
-    try:
-        from you_trade import YOU_BOOK, load_you_position
-
-        you_pos = load_you_position()
-        side = str(you_pos.get("side") or "flat")
-        if side in {"long", "short", "flat"} and hasattr(broker, "seed_positions"):
-            broker.seed_positions({YOU_BOOK: side})
-    except Exception as exc:
-        logger.warning("Could not seed You-tab position: %s", exc)
 
     symbol = contract["symbol"]
     token = contract["token"]
@@ -1527,45 +1518,6 @@ def run_once(
         logger.info(line)
 
 
-    def emit_you_if_pending(now: datetime, message: dict) -> None:
-        """You-tab MARKET click. Not a paper book. Live only if already armed."""
-        del message
-        from you_trade import YOU_BOOK, finish_you_order, take_pending_you_order
-
-        job = take_pending_you_order()
-        if not job:
-            return
-        act = str(job.get("action") or "").upper()
-        if act == "BUY":
-            after = "long"
-        elif act == "SHORT":
-            after = "short"
-        else:
-            after = "flat"
-        ts = now.isoformat(timespec="seconds")
-        res = _record_signal(
-            time_label=ts,
-            action=act,
-            position_after=after,
-            reason=(
-                f"you tab {act} example={job.get('example_id') or ''} "
-                f"queued={job.get('id')}"
-            ),
-            price_delta=None,
-            net=0.0,
-            net_delta=None,
-            strategy=YOU_BOOK,
-            cmp=latest.get("cmp"),
-        )
-        try:
-            finish_you_order(job, res)
-        except Exception as exc:
-            print(f"[YOU] finish failed: {exc}", flush=True)
-            logger.warning("[YOU] finish failed: %s", exc)
-        line = f"[{ts}] [YOU] {act} {YOU_BOOK} queued={job.get('id')}"
-        print(line, flush=True)
-        logger.info(line)
-
     def book_health() -> dict[str, dict[str, Any]]:
         """Per-book pos + why-idle so the desk can answer "why is S16 flat?"."""
         out: dict[str, dict[str, Any]] = {}
@@ -1879,7 +1831,6 @@ def run_once(
                             "S19": strategy_s19.position,
                             "S20": strategy_s20.position,
                             "GAP": strategy_og.position,
-                            "YOU": broker.positions.get("YOU_MANUAL", "flat"),
                         },
                         "skips": {
                             "S5": strategy_s5.last_skip,
@@ -1890,8 +1841,6 @@ def run_once(
                     }
                 )
 
-            # You tab: one queued MARKET order (record already stored on the desk)
-            emit_you_if_pending(now, message)
             # S2: 1-min sum of buy1-5 vs sell1-5
             emit_s2_if_changed(now, message)
             # S3: ML model BUY/SHORT/CLOSE
@@ -1951,7 +1900,7 @@ def run_once(
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
-            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. Papers; Live after 40% WR% AC.
+            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. You Arm live.
             emit_overnight_gap_if_changed(now, message)
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)
@@ -2248,8 +2197,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
-        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP paper then Live at 40% WR% AC, AMISE S21+ after Lab Approve)",
+        f"(slim default S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S18/S19 paper until 40% WR% AC, "
+        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP live-eligible (you Arm), AMISE off)",
         flush=True,
     )
 

@@ -354,7 +354,7 @@ def test_apply_desk_books_s20_stays_paper_only() -> None:
         td.cleanup()
 
 
-def test_apply_desk_books_overnight_gap_stays_paper_until_40() -> None:
+def test_apply_desk_books_overnight_gap_live_eligible_without_40() -> None:
     td = tempfile.TemporaryDirectory()
     try:
         env = Path(td.name) / ".env"
@@ -374,9 +374,9 @@ def test_apply_desk_books_overnight_gap_stays_paper_until_40() -> None:
         )
         assert res["ok"] is True
         assert "OVERNIGHT_GAP" in res["enabled"]
-        assert "OVERNIGHT_GAP" not in res["live_approved"]
+        assert "OVERNIGHT_GAP" in res["live_approved"]
         assert "S13_HHHL_DAY" in res["live_approved"]
-        assert "OVERNIGHT_GAP" in res["skipped_live_not_in_bot"]
+        assert "OVERNIGHT_GAP" not in res["skipped_live_not_in_bot"]
         text = env.read_text(encoding="utf-8")
         assert "ENABLE_OVERNIGHT_GAP=true" in text
         assert "DRY_RUN=true" in text
@@ -425,7 +425,8 @@ def test_ensure_overnight_gap_enable_writes_env() -> None:
         assert res.get("ok") is True
         assert "ENABLE_OVERNIGHT_GAP=true" in env.read_text(encoding="utf-8")
         assert os.environ.get("ENABLE_OVERNIGHT_GAP") == "true"
-        assert "40" in str(res.get("note") or "")
+        assert "Arm" in str(res.get("note") or "")
+        assert "40" not in str(res.get("note") or "")
     finally:
         os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
         td.cleanup()
@@ -448,8 +449,8 @@ def test_desk_snapshot_skips_checklist() -> None:
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
     assert s18["live_eligible"] is False
-    assert s16["live_eligible"] is False
-    assert gap["live_eligible"] is False
+    assert s16["live_eligible"] is True
+    assert gap["live_eligible"] is True
     assert "S4_OVERNIGHT" not in snap["enables"]
     assert not any(b["strategy"] == "S4_OVERNIGHT" for b in snap["books"])
     assert "S14_WICK30_STRICT" not in snap["enables"]
@@ -490,10 +491,10 @@ def test_desk_snapshot_lists_40pct_paper_books() -> None:
     assert s18["live_eligible"] is True
     assert s18["qualifies_live"] is True
     assert s18["closed"] == 10
-    assert s16["live_eligible"] is False
+    assert s16["live_eligible"] is True
     assert gap["live_eligible"] is True
     assert gap["qualifies_live"] is True
-    assert s5["live_eligible"] is False
+    assert s5["live_eligible"] is True
     assert snap["live_wr_min_pct"] == 40.0
 
 
@@ -823,8 +824,8 @@ if __name__ == "__main__":
     print("ok s19 paper only")
     test_apply_desk_books_s20_stays_paper_only()
     print("ok s20 paper only")
-    test_apply_desk_books_overnight_gap_stays_paper_until_40()
-    print("ok overnight gap paper until 40")
+    test_apply_desk_books_overnight_gap_live_eligible_without_40()
+    print("ok overnight gap live eligible")
     test_apply_desk_books_overnight_gap_live_when_wr_40()
     print("ok overnight gap live at 40")
     test_ensure_overnight_gap_enable_writes_env()

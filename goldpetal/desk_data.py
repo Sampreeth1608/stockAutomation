@@ -35,7 +35,7 @@ _LIVE_PNL_CACHE: dict[str, Any] = {"at": 0.0, "payload": None, "db": ""}
 _LIVE_PNL_LOCK = threading.Lock()
 _PGREP_CACHE: dict[str, Any] = {"at": 0.0, "path": ""}
 _SIGNAL_WINDOW = 1500
-_LIVE_PNL_BOOKS_EXTRA = frozenset({"YOU_MANUAL"})
+_LIVE_PNL_BOOKS_EXTRA = frozenset()
 
 
 def row_to_dict(row: Any) -> dict[str, Any]:

@@ -28,7 +28,7 @@ def test_unknown_book_rejected(tmp_path: Path) -> None:
 def test_you_manual_not_via_exit(tmp_path: Path) -> None:
     res = request_flatten("YOU_MANUAL", path=tmp_path / "q.json")
     assert res["ok"] is False
-    assert "You tab" in res["error"]
+    assert "retired" in res["error"]
 
 
 def test_queue_take_finish(tmp_path: Path) -> None:

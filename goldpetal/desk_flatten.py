@@ -22,7 +22,7 @@ from control_state import (
     ensure_control_dir,
     paper_strategy_names,
 )
-from you_trade import bot_is_running
+from live_readiness import bot_is_running
 
 IST = ZoneInfo("Asia/Kolkata")
 REQUEST_PATH = CONTROL_DIR / "flatten_requests.json"
@@ -143,7 +143,7 @@ def request_flatten(
         return {
             "ok": False,
             "queued": False,
-            "error": "use the You tab CLOSE for YOU_MANUAL",
+            "error": "YOU_MANUAL is retired — no You tab",
         }
     if name not in known_flatten_names():
         return {"ok": False, "queued": False, "error": f"unknown book {name}"}

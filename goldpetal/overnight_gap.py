@@ -1,8 +1,8 @@
 """Overnight gap read: today's session → predicted next-open direction.
 
 Paper book OVERNIGHT_GAP. Not S4 daily swing. Not S7.
-Joins the Live tab after closed paper trades and WR% AC ≥ 40. You Arm live.
-Independent of the tick-window mood gate.
+Live-eligible with S5/S8/S13/S16. Tick Lots or ₹, then you Arm live.
+Closes at next open, never MARKET_CLOSE. Independent of the tick-window mood gate.
 
 Score today's Gold Petal tape (day return, close in range, late-session
 return, late TBQ/TSQ imbalance). BUY near MARKET_CLOSE if the read is

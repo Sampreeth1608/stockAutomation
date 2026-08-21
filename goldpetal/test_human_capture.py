@@ -241,7 +241,7 @@ def test_not_a_paper_book() -> None:
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert "human_capture" not in runner
     assert "ENABLE_HUMAN" not in runner
-    assert "you_trade" in runner
+    assert "you_trade" not in runner
     assert "YOU_MANUAL" not in ALL_STRATEGY_NAMES
     paper = (root / "station.html").read_text(encoding="utf-8").split("const PAPER_BOOKS")[1].split("];")[0]
     assert "HUMAN" not in paper

@@ -265,8 +265,6 @@ def path_requires_totp(path: str, data: dict[str, Any] | None) -> bool:
         if dry_raw is False:
             return True
         return str(dry_raw).strip().lower() in {"false", "0", "no", "n", "off"}
-    if p == "/api/capture":
-        return bool(body.get("place") or body.get("send") or body.get("live"))
     return False
 
 

@@ -94,7 +94,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-pnl-open"></tbody>
     </table>
-    <p class="hint">Approve already papers every book. This page is only Angel. A book appears at ≥40% WR% AC with closed trades — S5 / S8 / S13 / S16 and any other paper book. Tick <b>Lots</b> or <b>₹</b> to send that book live (one tick only). Overnight gap papers now. S18 / S19 / S20 / overnight gap stay paper until they hit 40%. You Arm live.</p>
+    <p class="hint">Approve already papers every book. This page is only Angel. S5 / S8 / S13 / S16 / overnight gap can go live if you tick Lots or ₹ and Arm live. Overnight gap closes at next open. S18 / S19 / S20 stay paper until 40% WR% AC. You Arm live.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="1000" value="1"/></label>
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
@@ -114,27 +114,6 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
     <p class="flash" id="flash-money"></p>
-  </section>
-
-  <section class="card">
-    <h2>You — trade</h2>
-    <p class="hint">Sit 30m, 1h, 3h, or the whole day to teach (Mon–Fri 09:00–23:30 IST). Every BUY / SHORT / CLOSE stores the exact click time plus ticks and candles. Angel only after Arm live on Live + type YOU. Press Let it trade when you want the mimic to paper, then compare. Keep sitting to teach more. Full compare: <a href="/#you">desk You tab</a>.</p>
-    <p class="hint" id="you-ltp-line">LTP …</p>
-    <p class="hint" id="you-live-line">Angel: recorded only</p>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="you-send"/> Send to Angel</label>
-      <input id="you-word" placeholder="YOU" autocomplete="off"/>
-    </div>
-    <div class="row" style="margin-top:.35rem">
-      <button class="btn ok" type="button" data-you="buy">BUY</button>
-      <button class="btn danger" type="button" data-you="short">SHORT</button>
-      <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
-      <button class="btn" type="button" data-you="close">CLOSE</button>
-      <button class="btn warn" type="button" id="btn-you-learn">Learn my style</button>
-      <button class="btn ok" type="button" id="btn-you-go">Let it trade</button>
-    </div>
-    <p class="hint" id="you-sum">No captures yet.</p>
-    <p class="flash" id="flash-you"></p>
   </section>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -509,76 +488,6 @@ bootAuth().then((ok) => {
   if (ok === false) return;
   load().catch((e) => flash("flash-engine", String(e.message || e), true));
 });
-async function loadYou() {
-  const d = await api("/api/capture");
-  const s = (d && d.summary) || {};
-  const live = (d && d.live) || {};
-  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—")
-    + ((d.session && d.session.open) ? " · session open" : " · market closed")
-    + (d.tape_now && d.tape_now.tbq != null ? (" · TBQ " + d.tape_now.tbq + " TSQ " + d.tape_now.tsq) : "");
-  const learn = (d && d.learn) || {};
-  const hours = learn.hours || {};
-  $("you-sum").textContent = "captured " + (s.n || 0) +
-    " · BUY " + (s.n_buy || 0) +
-    " · SHORT " + (s.n_short || 0) +
-    " · NO TRADE " + (s.n_no_trade || 0) +
-    " · sittings " + (learn.n_sessions || 0) +
-    (hours.label ? (" · " + hours.label) : "") +
-    (learn.knowledge_good ? " · knowledge good" : "") +
-    (learn.can_start ? " · ready — Let it trade" : "");
-  const liveLine = $("you-live-line");
-  if (liveLine) liveLine.textContent = live.why || "Angel: recorded only";
-  const open = !!(d.session && d.session.open);
-  const pos = String(((live.position) || {}).side || "flat");
-  document.querySelectorAll("button[data-you]").forEach((b) => {
-    if (b.dataset.you === "close") b.disabled = !(open || pos !== "flat");
-    else b.disabled = !open;
-  });
-  if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
-  const cmp = (d && d.compare) || {};
-  if (cmp.verdict) $("you-sum").textContent += " · " + cmp.verdict;
-}
-document.querySelectorAll("button[data-you]").forEach((btn) => {
-  btn.onclick = () => {
-    const send = !!( $("you-send") && $("you-send").checked ) && btn.dataset.you !== "no_trade";
-    const word = ($("you-word") && $("you-word").value) || "";
-    if (send && !window.confirm("Send this " + btn.dataset.you.toUpperCase() + " to Angel? Real money.")) return;
-    api("/api/capture", {
-      method: "POST",
-      body: JSON.stringify({
-        action: btn.dataset.you,
-        confidence: 3,
-        place: send,
-        confirm: send ? word.trim() : "",
-      }),
-    }).then((res) => {
-      const rec = res.recorded || {};
-      let msg = "Recorded " + String(rec.action || btn.dataset.you).toUpperCase();
-      if (rec.places_order) msg += " — queued for Angel";
-      else if (send) msg += " — not sent (" + ((rec.order && rec.order.error) || "blocked") + ")";
-      else msg += " — tape stored";
-      flash("flash-you", msg);
-      if ($("you-word")) $("you-word").value = "";
-      return loadYou();
-    }).catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-});
-if ($("btn-you-learn")) {
-  $("btn-you-learn").onclick = () => {
-    api("/api/capture/learn", { method: "POST", body: JSON.stringify({}) })
-      .then((res) => { flash("flash-you", res.reminder || res.note || res.error || "Learned"); return loadYou(); })
-      .catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-}
-if ($("btn-you-go")) {
-  $("btn-you-go").onclick = () => {
-    if (!window.confirm("Start the mimic in paper? Not live. Restart the bot after it names a slot.")) return;
-    api("/api/capture/go", { method: "POST", body: JSON.stringify({}) })
-      .then((res) => { flash("flash-you", res.note || res.error || "Let it trade", !res.ok); return loadYou(); })
-      .catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-}
-loadYou().catch(() => {});
 setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
 </script>
 </body>

@@ -35,10 +35,11 @@ def test_station_is_the_operator_page() -> None:
     assert "No paper P&L yet" not in html
     assert "paper AC ₹" not in html
     assert "Downloads" in html
-    assert 'data-tab="you"' in html
+    assert 'data-tab="you"' not in html
+    assert 'id="you-panel"' not in html
     assert 'id="you-strip"' not in html
     assert 'id="fit-strip"' not in html
-    assert "You · trade" in html
+    assert "You · trade" not in html
     tabs = html.split('id="tabs"')[1].split("</div>")[0]
     assert "Enable regime" not in tabs
     assert 'id="btn-regime"' not in tabs
@@ -53,15 +54,14 @@ def test_station_is_the_operator_page() -> None:
     assert 'id="mood-pill"' not in html
     assert "/api/desk/regime" not in html
     assert ".mood-box" not in html
-    assert "You — trade and teach" in html
-    assert "/api/capture" in html
-    assert "/api/capture/learn" in html
-    assert "Send to Angel" in html
-    assert "Learn my style" in html
-    assert "type YOU" in html
-    assert "NO TRADE" in html
-    assert "Send to Angel" in html
-    assert "you_skipped_rule_would_take" in html
+    assert "You — trade and teach" not in html
+    assert "/api/capture" not in html
+    assert "/api/capture/learn" not in html
+    assert "Send to Angel" not in html
+    assert "Learn my style" not in html
+    assert "type YOU" not in html
+    assert "NO TRADE" not in html
+    assert "you_skipped_rule_would_take" not in html
     assert "Mon–Fri 09:00–23:30" in html
     assert "Gold Petal running" in html
     assert "Gold Petal stopped" in html
@@ -82,11 +82,11 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v57" in html
-    assert " · v57" in html
+    assert "gp-header-v58" in html
+    assert " · v58" in html
     assert 'id="desk-ver"' in html
-    assert ">v57</span>" in html
-    assert "<title>Gold Petal v57</title>" in html
+    assert ">v58</span>" in html
+    assert "<title>Gold Petal v58</title>" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -161,16 +161,15 @@ def test_station_is_the_operator_page() -> None:
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
-    assert "Overnight gap papers now" in html
-    assert "S18 / S19 / S20 / overnight gap stay paper" in html
+    assert "S5 / S8 / S13 / S16 / overnight gap" in html
+    assert "S18 / S19 / S20 stay paper until they hit 40%" in html
+    assert "overnight gap stay paper until they hit 40%" not in html
     assert "live_eligible" in html
-    assert "exact IST click time" in html
-    assert "tape_lag_ms" in html
-    assert "Let it trade" in html
-    assert "You vs mimic" in html
-    assert "/api/capture/go" in html
-    assert "whole day" in html
-    assert "30m" in html
+    assert "exact IST click time" not in html
+    assert "tape_lag_ms" not in html
+    assert "Let it trade" not in html
+    assert "You vs mimic" not in html
+    assert "/api/capture/go" not in html
     assert "lastLtpChangeAt" in html
     assert "sess.ltp" in html
     hist = html.split("async function loadHistory()")[1].split("async function act")[0]
@@ -187,7 +186,7 @@ def test_station_is_the_operator_page() -> None:
     assert 'id="books"' not in html
     assert "Approve already papers" in html
     assert "only Angel" in html
-    assert "WR% AC of 40" in html
+    assert "40% WR% AC" in html
     assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
@@ -202,7 +201,8 @@ def test_station_is_the_operator_page() -> None:
     assert "S20_FADE_HL" in html
     assert "OVERNIGHT_GAP" in html
     assert "overnight gap" in html
-    assert "overnight gap stay paper until they hit 40%" in html
+    assert "S18 / S19 / S20 stay paper until they hit 40%" in html
+    assert "overnight gap stay paper until they hit 40%" not in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -249,12 +249,11 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Save strategies" in html
     assert "Gold Petal Desk" in html
     assert "href=\"/\"" in html
-    assert "You — trade" in html
-    assert "whole day" in html
-    assert "30m" in html
-    assert "Let it trade" in html
-    assert "/api/capture/go" in html
-    assert "/#you" in html
+    assert "You — trade" not in html
+    assert "Let it trade" not in html
+    assert "/api/capture" not in html
+    assert "/api/capture/go" not in html
+    assert "/#you" not in html
     assert "/api/mood" not in html
     assert "id=\"mood-line\"" not in html
     assert "press Enable regime" not in html
@@ -275,8 +274,9 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Approve already papers" in html
     assert "only Angel" in html
     assert "40% WR% AC" in html
-    assert "Overnight gap papers now" in html
-    assert "overnight gap stay paper until they hit 40%" in html
+    assert "S5 / S8 / S13 / S16 / overnight gap can go live" in html
+    assert "S18 / S19 / S20 stay paper until 40% WR% AC" in html
+    assert "overnight gap stay paper until they hit 40%" not in html
     assert "no book at 40% WR% AC yet" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
@@ -364,15 +364,15 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "/api/s11" not in text
     assert "s11_desk" not in text
     assert "research_desk" not in text
-    assert "/api/capture" in text
-    assert "/api/capture/learn" in text
-    assert "/api/capture/go" in text
-    assert "after_new_example" in text
-    assert "start_mimic_paper" in text
-    assert "request_you_order" in text
+    assert "/api/capture" not in text
+    assert "/api/capture/learn" not in text
+    assert "/api/capture/go" not in text
+    assert "after_new_example" not in text
+    assert "start_mimic_paper" not in text
+    assert "request_you_order" not in text
     assert "/api/mood" in text
     assert "mood_desk_payload" in text
-    assert "record_human" in text
+    assert "record_human" not in text
     assert "/api/tape" in text
     assert "/api/s14/calc" in text
     assert "/api/analysis" in text
@@ -466,8 +466,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v57" in cmd
-    assert "?v=57" in cmd
+    assert "Gold Petal v58" in cmd
+    assert "?v=58" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -481,9 +481,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
     assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
-    assert "OVERNIGHT_GAP" in PAPER_ONLY_BOOKS
+    assert "OVERNIGHT_GAP" not in PAPER_ONLY_BOOKS
     assert "OVERNIGHT_GAP" not in NEVER_LIVE_BOOKS
-    assert "OVERNIGHT_GAP" not in LIVE_ELIGIBLE_BOOKS
+    assert "OVERNIGHT_GAP" in LIVE_ELIGIBLE_BOOKS
     assert "FLOW_BRAIN" in NEVER_LIVE_BOOKS
     from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
 
@@ -517,7 +517,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v57"
+    assert payload["desk_build"] == "v58"
 
 
 def test_login_html_is_the_gate() -> None:
