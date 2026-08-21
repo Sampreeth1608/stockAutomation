@@ -140,9 +140,9 @@ def portfolio_from_env() -> PortfolioConfig:
 
     Slim paper default: S5, S8, S13, S16, S18, S19, overnight gap (S4 off — Angel/ticks daily
     swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
-    false) — AMISE factory holds the research ML. S18 stays paper until 40% WR% AC.
-    S19 paper 1h body+close is on (Live after 40%). Overnight gap is live-eligible
-    with S5/S8/S13/S16 — you Arm. S20 stays off until you ask.
+    false) — AMISE factory holds the research ML. S18 is live-eligible
+    with S5/S8/S13/S16/overnight gap — you Arm. S19 paper 1h body+close is on
+    (Live after 40%). S20 stays off until you ask.
     AMISE slots S21+ ENABLE after Lab Approve.
     """
     def on(key: str, default: str) -> bool:

@@ -1,6 +1,6 @@
-"""S18 paper: 1h OHLC + prev OHLC + volume + yesterday, pack overlay.
+"""S18: 1h OHLC + prev OHLC + volume + yesterday, pack overlay.
 
-One book. Not live. Leave the 31 CR_* mixes off.
+One book. Live-eligible — tick Lots or ₹, then you Arm. Leave the 31 CR_* mixes off.
 
 Wait for the 1h to **finish**. Need a previous **same-session** 1h and
 yesterday's **completed** day candle. Bar volume is the delta of Angel
@@ -49,7 +49,7 @@ FORMULA = (
     "Base SHORT = red + C<prevC + LL + vol>prevVol + C<dayC. "
     "Learner may drop a core leg or add wick / net / ticks / prev-HL / range / TBQ. "
     "Skip equals / missing prev or day / volume not up. FLIP. Fill at close. Flatten EOD. "
-    "Paper only, not live."
+    "Live-eligible — tick Lots or ₹, then you Arm."
 )
 
 

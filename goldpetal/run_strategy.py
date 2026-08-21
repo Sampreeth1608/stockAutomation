@@ -473,7 +473,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S18      : ENABLE_S18 paper 1h OHLC+vol+day pack overlay "
+        f"S18      : ENABLE_S18 1h OHLC+vol+day pack overlay (live-eligible, you Arm) "
         f"[{'ON' if portfolio.is_enabled(strategy_s18.name) else 'OFF'}] "
         f"{strategy_s18.status_line}",
         flush=True,
@@ -1894,7 +1894,7 @@ def run_once(
             emit_s13_if_changed(now, message)
             # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close; flatten at EOD
             emit_s16_if_changed(now, message)
-            # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; paper only
+            # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; you Arm live
             emit_s18_if_changed(now, message)
             # S19: 1h aligned body+close, FLIP at bar close; paper only
             emit_s19_if_changed(now, message)
@@ -2197,8 +2197,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S18/S19 paper until 40% WR% AC, "
-        f"FLOW_BRAIN off, S20 off, OVERNIGHT_GAP live-eligible (you Arm), AMISE off)",
+        f"(slim default S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S19 paper until 40% WR% AC, "
+        f"FLOW_BRAIN off, S20 off, S18 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off)",
         flush=True,
     )
 

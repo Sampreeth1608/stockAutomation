@@ -302,7 +302,7 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v58",
+        "desk_build": "v59",
     }
 
 

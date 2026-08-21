@@ -229,7 +229,7 @@ def test_seed_positions_and_emergency() -> None:
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
-def test_s18_cannot_trade_live_even_if_approved() -> None:
+def test_s18_can_trade_live_when_approved_without_40() -> None:
     td, state, orders = _tmp_state()
     try:
         control_state.STATE_PATH = state
@@ -246,8 +246,8 @@ def test_s18_cannot_trade_live_even_if_approved() -> None:
 
         with patch("live_readiness.qualified_live_names", return_value=frozenset()):
             res = broker.place_signal(strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0)
-        assert res.skipped and res.reason == "not_live_eligible"
-        assert not api.calls
+        assert res.ok and res.transaction == "BUY"
+        assert api.calls
     finally:
         td.cleanup()
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
@@ -780,8 +780,8 @@ if __name__ == "__main__":
     print("ok place_flow")
     test_seed_positions_and_emergency()
     print("ok seed_emergency")
-    test_s18_cannot_trade_live_even_if_approved()
-    print("ok s18 not live")
+    test_s18_can_trade_live_when_approved_without_40()
+    print("ok s18 live without 40")
     test_s18_can_trade_live_when_wr_40()
     print("ok s18 live at 40")
     test_broker_from_session_live_when_not_dry()

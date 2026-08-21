@@ -264,7 +264,7 @@ def test_apply_desk_books_live_requires_in_bot() -> None:
         td.cleanup()
 
 
-def test_apply_desk_books_s18_stays_paper_only() -> None:
+def test_apply_desk_books_s18_live_eligible_without_40() -> None:
     td = tempfile.TemporaryDirectory()
     try:
         env = Path(td.name) / ".env"
@@ -280,12 +280,13 @@ def test_apply_desk_books_s18_stays_paper_only() -> None:
             ["S13_HHHL_DAY", "S18_OHLC_VOL_HTF"],
             path=env,
             state_path=state,
+            qualified=[],
         )
         assert res["ok"] is True
         assert "S18_OHLC_VOL_HTF" in res["enabled"]
-        assert "S18_OHLC_VOL_HTF" not in res["live_approved"]
+        assert "S18_OHLC_VOL_HTF" in res["live_approved"]
         assert "S13_HHHL_DAY" in res["live_approved"]
-        assert "S18_OHLC_VOL_HTF" in res["skipped_live_not_in_bot"]
+        assert "S18_OHLC_VOL_HTF" not in res["skipped_live_not_in_bot"]
         text = env.read_text(encoding="utf-8")
         assert "ENABLE_S18=true" in text
         assert "DRY_RUN=true" in text
@@ -448,7 +449,7 @@ def test_desk_snapshot_skips_checklist() -> None:
     gap = next(b for b in snap["books"] if b["strategy"] == "OVERNIGHT_GAP")
     s18 = next(b for b in snap["books"] if b["strategy"] == "S18_OHLC_VOL_HTF")
     s16 = next(b for b in snap["books"] if b["strategy"] == "S16_HHHL_WICK_1H")
-    assert s18["live_eligible"] is False
+    assert s18["live_eligible"] is True
     assert s16["live_eligible"] is True
     assert gap["live_eligible"] is True
     assert "S4_OVERNIGHT" not in snap["enables"]
@@ -818,8 +819,8 @@ if __name__ == "__main__":
     print("ok enables")
     test_apply_desk_books_live_requires_in_bot()
     print("ok desk books")
-    test_apply_desk_books_s18_stays_paper_only()
-    print("ok s18 paper only")
+    test_apply_desk_books_s18_live_eligible_without_40()
+    print("ok s18 live eligible")
     test_apply_desk_books_s19_stays_paper_only()
     print("ok s19 paper only")
     test_apply_desk_books_s20_stays_paper_only()

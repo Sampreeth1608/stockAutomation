@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v58</title>
+<title>Gold Petal v59</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v58: You tab gone; overnight gap live-eligible; you Arm live -->
+<!-- gp-header-v59: S18 live-eligible with overnight gap; you Arm live -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -171,7 +171,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v58</span>
+        <span class="ver" id="desk-ver">v59</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -183,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v58</div>
+      <div class="clock" id="clock">IST — · v59</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -256,7 +256,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it is live-eligible (S5 / S8 / S13 / S16 / overnight gap, or another paper book at 40% WR% AC). Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. Overnight gap closes at next open, not MARKET_CLOSE. S18 / S19 / S20 stay paper until they hit 40% WR% AC. You Arm live — the desk does not. Open contracts are on Live Open Positions.</p>
+        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it is live-eligible (S5 / S8 / S13 / S16 / S18 / overnight gap, or another paper book at 40% WR% AC). Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. Overnight gap closes at next open, not MARKET_CLOSE. S19 / S20 stay paper until they hit 40% WR% AC. You Arm live — the desk does not. Open contracts are on Live Open Positions.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
           <p class="hint" id="money-line">Paper is running. Angel leftover contracts still show on Live Open Positions until Angel is flat.</p>
@@ -573,8 +573,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v58";
-    document.title = "Gold Petal v58";
+    if (clock) clock.textContent = "IST " + ist + " · v59";
+    document.title = "Gold Petal v59";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1062,9 +1062,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v58"];
+  const foot = ["v59"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v58";
+  if (ver) ver.textContent = d.desk_build || "v59";
   if (lastHist.lots) foot.push(lastHist.lots + " lots");
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";

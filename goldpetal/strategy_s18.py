@@ -1,9 +1,10 @@
-"""S18_OHLC_VOL_HTF — paper 1h OHLC + volume + yesterday, pack overlay.
+"""S18_OHLC_VOL_HTF — 1h OHLC + volume + yesterday, pack overlay.
 
 Base AND: green/red, C vs prevC, HH/LL, vol up, C vs completed day.
 The learner may replace that pack from data/learn/s18/active.json.
 FLIP at the finished hour close. Delivery — holds overnight. Only S16
-flattens at MARKET_CLOSE. Not live. Paper 100 lots ≠ live.
+flattens at MARKET_CLOSE. Live-eligible — tick Lots or ₹, then you Arm.
+Paper 100 lots ≠ live.
 """
 
 from __future__ import annotations

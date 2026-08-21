@@ -41,20 +41,20 @@ RESTART_CONFIRM_WORD = "RESTART"
 DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
 PAPER_ONLY_BOOKS = frozenset(
     {
-        "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
         "FLOW_BRAIN",
     }
 )
-# Seed live books plus overnight gap. Other paper books (S18/S19/S20) join
-# the Live tab only after closed trades and WR% AC ≥ 40. You Arm live.
+# Seed live books plus overnight gap and S18. Other paper books (S19/S20)
+# join the Live tab only after closed trades and WR% AC ≥ 40. You Arm live.
 LIVE_ELIGIBLE_BOOKS = frozenset(
     {
         "S5_MINEDGE",
         "S8_NET_ZIGZAG",
         "S13_HHHL_DAY",
         "S16_HHHL_WICK_1H",
+        "S18_OHLC_VOL_HTF",
         "OVERNIGHT_GAP",
     }
 )
@@ -253,7 +253,7 @@ def apply_desk_books(
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
-    Live pick is the seed live set (incl. overnight gap), or a paper book at 40% WR% AC.
+    Live pick is the seed live set (incl. overnight gap and S18), or a paper book at 40% WR% AC.
     """
     from control_state import load_state, paper_strategy_names, set_intraday_books, set_live_approved
 
