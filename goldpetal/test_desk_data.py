@@ -12,6 +12,7 @@ from desk_data import (
     history_payload,
     json_safe,
     live_pnl_payload,
+    paper_strategy_summaries,
     reset_trade_cache,
     resolve_desk_db,
     tape_freshness,
@@ -526,6 +527,69 @@ def test_live_pnl_fill_leftover_shows_open_when_tape_flat() -> None:
         assert "Arm live" in note
 
 
+def test_live_pnl_wait_false_uses_leftover_without_rebuild() -> None:
+    """Desk/tape polls must not rebuild Live P&L or GOLD LTP freezes."""
+    import live_orders
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        orders = Path(td) / "live_orders.jsonl"
+        init_db(db)
+        _tick(db)
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "9002",
+                    "transaction": "SELL",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-21T11:40:00+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        st = ControlState(live_approved=["S5_MINEDGE", "S19_BODY_CLOSE_1H"])
+        with (
+            patch.object(live_orders, "ORDERS_PATH", orders),
+            patch("desk_data.live_lots_for", return_value=3),
+            patch("control_state.load_state", return_value=st),
+            patch("desk_data._kick_live_pnl"),
+            patch("desk_data._build_live_pnl", side_effect=AssertionError("must not rebuild")),
+            patch("desk_data.build_trades", side_effect=AssertionError("must not rebuild paper")),
+            patch(
+                "desk_data.all_trades_cached",
+                side_effect=AssertionError("must not wait on paper trades"),
+            ),
+        ):
+            pnl = live_pnl_payload(db_path=db, wait=False)
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S5_MINEDGE"]["status"] == "OPEN"
+        assert by_name["S5_MINEDGE"]["side"] == "SHORT"
+        assert int(by_name["S5_MINEDGE"].get("lots") or 0) == 3
+        assert by_name["S19_BODY_CLOSE_1H"]["status"] == "FLAT"
+
+
+def test_paper_summaries_wait_false_does_not_rebuild() -> None:
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        with (
+            patch("desk_data._kick_paper_trades"),
+            patch("desk_data.build_trades", side_effect=AssertionError("must not rebuild")),
+        ):
+            out = paper_strategy_summaries(db_path=db, wait=False)
+        assert isinstance(out, dict)
+        assert "S5_MINEDGE" in out
+
+
 def test_latest_signals_live_only_skips_paper() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Path(td) / "ticks.db"
@@ -585,5 +649,7 @@ if __name__ == "__main__":
     test_live_pnl_positions_one_row_per_open_book()
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
     test_live_pnl_fill_leftover_shows_open_when_tape_flat()
+    test_live_pnl_wait_false_uses_leftover_without_rebuild()
+    test_paper_summaries_wait_false_does_not_rebuild()
     test_latest_signals_live_only_skips_paper()
     print("ALL test_desk_data OK")

@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v51: Live tab shows Angel fill leftover; Save keeps Paper/Live; regime removed -->
+<!-- gp-header-v52: drop duplicate PAPER pill; tape/desk polls do not block GOLD LTP -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -178,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v51</div>
+      <div class="clock" id="clock">IST — · v52</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -693,7 +693,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v51";
+    if (clock) clock.textContent = "IST " + ist + " · v52";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -838,8 +838,12 @@ function renderQuote() {
     lastLtpChangeAt = Date.now();
   }
   el.textContent = hasPx ? money(ltp) : "—";
-  el.classList.remove("stale");
-  if (meta) meta.textContent = hasPx ? "" : "waiting for quote";
+  el.classList.toggle("stale", hasPx && !tapeIsLive());
+  if (meta) {
+    if (!hasPx) meta.textContent = "waiting for quote";
+    else if (!tapeIsLive()) meta.textContent = "quote stale — waiting for next tick";
+    else meta.textContent = "";
+  }
 }
 function renderKpis() {
   const all = allScore();
@@ -1777,7 +1781,6 @@ function renderDesk(d) {
     pill("FEED " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "CLEAR", st.emergency_off ? "bad" : "ok"),
     pill(st.trading_enabled === false ? "HELD" : "TRADING", st.trading_enabled === false ? "warn" : "ok"),
-    pill(st.live_unlocked && live.dry_run === false ? "LIVE PATH" : "PAPER", st.live_unlocked && live.dry_run === false ? "warn" : "ok"),
   ].join("");
   renderSessionLine();
   $("engine-line").textContent = (bot.running ? "bot running" : "bot stopped")

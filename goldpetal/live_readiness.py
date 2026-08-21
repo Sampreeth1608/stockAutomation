@@ -78,11 +78,11 @@ def summary_qualifies_live(summary: dict[str, Any] | None) -> bool:
     return wr >= LIVE_WR_MIN_PCT
 
 
-def paper_summaries_for_live() -> dict[str, dict[str, Any]]:
+def paper_summaries_for_live(*, wait: bool = True) -> dict[str, dict[str, Any]]:
     try:
         from desk_data import paper_strategy_summaries
 
-        return dict(paper_strategy_summaries() or {})
+        return dict(paper_strategy_summaries(wait=wait) or {})
     except Exception:
         return {}
 
@@ -523,7 +523,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
     live_ok, _why = is_live_mode_allowed()
     approved = list(st.live_approved or [])
     intra = set(st.intraday_books or [])
-    stats = summaries if summaries is not None else paper_summaries_for_live()
+    stats = summaries if summaries is not None else paper_summaries_for_live(wait=False)
     armed = any(book_may_go_live(n, summaries=stats) for n in approved)
     from analytics.env_bridge import strategy_enable_snapshot
 

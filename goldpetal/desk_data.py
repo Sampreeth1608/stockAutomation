@@ -280,12 +280,24 @@ def _public_live_order(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
+def _kick_live_pnl(db: Path) -> None:
+    if _LIVE_PNL_LOCK.locked():
+        return
+
+    def run() -> None:
+        try:
+            live_pnl_payload(db_path=db, wait=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="gp-live-pnl", daemon=True).start()
+
+
+def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[str, Any]:
     """Angel-sized P&L from dry_run=0 signals on live-eligible books.
 
-    Paper Positions / Blotter / Paper P&L tabs stay paper 100 lots. This is the Live-tab
-    number: live lot size, after Angel charges, tax excluded. Order ids come
-    from live_orders.jsonl — Angel app is still the fill confirmation.
+    Paper Positions / Blotter / Paper P&L stay paper 100 lots. Desk/tape polls
+    pass wait=False so GOLD LTP is not blocked by a trade rebuild.
     """
     from control_state import load_state
     from live_readiness import LIVE_ELIGIBLE_BOOKS, NEVER_LIVE_BOOKS, book_may_go_live
@@ -293,24 +305,24 @@ def live_pnl_payload(*, db_path: Path | None = None) -> dict[str, Any]:
     db = db_path or resolve_desk_db()
     now = time.time()
     cached = _LIVE_PNL_CACHE.get("payload")
-    if (
-        cached is not None
-        and _LIVE_PNL_CACHE.get("db") == str(db)
-        and float(_LIVE_PNL_CACHE["at"]) > 0
-        and now - float(_LIVE_PNL_CACHE["at"]) < 8
-    ):
+    same = _LIVE_PNL_CACHE.get("db") == str(db) and cached is not None
+    fresh = same and float(_LIVE_PNL_CACHE.get("at") or 0) > 0 and now - float(_LIVE_PNL_CACHE["at"]) < 8
+    if fresh:
         return dict(cached)
+    if not wait:
+        if same:
+            _kick_live_pnl(db)
+            return dict(cached)
+        _kick_live_pnl(db)
+        return _leftover_live_pnl()
     if not _LIVE_PNL_LOCK.acquire(blocking=False):
-        return dict(cached) if cached is not None else _empty_live_pnl()
+        return dict(cached) if same else _leftover_live_pnl()
     try:
         now = time.time()
         cached = _LIVE_PNL_CACHE.get("payload")
-        if (
-            cached is not None
-            and _LIVE_PNL_CACHE.get("db") == str(db)
-            and float(_LIVE_PNL_CACHE["at"]) > 0
-            and now - float(_LIVE_PNL_CACHE["at"]) < 8
-        ):
+        same = _LIVE_PNL_CACHE.get("db") == str(db) and cached is not None
+        fresh = same and float(_LIVE_PNL_CACHE.get("at") or 0) > 0 and now - float(_LIVE_PNL_CACHE["at"]) < 8
+        if fresh:
             return dict(cached)
         approved = [
             n
@@ -347,7 +359,12 @@ def _empty_live_pnl() -> dict[str, Any]:
     }
 
 
-def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _live_positions_by_book(
+    open_t: list[dict[str, Any]],
+    *,
+    summaries: dict[str, dict[str, Any]] | None = None,
+    live_gate: bool = True,
+) -> list[dict[str, Any]]:
     """One row per live-picked book: OPEN trade if any, else Angel fill leftover, else FLAT."""
     from control_state import load_state
     from live_readiness import NEVER_LIVE_BOOKS, book_may_go_live
@@ -368,7 +385,7 @@ def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]
         name = str(raw or "").strip()
         if not name or name in seen or name in NEVER_LIVE_BOOKS:
             continue
-        if name not in open_by and not book_may_go_live(name):
+        if live_gate and name not in open_by and not book_may_go_live(name, summaries=summaries):
             continue
         seen.add(name)
         names.append(name)
@@ -397,6 +414,28 @@ def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]
             }
         )
     return rows
+
+
+def _leftover_live_pnl() -> dict[str, Any]:
+    """Fill-log leftover only. Used when the full Live P&L rebuild must not block LTP."""
+    out = _empty_live_pnl()
+    try:
+        # Skip the 40% WR% paper rebuild — S19 FLAT still lists from live_approved.
+        positions = _live_positions_by_book([], live_gate=False)
+    except Exception:
+        return out
+    angel_open = [p for p in positions if str(p.get("status") or "") == "OPEN"]
+    out["positions"] = positions
+    out["open"] = list(angel_open)
+    summary = dict(out["summary"])
+    summary["open"] = len(angel_open)
+    out["summary"] = summary
+    if angel_open:
+        out["note"] = (
+            f"Angel still has {len(angel_open)} open book(s) on the fill log. "
+            "Live AC ₹ is still loading. Type LIVE, Arm live, RESTART, then Exit to square."
+        )
+    return out
 
 
 def _live_fill_lot_size(info: dict[str, Any], *, orders: list[dict[str, Any]]) -> float | None:
@@ -647,21 +686,38 @@ def tape_payload(
     except Exception as exc:
         payload["error"] = str(exc)
     try:
-        payload["live_pnl"] = live_pnl_payload(db_path=db)
+        payload["live_pnl"] = live_pnl_payload(db_path=db, wait=False)
     except Exception as exc:
         payload["live_pnl"] = {**_empty_live_pnl(), "note": str(exc)}
     return payload
 
 
-def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, Any]], str]:
+def _kick_paper_trades(db: Path) -> None:
+    if _TRADE_LOCK.locked():
+        return
+
+    def run() -> None:
+        try:
+            all_trades_cached(db_path=db, wait=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="gp-paper-trades", daemon=True).start()
+
+
+def all_trades_cached(*, db_path: Path | None = None, wait: bool = True) -> tuple[list[dict[str, Any]], str]:
     db = db_path or resolve_desk_db()
     now = time.time()
-    if (
-        _TRADE_CACHE.get("db") == str(db)
-        and float(_TRADE_CACHE["at"]) > 0
-        and now - float(_TRADE_CACHE["at"]) < 12
-    ):
+    same = _TRADE_CACHE.get("db") == str(db) and float(_TRADE_CACHE.get("at") or 0) > 0
+    fresh = same and now - float(_TRADE_CACHE["at"]) < 12
+    if fresh:
         return list(_TRADE_CACHE["rows"]), str(_TRADE_CACHE.get("error") or "")
+    if not wait:
+        if same:
+            _kick_paper_trades(db)
+            return list(_TRADE_CACHE["rows"]), str(_TRADE_CACHE.get("error") or "")
+        _kick_paper_trades(db)
+        return [], "trades still loading"
     if not _TRADE_LOCK.acquire(blocking=False):
         return list(_TRADE_CACHE["rows"]), str(_TRADE_CACHE.get("error") or "trades still loading")
     try:
@@ -694,9 +750,9 @@ def all_trades_cached(*, db_path: Path | None = None) -> tuple[list[dict[str, An
         _TRADE_LOCK.release()
 
 
-def paper_strategy_summaries(*, db_path: Path | None = None) -> dict[str, dict[str, Any]]:
+def paper_strategy_summaries(*, db_path: Path | None = None, wait: bool = True) -> dict[str, dict[str, Any]]:
     """Closed-trade WR% AC per paper book. Shared with the Live-tab 40% gate."""
-    rows, _ = all_trades_cached(db_path=db_path)
+    rows, _ = all_trades_cached(db_path=db_path, wait=wait)
     return {name: summarize_trades(rows, name) for name in paper_strategy_names()}
 
 

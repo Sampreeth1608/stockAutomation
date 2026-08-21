@@ -295,7 +295,6 @@ function render(d) {
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
     pill("feed " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "ok", st.emergency_off ? "bad" : "ok"),
-    pill(st.live_unlocked && live.dry_run === false ? "live path" : "paper", st.live_unlocked && live.dry_run === false ? "warn" : "ok"),
   ].join("");
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";

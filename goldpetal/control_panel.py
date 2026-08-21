@@ -262,7 +262,7 @@ def desk_payload() -> dict[str, Any]:
     try:
         from desk_data import live_pnl_payload
 
-        live_pnl = live_pnl_payload()
+        live_pnl = live_pnl_payload(wait=False)
     except Exception:
         live_pnl = {
             "trades": [],

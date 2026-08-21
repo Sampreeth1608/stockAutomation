@@ -79,8 +79,12 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v51" in html
-    assert " · v51" in html
+    assert "quote stale" in html
+    assert "LIVE PATH" not in html
+    desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
+    assert "live_unlocked && live.dry_run" not in desk_pills
+    assert "gp-header-v52" in html
+    assert " · v52" in html
     assert "not today's Live Lots" in html
     assert "Raising Live Lots does not rewrite" in html
     assert "data-intraday" in html
@@ -259,6 +263,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "/api/desk/regime" not in html
     assert "PAPER · Angel open" in html
     assert "collectArmBody(\"keep\")" in html
+    assert "live path" not in html
+    assert "live_unlocked && live.dry_run" not in html
     assert "/#lab" in html
     assert "/#amise" in html
     assert "AMISE" in html
@@ -456,7 +462,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v51" in cmd
+    assert "Gold Petal v52" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
