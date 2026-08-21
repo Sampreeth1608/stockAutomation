@@ -16,18 +16,27 @@ print_open_on_mac() {
   echo "The Google Cloud Console SSH button is also the VM."
   echo
   echo "On the Mac laptop (not this SSH tab):"
-  echo "  Easiest on the Mac (not this SSH tab):"
-  echo "    gcloud compute scp sampreeth1608@sampreeth-love-story:/home/sampreeth1608/goldpetal-repo/goldpetal/scripts/GoldPetal.command ~/Desktop/GoldPetal.command --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap"
-  echo "    chmod +x ~/Desktop/GoldPetal.command && open ~/Desktop/GoldPetal.command"
-  echo "  Or Terminal (IAP — not ssh to 8.231.125.120:22):"
+  echo "  Copy ONE command at a time. scp does not open the desk."
+  echo "  ImportError HARD_LIVE_MAX_LOTS = live_orders.py on the VM is old. Sync matching desk files, then restart:"
+  echo "    gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/live_orders.py > ~/goldpetal/live_orders.py && git show origin/cursor/live-1lot-test-a4b2:goldpetal/live_readiness.py > ~/goldpetal/live_readiness.py && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/sync_desk_runtime.sh > ~/goldpetal/scripts/sync_desk_runtime.sh && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/run_desk_vm.sh > ~/goldpetal/scripts/run_desk_vm.sh && chmod +x ~/goldpetal/scripts/sync_desk_runtime.sh ~/goldpetal/scripts/run_desk_vm.sh && ~/goldpetal/scripts/sync_desk_runtime.sh && cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart'"
+  echo "  Connection refused on the tunnel = 8501 is down. After the files match, restart only:"
+  echo "    gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal && ./scripts/run_desk_vm.sh --restart'"
+  echo "  Login is off until DESK_PASSWORD is set. IAP + localhost bind stay."
+  echo "  1) Open the desk (leave this running, then Chrome http://127.0.0.1:8501/ ):"
   echo
   echo "gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501"
+  echo
+  echo "  2) Replace the Desktop file with v62 (~ window says Gold Petal v62):"
+  echo "     gcloud compute ssh sampreeth1608@sampreeth-love-story --project=sampreethlovestory --zone=asia-south1-c --tunnel-through-iap --command 'cd ~/goldpetal-repo && git fetch origin && git show origin/cursor/live-1lot-test-a4b2:goldpetal/scripts/GoldPetal.command' > ~/Desktop/GoldPetal.command"
+  echo "     chmod +x ~/Desktop/GoldPetal.command"
+  echo "     open ~/Desktop/GoldPetal.command"
+  echo "     Do not put chmod on the gcloud line. The window must say Gold Petal v62, not v61."
   echo
   echo "  If ssh times out on port 22, you missed --tunnel-through-iap."
   echo "  Do not open port 22 or 8501 to the internet."
   echo
   echo "  Then Chrome on the Mac (not this SSH tab):"
-  echo "     http://127.0.0.1:8501/          trading station"
+  echo "     http://127.0.0.1:8501/?v=62     Gold Petal desk — gold v62 badge next to the title"
   echo "     http://127.0.0.1:8501/lite     compact controls"
   echo "     http://127.0.0.1:8501/full     archive / downloads"
   echo "     Hard-refresh: Cmd+Shift+R"

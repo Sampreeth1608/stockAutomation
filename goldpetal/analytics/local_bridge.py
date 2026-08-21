@@ -14,30 +14,7 @@ SLIM_STRATEGIES = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
 )
-
-
-def decide_proposal_local(
-    proposal_id: str,
-    decision: str,
-    note: str = "",
-    *,
-    apply_env: bool = True,
-    accept_unsafe: bool = False,
-) -> dict[str, Any]:
-    from s11_desk import decide_proposal_for_desk
-
-    return decide_proposal_for_desk(
-        proposal_id,
-        decision,
-        note=note,
-        apply_env=apply_env,
-        accept_unsafe=accept_unsafe,
-    )
 
 
 def set_control_local(

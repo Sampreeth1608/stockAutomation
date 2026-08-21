@@ -41,6 +41,7 @@ def summarize_trades(trades: list[dict], strategy: str | None = None) -> dict:
 
     wins = [t for t in closed if _f(t, "pnl_after_tax") > 0]
     losses = [t for t in closed if _f(t, "pnl_after_tax") < 0]
+    wins_ac = [t for t in closed if _f(t, "pnl_after_charges") > 0]
     return {
         "strategy": strategy or "ALL",
         "trades": len(trades),
@@ -49,6 +50,9 @@ def summarize_trades(trades: list[dict], strategy: str | None = None) -> dict:
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": (len(wins) / len(closed) * 100.0) if closed else 0.0,
+        "win_rate_after_charges": (
+            (len(wins_ac) / len(closed) * 100.0) if closed else 0.0
+        ),
         "gross_pnl": gross,
         "charges": charges,
         "pnl_after_charges": after_ch,
@@ -101,10 +105,6 @@ def main() -> None:
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
-        "S21_AMISE",
-        "S22_AMISE",
-        "S23_AMISE",
-        "S24_AMISE",
         None,
     ):
         s = _summarize(strat)

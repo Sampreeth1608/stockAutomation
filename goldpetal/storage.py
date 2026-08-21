@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 _PACKAGE_DB = Path(__file__).resolve().parent / "data" / "ticks.db"
 DB_PATH = _PACKAGE_DB
@@ -266,13 +266,17 @@ def list_signals(
     db_path: Path = DB_PATH,
     *,
     limit: int | None = None,
+    live_only: bool = False,
 ) -> list[sqlite3.Row]:
     init_db(db_path)
-    where = ""
+    clauses: list[str] = []
     params: list[Any] = []
     if strategy:
-        where = " WHERE strategy = ?"
+        clauses.append("strategy = ?")
         params.append(strategy)
+    if live_only:
+        clauses.append("dry_run = 0")
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     if limit is not None:
         query = f"""
             SELECT id, time_label, symbol, strategy, action, position_after, reason,
@@ -302,27 +306,27 @@ def latest_signals(
     limit: int = 20,
     strategy: str | None = None,
     db_path: Path = DB_PATH,
+    *,
+    live_only: bool = False,
 ) -> list[sqlite3.Row]:
     init_db(db_path)
+    where: list[str] = []
+    params: list[Any] = []
     if strategy:
-        query = """
-            SELECT time_label, symbol, strategy, action, position_after, reason,
-                   price_delta, net, net_delta, dry_run, cmp
-            FROM signals
-            WHERE strategy = ?
-            ORDER BY id DESC
-            LIMIT ?
-        """
-        params: tuple[Any, ...] = (strategy, limit)
-    else:
-        query = """
-            SELECT time_label, symbol, strategy, action, position_after, reason,
-                   price_delta, net, net_delta, dry_run, cmp
-            FROM signals
-            ORDER BY id DESC
-            LIMIT ?
-        """
-        params = (limit,)
+        where.append("strategy = ?")
+        params.append(strategy)
+    if live_only:
+        where.append("dry_run = 0")
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    query = f"""
+        SELECT time_label, symbol, strategy, action, position_after, reason,
+               price_delta, net, net_delta, dry_run, cmp
+        FROM signals
+        {clause}
+        ORDER BY id DESC
+        LIMIT ?
+    """
+    params.append(int(limit))
     with connect(db_path) as conn:
         return list(conn.execute(query, params))
 
@@ -429,6 +433,8 @@ def build_trades(
     *,
     lot_size: float | None = None,
     signal_limit: int | None = None,
+    live_only: bool = False,
+    lot_size_for: Callable[[dict[str, Any]], float | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) into round-trip trades + PnL.
 
@@ -437,7 +443,10 @@ def build_trades(
 
     Post-trade Angel fees + tax are always computed for display (even when
     IGNORE_FEES=true). lot_size overrides LOT_SIZE for fee/PnL scaling.
+    lot_size_for(entry) overrides lot_size per round-trip (Angel fill qty).
     signal_limit caps how far back each book is scanned (desk tape).
+    live_only keeps signals stored with dry_run=0 (armed live), so paper
+    100-lot tape is not mixed into Angel-sized P&L.
     """
     if strategy is None:
         with connect(db_path) as conn:
@@ -452,7 +461,12 @@ def build_trades(
         trade_no = 0
         for name in names:
             for t in _build_trades_one(
-                name, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+                name,
+                db_path=db_path,
+                lot_size=lot_size,
+                signal_limit=signal_limit,
+                live_only=live_only,
+                lot_size_for=lot_size_for,
             ):
                 trade_no += 1
                 t = dict(t)
@@ -460,8 +474,20 @@ def build_trades(
                 merged.append(t)
         return merged
     return _build_trades_one(
-        strategy, db_path=db_path, lot_size=lot_size, signal_limit=signal_limit
+        strategy,
+        db_path=db_path,
+        lot_size=lot_size,
+        signal_limit=signal_limit,
+        live_only=live_only,
+        lot_size_for=lot_size_for,
     )
+
+
+def _signal_is_live(row: Any) -> bool:
+    try:
+        return int(row["dry_run"] or 0) == 0
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _build_trades_one(
@@ -470,12 +496,42 @@ def _build_trades_one(
     *,
     lot_size: float | None = None,
     signal_limit: int | None = None,
+    live_only: bool = False,
+    lot_size_for: Callable[[dict[str, Any]], float | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) for one strategy."""
-    rows = list_signals(strategy=strategy, db_path=db_path, limit=signal_limit)
+    rows = list_signals(
+        strategy=strategy,
+        db_path=db_path,
+        limit=signal_limit,
+        live_only=live_only,
+    )
     trades: list[dict[str, Any]] = []
     open_trade: dict[str, Any] | None = None
     trade_no = 0
+
+    def _lots_for(
+        info: dict[str, Any], *, allow_default: bool = True
+    ) -> float | None:
+        if lot_size_for is not None:
+            try:
+                got = lot_size_for(info)
+            except Exception:
+                got = None
+            if got is not None and got != "":
+                try:
+                    n = float(got)
+                    if n > 0:
+                        return n
+                except (TypeError, ValueError):
+                    pass
+        if not allow_default or lot_size is None:
+            return None
+        try:
+            n = float(lot_size)
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
 
     def _close(trade: dict[str, Any], *, exit_ts: str, exit_price: float | None,
                exit_reason: str, exit_net: Any, exit_net_delta: Any,
@@ -497,6 +553,22 @@ def _build_trades_one(
             "tax": "",
             "pnl_after_tax": "",
         }
+        use_lots = _lots_for(
+            {
+                "strategy": trade.get("strategy") or strategy,
+                "entry_ts": trade.get("entry_ts") or "",
+                "exit_ts": exit_ts,
+                "side": side,
+                "status": status,
+            }
+        )
+        if use_lots is None:
+            raw_lots = trade.get("lots")
+            if raw_lots not in (None, ""):
+                try:
+                    use_lots = float(raw_lots)
+                except (TypeError, ValueError):
+                    use_lots = None
         if entry is not None and entry != "" and exit_price is not None:
             entry_f = float(entry)
             if side == "BUY":
@@ -505,7 +577,7 @@ def _build_trades_one(
                 pnl_pts = entry_f - exit_price
             pnl_pct = (pnl_pts / entry_f * 100.0) if entry_f else 0.0
             # Always Angel schedule for post-trade reporting columns
-            report_cfg = angel_charges_from_env(lot_size=lot_size)
+            report_cfg = angel_charges_from_env(lot_size=use_lots)
             charge_bits = apply_charges_and_tax(
                 pnl_pts,
                 report_cfg,
@@ -537,7 +609,7 @@ def _build_trades_one(
                 "pnl_after_charges": charge_bits["pnl_after_charges"],
                 "tax": charge_bits["tax"],
                 "pnl_after_tax": charge_bits["pnl_after_tax"],
-                "lots": float(lot_size) if lot_size is not None else "",
+                "lots": float(use_lots) if use_lots is not None else "",
                 "net_pnl": round(pnl, 2) if pnl is not None else "",
                 "net_pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else "",
                 "status": status,
@@ -574,6 +646,15 @@ def _build_trades_one(
                 open_trade = None
 
             trade_no += 1
+            entry_lots = _lots_for(
+                {
+                    "strategy": strat,
+                    "entry_ts": ts,
+                    "side": action,
+                    "status": "OPEN",
+                },
+                allow_default=False,
+            )
             open_trade = {
                 "trade_no": trade_no,
                 "strategy": strat,
@@ -602,7 +683,9 @@ def _build_trades_one(
                 "pnl_after_tax": "",
                 "net_pnl": "",
                 "net_pnl_pct": "",
+                "lots": float(entry_lots) if entry_lots is not None else "",
                 "status": "OPEN",
+                "tape": "live" if _signal_is_live(r) else "paper",
             }
         elif action == "CLOSE" and open_trade is not None:
             trades.append(
@@ -801,10 +884,15 @@ def export_sheet_csv(
 
 
 def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) -> int:
+    """Write every stored tick with LTP, OHLC, volume, TBQ/TSQ, LTQ, depth 1-5, OI."""
+    import csv
+
+    from export_full_ticks import FULL_TICK_CSV_FIELDS, full_tick_row
+
     init_db(db_path)
     query = """
         SELECT received_at, exchange_timestamp, symbol, token,
-               ltp, open, high, low, close, volume, bp, sp
+               ltp, open, high, low, close, volume, bp, sp, raw_json
         FROM ticks
         ORDER BY id ASC
     """
@@ -813,32 +901,30 @@ def export_csv(path: Path, limit: int | None = None, db_path: Path = DB_PATH) ->
         query += " LIMIT ?"
         params = (limit,)
 
-    with connect(db_path) as conn:
-        rows = list(conn.execute(query, params))
-
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        handle.write(
-            "received_at,exchange_timestamp,symbol,token,ltp,open,high,low,close,volume,bp,sp\n"
+    n = 0
+    with connect(db_path) as conn, path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=FULL_TICK_CSV_FIELDS, extrasaction="ignore", lineterminator="\n"
         )
-        for row in rows:
-            handle.write(
-                ",".join(
-                    [
-                        str(row["received_at"] or ""),
-                        str(row["exchange_timestamp"] or ""),
-                        str(row["symbol"] or ""),
-                        str(row["token"] or ""),
-                        str(row["ltp"] or ""),
-                        str(row["open"] or ""),
-                        str(row["high"] or ""),
-                        str(row["low"] or ""),
-                        str(row["close"] or ""),
-                        str(row["volume"] or ""),
-                        str(row["bp"] or ""),
-                        str(row["sp"] or ""),
-                    ]
+        writer.writeheader()
+        for row in conn.execute(query, params):
+            writer.writerow(
+                full_tick_row(
+                    received_at=row["received_at"],
+                    exchange_ts=row["exchange_timestamp"],
+                    raw_json=row["raw_json"] or "",
+                    symbol=row["symbol"] or "",
+                    token=row["token"] or "",
+                    ltp=row["ltp"],
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    volume=row["volume"],
+                    bp=row["bp"],
+                    sp=row["sp"],
                 )
-                + "\n"
             )
-    return len(rows)
+            n += 1
+    return n

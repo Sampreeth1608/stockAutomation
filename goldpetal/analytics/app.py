@@ -38,7 +38,6 @@ from operator_desk import (  # noqa: E402
     streamlit_write_blocked,
 )
 from analytics.local_bridge import (  # noqa: E402
-    decide_proposal_local,
     desk_data_dir,
     set_control_local,
 )
@@ -77,10 +76,6 @@ STRATEGIES = [
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
 ]
 
 # One page at a time — st.tabs runs every tab on every load (that is why the desk felt late).
@@ -109,17 +104,12 @@ def decide_proposal(
     apply_env: bool = True,
     accept_unsafe: bool = False,
 ) -> dict:
+    del apply_env, accept_unsafe
     if LOCAL_DESK:
-        try:
-            return decide_proposal_local(
-                pid,
-                decision,
-                note=note,
-                apply_env=apply_env,
-                accept_unsafe=accept_unsafe,
-            )
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": False,
+            "error": "ML / Lab approvals were removed from the desk.",
+        }
     return decide_proposal_remote(pid, decision, note=note)
 
 
@@ -139,11 +129,8 @@ def require_desk_login() -> bool:
         f"password_len={hint['password_len']}"
     )
     if not desk_password_configured():
-        st.error(
-            "DESK_AUTH is on but DESK_PASSWORD / DESK_PASSWORD_HASH is not set in .env. "
-            "Set one, or DESK_AUTH=false for trusted localhost-only use."
-        )
-        return False
+        st.info("Desk login is off until DESK_PASSWORD is set. IAP and localhost bind stay.")
+        return True
     # Prefer non-form inputs: browser password managers often fill the visual
     # field without updating Streamlit form state (submit then looks "wrong").
     pw = st.text_input("Desk password", type="password", key="desk_login_pw")

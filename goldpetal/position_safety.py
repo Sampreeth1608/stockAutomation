@@ -1,10 +1,12 @@
-"""Restart / orphan / EOD safety for intraday strategies (S5/S8/…).
+"""Restart / orphan / EOD safety.
 
 Institutional minimum:
   - Restore RAM position from last DB signal after restart (so exits can fire)
   - Or auto-CLOSE orphans when restore is impossible / mode=close
-  - Flatten intraday books in the last N minutes before MARKET_CLOSE
-    (S12/S13/S14/S15/S4 skipped — multi-day holds / last-minute confirm overlaps EOD flatten)
+  - Flatten Live-tab Intraday ticks in the last N minutes before MARKET_CLOSE
+    (S16 starts ticked; operator can add any later book, including new AMISE slots)
+  - Unticked books are delivery — hold overnight; do not EOD-close
+  - Overnight gap never EOD-flattens (next-open product)
   - Write data/control/bot_health.json for the desk
 """
 
@@ -29,6 +31,7 @@ INTRADAY_RESTORE = (
     "S4_OVERNIGHT",
     "S5_MINEDGE",
     "FLOW_BRAIN",
+    "OVERNIGHT_GAP",
     "S8_NET_ZIGZAG",
     "S12_HHHL30",
     "S13_HHHL_DAY",
@@ -38,10 +41,6 @@ INTRADAY_RESTORE = (
     "S18_OHLC_VOL_HTF",
     "S19_BODY_CLOSE_1H",
     "S20_FADE_HL",
-    "S21_AMISE",
-    "S22_AMISE",
-    "S23_AMISE",
-    "S24_AMISE",
     "S6_MIN30",
     "S2_BALANCE",
     "S3_ML",
@@ -50,31 +49,51 @@ INTRADAY_RESTORE = (
     "S11_DISCOVERED",
 )
 
-# S16 is a same-session book: do not restore yesterday's position overnight.
-SESSION_CLOSE_OVERNIGHT = frozenset(
-    {
-        "S16_HHHL_WICK_1H",
-        "S18_OHLC_VOL_HTF",
-        "S19_BODY_CLOSE_1H",
-        "S20_FADE_HL",
-        "FLOW_BRAIN",
-        "S21_AMISE",
-        "S22_AMISE",
-        "S23_AMISE",
-        "S24_AMISE",
-    }
-)
+# Default when Live-tab Intraday has never been saved. Operator ticks override.
+SESSION_INTRADAY_BOOKS = frozenset({"S16_HHHL_WICK_1H"})
+SESSION_CLOSE_OVERNIGHT = SESSION_INTRADAY_BOOKS
+EOD_NEVER = frozenset({"OVERNIGHT_GAP"})
 
-# S4/S13 are multi-day/week holds. Retired S12/S14/S15 last-minute confirm overlapped EOD.
+# Extra skip list (delivery / multi-day). Allowlist above is the real gate.
 EOD_FLATTEN_SKIP = frozenset(
     {
         "S4_OVERNIGHT",
+        "OVERNIGHT_GAP",
+        "S5_MINEDGE",
+        "S8_NET_ZIGZAG",
         "S12_HHHL30",
         "S13_HHHL_DAY",
         "S14_WICK30_STRICT",
         "S15_WICK30_NOWICK",
+        "S18_OHLC_VOL_HTF",
+        "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
+        "FLOW_BRAIN",
     }
 )
+
+
+def session_intraday_names() -> frozenset[str]:
+    """Books the Live-tab Intraday tick says to flatten at MARKET_CLOSE."""
+    try:
+        from control_state import DEFAULT_INTRADAY_BOOKS, load_state
+
+        st = load_state()
+        raw = list(st.intraday_books) if st.intraday_books is not None else list(
+            DEFAULT_INTRADAY_BOOKS
+        )
+    except Exception:
+        raw = list(SESSION_INTRADAY_BOOKS)
+    out: list[str] = []
+    for item in raw:
+        name = str(item or "").strip()
+        if name and name not in EOD_NEVER and name not in out:
+            out.append(name)
+    return frozenset(out)
+
+
+def is_session_intraday(name: str) -> bool:
+    return str(name or "").strip() in session_intraday_names()
 
 
 def _holds_overnight(obj: Any | None) -> bool:
@@ -177,6 +196,7 @@ def apply_position_to_strategy(strategy_obj: Any, open_pos: OpenPosition) -> boo
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
         "S20_FADE_HL",
+        "OVERNIGHT_GAP",
     } or is_amise_slot(name)) and open_pos.time_label:
         if hasattr(strategy_obj, "entry_date"):
             strategy_obj.entry_date = str(open_pos.time_label)[:10]
@@ -230,11 +250,7 @@ def startup_reconcile(
             continue
         obj = strategies.get(name)
 
-        if (
-            (name in SESSION_CLOSE_OVERNIGHT or is_amise_slot(name))
-            and not _holds_overnight(obj)
-            and str(open_pos.time_label)[:10] != today
-        ):
+        if name in session_intraday_names() and str(open_pos.time_label)[:10] != today:
             closes.append(
                 {
                     "strategy": name,
@@ -242,7 +258,7 @@ def startup_reconcile(
                     "entry_price": open_pos.entry_price,
                     "time_label": open_pos.time_label,
                     "cmp": open_pos.cmp,
-                    "reason": "S16 session leftover auto-CLOSE (intraday — flatten overnight)",
+                    "reason": "session leftover auto-CLOSE (Live-tab Intraday — flatten overnight)",
                 }
             )
             messages.append(
@@ -324,12 +340,11 @@ def in_eod_flatten_window(
 
 
 def intraday_open_for_flatten(strategies: dict[str, Any]) -> list[dict[str, Any]]:
-    """Which loaded intraday strategies currently hold a RAM position."""
+    """Open books the Live-tab Intraday tick says to flatten at MARKET_CLOSE."""
+    wanted = session_intraday_names()
     out: list[dict[str, Any]] = []
     for name, obj in strategies.items():
-        if name not in INTRADAY_RESTORE and not is_amise_slot(name):
-            continue
-        if name in EOD_FLATTEN_SKIP or _holds_overnight(obj):
+        if name not in wanted:
             continue
         pos = getattr(obj, "position", "flat")
         if pos in {"long", "short"}:

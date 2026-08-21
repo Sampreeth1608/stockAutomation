@@ -1,4 +1,4 @@
-"""Run Gold Petal strategies: paper by default; live Angel orders when gated."""
+"""Run Gold Petal strategies: idle until Arm live; then Angel orders when gated."""
 
 from __future__ import annotations
 
@@ -19,10 +19,16 @@ from auth import login
 from depth import depth_buy_sell_sums
 from entry_gates import allow_new_entry
 from export_full_ticks import _depth_side
-from live_orders import broker_from_session
+from live_orders import broker_from_session, mirror_positions_from_signals
 from portfolio import portfolio_from_env
 from regime import RegimeDetector
-from market_mood import MoodDetector, mood_blocks_entry, mood_wants_flatten
+from market_mood import (
+    FORMULA_GATE_BOOKS,
+    MOOD_EXEMPT_BOOKS,
+    MoodDetector,
+    mood_blocks_entry,
+    mood_wants_flatten,
+)
 from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
 from desk_data import tick_feed_stale
 from control_state import entries_blocked, is_live_mode_allowed, load_state
@@ -181,6 +187,7 @@ def run_once(
     strategy_s18: S18OhlcVolHtfStrategy,
     strategy_s19,
     strategy_s20,
+    strategy_og,
     portfolio,
     regime_det: RegimeDetector,
     mood_det: MoodDetector,
@@ -200,32 +207,41 @@ def run_once(
     contract = find_goldpetal_futures(force_refresh=True)
     session = login()
     broker = broker_from_session(session, contract)
-    # Seed broker mirror from last DB signal per strategy so CLOSE/REVERSE work after restart.
+    # Seed Angel mirror from last live signal. Do not treat paper opens as contracts.
     try:
-        seeded: dict[str, str] = {}
-        for row in latest_signals(limit=200):
-            name = str(row["strategy"] or "")
-            pos = str(row["position_after"] or "").lower()
-            if name and name not in seeded and pos in {"long", "short", "flat"}:
-                seeded[name] = pos
+        seeded = mirror_positions_from_signals(
+            latest_signals(limit=400, live_only=True),
+            live_only=True,
+        )
         if seeded and hasattr(broker, "seed_positions"):
             broker.seed_positions(seeded)
             print(f"Broker positions seeded: {seeded}", flush=True)
+        elif not dry_run:
+            print("Broker positions seeded: {} (not-armed opens are not live)", flush=True)
     except Exception as exc:
         logger.warning("Could not seed broker positions: %s", exc)
-    try:
-        from you_trade import YOU_BOOK, load_you_position
-
-        you_pos = load_you_position()
-        side = str(you_pos.get("side") or "flat")
-        if side in {"long", "short", "flat"} and hasattr(broker, "seed_positions"):
-            broker.seed_positions({YOU_BOOK: side})
-    except Exception as exc:
-        logger.warning("Could not seed You-tab position: %s", exc)
 
     symbol = contract["symbol"]
     token = contract["token"]
     exchange_type = contract["exchange_type"]
+    try:
+        from live_orders import refresh_angel_snapshot
+        from desk_data import invalidate_live_pnl_cache
+
+        snap = refresh_angel_snapshot(
+            getattr(session, "api", None),
+            symbol=str(symbol),
+            token=str(token),
+            min_interval_sec=0,
+        )
+        invalidate_live_pnl_cache()
+        print(
+            f"Angel Gold Petal net={snap.get('net')} pnl={snap.get('pnl')} "
+            f"cleared={snap.get('cleared') or []}",
+            flush=True,
+        )
+    except Exception as exc:
+        logger.warning("Angel snapshot at start failed: %s", exc)
 
     latest = {"cmp": None, "bp": None, "sp": None, "message": None}
     state = {
@@ -256,7 +272,13 @@ def run_once(
     def _may_enter(
         strategy_name: str, regime: str, *, side: str = ""
     ) -> tuple[bool, str]:
-        """Portfolio regime + control-panel emergency/capital/ML gates for new entries."""
+        """Live desk books only, and only after Arm. No paper fills."""
+        from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+        if strategy_name not in LIVE_ELIGIBLE_BOOKS:
+            return False, "not_live_book"
+        if dry_run:
+            return False, "not_armed"
         if not portfolio.allows(strategy_name, regime):
             return False, f"regime={regime}"
         blocked, mood_why = mood_blocks_entry(
@@ -269,7 +291,7 @@ def run_once(
         )
 
     def _strategy_active(strategy_name: str) -> bool:
-        """False when ENABLE_* is off or desk force-disabled (stops paper emits)."""
+        """False when ENABLE_* is off or desk force-disabled."""
         if not portfolio.is_enabled(strategy_name):
             return False
         st = load_state()
@@ -343,6 +365,8 @@ def run_once(
         strategy_s13.set_contract(contract)
     if hasattr(strategy_s4, "set_contract"):
         strategy_s4.set_contract(contract)
+    if hasattr(strategy_og, "set_contract"):
+        strategy_og.set_contract(contract)
     for slot in amise_slots:
         if hasattr(slot, "set_contract"):
             slot.set_contract(contract)
@@ -357,7 +381,9 @@ def run_once(
         seeded_mood = mood_det.seed_from_db()
         print(
             f"Mood seed n={seeded_mood.n_samples} mood={seeded_mood.mood} "
-            f"regime={seeded_mood.regime} {seeded_mood.label}",
+            f"regime={seeded_mood.regime} {seeded_mood.alignment} "
+            f"layers={sum(1 for L in (seeded_mood.layers or []) if L.get('ready'))}/"
+            f"{len(seeded_mood.layers or [])} {seeded_mood.label}",
             flush=True,
         )
     except Exception as exc:
@@ -384,7 +410,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"S5       : min-edge "
+        f"S5       : min-edge (delivery — not EOD flattened) "
         f"[{'ON' if portfolio.is_enabled(strategy_s5.name) else 'OFF'}] "
         f"{strategy_s5.status_line}",
         flush=True,
@@ -396,13 +422,19 @@ def run_once(
         flush=True,
     )
     print(
-        f"FLOW     : ENABLE_FLOW_BRAIN paper tick LTP+TBQ+TSQ pressure "
+        f"FLOW     : ENABLE_FLOW_BRAIN off (not a live book) "
         f"[{'ON' if portfolio.is_enabled(strategy_fb.name) else 'OFF'}] "
         f"{strategy_fb.status_line}",
         flush=True,
     )
     print(
-        f"S8       : ALIGN E/H/X models (default fat_tp_flip@50t) "
+        f"GAP      : ENABLE_OVERNIGHT_GAP close→next-open 09:05 "
+        f"[{'ON' if portfolio.is_enabled(strategy_og.name) else 'OFF'}] "
+        f"{strategy_og.status_line}",
+        flush=True,
+    )
+    print(
+        f"S8       : ALIGN E/H/X models (delivery — not EOD flattened) "
         f"[{'ON' if portfolio.is_enabled(strategy_s8.name) else 'OFF'}] "
         f"{strategy_s8.status_line}",
         flush=True,
@@ -441,25 +473,25 @@ def run_once(
         flush=True,
     )
     print(
-        f"S16      : 1h HH/LL-or-wick, intraday flatten at close "
+        f"S16      : 1h HH/LL-or-wick, Live-tab Intraday (default on) — flatten at MARKET_CLOSE "
         f"[{'ON' if portfolio.is_enabled(strategy_s16.name) else 'OFF'}] "
         f"{strategy_s16.status_line}",
         flush=True,
     )
     print(
-        f"S18      : ENABLE_S18 paper 1h OHLC+vol+day pack overlay "
+        f"S18      : ENABLE_S18 1h OHLC+vol+day pack overlay (live-eligible, you Arm) "
         f"[{'ON' if portfolio.is_enabled(strategy_s18.name) else 'OFF'}] "
         f"{strategy_s18.status_line}",
         flush=True,
     )
     print(
-        f"S19      : ENABLE_S19 paper 1h aligned body+close FLIP "
+        f"S19      : ENABLE_S19 1h aligned body+close (live-eligible, you Arm) "
         f"[{'ON' if portfolio.is_enabled(strategy_s19.name) else 'OFF'}] "
         f"{strategy_s19.status_line}",
         flush=True,
     )
     print(
-        f"S20      : ENABLE_S20 paper 1h fade HL (buy bounced low / short rejected high) "
+        f"S20      : ENABLE_S20 off (not a live book) "
         f"[{'ON' if portfolio.is_enabled(strategy_s20.name) else 'OFF'}] "
         f"{strategy_s20.status_line}",
         flush=True,
@@ -473,7 +505,7 @@ def run_once(
         )
     live_ok, live_why = is_live_mode_allowed()
     print(
-        f"Mode     : {'PAPER (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
+        f"Mode     : {'NOT ARMED (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
         flush=True,
     )
     print(f"Broker   : {broker.status_line}", flush=True)
@@ -502,6 +534,7 @@ def run_once(
         strategy_s18.name: strategy_s18,
         strategy_s19.name: strategy_s19,
         strategy_s20.name: strategy_s20,
+        strategy_og.name: strategy_og,
         **{s.name: s for s in amise_slots},
         strategy_s2.name: strategy_s2,
         strategy_s3.name: strategy_s3,
@@ -613,7 +646,8 @@ def run_once(
             return
         regime = regime_det.last.regime
         action = result_s1.action
-        # Block new entries when regime unfit / emergency / capital; optionally flatten.
+        # Emergency / capital / ENABLE still gate entries. Mood and TREND/CHOP
+        # labels do not.
         if action in {"BUY", "SHORT"}:
             ok_enter, enter_why = _may_enter(strategy_s1.name, regime, side=action)
             if not ok_enter:
@@ -997,12 +1031,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(
+            ok_enter, why = _may_enter(
                 strategy_s5.name, regime_det.last.regime, side=result.action
             )
             if not ok_enter:
                 strategy_s5.position = "flat"
                 strategy_s5.entry_price = None
+                strategy_s5.last_skip = why
+                if state["tick_count"] % 50 == 0:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] {strategy_s5.name} "
+                        f"ENTRY BLOCKED ({why}) exp={strategy_s5.last_expected}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
                 return
         _record_signal(
             time_label=now.isoformat(timespec="seconds"),
@@ -1102,12 +1144,20 @@ def run_once(
         if result is None or result.action not in {"BUY", "SHORT", "CLOSE"}:
             return
         if result.action in {"BUY", "SHORT"}:
-            ok_enter, _why = _may_enter(
+            ok_enter, why = _may_enter(
                 strategy_s8.name, regime_det.last.regime, side=result.action
             )
             if not ok_enter:
                 strategy_s8.position = "flat"
                 strategy_s8.entry_price = None
+                strategy_s8.last_skip = why
+                if state["tick_count"] % 50 == 0:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] {strategy_s8.name} "
+                        f"ENTRY BLOCKED ({why}) imb={strategy_s8.last_imb:.1f}%"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
                 return
         if (
             strategy_s8.position != "flat"
@@ -1342,16 +1392,85 @@ def run_once(
         emit_hour_book(strategy_s16, now, message)
 
     def emit_s18_if_changed(now: datetime, message: dict) -> None:
-        """S18: 1h OHLC+vol+yesterday pack — FLIP at the finished hour close. Paper only."""
+        """S18: 1h OHLC+vol+yesterday pack — FLIP at the finished hour close. Live-eligible, you Arm."""
         emit_hour_book(strategy_s18, now, message)
 
     def emit_s19_if_changed(now: datetime, message: dict) -> None:
-        """S19: 1h aligned body+close — FLIP at the finished hour close. Paper only."""
+        """S19: 1h aligned body+close — FLIP at the finished hour close. Live-eligible, you Arm."""
         emit_hour_book(strategy_s19, now, message)
 
     def emit_s20_if_changed(now: datetime, message: dict) -> None:
         """S20: 1h fade HL — buy bounced low / short rejected high. Paper only."""
         emit_hour_book(strategy_s20, now, message)
+
+    def emit_overnight_gap_if_changed(now: datetime, message: dict) -> None:
+        """OVERNIGHT_GAP: close→next-open. Mood/regime exempt. Not S4 swing."""
+        if not _strategy_active(strategy_og.name):
+            return
+        if latest["cmp"] is None:
+            return
+        prev_pos = strategy_og.position
+        prev_entry = getattr(strategy_og, "entry_price", None)
+        prev_date = getattr(strategy_og, "entry_date", None)
+        result = strategy_og.on_tick(now, float(latest["cmp"]), message)
+        skip = getattr(strategy_og, "last_skip", None)
+        if result is None and state["tick_count"] % 50 == 0:
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} idle "
+                f"pos={strategy_og.position} skip={skip}"
+            )
+            print(line, flush=True)
+            logger.info(line)
+        planned = wick_record_actions(prev_pos, result)
+        if not planned:
+            return
+        enter_action = planned[-1][0]
+        if enter_action in {"BUY", "SHORT"}:
+            ok_enter, why = allow_new_entry(
+                strategy_og.name,
+                features=_entry_features(strategy_og.name, enter_action),
+            )
+            if not ok_enter:
+                strategy_og.position = prev_pos
+                strategy_og.entry_price = prev_entry
+                if hasattr(strategy_og, "entry_date"):
+                    strategy_og.entry_date = prev_date
+                if hasattr(strategy_og, "release_action_lock"):
+                    strategy_og.release_action_lock()
+                if hasattr(strategy_og, "_save_state"):
+                    strategy_og._save_state()
+                line = (
+                    f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} "
+                    f"ENTRY BLOCKED ({why}) — will retry in close window | "
+                    f"{result.reason}"
+                )
+                print(line, flush=True)
+                logger.info(line)
+                return
+        fill_px = (
+            float(strategy_og.entry_price)
+            if getattr(strategy_og, "entry_price", None) is not None
+            else float(latest["cmp"])
+        )
+        for action, pos_after in planned:
+            _record_signal(
+                time_label=now.isoformat(timespec="seconds"),
+                action=action,
+                position_after=pos_after,
+                reason=result.reason,
+                price_delta=result.price_delta,
+                net=result.net,
+                net_delta=result.net_delta,
+                strategy=strategy_og.name,
+                cmp=fill_px,
+            )
+            line = (
+                f"[{now.isoformat(timespec='seconds')}] {strategy_og.name} "
+                f"CMP={fill_px} => {action} "
+                f"(pos={pos_after}) | {result.reason}"
+            )
+            print(line, flush=True)
+            logger.info(line)
 
     def emit_flow_brain_if_changed(now: datetime, message: dict) -> None:
         """FLOW_BRAIN: tick LTP+TBQ+TSQ pressure. Always feed ticks. Paper only. Not S7_HOURLY."""
@@ -1405,52 +1524,131 @@ def run_once(
         logger.info(line)
 
 
-    def emit_you_if_pending(now: datetime, message: dict) -> None:
-        """You-tab MARKET click. Not a paper book. Live only if already armed."""
-        del message
-        from you_trade import YOU_BOOK, finish_you_order, take_pending_you_order
+    def book_health() -> dict[str, dict[str, Any]]:
+        """Per-book pos + why-idle so the desk can answer "why is S16 flat?"."""
+        out: dict[str, dict[str, Any]] = {}
+        for name, obj in strat_map.items():
+            row: dict[str, Any] = {
+                "position": str(getattr(obj, "position", "flat") or "flat"),
+                "enabled": bool(portfolio.is_enabled(name)),
+                "skip": str(getattr(obj, "last_skip", "") or ""),
+            }
+            bar = getattr(obj, "bar_debug", "")
+            if bar:
+                row["bar"] = str(bar)
+            tf = getattr(getattr(obj, "cfg", None), "bar_minutes", None)
+            if tf:
+                row["bar_minutes"] = int(tf)
+                row["next_decision_ist"] = _next_boundary(
+                    datetime.now(IST), int(tf)
+                ).isoformat(timespec="seconds")
+            out[name] = row
+        return out
 
-        job = take_pending_you_order()
-        if not job:
+    flatten_lock = threading.Lock()
+
+    def emit_desk_flatten(now: datetime) -> None:
+        """Operator Exit: flatten RAM + square leftover Angel even in Paper."""
+        from desk_flatten import apply_pending_flattens
+        from live_orders import square_fill_leftover
+
+        with flatten_lock:
+            cmp = latest.get("cmp")
+            if cmp is None:
+                try:
+                    from storage import latest_ltp as _latest_ltp
+
+                    cmp = _latest_ltp()
+                except Exception:
+                    cmp = None
+            leftover_broker_box: dict[str, Any] = {"b": None}
+
+            try:
+                from live_orders import reconcile_fill_leftovers_with_angel
+                from desk_data import invalidate_live_pnl_cache
+
+                cleared = reconcile_fill_leftovers_with_angel(
+                    getattr(session, "api", None),
+                    symbol=str(contract.get("symbol") or ""),
+                    token=str(contract.get("token") or ""),
+                )
+                try:
+                    invalidate_live_pnl_cache()
+                except Exception:
+                    pass
+                if cleared:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] [EXIT] "
+                        f"Angel already flat — cleared leftover {', '.join(cleared)}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
+            except Exception:
+                pass
+
+            def _square_leftover(name: str, leftover: dict) -> Any:
+                b = leftover_broker_box["b"]
+                if b is None:
+                    b = broker
+                    if not hasattr(b, "place_leftover_square"):
+                        b = broker_from_session(session, contract, force_live=True)
+                    leftover_broker_box["b"] = b
+                return square_fill_leftover(name, leftover=leftover, broker=b)
+
+            rows = apply_pending_flattens(
+                strat_map,
+                _record_signal,
+                now=now,
+                cmp=cmp,
+                square_leftover=_square_leftover,
+            )
+        if not rows:
             return
-        act = str(job.get("action") or "").upper()
-        if act == "BUY":
-            after = "long"
-        elif act == "SHORT":
-            after = "short"
-        else:
-            after = "flat"
-        ts = now.isoformat(timespec="seconds")
-        res = _record_signal(
-            time_label=ts,
-            action=act,
-            position_after=after,
-            reason=(
-                f"you tab {act} example={job.get('example_id') or ''} "
-                f"queued={job.get('id')}"
-            ),
-            price_delta=None,
-            net=0.0,
-            net_delta=None,
-            strategy=YOU_BOOK,
-            cmp=latest.get("cmp"),
+        for row in rows:
+            name = str(row.get("strategy") or "")
+            res = row.get("result") or {}
+            ts = now.isoformat(timespec="seconds")
+            if res.get("leftover_squared"):
+                broker_res = res.get("broker") or {}
+                line = (
+                    f"[{ts}] [EXIT] leftover SQUARE {name} "
+                    f"tx={broker_res.get('transaction')} qty={res.get('lots')} "
+                    f"ok={broker_res.get('ok')} order={broker_res.get('order_id')}"
+                )
+            elif res.get("already_flat"):
+                line = f"[{ts}] [EXIT] {name} already flat"
+            elif row.get("status") == "done":
+                line = (
+                    f"[{ts}] [EXIT] CLOSE {name} was_{res.get('was_side')} "
+                    f"queued={row.get('id')}"
+                )
+            else:
+                line = f"[{ts}] [EXIT] {name} failed {row.get('error')}"
+            print(line, flush=True)
+            logger.info(line)
+        write_bot_health(
+            {
+                "event": "desk_exit",
+                "flattened": [
+                    {
+                        "strategy": r.get("strategy"),
+                        "status": r.get("status"),
+                        "was_side": (r.get("result") or {}).get("was_side"),
+                    }
+                    for r in rows
+                ],
+                "positions": {
+                    n: getattr(o, "position", "flat") for n, o in strat_map.items()
+                },
+                "runner": "run_strategy",
+            }
         )
-        try:
-            finish_you_order(job, res)
-        except Exception as exc:
-            print(f"[YOU] finish failed: {exc}", flush=True)
-            logger.warning("[YOU] finish failed: %s", exc)
-        line = f"[{ts}] [YOU] {act} {YOU_BOOK} queued={job.get('id')}"
-        print(line, flush=True)
-        logger.info(line)
 
     def emit_hour_book(strategy, now: datetime, message: dict) -> None:
-        """1h FLIP books. Mood gate via _may_enter. Block does not flatten a hold."""
+        """1h FLIP books. Mood/regime do not skip a finished-hour close."""
         if not _strategy_active(strategy.name):
             return
         if latest["cmp"] is None:
-            return
-        if int(getattr(mood_det.last, "n_samples", 0) or 0) < 8:
             return
         prev = strategy.position
         prev_entry = getattr(strategy, "entry_price", None)
@@ -1542,8 +1740,9 @@ def run_once(
 
         try:
             now = datetime.now(IST)
-            # Skip night/weekend noise entirely.
+            # Skip night/weekend noise entirely. Still honour desk Exit.
             if not is_market_open(now):
+                emit_desk_flatten(now)
                 if now >= state["next_bar_at"]:
                     state["next_bar_at"] = _next_boundary(now, interval)
                 return
@@ -1582,7 +1781,11 @@ def run_once(
                     get_learner().maybe_refit()
                 except Exception:
                     pass
-            if tick_count == 1 or tick_count % 50 == 0:
+            if tick_count == 1 or tick_count % 200 == 0:
+                try:
+                    mood_det.refresh_layers()
+                except Exception:
+                    pass
                 s3_extra = ""
                 if strategy_s3.enabled:
                     if strategy_s3.last_prob is not None:
@@ -1597,19 +1800,23 @@ def run_once(
                     f"ltp={latest['cmp']} bp={latest['bp']} sp={latest['sp']} "
                     f"regime={rs.regime} "
                     f"mood={mood_det.last.mood} "
+                    f"align={mood_det.last.alignment} "
                     f"regime={mood_det.last.regime} "
                     f"next_bar={state['next_bar_at'].strftime('%H:%M:%S')} "
                     f"s2={strategy_s2.position} s3={strategy_s3.position} "
-                    f"s4={strategy_s4.position} s5={strategy_s5.position} "
-                    f"s6={strategy_s6.position} fb={strategy_fb.position} s8={strategy_s8.position}"
-                    f"/{strategy_s8.bias} s9={strategy_s9.position}"
-                    f"/{strategy_s9.last_label} s10={strategy_s10.position}"
-                    f"/{strategy_s10.bias} s11={strategy_s11.position} "
+                    f"s4={strategy_s4.position} "
+                    f"s5={strategy_s5.position}/{strategy_s5.last_skip or '-'} "
+                    f"s6={strategy_s6.position} fb={strategy_fb.position} "
+                    f"s8={strategy_s8.position}/{strategy_s8.bias}/{strategy_s8.last_skip or '-'} "
+                    f"s9={strategy_s9.position}/{strategy_s9.last_label} "
+                    f"s10={strategy_s10.position}/{strategy_s10.bias} "
+                    f"s11={strategy_s11.position} "
                     f"s13={strategy_s13.position} "
                     f"s16={strategy_s16.position} "
                     f"s18={strategy_s18.position} "
                     f"s19={strategy_s19.position} "
-                    f"s20={strategy_s20.position}{s3_extra}"
+                    f"s20={strategy_s20.position} "
+                    f"gap={strategy_og.position}{s3_extra}"
                 )
                 print(line, flush=True)
                 logger.info(line)
@@ -1629,14 +1836,17 @@ def run_once(
                             "S18": strategy_s18.position,
                             "S19": strategy_s19.position,
                             "S20": strategy_s20.position,
-                            "YOU": broker.positions.get("YOU_MANUAL", "flat"),
+                            "GAP": strategy_og.position,
                         },
+                        "skips": {
+                            "S5": strategy_s5.last_skip,
+                            "S8": strategy_s8.last_skip,
+                        },
+                        "books": book_health(),
                         "runner": "run_strategy",
                     }
                 )
 
-            # You tab: one queued MARKET order (record already stored on the desk)
-            emit_you_if_pending(now, message)
             # S2: 1-min sum of buy1-5 vs sell1-5
             emit_s2_if_changed(now, message)
             # S3: ML model BUY/SHORT/CLOSE
@@ -1673,6 +1883,8 @@ def run_once(
                         strategy_s13.set_contract(fresh)
                     if hasattr(strategy_s4, "set_contract"):
                         strategy_s4.set_contract(fresh)
+                    if hasattr(strategy_og, "set_contract"):
+                        strategy_og.set_contract(fresh)
                     for slot in amise_slots:
                         if hasattr(slot, "set_contract"):
                             slot.set_contract(fresh)
@@ -1688,16 +1900,21 @@ def run_once(
             emit_s13_if_changed(now, message)
             # S16: 1h close-vs-prev HH/LL or wick, FLIP at bar close; flatten at EOD
             emit_s16_if_changed(now, message)
-            # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; paper only
+            # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; you Arm live
             emit_s18_if_changed(now, message)
-            # S19: 1h aligned body+close, FLIP at bar close; paper only
+            # S19: 1h aligned body+close, FLIP at bar close; live-eligible, you Arm
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
+            # OVERNIGHT_GAP: today's tape → next open. Mood-exempt. You Arm live.
+            emit_overnight_gap_if_changed(now, message)
             for slot in amise_slots:
                 emit_hour_book(slot, now, message)
 
-            # EOD flatten intraday (S5/S8/S12/…) in last N minutes before MARKET_CLOSE
+            # Desk Exit button: flatten that book only (after this tick's entries)
+            emit_desk_flatten(now)
+
+            # EOD flatten: Live-tab Intraday ticks (S16 default). Delivery books hold.
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
             if in_eod_flatten_window(now, market_close=close_s):
                 opens = intraday_open_for_flatten(strat_map)
@@ -1722,7 +1939,7 @@ def run_once(
                         action="CLOSE",
                         position_after="flat",
                         reason=(
-                            f"EOD flatten intraday was_{side} "
+                            f"EOD flatten Intraday was_{side} "
                             f"(last {os.getenv('EOD_FLATTEN_MINUTES', '5')}m "
                             f"before {close_s})"
                         ),
@@ -1750,11 +1967,12 @@ def run_once(
                         }
                     )
 
-            # Optional mood flatten (MOOD_GATE + MOOD_FLATTEN). Never dumps S13/S4.
+            # Optional mood flatten (MOOD_GATE + MOOD_FLATTEN). Never dumps
+            # S13/S4/overnight or S16's 1h formula hold.
             if mood_det.last.gate_on and mood_det.last.flatten_on:
                 day_key = now.astimezone(IST).strftime("%Y-%m-%d")
                 for name, obj in strat_map.items():
-                    if name in {"S13_HHHL_DAY", "S4_OVERNIGHT"}:
+                    if name in MOOD_EXEMPT_BOOKS or name in FORMULA_GATE_BOOKS:
                         continue
                     pos = str(getattr(obj, "position", "flat") or "flat")
                     want, why = mood_wants_flatten(
@@ -1834,6 +2052,10 @@ def run_once(
             and not stop_flag.get("stop")
         ):
             time.sleep(5)
+            try:
+                emit_desk_flatten(datetime.now(IST))
+            except Exception as exc:
+                logger.warning("desk Exit poll failed: %s", exc)
             idle = time.monotonic() - float(feed_watch["t"])
             if not tick_feed_stale(
                 idle_sec=idle,
@@ -1950,6 +2172,10 @@ def main() -> None:
         "S20_FADE_HL",
         _optional_book("S20_FADE_HL", "strategy_s20", "s20_from_env"),
     )
+    strategy_og = _load(
+        "OVERNIGHT_GAP",
+        _optional_book("OVERNIGHT_GAP", "strategy_overnight_gap", "overnight_gap_from_env"),
+    )
     amise_slots = _load_amise_slots(portfolio)
     regime_det = RegimeDetector(window=60)
     mood_det = MoodDetector(window=80)
@@ -1972,12 +2198,13 @@ def main() -> None:
     print(f"S18_OHLC_VOL_HTF: {strategy_s18.status_line}", flush=True)
     print(f"S19_BODY_CLOSE_1H: {strategy_s19.status_line}", flush=True)
     print(f"S20_FADE_HL: {strategy_s20.status_line}", flush=True)
+    print(f"OVERNIGHT_GAP: {strategy_og.status_line}", flush=True)
     for slot in amise_slots:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S13/S16/S18/S19 — S4 off, S11 off, S18/S19 paper only, "
-        f"FLOW_BRAIN off, S20 off, AMISE S21+ after Lab Approve)",
+        f"(live desk S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S20/FLOW off, "
+        f"S18/S19 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off. No paper fills.)",
         flush=True,
     )
 
@@ -2010,6 +2237,7 @@ def main() -> None:
                 strategy_s18,
                 strategy_s19,
                 strategy_s20,
+                strategy_og,
                 portfolio,
                 regime_det,
                 mood_det,
@@ -2040,6 +2268,7 @@ def main() -> None:
             f"s18={strategy_s18.position} "
             f"s19={strategy_s19.position} "
             f"s20={strategy_s20.position} "
+            f"gap={strategy_og.position} "
             f"amise={','.join(s.name.split('_')[0] + '=' + str(s.position) for s in amise_slots)} "
             f"regime={regime_det.last.regime})...",
             flush=True,

@@ -400,7 +400,8 @@ def test_not_wired_to_paper_or_live() -> None:
     paper = station.split("const PAPER_BOOKS")[1].split("];")[0]
     portfolio = (root / "portfolio.py").read_text(encoding="utf-8")
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
-    assert "ENABLE_FLOW" not in portfolio
+    assert "ENABLE_FLOW_LAB" not in portfolio
+    assert "flow_lab" not in portfolio
     assert "flow_lab" not in runner
     assert "FLOW_LAB" not in paper
     assert "depth_ltp" not in ALL_STRATEGY_NAMES

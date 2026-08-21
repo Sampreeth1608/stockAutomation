@@ -99,6 +99,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
       <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
       <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
       <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <input id="desk-totp" placeholder="OTP if asked" autocomplete="one-time-code" hidden/>
       <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
     </div>
     <div class="row" style="margin-top:.55rem">
@@ -115,7 +116,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <div class="scroll">
       <table>
         <thead>
-          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th></tr>
+          <tr><th>Book</th><th>In bot</th><th>Live pick</th><th>RAM</th><th>Live qty</th><th></th></tr>
         </thead>
         <tbody id="books"></tbody>
       </table>
@@ -132,7 +133,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
     <div class="row" style="margin-top:.7rem">
       <label class="chk"><input type="checkbox" id="paper-only" checked/> Paper only (DRY_RUN)</label>
       <label class="chk">LIVE_MAX_LOTS
-        <input type="number" id="live-max" min="1" max="10" step="1" value="1"/>
+        <input type="number" id="live-max" min="1" max="1000" step="1" value="1"/>
       </label>
       <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
       <button class="btn" id="btn-save-money" type="button">Save money</button>
@@ -146,7 +147,7 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
       <button class="btn" id="btn-save-cap" type="button">Save capital</button>
     </div>
-    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–10.</p>
+    <p class="hint">Real Angel fills need all of: emergency clear, trading on, In bot, Live pick, Unlock, Paper only <em>off</em> (type LIVE), then Restart. Paper 100 lots is not live size. Cap is 1–1000 (SIZE if above 10).</p>
     <p class="flash" id="flash-money"></p>
   </section>
 
@@ -261,9 +262,8 @@ td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middl
 const $ = (id) => document.getElementById(id);
 const PAPER_BOOKS = [
   "S5_MINEDGE", "S8_NET_ZIGZAG",
-  "S13_HHHL_DAY", "S16_HHHL_WICK_1H",   "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL",
-  "S21_AMISE", "S22_AMISE", "S23_AMISE", "S24_AMISE",
-];
+  "S13_HHHL_DAY", "S16_HHHL_WICK_1H",   "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "OVERNIGHT_GAP",
+  ];
 const SHORT = {
   S4_OVERNIGHT: "S4 HHHL swing",
   S5_MINEDGE: "S5 minedge",
@@ -274,10 +274,7 @@ const SHORT = {
   S18_OHLC_VOL_HTF: "S18 OHLC+vol+day",
   S19_BODY_CLOSE_1H: "S19 body+close 1h",
   S20_FADE_HL: "S20 fade low/high",
-  S21_AMISE: "S21 AMISE",
-  S22_AMISE: "S22 AMISE",
-  S23_AMISE: "S23 AMISE",
-  S24_AMISE: "S24 AMISE",
+  OVERNIGHT_GAP: "overnight gap",
   S12_HHHL30: "S12 HHHL 30m",
   S14_WICK30_STRICT: "S14 wick",
   S15_WICK30_NOWICK: "S15 no-wick",
@@ -587,12 +584,58 @@ async function copyExport(kind) {
   flash("flash-dl", `Copied ${data.rows || 0} ${kind} rows — paste into Google Sheets`);
 }
 
+function deskTotp() {
+  const el = document.getElementById("desk-totp");
+  return el ? String(el.value || "").trim() : "";
+}
+function withDeskAuth(opts) {
+  const o = Object.assign({}, opts || {});
+  const headers = Object.assign({ "Content-Type": "application/json" }, o.headers || {});
+  if (window.__GP_CSRF) headers["X-GP-CSRF"] = window.__GP_CSRF;
+  o.headers = headers;
+  o.credentials = "same-origin";
+  if (o.body && typeof o.body === "string") {
+    const totp = deskTotp();
+    if (totp) {
+      try {
+        const obj = JSON.parse(o.body);
+        if (obj && typeof obj === "object" && !Array.isArray(obj) && obj.totp == null) {
+          obj.totp = totp;
+          o.body = JSON.stringify(obj);
+        }
+      } catch (e) {}
+    }
+  }
+  return o;
+}
+async function bootAuth() {
+  try {
+    const r = await fetch("/api/desk/session", { credentials: "same-origin" });
+    if (r.status === 401) {
+      location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+      return false;
+    }
+    const d = await r.json().catch(() => ({}));
+    window.__GP_CSRF = d.csrf || "";
+    const totpEl = document.getElementById("desk-totp");
+    if (totpEl) totpEl.hidden = !d.totp_required;
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
 async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const o = withDeskAuth(opts || {});
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { credentials: "same-origin" }));
+  if (res.status === 401) {
+    location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+    throw new Error("login required");
+  }
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error("bad JSON from " + path); }
   if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  if (data && data.csrf) window.__GP_CSRF = data.csrf;
   return data;
 }
 function flash(id, msg, bad) {
@@ -646,8 +689,9 @@ function render(d) {
       <td><input type="checkbox" data-live="${name}" ${livePick ? "checked" : ""}/></td>
       <td>${b.ram || "—"}</td>
       <td>${b.live_approved ? b.live_qty : 0}${b.warn_100 && b.live_approved ? " · paper 100≠live" : ""}</td>
+      <td><button type="button" class="btn danger" data-exit="${name}">Exit</button></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="5">no books</td></tr>`;
+  }).join("") || `<tr><td colspan="6">no books</td></tr>`;
   const armed = live.would_place_real_orders
     ? "ARMED — next signal on a live-picked book hits Angel."
     : "Paper. Nothing hits Angel until Paper only is off, live is unlocked, a book is live-picked, and the bot is restarted.";
@@ -743,6 +787,17 @@ $("btn-save-books").onclick = async () => {
     await load();
   } catch (e) { flash("flash-books", String(e.message || e), true); }
 };
+$("books").addEventListener("click", async (ev) => {
+  const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
+  if (!btn) return;
+  const name = btn.dataset.exit;
+  if (!confirm("Flatten " + (SHORT[name] || name) + " now? This book only.")) return;
+  try {
+    const res = await api("/api/desk/flatten", { method: "POST", body: JSON.stringify({ strategy: name }) });
+    flash("flash-books", res.note || "Exit queued");
+    await load();
+  } catch (e) { flash("flash-books", String(e.message || e), true); }
+});
 $("btn-save-money").onclick = async () => {
   const paper = $("paper-only").checked;
   const lots = Number($("live-max").value || 1);
@@ -871,7 +926,10 @@ async function boot() {
   loadWhy().catch((e) => flash("flash-why", String(e.message || e), true));
 }
 
-boot().catch((e) => flash("flash-engine", String(e.message || e), true));
+bootAuth().then((ok) => {
+  if (ok === false) return;
+  boot().catch((e) => flash("flash-engine", String(e.message || e), true));
+});
 setInterval(() => load().catch(() => {}), 4000);
 setInterval(() => loadTape().catch((e) => flash("flash-hist", String(e.message || e), true)), 4000);
 setInterval(() => loadHistory().catch((e) => flash("flash-hist", String(e.message || e), true)), 12000);

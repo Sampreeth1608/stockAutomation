@@ -43,12 +43,37 @@ def test_down_close_uses_wick_not_hhhl() -> None:
     assert "lower wick" in why
 
 
-def test_down_close_upper_wick_short() -> None:
-    cur = _c("2026-08-17 10:30:00", 104.0, 130.0, 80.0, 90.0)
-    assert cur.close < PREV.close
-    side, why = s16_bar_decision(PREV, cur)
-    assert side == "short"
-    assert "upper wick" in why
+def test_down_close_upper_then_lower_wick_flips() -> None:
+    """20 Aug 15:00 C=15770 → 16:00 C=15753 upper wick SHORT; 17:00 C=15680 lower wick BUY.
+
+    Fill is at that bar's close. The long is held through 17:00–18:00 (the
+    '18:00 buy'); it does not wait for the 18:00 close.
+    """
+    c15 = _c("2026-08-20 14:00:00", 15770.0, 15780.0, 15760.0, 15770.0)
+    c16 = _c("2026-08-20 15:00:00", 15768.0, 15800.0, 15750.0, 15753.0)
+    c17 = _c("2026-08-20 16:00:00", 15750.0, 15755.0, 15640.0, 15680.0)
+    hold = _c("2026-08-20 17:00:00", 15680.0, 15690.0, 15670.0, 15685.0)
+    assert c16.close < c15.close
+    side16, why16 = s16_bar_decision(c15, c16, min_wick_gap=0)
+    assert side16 == "short" and "upper wick" in why16
+    assert c17.close < c16.close
+    side17, why17 = s16_bar_decision(c16, c17, min_wick_gap=0)
+    assert side17 == "long" and "lower wick" in why17
+    r = simulate_s16(
+        [c15, c16, c17, hold],
+        tf="toy:20aug-pm",
+        lots=1,
+        fees=False,
+        session_filter=False,
+        min_wick_gap=0,
+    )
+    assert r.n_trades == 2
+    assert r.trades[0].side == "SHORT"
+    assert r.trades[0].entry_px == 15753.0
+    assert r.trades[0].exit_px == 15680.0
+    assert r.trades[1].side == "LONG"
+    assert r.trades[1].entry_px == 15680.0
+    assert r.trades[1].entry_time == "2026-08-20 16:00:00"
 
 
 def test_tiny_wick_gap_skips_when_gap_is_3() -> None:
@@ -187,7 +212,8 @@ def test_paper_wired_1h_not_s17() -> None:
     assert "S16_HHHL_WICK_1H" in SLIM_PAPER_STRATEGIES
     assert "S18_OHLC_VOL_HTF" in SLIM_PAPER_STRATEGIES
     assert "S19_BODY_CLOSE_1H" in SLIM_PAPER_STRATEGIES
-    assert "S20_FADE_HL" in SLIM_PAPER_STRATEGIES
+    assert "S20_FADE_HL" not in SLIM_PAPER_STRATEGIES
+    assert "OVERNIGHT_GAP" in SLIM_PAPER_STRATEGIES
     assert "S13_HHHL_DAY" in SLIM_PAPER_STRATEGIES
     assert "S4_OVERNIGHT" not in SLIM_PAPER_STRATEGIES
     assert "S12_HHHL30" not in SLIM_PAPER_STRATEGIES
@@ -198,6 +224,7 @@ def test_paper_wired_1h_not_s17() -> None:
     runner = (Path(__file__).resolve().parent / "run_strategy.py").read_text(encoding="utf-8")
     assert "ENABLE_S16" in runner or "S16_HHHL_WICK_1H" in runner
     assert "s16_from_env" in runner
+    assert "FORMULA_GATE_BOOKS" in runner
     assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
     assert "ENABLE_S17" not in runner
 
@@ -237,7 +264,7 @@ if __name__ == "__main__":
     test_up_close_takes_hh_green_even_with_upper_wick()
     test_up_close_without_hhhl_skips_even_if_wick()
     test_down_close_uses_wick_not_hhhl()
-    test_down_close_upper_wick_short()
+    test_down_close_upper_then_lower_wick_flips()
     test_equal_close_skips()
     test_tiny_wick_gap_skips_when_gap_is_3()
     test_clear_wick_still_fires_with_gap_3()

@@ -154,6 +154,10 @@ class S16HhhlWickStrategy:
     def _session_flatten_why(self, now: datetime) -> str | None:
         if self.position == "flat":
             return None
+        from position_safety import is_session_intraday
+
+        if not is_session_intraday(self.name):
+            return None
         if now.weekday() >= 5:
             return "weekend flatten"
         oh, om = self._hhmm(self.cfg.market_open)

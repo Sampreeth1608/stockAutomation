@@ -14,7 +14,6 @@ from amise_timeframes import (
     parse_tf,
 )
 from flow_lab import flow_bars_from_tick_rows
-from research_factory import stamp_genome_tf
 from strategy_amise import AmiseSlotStrategy, amise_slot_from_env
 from strategy_genome import StrategyGenome
 
@@ -130,19 +129,6 @@ def test_token_split_does_not_share_volume() -> None:
         assert merged[0].open == 100.0
 
 
-def test_stamp_tf_keeps_1h_name_and_changes_id() -> None:
-    g = _g(name="demo-breakout")
-    one = stamp_genome_tf(g, "1h")
-    assert one.name == "demo-breakout"
-    assert one.timeframe == "1h"
-    m15 = stamp_genome_tf(g, "15m")
-    assert m15.name.endswith("@15m")
-    assert m15.timeframe == "15m"
-    assert m15.genome_id != one.genome_id
-    again = stamp_genome_tf(m15, "15m")
-    assert again.name.count("@") == 1
-
-
 def test_amise_slot_uses_genome_tf_not_env_hour(monkeypatch=None) -> None:
     g = _g(timeframe="15m")
     s = AmiseSlotStrategy("S21_AMISE", g, seed=False)
@@ -150,7 +136,7 @@ def test_amise_slot_uses_genome_tf_not_env_hour(monkeypatch=None) -> None:
     assert s.holds_overnight is False
     s.position = "long"
     why = s._session_flatten_why(datetime(2026, 8, 18, 23, 30, tzinfo=IST))
-    assert why is not None
+    assert why is None
     daily = AmiseSlotStrategy("S21_AMISE", _g(timeframe="1d"), seed=False)
     assert daily.bar_minutes == 1440
     assert daily.holds_overnight is True
@@ -205,7 +191,6 @@ if __name__ == "__main__":
     test_all_user_rungs_parse()
     test_session_floor_75m_from_open_not_midnight()
     test_token_split_does_not_share_volume()
-    test_stamp_tf_keeps_1h_name_and_changes_id()
     test_amise_slot_uses_genome_tf_not_env_hour()
     test_you_mimic_hours_flatten()
     td = P(tempfile.mkdtemp())

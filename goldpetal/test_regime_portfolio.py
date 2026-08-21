@@ -31,14 +31,23 @@ def test_portfolio_gates() -> None:
     assert p.allows("S1_NETDELTA", "TREND")
     assert p.allows("S5_MINEDGE", "TREND")
     assert not p.allows("S2_BALANCE", "TREND")  # not enabled
-    assert not p.allows("S1_NETDELTA", "WIDE_SPREAD")
-    assert p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
-    assert not p.allows("S3_ML", "CHOP")  # chop: overnight only by default
+    assert p.allows("S1_NETDELTA", "WIDE_SPREAD")
+    assert not p.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
+    assert p.allows("S3_ML", "CHOP")
     assert p.allows("S5_MINEDGE", "UNKNOWN")
     # Smooth rallies often label QUIET — S5 must still be eligible (own fee gate).
     assert p.allows("S5_MINEDGE", "QUIET")
     assert p.allows("S5_MINEDGE", "CHOP")
     assert not p.allows("S2_BALANCE", "CHOP")
+    dump = PortfolioConfig(
+        enabled={"S1_NETDELTA", "S3_ML", "S5_MINEDGE"},
+        flatten_when_blocked=True,
+    )
+    assert dump.allows("S1_NETDELTA", "WIDE_SPREAD")
+    assert not dump.should_flatten("S1_NETDELTA", "WIDE_SPREAD")
+    assert dump.allows("S3_ML", "CHOP")
+    assert dump.allows("S5_MINEDGE", "CHOP")
+    assert not dump.should_flatten("S5_MINEDGE", "CHOP")
     p10 = PortfolioConfig(enabled={"S10_LEGACY30"})
     assert p10.allows("S10_LEGACY30", "TREND")
     assert p10.allows("S10_LEGACY30", "QUIET")
@@ -64,6 +73,7 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     os.environ.pop("ENABLE_S18", None)
     os.environ.pop("ENABLE_S19", None)
     os.environ.pop("ENABLE_S20", None)
+    os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
     p = portfolio_from_env()
     assert "S1_NETDELTA" not in p.enabled
     assert "S2_BALANCE" not in p.enabled
@@ -72,9 +82,11 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S5_MINEDGE" in p.enabled
     assert "S13_HHHL_DAY" in p.enabled
     assert "S16_HHHL_WICK_1H" in p.enabled
+    assert p.allows("S16_HHHL_WICK_1H", "WIDE_SPREAD")
     assert "S18_OHLC_VOL_HTF" in p.enabled
     assert "S19_BODY_CLOSE_1H" in p.enabled
     assert "S20_FADE_HL" not in p.enabled
+    assert "OVERNIGHT_GAP" in p.enabled
     assert "FLOW_BRAIN" not in p.enabled
     assert "S8_NET_ZIGZAG" in p.enabled
     assert "S9_STATE30" not in p.enabled
@@ -101,8 +113,15 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S25_AMISE" in p25.enabled
     assert p25.allows("S25_AMISE", "TREND")
     assert p25.allows("S25_AMISE", "CHOP")
-    assert not p25.allows("S25_AMISE", "WIDE_SPREAD")
+    assert p25.allows("S25_AMISE", "WIDE_SPREAD")
     os.environ.pop("ENABLE_S25", None)
+
+    os.environ["ENABLE_OVERNIGHT_GAP"] = "true"
+    p_gap = portfolio_from_env()
+    assert "OVERNIGHT_GAP" in p_gap.enabled
+    assert p_gap.allows("OVERNIGHT_GAP", "WIDE_SPREAD")
+    assert p_gap.allows("OVERNIGHT_GAP", "CHOP")
+    os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
 
 
 if __name__ == "__main__":

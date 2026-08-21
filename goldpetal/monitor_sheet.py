@@ -46,19 +46,20 @@ from market_mood import snapshot_mood
 from paper_report import summarize_trades
 from sheet_commands import apply_command_rows
 from sheet_dashboard import (
+    ANGEL_FIELDS,
     COMMAND_FIELDS,
     DASHBOARD_TABS,
-    LAB_FIELDS,
     LIVE_FIELDS,
     MARKET_FIELDS,
     RISK_FIELDS,
     STRATEGY_FIELDS,
-    build_lab_rows,
+    build_angel_rows,
     build_live_rows,
     build_market_rows,
     build_risk_rows,
     build_strategy_rows,
     command_template_rows,
+    desk_mode_label,
 )
 from storage import DB_PATH, build_trades, latest_signals
 
@@ -66,9 +67,10 @@ IST = ZoneInfo("Asia/Kolkata")
 ROOT = Path(__file__).resolve().parent
 WATCH_NOTE = (
     "Sheets = dashboard + pause/emergency only. Ticks stay in SQLite. "
-    "Start/stop, Unlock live, micro-live, and Approve stay on the desk "
+    "Start/stop, Unlock live, micro-live, Approve, and ceiling SIZE stay on the desk "
     "(SSH tunnel → http://127.0.0.1:8501/). Rank after_charges₹. "
-    "Tax excluded from rank. Keep DRY_RUN=true. No single AI LONG 73%."
+    "Tax excluded from rank. Paper tape ≠ Angel. ANGEL tab is live ₹. "
+    "No single AI LONG 73%."
 )
 TAB_ORDER = list(DASHBOARD_TABS) + ["HOW_TO"]
 
@@ -248,12 +250,13 @@ def how_to_rows() -> list[dict[str, str]]:
     steps = [
         "Gold Petal Google Sheets dashboard — Python engine, Sheets view.",
         "Angel websocket → SQLite ticks.db → mood/books → this Sheet (15–60s). Do not stream every tick.",
-        "Rank books by after_charges₹. Do not rank after_tax₹. Keep DRY_RUN=true.",
+        "Rank books by after_charges₹. Do not rank after_tax₹. Paper STRATEGIES/TRADES ≠ Angel.",
         "There is no single AI DECISION LONG 73%. Each book decides. FLOW_BRAIN stays ENABLE=false.",
         "",
-        "Tabs: LIVE, MARKET, STRATEGIES, SIGNALS, TRADES, LAB, RISK, COMMANDS.",
+        "Tabs: LIVE, ANGEL, MARKET, STRATEGIES, SIGNALS, TRADES, LAB, RISK, COMMANDS.",
+        "ANGEL = live AC ₹, live positions, last Angel order ids. Desk Live tab is the same numbers.",
         "COMMANDS: type YES under request for pause_all / emergency_off / kill_all / resume_trading / clear_emergency.",
-        "Refused from Sheets: micro_live, Unlock live, DRY_RUN=false, Approve, start/stop bot.",
+        "Refused from Sheets: micro_live, Unlock live, DRY_RUN=false, Approve, start/stop bot, raise lots.",
         "Start/stop and Unlock: SSH tunnel → http://127.0.0.1:8501/",
         "",
         "Easy today (no Google API):",
@@ -295,7 +298,7 @@ def build_status_rows(
     blocked, why = entries_blocked()
     live_ok, live_why = is_live_mode_allowed()
     would = bool(live.get("would_place_real_orders"))
-    mode = "LIVE-UNSAFE" if would else ("PAPER" if live.get("dry_run") else "CHECK DESK")
+    mode = desk_mode_label(live)
     rows = [
         {"key": "updated_at_ist", "value": clock.isoformat(timespec="seconds")},
         {"key": "mode", "value": mode},
@@ -324,6 +327,7 @@ def build_status_rows(
         {"key": "mood_label", "value": str(mood.label)},
         {"key": "mood_gate", "value": _yn(mood.gate_on)},
         {"key": "paper_lots", "value": str(paper_lots())},
+        {"key": "live_max_lots", "value": str(live.get("live_max_lots") or "")},
         {"key": "today_pnl_inr", "value": _round(cap.get("today_pnl_inr"), 2)},
         {"key": "deployable_inr", "value": _round(cap.get("deployable_inr"), 2)},
         {"key": "open_note", "value": "OPEN tab = paper positions right now"},
@@ -503,16 +507,15 @@ def _pack_csvs(
     market = build_market_rows(db_path=db_path)
     strategies = build_strategy_rows(blotter, db_path=db_path)
     trades = build_trade_rows(limit=closed_limit, trades=blotter)
-    lab = build_lab_rows()
     risk = build_risk_rows()
     commands = command_template_rows(results=command_results)
     return {
         "LIVE": (LIVE_FIELDS, live),
+        "ANGEL": (ANGEL_FIELDS, build_angel_rows(db_path=db_path)),
         "MARKET": (MARKET_FIELDS, market),
         "STRATEGIES": (STRATEGY_FIELDS, strategies),
         "SIGNALS": (SIGNAL_FIELDS, signals),
         "TRADES": (CLOSED_FIELDS, trades),
-        "LAB": (LAB_FIELDS, lab),
         "RISK": (RISK_FIELDS, risk),
         "COMMANDS": (COMMAND_FIELDS, commands),
         "HOW_TO": (HOW_TO_FIELDS, how),

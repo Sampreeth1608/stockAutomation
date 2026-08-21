@@ -9,7 +9,7 @@ from pathlib import Path
 import capital
 import control_state
 import live_orders
-from capital import apply_live_capital_allocation, load_capital, save_capital, default_plan
+from capital import apply_live_capital_allocation, can_open_trade, load_capital, save_capital, default_plan
 from control_state import load_state, set_live_approved, set_live_unlocked, set_emergency, set_trading_enabled
 from live_orders import LiveBroker, live_lots_for
 
@@ -132,7 +132,10 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
         capital.CAPITAL_PATH = capital_path
         save_capital(default_plan(), path=capital_path)
         apply_live_capital_allocation(
-            [{"strategy": "S4_OVERNIGHT", "budget_inr": 50_000, "max_lots": 3}],
+            [
+                {"strategy": "S4_OVERNIGHT", "budget_inr": 50_000, "max_lots": 3},
+                {"strategy": "S13_HHHL_DAY", "budget_inr": 50_000, "max_lots": 3},
+            ],
             path=capital_path,
         )
         os.environ["LIVE_LOTS"] = "1"
@@ -144,7 +147,7 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
         set_emergency(False, path=state)
         set_trading_enabled(True, path=state)
         set_live_unlocked(True, path=state)
-        set_live_approved(["S4_OVERNIGHT"], path=state)
+        set_live_approved(["S13_HHHL_DAY"], path=state)
         os.environ["DRY_RUN"] = "false"
         os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
         os.environ["LIVE_MAX_LOTS"] = "5"
@@ -159,7 +162,7 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
 
         api = _Api()
         broker = LiveBroker(api, symbol="GOLDPETAL", token="1")
-        res = broker.place_signal(strategy="S4_OVERNIGHT", action="BUY", price=7000.0)
+        res = broker.place_signal(strategy="S13_HHHL_DAY", action="BUY", price=7000.0)
         assert res.ok and res.quantity == 3
         assert api.calls[0]["quantity"] == "3"
     finally:
@@ -171,6 +174,115 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
         capital.CAPITAL_PATH = capital.CONTROL_DIR / "capital.json"
 
 
+def test_lots_mode_save_does_not_zero_budget_or_paper_lots() -> None:
+    td, _, capital_path, _ = _tmp()
+    try:
+        save_capital(default_plan(), path=capital_path)
+        before = load_capital(path=capital_path).strategies["S5_MINEDGE"]
+        paper_n = before.max_lots
+        budget = before.budget_inr
+        apply_live_capital_allocation(
+            [
+                {
+                    "strategy": "S5_MINEDGE",
+                    "live_size_mode": "lots",
+                    "live_lots": 1,
+                }
+            ],
+            path=capital_path,
+        )
+        plan = load_capital(path=capital_path)
+        sb = plan.strategies["S5_MINEDGE"]
+        assert sb.budget_inr == budget
+        assert sb.max_lots == paper_n
+        assert sb.live_lots == 1
+        assert sb.live_size_mode == "lots"
+        from capital import live_qty_for
+
+        assert live_qty_for("S5_MINEDGE", cap=5, default=1, plan=plan) == 1
+    finally:
+        td.cleanup()
+
+
+def test_live_qty_capital_mode_uses_budget_over_ltp() -> None:
+    td, _, capital_path, _ = _tmp()
+    try:
+        save_capital(default_plan(), path=capital_path)
+        apply_live_capital_allocation(
+            [
+                {
+                    "strategy": "S5_MINEDGE",
+                    "live_size_mode": "capital",
+                    "live_budget_inr": 50_000,
+                }
+            ],
+            path=capital_path,
+        )
+        plan = load_capital(path=capital_path)
+        from capital import live_qty_for
+
+        assert live_qty_for(
+            "S5_MINEDGE", cap=10, default=1, ltp=15_000, plan=plan
+        ) == 3
+        assert live_qty_for(
+            "S5_MINEDGE", cap=1, default=1, ltp=15_000, plan=plan
+        ) == 1
+    finally:
+        td.cleanup()
+
+
+def test_can_open_trade_skips_zero_budget_in_lots_mode() -> None:
+    td, _, capital_path, _ = _tmp()
+    try:
+        plan = default_plan()
+        plan.strategies["S5_MINEDGE"].budget_inr = 0
+        plan.strategies["S5_MINEDGE"].live_size_mode = "lots"
+        save_capital(plan, path=capital_path)
+        ok, why = can_open_trade("S5_MINEDGE", lots=1, path=capital_path)
+        assert ok, why
+        plan = load_capital(path=capital_path)
+        plan.strategies["S5_MINEDGE"].live_size_mode = "capital"
+        save_capital(plan, path=capital_path)
+        ok, why = can_open_trade("S5_MINEDGE", lots=1, path=capital_path)
+        assert not ok
+        assert why == "zero_budget"
+    finally:
+        td.cleanup()
+
+
+def test_live_budget_not_paper_split() -> None:
+    td, _, capital_path, _ = _tmp()
+    try:
+        plan = default_plan()
+        plan.strategies["S5_MINEDGE"].budget_inr = 4444.44
+        plan.strategies["S5_MINEDGE"].live_budget_inr = 0
+        plan.strategies["S5_MINEDGE"].live_size_mode = "capital"
+        save_capital(plan, path=capital_path)
+        from capital import live_qty_for
+
+        assert live_qty_for(
+            "S5_MINEDGE", cap=10, default=1, ltp=15_000, plan=plan
+        ) == 1
+        apply_live_capital_allocation(
+            [
+                {
+                    "strategy": "S5_MINEDGE",
+                    "live_size_mode": "capital",
+                    "live_budget_inr": 45_000,
+                }
+            ],
+            path=capital_path,
+        )
+        plan = load_capital(path=capital_path)
+        assert plan.strategies["S5_MINEDGE"].budget_inr == 4444.44
+        assert plan.strategies["S5_MINEDGE"].live_budget_inr == 45_000
+        assert live_qty_for(
+            "S5_MINEDGE", cap=10, default=1, ltp=15_000, plan=plan
+        ) == 3
+    finally:
+        td.cleanup()
+
+
 if __name__ == "__main__":
     test_set_live_approved_exact_set()
     print("ok set_live_approved")
@@ -180,4 +292,12 @@ if __name__ == "__main__":
     print("ok save_live_allocation_local")
     test_live_lots_for_uses_strategy_max_lots()
     print("ok live_lots_for")
+    test_lots_mode_save_does_not_zero_budget_or_paper_lots()
+    print("ok lots_mode_save")
+    test_live_qty_capital_mode_uses_budget_over_ltp()
+    print("ok capital_qty")
+    test_can_open_trade_skips_zero_budget_in_lots_mode()
+    print("ok zero_budget_lots")
+    test_live_budget_not_paper_split()
+    print("ok live_budget")
     print("ALL test_live_allocation OK")

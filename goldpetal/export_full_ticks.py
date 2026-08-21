@@ -82,10 +82,14 @@ def _qty(value: Any) -> float | None:
 
 def _depth_side(message: dict[str, Any], side: str) -> list[tuple[float | None, float | None]]:
     """Return 5 (price, qty) levels for buy/sell."""
+    alt = "bid" if side == "buy" else "ask"
     key_options = [
         f"best_5_{side}_data",
         f"best5_{side}_data",
         f"{side}_depth",
+        f"best_5_{alt}_data",
+        f"best5_{alt}_data",
+        f"{alt}_depth",
     ]
     levels: list[Any] = []
     for key in key_options:
@@ -159,11 +163,20 @@ def row_from_tick(received_at: str, exchange_ts: Any, raw_json: str) -> dict[str
         "low": _price(message.get("low_price_of_the_day") or message.get("low")),
         "close": _price(message.get("closed_price") or message.get("close")),
         "volume": _qty(message.get("volume_trade_for_the_day") or message.get("volume")),
-        "last_traded_quantity": _qty(message.get("last_traded_quantity")),
+        "last_traded_quantity": _qty(
+            message.get("last_traded_quantity") or message.get("last_trade_qty")
+        ),
         "average_traded_price": _price(message.get("average_traded_price")),
         "total_buy_quantity": _qty(message.get("total_buy_quantity")),
         "total_sell_quantity": _qty(message.get("total_sell_quantity")),
-        "open_interest": _qty(message.get("open_interest")),
+        "open_interest": _qty(
+            message.get("open_interest")
+            or message.get("opnInterest")
+            or message.get("oi")
+        ),
+        "last_traded_time": message.get("last_traded_time")
+        or message.get("last_trade_time")
+        or "",
     }
 
     for i in range(5):
@@ -171,6 +184,57 @@ def row_from_tick(received_at: str, exchange_ts: Any, raw_json: str) -> dict[str
         row[f"buy{i+1}_qty"] = buy[i][1]
         row[f"sell{i+1}_price"] = sell[i][0]
         row[f"sell{i+1}_qty"] = sell[i][1]
+    return row
+
+
+FULL_TICK_CSV_FIELDS = [
+    "received_at",
+    "exchange_timestamp",
+    "symbol",
+    "token",
+    *HEADERS,
+    "last_traded_time",
+]
+
+
+def full_tick_row(
+    *,
+    received_at: str,
+    exchange_ts: Any,
+    raw_json: str,
+    symbol: str = "",
+    token: str = "",
+    ltp: Any = None,
+    open: Any = None,
+    high: Any = None,
+    low: Any = None,
+    close: Any = None,
+    volume: Any = None,
+    bp: Any = None,
+    sp: Any = None,
+) -> dict[str, Any]:
+    """One desk/CSV tick: scaled OHLC/LTP plus depth, TBQ/TSQ, LTQ, OI from raw_json."""
+    row = row_from_tick(received_at, exchange_ts, raw_json)
+    row["received_at"] = received_at or ""
+    row["exchange_timestamp"] = exchange_ts if exchange_ts is not None else ""
+    row["symbol"] = symbol or ""
+    row["token"] = token or ""
+    if row.get("ltp") is None and ltp is not None:
+        row["ltp"] = ltp
+    if row.get("open") is None and open is not None:
+        row["open"] = open
+    if row.get("high") is None and high is not None:
+        row["high"] = high
+    if row.get("low") is None and low is not None:
+        row["low"] = low
+    if row.get("close") is None and close is not None:
+        row["close"] = close
+    if row.get("volume") is None and volume is not None:
+        row["volume"] = volume
+    if row.get("total_buy_quantity") is None and bp is not None:
+        row["total_buy_quantity"] = bp
+    if row.get("total_sell_quantity") is None and sp is not None:
+        row["total_sell_quantity"] = sp
     return row
 
 
@@ -200,7 +264,7 @@ def export_full_ticks(path: Path, limit: int | None = None) -> int:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=HEADERS)
+        writer = csv.DictWriter(handle, fieldnames=HEADERS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow(

@@ -1,8 +1,9 @@
-"""S19_BODY_CLOSE_1H — paper 1h aligned green/red + close vs prev.
+"""S19_BODY_CLOSE_1H — 1h aligned green/red + close vs prev.
 
 LONG when the finished hour is green and closed up vs the previous same-session
 hour. SHORT when red and closed down. Mixed / doji / equal → hold.
-FLIP at that close. Flatten at MARKET_CLOSE. Not live. Paper 100 lots ≠ live.
+FLIP at that close. Delivery — holds overnight. Only S16 flattens at
+MARKET_CLOSE. Live-eligible — you Arm.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ class S19BodyCloseStrategy(S18OhlcVolHtfStrategy):
     @property
     def status_line(self) -> str:
         return (
-            f"TF={self.bar_minutes}m aligned body+close FLIP flatten-at-close "
+            f"TF={self.bar_minutes}m aligned body+close FLIP delivery "
             f"{self.market_open}-{self.market_close} "
             f"{self.bar_debug} skip={self.last_skip or '-'} pos={self.position}"
         )

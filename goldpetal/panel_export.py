@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from export_full_ticks import FULL_TICK_CSV_FIELDS, full_tick_row
 from charges import paper_lots
 from storage import (
     TRADE_CSV_FIELDS,
@@ -24,19 +25,20 @@ from storage import (
 
 IST = ZoneInfo("Asia/Kolkata")
 
-TICK_CSV_FIELDS = [
-    "received_at",
+TICK_CSV_FIELDS = list(FULL_TICK_CSV_FIELDS)
+
+SIGNAL_CSV_FIELDS = [
+    "time_label",
     "symbol",
-    "token",
-    "ltp",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "bp",
-    "sp",
-    "exchange_timestamp",
+    "strategy",
+    "action",
+    "position_after",
+    "reason",
+    "price_delta",
+    "net",
+    "net_delta",
+    "dry_run",
+    "cmp",
 ]
 
 
@@ -85,7 +87,89 @@ def trades_in_range(
     return out
 
 
+def _tick_day_bounds(date_from: str, date_to: str) -> tuple[str, str]:
+    d0 = (date_from or "").strip()[:10]
+    d1 = (date_to or "").strip()[:10]
+    if not d0 or not d1:
+        raise ValueError("date_from and date_to required (YYYY-MM-DD)")
+    end_exclusive = (
+        datetime.strptime(d1, "%Y-%m-%d").date() + timedelta(days=1)
+    ).isoformat()
+    return d0, end_exclusive
+
+
+def count_ticks_in_range(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+) -> int:
+    init_db(db_path)
+    start, end_exclusive = _tick_day_bounds(date_from, date_to)
+    with connect(db_path) as conn:
+        n = conn.execute(
+            """
+            SELECT COUNT(*) FROM ticks
+            WHERE substr(received_at, 1, 10) >= ? AND substr(received_at, 1, 10) < ?
+            """,
+            (start, end_exclusive),
+        ).fetchone()[0]
+    return int(n or 0)
+
+
+def iter_ticks_in_range(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+    limit: int | None = None,
+):
+    """Yield one full-depth tick at a time (does not load the whole date range)."""
+    init_db(db_path)
+    start, end_exclusive = _tick_day_bounds(date_from, date_to)
+    sql = f"""
+        SELECT received_at, exchange_timestamp, symbol, token,
+               ltp, open, high, low, close, volume, bp, sp, raw_json
+        FROM ticks
+        WHERE substr(received_at, 1, 10) >= ? AND substr(received_at, 1, 10) < ?
+        ORDER BY id ASC
+        {"LIMIT ?" if limit else ""}
+    """
+    params: list[Any] = [start, end_exclusive]
+    if limit:
+        params.append(int(limit))
+    with connect(db_path) as conn:
+        for r in conn.execute(sql, tuple(params)):
+            yield full_tick_row(
+                received_at=r["received_at"],
+                exchange_ts=r["exchange_timestamp"],
+                raw_json=r["raw_json"] or "",
+                symbol=r["symbol"] or "",
+                token=r["token"] or "",
+                ltp=r["ltp"],
+                open=r["open"],
+                high=r["high"],
+                low=r["low"],
+                close=r["close"],
+                volume=r["volume"],
+                bp=r["bp"],
+                sp=r["sp"],
+            )
+
+
 def ticks_in_range(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    return list(
+        iter_ticks_in_range(date_from, date_to, db_path=db_path, limit=limit)
+    )
+
+
+def signals_in_range(
     date_from: str,
     date_to: str,
     *,
@@ -97,25 +181,24 @@ def ticks_in_range(
     d1 = (date_to or "").strip()[:10]
     if not d0 or not d1:
         raise ValueError("date_from and date_to required (YYYY-MM-DD)")
-    # Inclusive calendar days via prefix compare on received_at
-    start = d0
     end_exclusive = (
         datetime.strptime(d1, "%Y-%m-%d").date() + timedelta(days=1)
     ).isoformat()
     sql = f"""
-        SELECT received_at, symbol, token, ltp, open, high, low, close,
-               volume, bp, sp, exchange_timestamp
-        FROM ticks
-        WHERE substr(received_at, 1, 10) >= ? AND substr(received_at, 1, 10) < ?
+        SELECT time_label, symbol, strategy, action, position_after, reason,
+               price_delta, net, net_delta, dry_run, cmp
+        FROM signals
+        WHERE substr(time_label, 1, 10) >= ? AND substr(time_label, 1, 10) < ?
         ORDER BY id ASC
         {"LIMIT ?" if limit else ""}
     """
-    params: list[Any] = [start, end_exclusive]
+    params: list[Any] = [d0, end_exclusive]
     if limit:
         params.append(int(limit))
     with connect(db_path) as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [{k: r[k] for k in r.keys()} for r in rows]
+
 
 def rows_to_csv(rows: list[dict[str, Any]], fields: list[str]) -> str:
     buf = io.StringIO()
@@ -142,8 +225,24 @@ def rows_to_tsv(rows: list[dict[str, Any]], fields: list[str]) -> str:
 
 
 def export_ticks_csv(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> str:
-    rows = ticks_in_range(date_from, date_to, db_path=db_path)
-    return rows_to_csv(rows, TICK_CSV_FIELDS)
+    buf = io.StringIO()
+    w = csv.DictWriter(
+        buf, fieldnames=TICK_CSV_FIELDS, extrasaction="ignore", lineterminator="\n"
+    )
+    w.writeheader()
+    for row in iter_ticks_in_range(date_from, date_to, db_path=db_path):
+        w.writerow({k: row.get(k, "") for k in TICK_CSV_FIELDS})
+    return buf.getvalue()
+
+
+def export_signals_csv(
+    date_from: str,
+    date_to: str,
+    *,
+    db_path: Path = DB_PATH,
+) -> str:
+    rows = signals_in_range(date_from, date_to, db_path=db_path)
+    return rows_to_csv(rows, SIGNAL_CSV_FIELDS)
 
 
 def export_trades_csv(
@@ -166,8 +265,13 @@ def export_pack_zip(
     """ZIP: ticks.csv + trades_all.csv + trades_<strategy>.csv for each strategy."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        ticks = ticks_in_range(date_from, date_to, db_path=db_path)
-        zf.writestr("ticks.csv", rows_to_csv(ticks, TICK_CSV_FIELDS))
+        ticks_csv = export_ticks_csv(date_from, date_to, db_path=db_path)
+        zf.writestr("ticks.csv", ticks_csv)
+        tick_n = ticks_csv.count("\n") - 1
+        if tick_n < 0:
+            tick_n = 0
+        signals = signals_in_range(date_from, date_to, db_path=db_path)
+        zf.writestr("signals.csv", rows_to_csv(signals, SIGNAL_CSV_FIELDS))
         all_trades = trades_in_range(date_from, date_to, db_path=db_path)
         zf.writestr("trades_all.csv", rows_to_csv(all_trades, TRADE_CSV_FIELDS))
         by_strat: dict[str, list[dict[str, Any]]] = {}
@@ -179,7 +283,9 @@ def export_pack_zip(
             zf.writestr(f"trades_{safe}.csv", rows_to_csv(rows, TRADE_CSV_FIELDS))
         readme = (
             f"Gold Petal export {date_from} → {date_to} (IST inclusive)\n"
-            f"ticks={len(ticks)} trades={len(all_trades)}\n"
+            f"ticks={tick_n} signals={len(signals)} trades={len(all_trades)}\n"
+            "ticks.csv is every snap-quote tick: LTP, session OHLC, volume, last traded qty,\n"
+            "average traded price, total buy/sell qty, bid1-5 price+qty, ask1-5 price+qty, OI.\n"
             "Import any CSV into Google Sheets: File → Import → Upload\n"
             "Or paste TSV from the control panel Copy button.\n"
         )
@@ -188,7 +294,8 @@ def export_pack_zip(
 
 
 def export_summary(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> dict[str, Any]:
-    ticks = ticks_in_range(date_from, date_to, db_path=db_path)
+    tick_n = count_ticks_in_range(date_from, date_to, db_path=db_path)
+    signals = signals_in_range(date_from, date_to, db_path=db_path)
     trades = trades_in_range(date_from, date_to, db_path=db_path)
     by_strat: dict[str, int] = {}
     for t in trades:
@@ -197,7 +304,8 @@ def export_summary(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> 
     return {
         "date_from": date_from,
         "date_to": date_to,
-        "tick_count": len(ticks),
+        "tick_count": tick_n,
+        "signal_count": len(signals),
         "trade_count": len(trades),
         "trades_by_strategy": by_strat,
     }

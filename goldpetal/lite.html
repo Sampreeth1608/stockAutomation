@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal</title>
+<title>Gold Petal Desk</title>
 <meta name="theme-color" content="#7a5314"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <style>
@@ -30,6 +30,8 @@ h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
   color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .5rem .75rem;
   border-radius: 4px; cursor: pointer; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
+input:disabled { opacity: .45; }
+input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--gold); vertical-align: middle; }
 .btn.ok { background: #e8f6ee; border-color: #8fceb0; color: #0d7a45; }
 .btn.warn { background: #fff4e0; border-color: #e6c48a; color: #a15c00; }
 .btn.danger { background: #fdecea; border-color: #f0b4ae; color: #c4281c; }
@@ -47,10 +49,9 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 </style>
 </head>
 <body>
-  <h1>Gold Petal</h1>
-  <p class="hint">Compact controls. <a href="/">Trading station</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <a href="/full#why">Why win rate is low</a> · <a href="/full#s14-calc">S14 calculation</a></p>
+  <h1>Gold Petal Desk</h1>
+  <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
-  <p class="hint" id="mood-line">mood … · one tape read for all books · MOOD_GATE on: unfit books do not open</p>
 
   <section class="card">
     <h2>Stop / go</h2>
@@ -69,6 +70,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
       <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
       <input id="restart-word" placeholder="RESTART" autocomplete="off"/>
+      <input id="desk-totp" placeholder="OTP if asked" autocomplete="one-time-code" inputmode="numeric" hidden/>
       <button class="btn warn" id="btn-bot-restart" type="button">Restart bot</button>
     </div>
     <div class="row" style="margin-top:.45rem">
@@ -79,69 +81,37 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   </section>
 
   <section class="card">
-    <h2>Strategies</h2>
-    <table>
-      <thead><tr><th>Book</th><th>In bot</th><th>Live</th></tr></thead>
-      <tbody id="books"></tbody>
-    </table>
-    <div class="row" style="margin-top:.55rem">
-      <button class="btn ok" id="btn-save-books" type="button">Save strategies</button>
-    </div>
-    <p class="hint">Live without In bot is ignored. Type RESTART after save to load RAM.</p>
-    <p class="flash" id="flash-books"></p>
-  </section>
-
-  <section class="card">
-    <h2>ML / S11 + S18</h2>
-    <p class="hint" id="ml-s11-line">Loading S11 pack…</p>
-    <p class="hint" id="ml-s18-line">Loading S18 pack…</p>
-    <div id="ml-pending"></div>
-    <p class="hint">S11 and S18 rank after Angel charges (tax excluded). After the first S11 pack is approved, a new row appears only if it beats that pack. Approve → paper, then type RESTART. Full inspector: <a href="/#ml">station ML tab</a>.</p>
-    <p class="flash" id="flash-ml"></p>
-  </section>
-
-  <section class="card">
-    <h2>Research Lab</h2>
-    <p class="hint" id="lab-line">Loading lab…</p>
-    <p class="hint">AI can propose. You decide on the <a href="/#lab">station Lab tab</a>. This phone page does not approve, ENABLE, or arm live.</p>
-  </section>
-
-  <section class="card">
-    <h2>You — trade</h2>
-    <p class="hint">Sit 30m, 1h, 3h, or the whole day to teach (Mon–Fri 09:00–23:30 IST). Every BUY / SHORT / CLOSE stores the exact click time plus ticks and candles. Angel only after Paper off + LIVE + Unlock + type YOU. Press Let it trade when you want the mimic to paper, then compare. Keep sitting to teach more. Never DRY_RUN=false. Full compare: <a href="/#you">station You tab</a>.</p>
-    <p class="hint" id="you-ltp-line">LTP …</p>
-    <p class="hint" id="you-live-line">Angel: recorded only</p>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="you-send"/> Send to Angel</label>
-      <input id="you-word" placeholder="YOU" autocomplete="off"/>
-    </div>
-    <div class="row" style="margin-top:.35rem">
-      <button class="btn ok" type="button" data-you="buy">BUY</button>
-      <button class="btn danger" type="button" data-you="short">SHORT</button>
-      <button class="btn warn" type="button" data-you="no_trade">NO TRADE</button>
-      <button class="btn" type="button" data-you="close">CLOSE</button>
-      <button class="btn warn" type="button" id="btn-you-learn">Learn my style</button>
-      <button class="btn ok" type="button" id="btn-you-go">Let it trade</button>
-    </div>
-    <p class="hint" id="you-sum">No captures yet.</p>
-    <p class="flash" id="flash-you"></p>
-  </section>
-
-  <section class="card">
-    <h2>Live money</h2>
+    <h2>Live books + money</h2>
     <p class="armed" id="money-line"></p>
+    <p class="hint" id="live-pnl-line">Real Angel P&amp;L shows here after Arm live. After charges, tax excluded. Live closed trades are on Blotter. Angel order ids are on Downloads. Open contracts are on Live Open Positions.</p>
+    <p class="hint">All live money = Live AC ₹. Each strategy = Live P&amp;L by book (zeros until an Angel fill). Open contracts are on Live Open Positions. Closed round-trips are on Blotter.</p>
+    <table style="margin-top:.35rem">
+      <thead><tr><th>Book</th><th>Open</th><th>Closed</th><th>WR%</th><th>AC ₹</th></tr></thead>
+      <tbody id="live-pnl-books"></tbody>
+    </table>
+    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel leftover or live tape, FLAT = none). If you already squared in the Angel app, OPEN clears when the bot sees Angel flat.</p>
+    <table style="margin-top:.35rem">
+      <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
+      <tbody id="live-pnl-open"></tbody>
+    </table>
+    <p class="hint">This page is Angel. S5 / S8 / S13 / S16 / S18 / S19 / overnight gap can go live if you tick Lots or ₹ and Arm live. Overnight gap closes at next open. S19 is delivery overnight. S20 stays off. You Arm live.</p>
     <div class="row" style="margin-top:.5rem">
-      <label class="chk"><input type="checkbox" id="paper-only"/> Paper only</label>
-      <label class="chk">Lots <input type="number" id="live-max" min="1" max="10" value="1"/></label>
-      <input id="live-word" placeholder="LIVE" autocomplete="off"/>
-      <button class="btn" id="btn-save-money" type="button">Save money</button>
-    </div>
-    <div class="row" style="margin-top:.45rem">
-      <button class="btn warn" id="btn-unlock" type="button">Unlock live</button>
-      <button class="btn" id="btn-lock" type="button">Lock live</button>
-      <label class="chk">Book ₹ <input type="number" id="cap-total" step="1000"/></label>
+      <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="1000" value="1"/></label>
+      <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
       <label class="chk">Day-loss ₹ <input type="number" id="cap-dd" step="100"/></label>
-      <button class="btn" id="btn-save-cap" type="button">Save capital</button>
+      <input id="size-word" placeholder="SIZE if ceiling &gt; 10" autocomplete="off"/>
+    </div>
+    <p class="hint">Tick Lots = contracts (1–ceiling, hard max 1000). Tick ₹, type that book’s money in amount (or Wallet if only one ₹ book). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked). Unticked = delivery overnight.</p>
+    <table style="margin-top:.45rem">
+      <thead><tr><th>Book</th><th>Pos</th><th>WR%</th><th>n</th><th>Lots</th><th>qty</th><th>₹</th><th>amount</th><th>Intraday</th><th></th></tr></thead>
+      <tbody id="live-books"></tbody>
+    </table>
+    <div class="row" style="margin-top:.45rem">
+      <input id="live-word" placeholder="type LIVE" autocomplete="off"/>
+      <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
+      <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
+      <button class="btn ok" id="btn-save-books" type="button">Save strategies + live size</button>
+      <button class="btn danger" id="btn-exit-all" type="button">Exit all</button>
     </div>
     <p class="flash" id="flash-money"></p>
   </section>
@@ -154,13 +124,11 @@ const SHORT = {
   S18_OHLC_VOL_HTF: "S18 OHLC+vol+day",
   S19_BODY_CLOSE_1H: "S19 body+close 1h",
   S20_FADE_HL: "S20 fade low/high",
-  S21_AMISE: "S21 AMISE", S22_AMISE: "S22 AMISE", S23_AMISE: "S23 AMISE", S24_AMISE: "S24 AMISE",
+  OVERNIGHT_GAP: "overnight gap",
 };
 function shortName(name) {
   const n = String(name || "");
   if (SHORT[n]) return SHORT[n];
-  const m = n.match(/^S(\d+)_AMISE$/);
-  if (m) return "S" + m[1] + " AMISE";
   return n;
 }
 function esc(s) {
@@ -169,12 +137,60 @@ function esc(s) {
 function pill(text, kind) {
   return `<span class="pill ${kind || ""}">${text}</span>`;
 }
+function deskTotp() {
+  const el = document.getElementById("desk-totp");
+  return el ? String(el.value || "").trim() : "";
+}
+function withDeskAuth(opts) {
+  const o = Object.assign({}, opts || {});
+  const headers = Object.assign({ "Content-Type": "application/json" }, o.headers || {});
+  if (window.__GP_CSRF) headers["X-GP-CSRF"] = window.__GP_CSRF;
+  o.headers = headers;
+  o.credentials = "same-origin";
+  if (o.body && typeof o.body === "string") {
+    const totp = deskTotp();
+    if (totp) {
+      try {
+        const obj = JSON.parse(o.body);
+        if (obj && typeof obj === "object" && !Array.isArray(obj) && obj.totp == null) {
+          obj.totp = totp;
+          o.body = JSON.stringify(obj);
+        }
+      } catch (e) {}
+    }
+  }
+  return o;
+}
+async function bootAuth() {
+  try {
+    const r = await fetch("/api/desk/session", { credentials: "same-origin" });
+    if (r.status === 401) {
+      location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+      return false;
+    }
+    const d = await r.json().catch(() => ({}));
+    window.__GP_CSRF = d.csrf || "";
+    const totpEl = document.getElementById("desk-totp");
+    if (totpEl) totpEl.hidden = !d.totp_required;
+    const lock = document.getElementById("btn-lock-desk");
+    if (lock) lock.hidden = !d.auth_required;
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
 async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  const o = withDeskAuth(opts || {});
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, o, { credentials: "same-origin" }));
+  if (res.status === 401) {
+    location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
+    throw new Error("login required");
+  }
   const text = await res.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch (e) { throw new Error(text || res.status); }
   if (!res.ok) throw new Error(data.error || data.note || text || res.status);
+  if (data && data.csrf) window.__GP_CSRF = data.csrf;
   return data;
 }
 function flash(id, msg, bad) {
@@ -186,80 +202,145 @@ function typing() {
   const el = document.activeElement;
   return el && el.matches && el.matches("input, textarea");
 }
+let liveMoneyDirty = false;
+function markLiveMoneyDirty(ev) {
+  const t = ev.target;
+  if (!t) return;
+  if (t.id === "cap-total" || t.id === "cap-dd" || t.id === "live-max" || t.id === "live-word" || t.id === "size-word") {
+    liveMoneyDirty = true;
+    return;
+  }
+  if (t.closest && t.closest("#live-books") && t.matches && t.matches("input")) liveMoneyDirty = true;
+}
+document.addEventListener("input", markLiveMoneyDirty);
+document.addEventListener("change", markLiveMoneyDirty);
+function liveBudgetDisplay(b, sb) {
+  const v = (b && b.live_budget_inr != null && b.live_budget_inr !== "")
+    ? b.live_budget_inr
+    : (sb && sb.live_budget_inr);
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n;
+}
+let lastLite = {};
+function livePosRows(p, d) {
+  const fromPnl = (p.positions && p.positions.length) ? p.positions
+    : ((p.open && p.open.length) ? p.open : []);
+  return fromPnl.filter((t) => t && String(t.status || "") === "OPEN");
+}
+function liveBookScoreRows(p, d) {
+  const rows = (p.scoreboard || []).filter((r) => r && r.strategy && r.strategy !== "LIVE" && r.strategy !== "ALL");
+  if (rows.length) return rows;
+  return livePosRows(p, d).map((t) => ({
+    strategy: t.strategy, open: 0, closed: 0, win_rate_after_charges: "", pnl_after_charges: "",
+  }));
+}
 function render(d) {
+  lastLite = d;
   const live = d.live_desk || {};
   const bot = d.bot || {};
   const st = d.state || {};
   const feed = bot.feed_source || "off";
-  const mode = live.would_place_real_orders ? "ARMED" : (live.dry_run === false ? "LIVE env" : "PAPER");
+  const armed = !!live.would_place_real_orders;
+  const angelOpen = ((d.live_pnl || {}).positions || []).some((t) => t && t.status === "OPEN");
+  const mode = armed ? "ARMED" : (angelOpen ? "NOT ARMED · Angel open" : (live.dry_run === false ? "LIVE env" : "NOT ARMED"));
   $("pills").innerHTML = [
-    pill(mode, live.would_place_real_orders ? "bad" : "ok"),
+    pill(mode, armed ? "bad" : (angelOpen ? "warn" : "ok")),
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
     pill("feed " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "ok", st.emergency_off ? "bad" : "ok"),
-    pill(st.live_unlocked ? "unlocked" : "locked", st.live_unlocked ? "warn" : "ok"),
   ].join("");
   $("btn-feed-start").disabled = !!bot.running;
   $("btn-feed-stop").disabled = !!bot.running || feed !== "collector";
-  if (!typing()) {
-    const enables = live.enables || {};
-    $("books").innerHTML = (live.books || []).map((b) => {
+  if (!typing() && !liveMoneyDirty) {
+    const cap = d.capital || {};
+    const budgets = cap.strategies || {};
+    const posBy = {};
+    livePosRows(d.live_pnl || {}, d).forEach((t) => {
+      if (t && t.strategy) posBy[t.strategy] = t;
+    });
+    $("live-books").innerHTML = (live.books || []).filter((b) => b.live_eligible).map((b) => {
       const name = b.strategy;
+      const sb = budgets[name] || {};
+      const waiting = !!(((d.flatten || {}).by_strategy || {})[name]);
+      const wr = b.win_rate_after_charges;
+      const wrBit = (wr == null || wr === "") ? "—" : String(Math.round(Number(wr)));
+      const pos = posBy[name] || {};
+      const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
+      const budget = liveBudgetDisplay(b, sb);
+      const liveLots = Math.min(1000, Math.max(1, Number(b.live_lots || sb.live_lots || 1) || 1));
+      const sizeMode = b.live_size_mode || "";
+      const lotsOn = sizeMode === "lots" || (!!b.live_approved && sizeMode !== "capital");
+      const capOn = sizeMode === "capital";
+      const intraOn = !!b.intraday;
+      const gap = name === "OVERNIGHT_GAP";
       return `<tr>
         <td>${shortName(name)}</td>
-        <td><input type="checkbox" data-in="${name}" ${enables[name] ? "checked" : ""}/></td>
-        <td><input type="checkbox" data-live="${name}" ${b.live_approved ? "checked" : ""}/></td>
+        <td>${esc(posBit)}</td>
+        <td>${wrBit}</td>
+        <td>${esc(b.closed == null ? "—" : b.closed)}</td>
+        <td><input type="checkbox" data-size="lots" data-book="${esc(name)}" ${lotsOn ? "checked" : ""}/></td>
+        <td><input type="number" data-lots="${esc(name)}" min="1" max="1000" value="${esc(liveLots)}" ${capOn ? "disabled" : ""}/></td>
+        <td><input type="checkbox" data-size="capital" data-book="${esc(name)}" ${capOn ? "checked" : ""}/></td>
+        <td><input type="number" data-budget="${esc(name)}" min="0" step="1000" placeholder="₹" value="${esc(budget)}" ${lotsOn ? "disabled" : ""}/></td>
+        <td><input type="checkbox" data-intraday="${esc(name)}" ${intraOn ? "checked" : ""} ${gap ? "disabled" : ""} title="${gap ? "closes at next open" : "flatten at MARKET_CLOSE"}"/></td>
+        <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="3">no books</td></tr>`;
-    $("paper-only").checked = live.dry_run !== false;
+    }).join("") || `<tr><td colspan="10">Tick Lots or ₹ on a live book</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
-    const cap = d.capital || {};
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
   }
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
-    : "Paper. Unlock + Live pick + type LIVE + Restart to arm.";
-}
-function renderMl(d) {
-  const s11 = (d && d.s11) || {};
-  const s18 = (d && d.s18) || {};
-  const pending = ((d && d.proposals) || {}).pending || [];
-  $("ml-s11-line").textContent = s11.load_hint || (s11.pack_path || "S11_PACK_PATH not set");
-  $("ml-s18-line").textContent = s18.load_hint || ("S18 pack " + (s18.pack_name || "base") + " — after charges, tax excluded");
-  $("ml-pending").innerHTML = pending.map((p) => {
-    const paper = p.paper || {};
-    const extra = p.extra || (paper.extra || {});
-    const isS18 = p.strategy === "S18_OHLC_VOL_HTF";
-    const isS11 = p.strategy === "S11_DISCOVERED";
-    const pnl = p.pnl_value != null ? p.pnl_value : ((isS18 || isS11) ? (extra.after_charges_inr ?? paper.after_tax_pnl_inr) : paper.after_tax_pnl_inr);
-    const pnlLabel = p.pnl_label || ((isS18 || isS11) ? "after charges ₹" : "after-tax ₹");
-    return `<div style="border-top:1px solid var(--line);padding:.55rem 0">
-      <div><b>${esc(p.title || p.strategy)}</b></div>
-      <div class="hint">${esc(p.id)} · ${esc(p.strategy)} · safety ${p.safety_ok ? "ok" : "fail"} · trades ${esc(paper.n_trades ?? "—")} · ${esc(pnlLabel)} ${esc(pnl ?? "—")}</div>
-      ${p.safety_ok === false ? `<label class="chk"><input type="checkbox" data-unsafe="${esc(p.id)}"/> Accept risk</label>` : ""}
-      <div class="row" style="margin-top:.35rem">
-        <button class="btn ok" type="button" data-ml="approve" data-id="${esc(p.id)}">Approve → paper</button>
-        <button class="btn danger" type="button" data-ml="reject" data-id="${esc(p.id)}">Reject</button>
-      </div>
-    </div>`;
-  }).join("") || `<p class="hint">No pending. Run weekly_discover.sh (S11) or ./weekly_s18.sh (S18) on the VM.</p>`;
-}
-async function loadMl() {
-  renderMl(await api("/api/ml"));
-}
-async function loadLab() {
-  try {
-    const d = await api("/api/research");
-    const c = (d && d.counts) || {};
-    const n = (d.pending || []).length;
-    $("lab-line").textContent = (d.last_run_at || "no lab run yet") +
-      " · found " + (c.found || 0) +
-      " · passed " + (c.passed_validation || 0) +
-      " · awaiting " + n +
-      " · rejected " + (c.rejected || 0);
-  } catch (e) {
-    $("lab-line").textContent = String(e.message || e);
+    : (angelOpen
+      ? "Not armed — leftover Angel shows below until Angel is flat. Exit squares leftover even when not armed, or clears it if you already squared in the Angel app. Does not Arm live."
+      : "Not armed. New Angel orders stay off until you Arm live.");
+  const paperBtn = $("btn-mode-paper");
+  if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;
+  const lp = d.live_pnl || {};
+  const sum = lp.summary || {};
+  const ac = sum.pnl_after_charges;
+  const closed = sum.closed || 0;
+  const openN = sum.open || 0;
+  const placed = lp.placed_count || 0;
+  const acBit = (closed || placed) ? ("Live AC ₹ " + (ac == null || ac === "" ? "—" : ac)) : "Live AC ₹ —";
+  $("live-pnl-line").textContent = (lp.note || "Real Angel ₹ is Live AC after a live round-trip.")
+    + " · " + acBit
+    + " · open " + openN
+    + " · closed " + closed
+    + " · Angel sends " + placed
+    + ". Angel app is the fill confirmation.";
+  const booksEl = $("live-pnl-books");
+  if (booksEl) {
+    booksEl.innerHTML = liveBookScoreRows(lp, d).map((r) => {
+      const closedB = r.closed || 0;
+      const acB = r.pnl_after_charges;
+      const wrB = r.win_rate_after_charges;
+      return `<tr>
+        <td>${shortName(r.strategy)}</td>
+        <td>${esc(r.open || 0)}</td>
+        <td>${esc(closedB)}</td>
+        <td>${closedB ? (wrB == null || wrB === "" ? "—" : String(Math.round(Number(wrB)))) : "—"}</td>
+        <td>${closedB ? (acB == null || acB === "" ? "—" : acB) : "—"}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">No live-picked book yet</td></tr>`;
+  }
+  const posEl = $("live-pnl-open");
+  if (posEl) {
+    const waitingAll = ((d.flatten || {}).by_strategy) || {};
+    posEl.innerHTML = livePosRows(lp, d).map((t) => {
+      const name = t.strategy;
+      const waiting = !!waitingAll[name];
+      const open = String(t.status || "") === "OPEN";
+      return `<tr>
+        <td>${shortName(name)}</td>
+        <td>${esc(t.side || "FLAT")}</td>
+        <td>${esc(t.status || "FLAT")}</td>
+        <td>${esc(t.lots != null && t.lots !== "" ? t.lots : "")}</td>
+        <td><button type="button" class="btn danger" data-exit="${esc(name)}" ${waiting || !open ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5">No live positions</td></tr>`;
   }
 }
 async function load() {
@@ -268,9 +349,16 @@ async function load() {
 async function act(id, path, body, okMsg) {
   try {
     const res = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
+    if (String(path).indexOf("/api/desk/arm") >= 0) liveMoneyDirty = false;
     flash(id, okMsg || res.note || "ok");
     await load();
   } catch (e) { flash(id, String(e.message || e), true); }
+}
+if ($("btn-lock-desk")) {
+  $("btn-lock-desk").onclick = async () => {
+    try { await api("/api/desk/logout", { method: "POST", body: "{}" }); } catch (e) {}
+    location.replace("/login");
+  };
 }
 $("btn-kill").onclick = () => act("flash-stop", "/api/emergency", { off: true }, "Emergency off");
 $("btn-clear").onclick = () => act("flash-stop", "/api/emergency", { off: false }, "Emergency cleared");
@@ -287,140 +375,120 @@ $("btn-bot-restart").onclick = () => {
 $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
 $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
 $("btn-save-books").onclick = () => {
-  const in_bot = [...document.querySelectorAll("input[data-in]:checked")].map((el) => el.dataset.in);
-  const live = [...document.querySelectorAll("input[data-live]:checked")].map((el) => el.dataset.live);
-  act("flash-books", "/api/desk/books", { in_bot, live }, "Saved. Type RESTART to load RAM.");
+  const body = collectArmBody("keep");
+  act("flash-money", "/api/desk/arm", body, "Saved. Arm/Stop unchanged. Type RESTART to load RAM.");
 };
-$("btn-save-money").onclick = () => {
-  const paper = $("paper-only").checked;
-  act("flash-money", "/api/live/env", {
-    dry_run: paper,
+document.addEventListener("click", (ev) => {
+  const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
+  if (!btn || btn.disabled) return;
+  if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
+  const name = btn.dataset.exit;
+  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Leftover Angel squares even when not armed. Does not Arm live.")) return;
+  act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — leftover Angel squares even when not armed.");
+});
+$("btn-exit-all").onclick = () => {
+  if (!window.confirm("Flatten EVERY book now?")) return;
+  act("flash-money", "/api/desk/flatten", { all: true }, "Exit all queued.");
+};
+document.addEventListener("change", (ev) => {
+  const el = ev.target && ev.target.closest && ev.target.closest("input[data-size]");
+  if (!el) return;
+  const book = el.dataset.book;
+  if (el.checked) {
+    document.querySelectorAll('input[data-size][data-book="' + book + '"]').forEach((other) => {
+      if (other !== el) other.checked = false;
+    });
+  }
+  const lotsChk = document.querySelector('input[data-size="lots"][data-book="' + book + '"]');
+  const capChk = document.querySelector('input[data-size="capital"][data-book="' + book + '"]');
+  const lotsOn = !!(lotsChk && lotsChk.checked);
+  const capOn = !!(capChk && capChk.checked);
+  const lotsEl = document.querySelector('input[data-lots="' + book + '"]');
+  const budEl = document.querySelector('input[data-budget="' + book + '"]');
+  if (lotsEl) lotsEl.disabled = capOn && !lotsOn;
+  if (budEl) budEl.disabled = lotsOn && !capOn;
+});
+function currentInBot(desk) {
+  const en = ((desk || {}).live_desk || {}).enables || {};
+  const names = Object.keys(en).filter((k) => en[k]);
+  const live = [...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book);
+  return [...new Set(names.concat(live))];
+}
+function collectLivePicks() {
+  const ticked = [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+  if (ticked.length) return ticked;
+  return [...new Set(((lastLite.live_desk || {}).books || []).filter((b) => b.live_approved).map((b) => b.strategy))];
+}
+function collectIntraday() {
+  const boxes = [...document.querySelectorAll("input[data-intraday]")];
+  if (!boxes.length) return null;
+  const visible = new Set(boxes.map((el) => el.dataset.intraday));
+  const checked = boxes.filter((el) => el.checked && !el.disabled).map((el) => el.dataset.intraday);
+  const prev = ((lastLite || {}).live_desk || {}).intraday_books || [];
+  const kept = prev.filter((n) => n && !visible.has(n));
+  return [...new Set(checked.concat(kept))];
+}
+function collectAllocations() {
+  const capBooks = [...document.querySelectorAll('input[data-size="capital"]:checked')];
+  const wallet = Number(($("cap-total") && $("cap-total").value) || 0);
+  return [...document.querySelectorAll("input[data-lots]")].map((lotsEl) => {
+    const name = lotsEl.dataset.lots;
+    const budEl = document.querySelector('input[data-budget="' + name + '"]');
+    const lotsChk = document.querySelector('input[data-size="lots"][data-book="' + name + '"]');
+    const capChk = document.querySelector('input[data-size="capital"][data-book="' + name + '"]');
+    const mode = (lotsChk && lotsChk.checked) ? "lots" : ((capChk && capChk.checked) ? "capital" : "");
+    const row = {
+      strategy: name,
+      live_size_mode: mode,
+      live_lots: Number(lotsEl.value || 1),
+      enabled: true,
+    };
+    if (mode === "capital") {
+      let amt = (budEl && budEl.value !== "") ? Number(budEl.value) : 0;
+      if (!(amt > 0) && capBooks.length === 1 && wallet > 0) amt = wallet;
+      if (amt > 0) row.live_budget_inr = amt;
+    }
+    return row;
+  });
+}
+function collectArmBody(mode) {
+  const in_bot = currentInBot(lastLite);
+  const live = collectLivePicks();
+  const body = {
+    mode,
+    confirm: ($("live-word").value || "").trim(),
+    size_confirm: ($("size-word") && $("size-word").value || "").trim(),
     live_max_lots: Number($("live-max").value || 1),
-    confirm: $("live-word").value.trim(),
-  }, "Money saved — Restart to load");
+    in_bot,
+    live,
+    allocations: collectAllocations(),
+  };
+  const intra = collectIntraday();
+  if (intra !== null) body.intraday = intra;
+  const wallet = $("cap-total") && $("cap-total").value;
+  if (wallet !== "" && wallet != null) body.total_capital_inr = Number(wallet);
+  const dayLoss = $("cap-dd") && $("cap-dd").value;
+  if (dayLoss !== "" && dayLoss != null) body.daily_loss_limit_inr = Number(dayLoss);
+  return body;
+}
+$("btn-arm-live").onclick = () => {
+  const word = ($("live-word").value || "").trim();
+  if (word !== "LIVE") { flash("flash-money", "Type LIVE to arm Angel", true); return; }
+  if (!window.confirm("Arm live? Real Angel on books you ticked Lots or ₹. Then type RESTART.")) return;
+  act("flash-money", "/api/desk/arm", collectArmBody("live"), "Armed setup saved. Type RESTART.");
   $("live-word").value = "";
 };
-$("btn-unlock").onclick = () => act("flash-money", "/api/live", { unlocked: true }, "Live unlocked");
-$("btn-lock").onclick = () => act("flash-money", "/api/live", { unlocked: false }, "Live locked");
-$("btn-save-cap").onclick = () => act("flash-money", "/api/capital", {
-  total_capital_inr: Number($("cap-total").value || 0),
-  daily_loss_limit_inr: Number($("cap-dd").value || 0),
-}, "Capital saved");
-load().catch((e) => flash("flash-engine", String(e.message || e), true));
-loadMl().catch((e) => flash("flash-ml", String(e.message || e), true));
-loadLab().catch(() => {});
-async function loadYou() {
-  const d = await api("/api/capture");
-  const s = (d && d.summary) || {};
-  const live = (d && d.live) || {};
-  $("you-ltp-line").textContent = "LTP " + (d.ltp != null ? d.ltp : "—")
-    + ((d.session && d.session.open) ? " · session open" : " · market closed")
-    + (d.tape_now && d.tape_now.tbq != null ? (" · TBQ " + d.tape_now.tbq + " TSQ " + d.tape_now.tsq) : "");
-  const learn = (d && d.learn) || {};
-  const hours = learn.hours || {};
-  $("you-sum").textContent = "captured " + (s.n || 0) +
-    " · BUY " + (s.n_buy || 0) +
-    " · SHORT " + (s.n_short || 0) +
-    " · NO TRADE " + (s.n_no_trade || 0) +
-    " · sittings " + (learn.n_sessions || 0) +
-    (hours.label ? (" · " + hours.label) : "") +
-    (learn.knowledge_good ? " · knowledge good" : "") +
-    (learn.can_start ? " · ready — Let it trade" : "");
-  const liveLine = $("you-live-line");
-  if (liveLine) liveLine.textContent = live.why || "Angel: recorded only";
-  const open = !!(d.session && d.session.open);
-  const pos = String(((live.position) || {}).side || "flat");
-  document.querySelectorAll("button[data-you]").forEach((b) => {
-    if (b.dataset.you === "close") b.disabled = !(open || pos !== "flat");
-    else b.disabled = !open;
-  });
-  if (d.session && d.session.label) $("you-sum").textContent += " · " + d.session.label;
-  const cmp = (d && d.compare) || {};
-  if (cmp.verdict) $("you-sum").textContent += " · " + cmp.verdict;
-}
-document.querySelectorAll("button[data-you]").forEach((btn) => {
-  btn.onclick = () => {
-    const send = !!( $("you-send") && $("you-send").checked ) && btn.dataset.you !== "no_trade";
-    const word = ($("you-word") && $("you-word").value) || "";
-    if (send && !window.confirm("Send this " + btn.dataset.you.toUpperCase() + " to Angel? Real money.")) return;
-    api("/api/capture", {
-      method: "POST",
-      body: JSON.stringify({
-        action: btn.dataset.you,
-        confidence: 3,
-        place: send,
-        confirm: send ? word.trim() : "",
-      }),
-    }).then((res) => {
-      const rec = res.recorded || {};
-      let msg = "Recorded " + String(rec.action || btn.dataset.you).toUpperCase();
-      if (rec.places_order) msg += " — queued for Angel";
-      else if (send) msg += " — not sent (" + ((rec.order && rec.order.error) || "blocked") + ")";
-      else msg += " — tape stored";
-      flash("flash-you", msg);
-      if ($("you-word")) $("you-word").value = "";
-      return loadYou();
-    }).catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-});
-if ($("btn-you-learn")) {
-  $("btn-you-learn").onclick = () => {
-    api("/api/capture/learn", { method: "POST", body: JSON.stringify({}) })
-      .then((res) => { flash("flash-you", res.reminder || res.note || res.error || "Learned"); return loadYou(); })
-      .catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-}
-if ($("btn-you-go")) {
-  $("btn-you-go").onclick = () => {
-    if (!window.confirm("Start the mimic in paper? Not live. Restart the bot after it names a slot.")) return;
-    api("/api/capture/go", { method: "POST", body: JSON.stringify({}) })
-      .then((res) => { flash("flash-you", res.note || res.error || "Let it trade", !res.ok); return loadYou(); })
-      .catch((e) => flash("flash-you", String(e.message || e), true));
-  };
-}
-loadYou().catch(() => {});
-async function loadMood() {
-  try {
-    const d = await api("/api/mood");
-    const el = $("mood-line");
-    if (!el) return;
-    const mode = d.gate_on ? (d.flatten_on ? "GATE+FLATTEN" : "GATE ON") : "observe only";
-    el.textContent = (d.label || d.mood || "mood") +
-      (d.regime ? " · " + d.regime : "") +
-      " · " + mode
-      + (d.reason ? " · " + d.reason : "")
-      + " · not a paper book";
-    const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
-    if (fits.length) {
-      el.textContent += " · " + fits.map((f) => {
-        const w = Math.round(Number(f.weight || 0) * 100);
-        const st = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
-        return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
-      }).join(" · ");
-    }
-  } catch (e) {
-    const el = $("mood-line");
-    if (el) el.textContent = "mood unavailable · " + String(e.message || e);
-  }
-}
-loadMood().catch(() => {});
-$("ml-pending").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("button[data-ml]");
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const unsafe = document.querySelector(`[data-unsafe="${id}"]`);
-  const decision = btn.dataset.ml === "reject" ? "rejected" : "approved_paper";
-  api("/api/proposals/" + encodeURIComponent(id) + "/decide", {
-    method: "POST",
-    body: JSON.stringify({ decision, accept_unsafe: !!(unsafe && unsafe.checked) }),
-  }).then((res) => {
-    flash("flash-ml", res.reminder || res.note || "ok");
-    return loadMl();
-  }).catch((e) => flash("flash-ml", String(e.message || e), true));
+$("btn-mode-paper").onclick = () => {
+  if (!window.confirm("Stop live? New Angel orders off.")) return;
+  const body = collectArmBody("paper");
+  body.confirm = "";
+  act("flash-money", "/api/desk/arm", body, "Not armed. Open Angel contracts stay until you Exit.");
+};
+bootAuth().then((ok) => {
+  if (ok === false) return;
+  load().catch((e) => flash("flash-engine", String(e.message || e), true));
 });
 setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
-setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
-setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 4000);
 </script>
 </body>
 </html>

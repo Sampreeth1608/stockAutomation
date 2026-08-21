@@ -59,22 +59,42 @@ from live_readiness import (
     panel_restart_allowed,
     read_live_env,
 )
+from desk_http_auth import (
+    MAX_BODY_BYTES,
+    Access,
+    auth_status_payload,
+    check_access,
+    cookie_header,
+    dangerous_requires_totp,
+    desk_http_start_error,
+    desk_http_start_warning,
+    drop_session,
+    public_bind_blocked,
+    security_headers,
+    session_from_headers,
+    session_payload,
+    try_login,
+)
 from position_safety import read_bot_health
 from paper_report import summarize_trades
 from proposals import proposals_snapshot
-from s11_desk import (
-    activate_s11_pack,
-    decide_proposal_for_desk,
-    ml_desk_payload,
-    pack_summary,
-)
-from research_desk import decide_research, research_desk_payload
 from sheets_pack import sheets_pack_zip_bytes, build_scoreboard_rows, SCORE_FIELDS
-from monitor_sheet import (
-    STATUS_FIELDS,
-    build_status_rows,
-    monitor_sheet_zip_bytes,
-)
+try:
+    from monitor_sheet import (
+        STATUS_FIELDS,
+        build_status_rows,
+        monitor_sheet_zip_bytes,
+    )
+except ImportError:  # partial VM copy — desk must still boot
+    STATUS_FIELDS = ["section", "field", "value"]
+
+    def build_status_rows() -> list:
+        return []
+
+    def monitor_sheet_zip_bytes() -> bytes:
+        raise ModuleNotFoundError(
+            "monitor_sheet.py missing on this desk folder — copy it from the branch"
+        )
 from s14_exchange_sheet import (
     HTML_NAME,
     load_sheet_csv,
@@ -88,12 +108,15 @@ from s14_exchange_sheet import (
 from panel_export import (
     TRADE_CSV_FIELDS,
     TICK_CSV_FIELDS,
+    SIGNAL_CSV_FIELDS,
     default_date_range,
     export_pack_zip,
+    export_signals_csv,
     export_summary,
     export_ticks_csv,
     export_trades_csv,
     rows_to_tsv,
+    signals_in_range,
     ticks_in_range,
     trades_in_range,
 )
@@ -111,6 +134,7 @@ S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
 DESK_HTML_PATH = ROOT / "desk.html"
 LITE_HTML_PATH = ROOT / "lite.html"
 STATION_HTML_PATH = ROOT / "station.html"
+LOGIN_HTML_PATH = ROOT / "login.html"
 MANIFEST_PATH = ROOT / "manifest.webmanifest"
 
 
@@ -130,9 +154,24 @@ def load_full_desk_html() -> bytes:
     return DESK_HTML_PATH.read_bytes()
 
 
+def load_login_html() -> bytes:
+    if LOGIN_HTML_PATH.is_file():
+        return LOGIN_HTML_PATH.read_bytes()
+    return (
+        b"<!DOCTYPE html><html><body class='gp-desk-login'>"
+        b"<h1>Unlock desk</h1><p>login.html missing</p></body></html>"
+    )
+
+
 def _json_bytes(payload: Any, status: int = 200) -> tuple[int, bytes, str]:
     body = json.dumps(json_safe(payload), default=str, allow_nan=False).encode("utf-8")
     return status, body, "application/json; charset=utf-8"
+
+
+def _internal_error_bytes(exc: BaseException) -> tuple[int, bytes, str]:
+    traceback.print_exc()
+    msg = f"internal error: {type(exc).__name__}: {exc}"
+    return _json_bytes({"ok": False, "error": msg[:240]}, 500)
 
 
 def dashboard_payload(tick_limit: int = 40, trade_limit: int = 40) -> dict[str, Any]:
@@ -207,12 +246,68 @@ def desk_payload() -> dict[str, Any]:
     sess["last_tick_at"] = tape.get("last_tick_at") or ""
     sess["ltp"] = tape.get("ltp")
     sess["goldpetal_running"] = bool(sess.get("open")) and feed_on and bool(tape.get("tape_live"))
+    try:
+        from desk_flatten import flatten_desk_status
+
+        flatten = flatten_desk_status()
+    except Exception:
+        flatten = {"pending": [], "by_strategy": {}, "recent": [], "bot_running": False}
+    try:
+        from position_safety import read_bot_health
+
+        health = read_bot_health()
+        books_health = dict(health.get("books") or {})
+    except Exception:
+        books_health = {}
+    try:
+        from desk_data import live_pnl_payload
+
+        live_pnl = live_pnl_payload(wait=False)
+    except Exception:
+        live_pnl = {
+            "trades": [],
+            "open": [],
+            "positions": [],
+            "closed": [],
+            "orders": [],
+            "scoreboard": [],
+            "placed_count": 0,
+            "lots": 1,
+            "summary": {"closed": 0, "open": 0, "pnl_after_charges": 0.0},
+            "note": "Live P&L unavailable",
+        }
+    try:
+        live_stats = {
+            str(r.get("strategy")): r
+            for r in (live_pnl.get("scoreboard") or [])
+            if isinstance(r, dict) and r.get("strategy")
+        }
+        live_desk = desk_snapshot(summaries=live_stats)
+    except Exception:
+        live_desk = {
+            "dry_run": True,
+            "books": [],
+            "would_place_real_orders": False,
+            "live_max_lots": 1,
+        }
+    try:
+        state = load_state().to_dict()
+    except Exception:
+        state = {}
+    try:
+        capital = capital_snapshot()
+    except Exception:
+        capital = {}
     return {
         "bot": bot,
-        "live_desk": desk_snapshot(),
-        "state": load_state().to_dict(),
-        "capital": capital_snapshot(),
+        "live_desk": live_desk,
+        "state": state,
+        "capital": capital,
         "session": sess,
+        "flatten": flatten,
+        "live_pnl": live_pnl,
+        "books_health": books_health,
+        "desk_build": "v62",
     }
 
 
@@ -227,28 +322,86 @@ class ControlHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        self.send_header("Pragma", "no-cache")
+        headers = dict(security_headers())
         if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
+            headers.update(extra_headers)
+        for k, v in headers.items():
+            self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if body:
+            self.wfile.write(body)
 
-    def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or 0)
+    def _header_map(self) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key in self.headers.keys():
+            out[str(key)] = str(self.headers.get(key) or "")
+        return out
+
+    def _client_ip(self) -> str:
+        if not self.client_address:
+            return ""
+        return str(self.client_address[0] or "")
+
+    def _apply_access(self, access: Access) -> bool:
+        """Send a block/login/redirect. True = caller may continue."""
+        if access.allow:
+            return True
+        extra: dict[str, str] = {}
+        if access.kind == "redirect" and access.location:
+            extra["Location"] = access.location
+            self._send(access.status or 302, b"", "text/plain; charset=utf-8", extra)
+            return False
+        if access.kind == "login_page":
+            self._send(200, load_login_html(), "text/html; charset=utf-8")
+            return False
+        payload = {"ok": False, "error": access.error or "forbidden", "login": "/login"}
+        self._send(*_json_bytes(payload, access.status or 401))
+        return False
+
+    def _read_json(self) -> dict[str, Any] | None:
+        """Parse JSON body. None means a 4xx was already sent."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            length = 0
+        if length > MAX_BODY_BYTES:
+            self._send(*_json_bytes({"ok": False, "error": "body too large"}, 413))
+            return None
         if length <= 0:
             return {}
         raw = self.rfile.read(length)
         if not raw:
             return {}
-        return json.loads(raw.decode("utf-8"))
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send(*_json_bytes({"ok": False, "error": "invalid json"}, 400))
+            return None
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            self._send(*_json_bytes({"ok": False, "error": "json object required"}, 400))
+            return None
+        return data
 
     def do_GET(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parse_qs(parsed.query)
+            access = check_access(method="GET", path=path, headers=self._header_map())
+            if not self._apply_access(access):
+                return
+            if path in {"/login", "/login.html"}:
+                self._send(302, b"", "text/plain; charset=utf-8", {"Location": "/"})
+                return
+            if path == "/api/desk/auth":
+                self._send(*_json_bytes(auth_status_payload()))
+                return
+            if path == "/api/desk/session":
+                sess = access.session or session_from_headers(self._header_map())
+                self._send(*_json_bytes(session_payload(sess)))
+                return
             if path in {"/", "/index.html", "/station", "/station.html"}:
                 if not STATION_HTML_PATH.is_file() and not LITE_HTML_PATH.is_file() and not DESK_HTML_PATH.is_file():
                     self._send(500, b"station.html missing", "text/plain; charset=utf-8")
@@ -386,24 +539,6 @@ class ControlHandler(BaseHTTPRequestHandler):
                 )
                 self._send(status, body, ctype)
                 return
-            if path == "/api/proposals":
-                status, body, ctype = _json_bytes(proposals_snapshot())
-                self._send(status, body, ctype)
-                return
-            if path == "/api/ml":
-                status, body, ctype = _json_bytes(ml_desk_payload())
-                self._send(status, body, ctype)
-                return
-            if path == "/api/research":
-                status, body, ctype = _json_bytes(research_desk_payload())
-                self._send(status, body, ctype)
-                return
-            if path == "/api/capture":
-                from human_capture import capture_desk_payload
-
-                status, body, ctype = _json_bytes(capture_desk_payload())
-                self._send(status, body, ctype)
-                return
             if path == "/api/mood":
                 try:
                     from market_mood import mood_desk_payload
@@ -418,45 +553,11 @@ class ControlHandler(BaseHTTPRequestHandler):
                         "gate_on": False,
                         "flatten_on": False,
                         "note": (
-                            "Desk still runs. Mood gate defaults on so unfit books do not open. "
+                            "Desk still runs. Mood and market regime are observe-only. "
                             "Not a paper book. Keep DRY_RUN=true."
                         ),
                     }
                 status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-            if path == "/api/amise":
-                try:
-                    from amise import amise_desk_payload
-
-                    payload = amise_desk_payload()
-                except Exception as exc:
-                    payload = {
-                        "ok": False,
-                        "engine": "AMISE",
-                        "error": str(exc),
-                        "live_blocked": True,
-                        "enable_blocked": True,
-                        "note": (
-                            "Desk still runs. AMISE invents challengers; you Approve. "
-                            "Never DRY_RUN=false. Keep DRY_RUN=true."
-                        ),
-                    }
-                status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-            if path == "/api/amise/lab":
-                try:
-                    from amise import amise_lab_status
-
-                    payload = amise_lab_status()
-                except Exception as exc:
-                    payload = {"ok": False, "error": str(exc), "running": False}
-                status, body, ctype = _json_bytes(payload)
-                self._send(status, body, ctype)
-                return
-                raw = ((qs.get("path") or [""])[0] or "").strip()
-                status, body, ctype = _json_bytes(pack_summary(raw))
                 self._send(status, body, ctype)
                 return
             if path == "/api/capital":
@@ -501,6 +602,18 @@ class ControlHandler(BaseHTTPRequestHandler):
                     {"Content-Disposition": f'attachment; filename="{name}"'},
                 )
                 return
+            if path == "/api/export/signals.csv":
+                d_from = (qs.get("from") or [""])[0]
+                d_to = (qs.get("to") or [""])[0]
+                csv_text = export_signals_csv(d_from, d_to)
+                name = f"goldpetal_signals_{d_from}_to_{d_to}.csv"
+                self._send(
+                    200,
+                    csv_text.encode("utf-8"),
+                    "text/csv; charset=utf-8",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
             if path == "/api/export/trades.csv":
                 d_from = (qs.get("from") or [""])[0]
                 d_to = (qs.get("to") or [""])[0]
@@ -532,6 +645,9 @@ class ControlHandler(BaseHTTPRequestHandler):
                 if kind == "ticks":
                     rows = ticks_in_range(d_from, d_to)
                     tsv = rows_to_tsv(rows, TICK_CSV_FIELDS)
+                elif kind == "signals":
+                    rows = signals_in_range(d_from, d_to)
+                    tsv = rows_to_tsv(rows, SIGNAL_CSV_FIELDS)
                 else:
                     rows = trades_in_range(d_from, d_to)
                     tsv = rows_to_tsv(rows, TRADE_CSV_FIELDS)
@@ -580,13 +696,57 @@ class ControlHandler(BaseHTTPRequestHandler):
                 return
             self._send(*_json_bytes({"error": "not found"}, 404))
         except Exception as exc:
-            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
+            self._send(*_internal_error_bytes(exc))
 
     def do_POST(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
             path = parsed.path
             data = self._read_json()
+            if data is None:
+                return
+            if path == "/api/desk/login":
+                res = try_login(password=str(data.get("password") or ""), ip=self._client_ip())
+                if not res.ok:
+                    extra = {"Set-Cookie": cookie_header("", clear=True)}
+                    self._send(
+                        *_json_bytes(
+                            {"ok": False, "error": res.error or "login failed"},
+                            res.status or 401,
+                        ),
+                        extra_headers=extra,
+                    )
+                    return
+                if res.session is None:
+                    self._send(*_json_bytes({"ok": True, "auth_required": False, "csrf": ""}))
+                    return
+                extra = {"Set-Cookie": cookie_header(res.session.sid)}
+                self._send(
+                    *_json_bytes(
+                        {
+                            "ok": True,
+                            "csrf": res.session.csrf,
+                            "totp_required": dangerous_requires_totp(),
+                        }
+                    ),
+                    extra_headers=extra,
+                )
+                return
+            access = check_access(
+                method="POST",
+                path=path,
+                headers=self._header_map(),
+                data=data,
+            )
+            if not self._apply_access(access):
+                return
+            if path == "/api/desk/logout":
+                sess = access.session or session_from_headers(self._header_map())
+                if sess is not None:
+                    drop_session(sess.sid)
+                extra = {"Set-Cookie": cookie_header("", clear=True)}
+                self._send(*_json_bytes({"ok": True}), extra_headers=extra)
+                return
 
             if path == "/api/s14/refresh":
                 res = start_angel_refresh(
@@ -609,10 +769,12 @@ class ControlHandler(BaseHTTPRequestHandler):
                 self._send(*_json_bytes({"ok": True, "state": st.to_dict()}))
                 return
             if path == "/api/live/approved":
+                from live_readiness import book_may_go_live
+
                 names = [
                     str(s).strip()
                     for s in (data.get("strategies") or [])
-                    if str(s).strip()
+                    if book_may_go_live(str(s).strip())
                 ]
                 st = set_live_approved(names, note="control panel live_approved")
                 self._send(
@@ -649,6 +811,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                     dry_run=dry_run,
                     live_max_lots=lots,
                     confirm=str(data.get("confirm") or ""),
+                    size_confirm=str(data.get("size_confirm") or data.get("size_word") or ""),
                 )
                 status = 200 if res.get("ok") else 400
                 res = {**res, "live_desk": live_readiness()}
@@ -665,26 +828,97 @@ class ControlHandler(BaseHTTPRequestHandler):
                     for s in (data.get("live") or [])
                     if str(s).strip()
                 ]
-                res = apply_desk_books(in_bot, live)
+                intra_raw = data.get("intraday")
+                intra = None
+                if intra_raw is not None:
+                    intra = [
+                        str(s).strip()
+                        for s in (intra_raw or [])
+                        if str(s).strip()
+                    ]
+                res = apply_desk_books(in_bot, live, intraday=intra)
                 status = 200 if res.get("ok") else 400
                 res = {**res, "live_desk": live_readiness()}
                 self._send(*_json_bytes(res, status))
                 return
-            if path == "/api/amise/lab":
-                from amise import start_amise_lab
+            if path == "/api/desk/flatten":
+                from desk_flatten import flatten_desk_status, request_flatten, request_flatten_all
 
-                res = start_amise_lab(propose=True)
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
+                if data.get("all"):
+                    names = [
+                        str(s).strip()
+                        for s in (data.get("strategies") or [])
+                        if str(s).strip()
+                    ]
+                    res = request_flatten_all(strategies=names or None)
+                else:
+                    name = str(data.get("strategy") or "").strip()
+                    res = request_flatten(name)
+                status = 200 if res.get("ok") else 400
+                res = {**res, "flatten": flatten_desk_status()}
+                self._send(*_json_bytes(res, status))
                 return
-            if path == "/api/amise/gate":
-                from amise import ensure_mood_gate
+            if path == "/api/desk/arm":
+                from live_readiness import apply_desk_arm
 
-                res = ensure_mood_gate()
-                res["gate_on"] = True
-                res["note"] = (
-                    "MOOD_GATE=true written. Restart the bot so paper books "
-                    "stand down in unfit regimes. Never dumps S13. Keep DRY_RUN=true."
+                allocations = data.get("allocations") or []
+                if not isinstance(allocations, list):
+                    allocations = []
+                try:
+                    lots = int(data.get("live_max_lots") or 1)
+                except (TypeError, ValueError):
+                    lots = 1
+                try:
+                    total = (
+                        float(data["total_capital_inr"])
+                        if data.get("total_capital_inr") not in (None, "")
+                        else None
+                    )
+                    day_loss = (
+                        float(data["daily_loss_limit_inr"])
+                        if data.get("daily_loss_limit_inr") not in (None, "")
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    self._send(*_json_bytes({"ok": False, "error": "capital must be numbers"}, 400))
+                    return
+                res = apply_desk_arm(
+                    mode=str(data.get("mode") or "paper"),
+                    confirm=str(data.get("confirm") or ""),
+                    live_max_lots=lots,
+                    in_bot=[
+                        str(s).strip()
+                        for s in (data.get("in_bot") or [])
+                        if str(s).strip()
+                    ],
+                    live=[
+                        str(s).strip()
+                        for s in (data.get("live") or [])
+                        if str(s).strip()
+                    ],
+                    intraday=(
+                        [
+                            str(s).strip()
+                            for s in (data.get("intraday") or [])
+                            if str(s).strip()
+                        ]
+                        if data.get("intraday") is not None
+                        else None
+                    ),
+                    total_capital_inr=total,
+                    daily_loss_limit_inr=day_loss,
+                    allocations=allocations,
+                    live_size_mode=str(data.get("live_size_mode") or "") or None,
+                    size_confirm=str(data.get("size_confirm") or data.get("size_word") or ""),
                 )
+                status = 200 if res.get("ok") else 400
+                self._send(*_json_bytes(res, status))
+                return
+            if path == "/api/desk/regime":
+                from market_mood import set_regime_gate
+
+                on = bool(data.get("on"))
+                res = set_regime_gate(on)
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return
             if path == "/api/bot/start":
@@ -769,157 +1003,10 @@ class ControlHandler(BaseHTTPRequestHandler):
                 )
                 self._send(*_json_bytes({"ok": True, "capital": capital_snapshot()}))
                 return
-            if path.startswith("/api/proposals/") and path.endswith("/decide"):
-                proposal_id = path[len("/api/proposals/") : -len("/decide")]
-                decision = str(data.get("decision") or "")
-                note = str(data.get("note") or "")
-                accept_unsafe = bool(data.get("accept_unsafe"))
-                apply_env = bool(data.get("apply_env", True))
-                try:
-                    res = decide_proposal_for_desk(
-                        proposal_id,
-                        decision,
-                        note=note,
-                        apply_env=apply_env,
-                        accept_unsafe=accept_unsafe,
-                    )
-                except KeyError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path.startswith("/api/research/") and path.endswith("/decide"):
-                proposal_id = path[len("/api/research/") : -len("/decide")]
-                decision = str(data.get("decision") or "")
-                note = str(data.get("note") or "")
-                try:
-                    res = decide_research(proposal_id, decision, note=note)
-                except KeyError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path == "/api/capture":
-                from human_capture import capture_desk_payload, mark_example_order, record_human
-                from you_trade import map_capture_action, request_you_order
-
-                action = str(data.get("action") or "")
-                place = bool(data.get("place") or data.get("send") or data.get("live"))
-                confirm = str(data.get("confirm") or "")
-                try:
-                    rec = record_human(
-                        action,
-                        confidence=int(data.get("confidence") or 3),
-                        note=str(data.get("note") or ""),
-                    )
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                order = None
-                mapped = map_capture_action(rec.get("action") or action)
-                if place and mapped:
-                    order = request_you_order(
-                        mapped,
-                        confirm=confirm,
-                        example_id=str(rec.get("id") or ""),
-                        entry_px=rec.get("entry_px"),
-                    )
-                    rec["places_order"] = bool(order.get("queued"))
-                    rec["live"] = bool(order.get("queued"))
-                    rec["order"] = order
-                    mark_example_order(
-                        str(rec.get("id") or ""),
-                        queued=bool(order.get("queued")),
-                        order=order,
-                    )
-                payload = capture_desk_payload(settle=False)
-                try:
-                    from you_learn import after_new_example
-
-                    learn_run = after_new_example()
-                    payload["learn_run"] = {
-                        "proposed": bool(learn_run.get("proposed")),
-                        "deployed": bool(learn_run.get("deployed")),
-                        "already": bool(learn_run.get("already")),
-                        "slot": learn_run.get("slot"),
-                        "note": learn_run.get("note"),
-                        "proposal_id": learn_run.get("proposal_id"),
-                    }
-                    if learn_run.get("learn"):
-                        payload["learn"] = learn_run["learn"]
-                except Exception as exc:
-                    payload["learn_run"] = {"error": str(exc)}
-                payload["recorded"] = {
-                    "id": rec.get("id"),
-                    "action": rec.get("action"),
-                    "entry_px": rec.get("entry_px"),
-                    "vs_coded": rec.get("vs_coded"),
-                    "places_order": bool(rec.get("places_order")),
-                    "live": bool(rec.get("live")),
-                    "order": order,
-                    "you_session_id": rec.get("you_session_id"),
-                    "clicked_at_ist": rec.get("clicked_at_ist"),
-                    "tape_lag_ms": rec.get("tape_lag_ms"),
-                }
-                payload["ok"] = True
-                self._send(*_json_bytes(payload))
-                return
-            if path == "/api/capture/learn":
-                from you_learn import propose_mimic
-
-                try:
-                    res = propose_mimic()
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path == "/api/capture/go":
-                from you_learn import start_mimic_paper
-
-                try:
-                    res = start_mimic_paper()
-                except (ValueError, RuntimeError) as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
-            if path == "/api/s11/activate":
-                pack_path = str(data.get("pack_path") or data.get("path") or "")
-                accept_unsafe = bool(data.get("accept_unsafe"))
-                try:
-                    res = activate_s11_pack(pack_path, accept_unsafe=accept_unsafe)
-                except FileNotFoundError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 404))
-                    return
-                except ValueError as exc:
-                    self._send(*_json_bytes({"error": str(exc)}, 400))
-                    return
-                self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
-                return
 
             self._send(*_json_bytes({"error": "not found"}, 404))
         except Exception as exc:
-            self._send(*_json_bytes({"error": str(exc), "trace": traceback.format_exc()}, 500))
-
-
-def _amise_auto_loop() -> None:
-    import time
-
-    from amise import maybe_start_auto_lab
-
-    while True:
-        time.sleep(60)
-        try:
-            maybe_start_auto_lab()
-        except Exception:
-            continue
+            self._send(*_internal_error_bytes(exc))
 
 
 def main() -> None:
@@ -927,6 +1014,17 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8501)
     args = ap.parse_args()
+    blocked = public_bind_blocked(args.host)
+    if blocked:
+        print(blocked, file=sys.stderr, flush=True)
+        sys.exit(2)
+    start_err = desk_http_start_error()
+    if start_err:
+        print(start_err, file=sys.stderr, flush=True)
+        sys.exit(2)
+    warn = desk_http_start_warning()
+    if warn:
+        print(warn, file=sys.stderr, flush=True)
     from desk_data import bind_live_ticks_db
 
     bound = bind_live_ticks_db()
@@ -941,12 +1039,11 @@ def main() -> None:
     load_state()
     load_capital()
     try:
-        from amise import ensure_mood_gate
+        from live_readiness import ensure_overnight_gap_enable
 
-        ensure_mood_gate()
+        ensure_overnight_gap_enable()
     except Exception:
         pass
-    threading.Thread(target=_amise_auto_loop, name="amise-auto-lab", daemon=True).start()
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)
     print(f"cwd {ROOT}  Gold Petal station → http://{args.host}:{args.port}/", flush=True)
     try:

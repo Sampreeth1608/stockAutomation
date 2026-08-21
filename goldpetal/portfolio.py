@@ -28,6 +28,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -46,6 +47,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S4_OVERNIGHT",
         "S5_MINEDGE",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S10_LEGACY30",
         "S13_HHHL_DAY",
@@ -62,6 +64,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -73,7 +76,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S20_FADE_HL",
         *AMISE_SLOT_BOOKS,
     },
-    "WIDE_SPREAD": set(),
+    "WIDE_SPREAD": {"OVERNIGHT_GAP", "S16_HHHL_WICK_1H"},
     "UNKNOWN": {
         "S1_NETDELTA",
         "S2_BALANCE",
@@ -82,6 +85,7 @@ DEFAULT_ALLOWED: dict[Regime, set[str]] = {
         "S5_MINEDGE",
         "S6_MIN30",
         "FLOW_BRAIN",
+        "OVERNIGHT_GAP",
         "S8_NET_ZIGZAG",
         "S9_STATE30",
         "S10_LEGACY30",
@@ -106,7 +110,7 @@ class PortfolioConfig:
     allowed: dict[Regime, set[str]] = field(
         default_factory=lambda: {k: set(v) for k, v in DEFAULT_ALLOWED.items()}
     )
-    flatten_when_blocked: bool = True
+    flatten_when_blocked: bool = False
 
     def is_enabled(self, strategy: str) -> bool:
         return strategy in self.enabled
@@ -121,26 +125,23 @@ class PortfolioConfig:
         return False
 
     def allows(self, strategy: str, regime: Regime) -> bool:
-        if strategy not in self.enabled:
-            return False
-        return self._in_regime(strategy, regime)
+        """Every enabled book may open. Market regime no longer gates entries."""
+        del regime
+        return strategy in self.enabled
 
     def should_flatten(self, strategy: str, regime: Regime) -> bool:
-        """True if open position should be closed because regime no longer fits."""
-        if not self.flatten_when_blocked:
-            return False
-        if strategy not in self.enabled:
-            return True
-        return not self._in_regime(strategy, regime)
+        """Never dump for regime. Market regime was removed."""
+        del strategy, regime
+        return False
 
 
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S5, S8, S13, S16, S18 (S4 off — Angel/ticks daily
+    Live desk default: S5, S8, S13, S16, S18, S19, overnight gap (S4 off — Angel/ticks daily
     swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
-    false) — AMISE factory holds the research ML.     S18 stays paper-only. S19 paper 1h body+close is on (not live). S20
-    stays off until you ask. AMISE slots S21+ ENABLE after Lab Approve.
+    false). S18/S19 are live-eligible with S5/S8/S13/S16/overnight gap — you Arm.
+    S20 / FLOW_BRAIN stay off. No paper fills. AMISE slots stay off.
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -160,6 +161,8 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S6_MIN30")
     if on("ENABLE_FLOW_BRAIN", "false"):
         enabled.add("FLOW_BRAIN")
+    if on("ENABLE_OVERNIGHT_GAP", "true"):
+        enabled.add("OVERNIGHT_GAP")
     if on("ENABLE_S8", "true"):
         enabled.add("S8_NET_ZIGZAG")
     if on("ENABLE_S9", "false"):
@@ -204,7 +207,8 @@ def portfolio_from_env() -> PortfolioConfig:
             "S16_HHHL_WICK_1H",
             "S18_OHLC_VOL_HTF",
             "S19_BODY_CLOSE_1H",
+            "OVERNIGHT_GAP",
         }
 
-    flatten = on("FLATTEN_ON_BAD_REGIME", "true")
+    flatten = on("FLATTEN_ON_BAD_REGIME", "false")
     return PortfolioConfig(enabled=enabled, flatten_when_blocked=flatten)

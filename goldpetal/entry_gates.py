@@ -1,4 +1,7 @@
-"""Unified entry gates: emergency, trading master, capital, force-disable, ML."""
+"""Unified entry gates: emergency, trading master, capital, force-disable.
+
+AMISE / hour-gate scores do not skip a book. Learner.allow is invent-only.
+"""
 
 from __future__ import annotations
 

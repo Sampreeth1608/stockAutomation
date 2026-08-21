@@ -2,8 +2,8 @@
 
 Wait for the 1h to finish. LONG when that hour made a lower low and closed
 green. SHORT when it made a higher high and closed red. Inside / outside /
-knife / chase → hold. FLIP at that close. Flatten at MARKET_CLOSE. Not live.
-Paper 100 lots ≠ live.
+knife / chase → hold. FLIP at that close. Delivery — holds overnight.
+Only S16 flattens at MARKET_CLOSE. Not live. Paper 100 lots ≠ live.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class S20FadeHlStrategy(S18OhlcVolHtfStrategy):
     @property
     def status_line(self) -> str:
         return (
-            f"TF={self.bar_minutes}m fade HL FLIP flatten-at-close "
+            f"TF={self.bar_minutes}m fade HL FLIP delivery "
             f"{self.market_open}-{self.market_close} "
             f"{self.bar_debug} skip={self.last_skip or '-'} pos={self.position}"
         )

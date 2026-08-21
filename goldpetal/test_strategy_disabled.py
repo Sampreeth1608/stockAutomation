@@ -26,6 +26,7 @@ def test_run_strategy_does_not_import_s19_at_startup() -> None:
     head = src.split("def run_once")[0]
     assert "from strategy_s19 import" not in head
     assert "from strategy_s20 import" not in head
+    assert "from strategy_overnight_gap import" not in head
     assert "from strategy_amise import" not in head
     assert "def _optional_book" in src
     assert "def _load_amise_slots" in src

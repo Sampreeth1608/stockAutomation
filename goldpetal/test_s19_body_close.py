@@ -1,4 +1,4 @@
-"""S19: 1h aligned green/red + close vs prev. Paper only. Not live."""
+"""S19: 1h aligned green/red + close vs prev. Live-eligible — you Arm."""
 
 from __future__ import annotations
 
@@ -86,10 +86,20 @@ def test_after_charges_excludes_tax() -> None:
     assert ac >= r.after_tax_pnl_inr - 1e-9
 
 
-def test_paper_wired_not_live() -> None:
+def test_paper_wired_live_eligible() -> None:
+    from live_readiness import LIVE_ELIGIBLE_BOOKS, book_may_go_live
+
     assert S19_NAME in ALL_STRATEGY_NAMES
     assert S19_NAME in SLIM_PAPER_STRATEGIES
-    assert S19_NAME in PAPER_ONLY_BOOKS
+    assert S19_NAME not in PAPER_ONLY_BOOKS
+    assert S19_NAME in LIVE_ELIGIBLE_BOOKS
+    assert (
+        book_may_go_live(
+            S19_NAME,
+            summaries={S19_NAME: {"closed": 0, "win_rate_after_charges": 0.0}},
+        )
+        is True
+    )
     assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
     root = Path(__file__).resolve().parent
     station = (root / "station.html").read_text(encoding="utf-8")
@@ -132,6 +142,6 @@ if __name__ == "__main__":
     test_close_follow_takes_mixed_hours()
     test_hold_through_mixed_then_flip()
     test_after_charges_excludes_tax()
-    test_paper_wired_not_live()
+    test_paper_wired_live_eligible()
     test_hours_from_ohlc_keeps_volume()
     print("ALL test_s19_body_close OK")

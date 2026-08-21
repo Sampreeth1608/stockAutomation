@@ -29,6 +29,7 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "ENABLE_S5",
         "ENABLE_S6",
         "ENABLE_FLOW_BRAIN",
+        "ENABLE_OVERNIGHT_GAP",
         "ENABLE_S8",
         "ENABLE_S9",
         "ENABLE_S10",
@@ -67,6 +68,13 @@ ALLOWED_ENV_KEYS: frozenset[str] = frozenset(
         "S13_ALLOW_SHORT",
         "S13_NO_FLIP",
         "S13_MIN_WICK_GAP",
+        "OVERNIGHT_GAP_ENTRY_MINUTES_BEFORE_CLOSE",
+        "OVERNIGHT_GAP_EXIT_MINUTES_AFTER_OPEN",
+        "OVERNIGHT_GAP_BUY_PROB",
+        "OVERNIGHT_GAP_SHORT_PROB",
+        "OVERNIGHT_GAP_LATE_MINUTES",
+        "OVERNIGHT_GAP_ALLOW_LONG",
+        "OVERNIGHT_GAP_ALLOW_SHORT",
         "S14_BAR_MINUTES",
         "S14_MIN_RANGE",
         "S14_CONFIRM_MINUTES",
@@ -97,6 +105,7 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S5_MINEDGE": "ENABLE_S5",
     "S6_MIN30": "ENABLE_S6",
     "FLOW_BRAIN": "ENABLE_FLOW_BRAIN",
+    "OVERNIGHT_GAP": "ENABLE_OVERNIGHT_GAP",
     "S8_NET_ZIGZAG": "ENABLE_S8",
     "S9_STATE30": "ENABLE_S9",
     "S10_LEGACY30": "ENABLE_S10",
@@ -109,10 +118,6 @@ STRATEGY_ENABLE: dict[str, str] = {
     "S18_OHLC_VOL_HTF": "ENABLE_S18",
     "S19_BODY_CLOSE_1H": "ENABLE_S19",
     "S20_FADE_HL": "ENABLE_S20",
-    "S21_AMISE": "ENABLE_S21",
-    "S22_AMISE": "ENABLE_S22",
-    "S23_AMISE": "ENABLE_S23",
-    "S24_AMISE": "ENABLE_S24",
 }
 
 SLIM_ENABLE_DEFAULTS: dict[str, str] = {
@@ -123,6 +128,7 @@ SLIM_ENABLE_DEFAULTS: dict[str, str] = {
     "ENABLE_S5": "true",
     "ENABLE_S6": "false",
     "ENABLE_FLOW_BRAIN": "false",
+    "ENABLE_OVERNIGHT_GAP": "true",
     "ENABLE_S8": "true",
     "ENABLE_S9": "false",
     "ENABLE_S10": "false",
@@ -184,6 +190,8 @@ def _validate_value(key: str, value: str) -> str:
         "S15_ALLOW_SHORT",
         "S16_ALLOW_LONG",
         "S16_ALLOW_SHORT",
+        "OVERNIGHT_GAP_ALLOW_LONG",
+        "OVERNIGHT_GAP_ALLOW_SHORT",
     }:
         low = value.lower()
         if low not in {"true", "false", "1", "0", "yes", "no", "y", "n"}:
@@ -197,6 +205,9 @@ def _validate_value(key: str, value: str) -> str:
         "S4_ENTRY_MINUTES_BEFORE_CLOSE",
         "S13_ENTRY_MINUTES_BEFORE_CLOSE",
         "S13_EXIT_MINUTES_AFTER_OPEN",
+        "OVERNIGHT_GAP_ENTRY_MINUTES_BEFORE_CLOSE",
+        "OVERNIGHT_GAP_EXIT_MINUTES_AFTER_OPEN",
+        "OVERNIGHT_GAP_LATE_MINUTES",
         "S14_BAR_MINUTES",
         "S14_CONFIRM_MINUTES",
         "S15_BAR_MINUTES",
@@ -217,6 +228,8 @@ def _validate_value(key: str, value: str) -> str:
         "S15_MIN_RANGE",
         "S15_NOWICK_EPS",
         "S16_MIN_WICK_GAP",
+        "OVERNIGHT_GAP_BUY_PROB",
+        "OVERNIGHT_GAP_SHORT_PROB",
     }:
         f = float(value)
         if f < 0 or f > 1_000_000:

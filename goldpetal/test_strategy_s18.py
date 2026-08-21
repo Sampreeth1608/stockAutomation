@@ -99,19 +99,48 @@ def test_weak_volume_skips_unless_pack_drops_vol() -> None:
     assert result.action == "BUY"
 
 
-def test_flatten_at_session_close() -> None:
-    s = _s18()
-    s.on_tick(_t(9, 0), 100.0, _msg(100))
-    s.on_tick(_t(9, 59), 104.0, _msg(1000))
-    s.on_tick(_t(10, 0), 104.0, _msg(1000))
-    s.on_tick(_t(10, 10), 120.0, _msg(1800))
-    s.on_tick(_t(10, 59), 110.0, _msg(3000))
-    assert s.on_tick(_t(11, 0), 110.0, _msg(3000)) is not None
-    assert s.position == "long"
-    close = s.on_tick(_t(23, 30), 111.0, _msg(9000))
-    assert close is not None
-    assert close.action == "CLOSE"
-    assert s.position == "flat"
+def test_holds_through_session_close() -> None:
+    import position_safety as ps
+
+    orig = ps.is_session_intraday
+    ps.is_session_intraday = lambda name: False  # type: ignore[assignment]
+    try:
+        s = _s18()
+        s.on_tick(_t(9, 0), 100.0, _msg(100))
+        s.on_tick(_t(9, 59), 104.0, _msg(1000))
+        s.on_tick(_t(10, 0), 104.0, _msg(1000))
+        s.on_tick(_t(10, 10), 120.0, _msg(1800))
+        s.on_tick(_t(10, 59), 110.0, _msg(3000))
+        assert s.on_tick(_t(11, 0), 110.0, _msg(3000)) is not None
+        assert s.position == "long"
+        hold = s.on_tick(_t(23, 30), 111.0, _msg(9000))
+        assert hold is None or hold.action != "CLOSE"
+        assert s.position == "long"
+    finally:
+        ps.is_session_intraday = orig  # type: ignore[assignment]
+
+
+def test_closes_at_session_when_intraday_ticked() -> None:
+    import position_safety as ps
+
+    orig = ps.is_session_intraday
+    ps.is_session_intraday = (  # type: ignore[assignment]
+        lambda name: str(name) == "S18_OHLC_VOL_HTF"
+    )
+    try:
+        s = _s18()
+        s.on_tick(_t(9, 0), 100.0, _msg(100))
+        s.on_tick(_t(9, 59), 104.0, _msg(1000))
+        s.on_tick(_t(10, 0), 104.0, _msg(1000))
+        s.on_tick(_t(10, 10), 120.0, _msg(1800))
+        s.on_tick(_t(10, 59), 110.0, _msg(3000))
+        assert s.on_tick(_t(11, 0), 110.0, _msg(3000)) is not None
+        assert s.position == "long"
+        close = s.on_tick(_t(23, 30), 111.0, _msg(9000))
+        assert close is not None and close.action == "CLOSE"
+        assert s.position == "flat"
+    finally:
+        ps.is_session_intraday = orig  # type: ignore[assignment]
 
 
 def test_s18_from_env_name() -> None:
@@ -125,6 +154,7 @@ if __name__ == "__main__":
     test_first_closed_hour_needs_prev()
     test_base_and_enters_long_at_second_close()
     test_weak_volume_skips_unless_pack_drops_vol()
-    test_flatten_at_session_close()
+    test_holds_through_session_close()
+    test_closes_at_session_when_intraday_ticked()
     test_s18_from_env_name()
     print("ALL test_strategy_s18 OK")

@@ -25,7 +25,7 @@ SLOTS_DIR = ROOT / "data" / "amise" / "slots"
 INDEX_NAME = "index.json"
 
 FIRST_AMISE_N = 21
-RESERVED_AMISE_N = 24  # always show S21–S24 on the desk, even empty
+RESERVED_AMISE_N = 24  # legacy reserve; no empty chairs are shown any more
 SLOT_MAX_N = 999
 SLOT_RE = re.compile(r"^S(\d+)_AMISE$")
 ENABLE_RE = re.compile(r"^ENABLE_S(\d+)$")
@@ -67,10 +67,9 @@ def short_amise(slot: str) -> str:
     return f"S{n} AMISE" if n is not None else str(slot or "")
 
 
-# Reserved empty chairs S21–S24 so the desk always has a row next to S20.
-AMISE_SLOT_BOOKS: tuple[str, ...] = tuple(
-    slot_name(i) for i in range(FIRST_AMISE_N, RESERVED_AMISE_N + 1)
-)
+# No reserved chairs. The AMISE research tabs are gone, so a slot book only
+# exists once something (the You mimic) actually writes a genome into it.
+AMISE_SLOT_BOOKS: tuple[str, ...] = ()
 AMISE_ENABLE: dict[str, str] = {name: enable_key(name) for name in AMISE_SLOT_BOOKS}
 AMISE_ENABLE_KEYS: frozenset[str] = frozenset(AMISE_ENABLE.values())
 SHORT_AMISE = {name: short_amise(name) for name in AMISE_SLOT_BOOKS}
@@ -138,18 +137,18 @@ def load_slot_genome(slot: str, folder: Path | None = None) -> StrategyGenome | 
 
 
 def extra_amise_books(folder: Path | None = None) -> tuple[str, ...]:
-    """S25+ that already have a genome (series continuation past S24)."""
+    """Every AMISE slot that already has a genome. Empty chairs are not books."""
     names: set[str] = set()
     dest = slots_dir(folder)
     idx = load_index(folder)
     for key in idx.get("slots") or {}:
         n = slot_number(str(key))
-        if n is not None and n > RESERVED_AMISE_N:
+        if n is not None and n >= FIRST_AMISE_N:
             names.add(slot_name(n))
     try:
         for path in dest.glob("S*_AMISE.json"):
             n = slot_number(path.stem)
-            if n is not None and n > RESERVED_AMISE_N:
+            if n is not None and n >= FIRST_AMISE_N:
                 names.add(slot_name(n))
     except OSError:
         pass

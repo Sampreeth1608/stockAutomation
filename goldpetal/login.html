@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Unlock Gold Petal Desk</title>
+<meta http-equiv="Cache-Control" content="no-store"/>
+<style>
+:root {
+  --bg: #f3f1ea; --panel: #fffcf7; --line: #e2ddd0; --text: #1c1914;
+  --muted: #6f6a60; --bad: #b81c16; --gold: #7a5314;
+  --font: "Segoe UI", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+  font: 15px/1.45 var(--font); }
+.wrap { max-width: 28rem; margin: 12vh auto; padding: 0 1.1rem; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.2rem 1.3rem 1.35rem; box-shadow: 0 10px 28px rgba(48, 36, 12, .06); }
+h1 { margin: 0 0 .35rem; font: 600 22px/1.2 Georgia, serif; color: var(--gold); }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 1rem; line-height: 1.45; }
+label { display: block; font: 600 12px/1.2 var(--font); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 .35rem; }
+input[type=password], input[type=text] {
+  width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  padding: .55rem .65rem; font: 15px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.row { margin: 0 0 .85rem; }
+.btn { appearance: none; border: 1px solid #c9a45a; background: #f8f1e3; color: var(--gold);
+  font: 650 14px/1 var(--font); padding: .55rem .9rem; border-radius: 8px; cursor: pointer; }
+.btn:hover { background: #fff; }
+.flash { min-height: 1.1rem; color: var(--bad); font-size: 13px; margin: .7rem 0 0; }
+.mono { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+</style>
+</head>
+<body class="gp-desk-login">
+  <div class="wrap">
+    <div class="card">
+      <h1>Unlock desk</h1>
+      <p class="hint">The IAP tunnel only reaches this machine. This password is the application gate — Arm live, restart, capital, and the tape stay behind it.</p>
+      <form id="login-form" autocomplete="on">
+        <div class="row">
+          <label for="pw">Desk password</label>
+          <input id="pw" name="password" type="password" autocomplete="current-password" autofocus/>
+        </div>
+        <button class="btn" type="submit" id="btn-unlock">Unlock desk</button>
+      </form>
+      <p class="flash" id="flash"></p>
+      <p class="mono" id="hint">Secrets file: …</p>
+    </div>
+  </div>
+<script>
+const next = (() => {
+  try {
+    const n = new URLSearchParams(location.search).get("next") || "/";
+    if (!n.startsWith("/") || n.startsWith("//") || n.includes("\\")) return "/";
+    return n;
+  } catch (e) { return "/"; }
+})();
+async function loadHint() {
+  try {
+    const r = await fetch("/api/desk/auth", { credentials: "same-origin" });
+    const d = await r.json();
+    const el = document.getElementById("hint");
+    if (!d.auth_required) { location.replace(next); return; }
+    el.textContent = "Secrets file: " + (d.env_path || ".env")
+      + " · mode=" + (d.mode || "none")
+      + " · password_len=" + (d.password_len || 0);
+    if (!d.password_configured) {
+      document.getElementById("flash").textContent =
+        "DESK_AUTH is on but DESK_PASSWORD is not set. Add it to .env, then restart the desk.";
+    }
+  } catch (e) {
+    document.getElementById("hint").textContent = "Could not read auth status.";
+  }
+}
+document.getElementById("login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const pw = document.getElementById("pw").value || "";
+  const flash = document.getElementById("flash");
+  flash.textContent = "";
+  try {
+    const r = await fetch("/api/desk/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) {
+      flash.textContent = d.error || ("HTTP " + r.status);
+      return;
+    }
+    location.replace(next);
+  } catch (e) {
+    flash.textContent = String((e && e.message) || e || "login failed");
+  }
+});
+loadHint();
+</script>
+</body>
+</html>

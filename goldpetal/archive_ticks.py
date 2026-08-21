@@ -73,7 +73,7 @@ def archive_days(
         folder.mkdir(parents=True, exist_ok=True)
         csv_path = folder / "full_ticks.csv"
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=HEADERS)
+            writer = csv.DictWriter(handle, fieldnames=HEADERS, extrasaction="ignore")
             writer.writeheader()
             for row in day_rows:
                 writer.writerow(

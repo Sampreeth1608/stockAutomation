@@ -117,8 +117,8 @@ def score_closed_trades(closed: list[dict[str, Any]], *, strategy: str) -> dict[
 
 
 def _note(status: str, strategy: str) -> str:
-    if strategy in {"S13_HHHL_DAY", "S4_OVERNIGHT"}:
-        return "Daily swing — guardian watches, never dumps from the tick window."
+    if strategy in {"S13_HHHL_DAY", "S4_OVERNIGHT", "OVERNIGHT_GAP"}:
+        return "Daily / overnight hold — guardian watches, never dumps from the tick window."
     if status == "THIN":
         return "Too few closed trades to judge edge."
     if status == "DETERIORATING":

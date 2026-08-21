@@ -28,6 +28,7 @@ from storage import DB_PATH
 IST = ZoneInfo("Asia/Kolkata")
 
 LIVE_FIELDS = ["section", "field", "value", "bar"]
+ANGEL_FIELDS = ["section", "field", "value"]
 MARKET_FIELDS = ["field", "value"]
 STRATEGY_FIELDS = [
     "strategy",
@@ -44,23 +45,12 @@ STRATEGY_FIELDS = [
     "in_bot",
     "note",
 ]
-LAB_FIELDS = [
-    "id",
-    "strategy",
-    "title",
-    "status",
-    "n_trades",
-    "after_charges_₹",
-    "profit_factor",
-    "win_rate",
-    "safety_ok",
-    "approve",
-]
 RISK_FIELDS = ["key", "value", "enforced_in"]
 COMMAND_FIELDS = ["command", "request", "allowed", "last_result", "note"]
 
 DASHBOARD_TABS = (
     "LIVE",
+    "ANGEL",
     "MARKET",
     "STRATEGIES",
     "SIGNALS",
@@ -73,6 +63,15 @@ DASHBOARD_TABS = (
 
 def _yn(v: Any) -> str:
     return "YES" if bool(v) else "NO"
+
+
+def desk_mode_label(live: dict[str, Any] | None) -> str:
+    row = live or {}
+    if row.get("would_place_real_orders"):
+        return "LIVE ARMED"
+    if row.get("dry_run"):
+        return "PAPER"
+    return "CHECK DESK"
 
 
 def _num(v: Any) -> float:
@@ -213,7 +212,7 @@ def build_live_rows(
     sell_pct = _pct(tsq, tot)
     imb_pct = buy_pct - sell_pct
     would = bool(live.get("would_place_real_orders"))
-    mode = "LIVE-UNSAFE" if would else ("PAPER" if live.get("dry_run") else "CHECK DESK")
+    mode = desk_mode_label(live)
     enables = dict(live.get("enables") or {})
     in_bot = [n for n in monitor_book_names() if enables.get(n)]
     fits_trade = []
@@ -224,7 +223,7 @@ def build_live_rows(
             fits_trade.append(f"{name}:{side}")
     goldpetal_running = bool(sess.get("open")) and running and bool(tape.get("tape_live"))
     return [
-        _kv("QUOTE", "title", "GOLDPETAL PAPER DASHBOARD"),
+        _kv("QUOTE", "title", "GOLDPETAL DESK"),
         _kv("QUOTE", "updated_at_ist", clock.isoformat(timespec="seconds")),
         _kv("QUOTE", "goldpetal_running", _yn(goldpetal_running)),
         _kv("QUOTE", "mode", mode),
@@ -260,13 +259,97 @@ def build_live_rows(
         _kv("DECISION", "fits_now_trade", ",".join(fits_trade) or "-"),
         _kv("ENGINE", "dry_run", _yn(live.get("dry_run"))),
         _kv("ENGINE", "would_place_real_orders", _yn(would)),
+        _kv("ENGINE", "live_max_lots", str(live.get("live_max_lots") or "")),
         _kv("ENGINE", "session", str(sess.get("label") or "")),
         _kv(
             "NOTE",
             "architecture",
-            "Angel WS → Python ticks.db → mood/books → this Sheet. Not tick-into-Sheets.",
+            "Angel WS → Python ticks.db → mood/books → this Sheet. Not tick-into-Sheets. Angel ₹ is the ANGEL tab.",
         ),
     ]
+
+
+def build_angel_rows(*, db_path: Path = DB_PATH) -> list[dict[str, str]]:
+    """Live Angel ₹ and last order ids. Paper tape stays STRATEGIES / TRADES."""
+    from desk_data import live_pnl_payload
+
+    live = desk_snapshot()
+    pnl = live_pnl_payload(db_path=db_path)
+    sum_ = pnl.get("summary") or {}
+    rows = [
+        {"section": "MODE", "field": "mode", "value": desk_mode_label(live)},
+        {
+            "section": "MODE",
+            "field": "would_place_real_orders",
+            "value": _yn(live.get("would_place_real_orders")),
+        },
+        {
+            "section": "MODE",
+            "field": "live_max_lots",
+            "value": str(live.get("live_max_lots") or ""),
+        },
+        {"section": "MODE", "field": "hard_cap", "value": "1000"},
+        {"section": "PNL", "field": "live_open", "value": str(sum_.get("open") or 0)},
+        {"section": "PNL", "field": "live_closed", "value": str(sum_.get("closed") or 0)},
+        {"section": "PNL", "field": "live_ac_₹", "value": _round(sum_.get("pnl_after_charges"), 2)},
+        {
+            "section": "PNL",
+            "field": "live_wr_ac_pct",
+            "value": _round(sum_.get("win_rate_after_charges"), 1),
+        },
+        {"section": "PNL", "field": "angel_sends", "value": str(pnl.get("placed_count") or 0)},
+        {"section": "PNL", "field": "note", "value": str(pnl.get("note") or "")},
+    ]
+    for pos in pnl.get("positions") or []:
+        name = str(pos.get("strategy") or "")
+        if not name:
+            continue
+        rows.append(
+            {
+                "section": "POS",
+                "field": name,
+                "value": (
+                    f"{pos.get('status') or 'FLAT'} {pos.get('side') or ''} "
+                    f"lots={pos.get('lots') or ''}"
+                ).strip(),
+            }
+        )
+    for board in pnl.get("scoreboard") or []:
+        name = str(board.get("strategy") or "")
+        if not name or name in {"LIVE", "ALL"}:
+            continue
+        rows.append(
+            {
+                "section": "BOOK",
+                "field": name,
+                "value": (
+                    f"open={board.get('open') or 0} closed={board.get('closed') or 0} "
+                    f"ac={_round(board.get('pnl_after_charges'), 2)}"
+                ),
+            }
+        )
+    for order in (pnl.get("orders") or [])[:12]:
+        placed = bool(order.get("placed"))
+        bit = (
+            f"sent {order.get('order_id') or ''}"
+            if placed
+            else f"skip {order.get('reason') or ''}"
+        )
+        rows.append(
+            {
+                "section": "ORDER",
+                "field": str(order.get("ts_ist") or order.get("ts") or "")[:19],
+                "value": (
+                    f"{order.get('strategy') or ''} {order.get('transaction') or ''} "
+                    f"qty={order.get('quantity') or ''} {bit}"
+                ).strip(),
+            }
+        )
+    if not any(r["section"] == "POS" for r in rows):
+        rows.append(
+            {"section": "POS", "field": "(none)", "value": "FLAT — no live-picked open"}
+        )
+    return rows
 
 
 def build_market_rows(*, db_path: Path = DB_PATH) -> list[dict[str, str]]:
@@ -347,6 +430,9 @@ def build_strategy_rows(
         elif paper_only:
             state = side.upper() if side in {"long", "short"} else "HOLD"
             status = "PAPER"
+        elif name in (st.live_approved or []) and not live.get("dry_run"):
+            state = side.upper() if side in {"long", "short"} else "HOLD"
+            status = "LIVE"
         elif live.get("dry_run"):
             state = side.upper() if side in {"long", "short"} else "HOLD"
             status = "ACTIVE"
@@ -381,73 +467,6 @@ def build_strategy_rows(
     return rows
 
 
-def build_lab_rows() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    pending: list[dict[str, Any]] = []
-    try:
-        from research_desk import research_desk_payload
-
-        lab = research_desk_payload()
-        pending.extend(list(lab.get("pending") or []))
-    except Exception:
-        lab = {}
-    try:
-        from proposals import proposals_snapshot
-
-        snap = proposals_snapshot()
-        seen = {str(p.get("id")) for p in pending}
-        for p in snap.get("pending") or []:
-            if str(p.get("id")) not in seen:
-                pending.append(p)
-    except Exception:
-        pass
-    if not pending:
-        rows.append(
-            {
-                "id": "",
-                "strategy": "",
-                "title": "No pending lab/ML proposals",
-                "status": "",
-                "n_trades": "",
-                "after_charges_₹": "",
-                "profit_factor": "",
-                "win_rate": "",
-                "safety_ok": "",
-                "approve": "Approve / Reject / Paper test stay on desk Lab + ML tabs",
-            }
-        )
-        return rows
-    for p in pending:
-        paper = p.get("paper") or {}
-        if not isinstance(paper, dict):
-            paper = {}
-        extra = paper.get("extra") if isinstance(paper.get("extra"), dict) else {}
-        metrics = extra.get("metrics") if isinstance(extra.get("metrics"), dict) else extra
-        if not isinstance(metrics, dict):
-            metrics = {}
-        ac = (
-            metrics.get("after_charges")
-            if isinstance(metrics, dict)
-            else None
-        )
-        pf = metrics.get("profit_factor") if isinstance(metrics, dict) else None
-        rows.append(
-            {
-                "id": p.get("id") or "",
-                "strategy": p.get("strategy") or "",
-                "title": p.get("title") or p.get("summary") or "",
-                "status": p.get("status") or "pending",
-                "n_trades": paper.get("n_trades") or metrics.get("n_trades") or "",
-                "after_charges_₹": _round(ac if ac is not None else paper.get("gross_pnl_inr"), 1),
-                "profit_factor": _round(pf, 3) if pf is not None else "",
-                "win_rate": _round(paper.get("win_rate"), 1),
-                "safety_ok": _yn(p.get("safety_ok")),
-                "approve": "desk Lab/ML — Sheets cannot Approve / micro-live / Unlock",
-            }
-        )
-    return rows
-
-
 def build_risk_rows() -> list[dict[str, str]]:
     st = load_state()
     cap = capital_snapshot()
@@ -460,6 +479,16 @@ def build_risk_rows() -> list[dict[str, str]]:
             "key": "live_max_lots",
             "value": str(env.get("live_max_lots") or ""),
             "enforced_in": "Python live_orders — desk only",
+        },
+        {
+            "key": "hard_live_max_lots",
+            "value": "1000",
+            "enforced_in": "Python live_orders HARD_LIVE_MAX_LOTS",
+        },
+        {
+            "key": "size_confirm_above_10",
+            "value": "SIZE on desk Save — Sheets cannot raise lots",
+            "enforced_in": "Python live_readiness",
         },
         {
             "key": "max_lots_total",
