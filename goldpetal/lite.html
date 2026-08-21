@@ -94,7 +94,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-pnl-open"></tbody>
     </table>
-    <p class="hint">Approve already papers every book. This page is only Angel. S5 / S8 / S13 / S16 / S18 / overnight gap can go live if you tick Lots or ₹ and Arm live. Overnight gap closes at next open. S19 / S20 stay paper until 40% WR% AC. You Arm live.</p>
+    <p class="hint">This page is Angel. S5 / S8 / S13 / S16 / S18 / overnight gap can go live if you tick Lots or ₹ and Arm live. Overnight gap closes at next open. S19 / S20 stay off. You Arm live.</p>
     <div class="row" style="margin-top:.5rem">
       <label class="chk">Ceiling lots <input type="number" id="live-max" min="1" max="1000" value="1"/></label>
       <label class="chk">Wallet ₹ <input type="number" id="cap-total" step="1000"/></label>
@@ -243,7 +243,7 @@ function render(d) {
   const feed = bot.feed_source || "off";
   const armed = !!live.would_place_real_orders;
   const angelOpen = ((d.live_pnl || {}).positions || []).some((t) => t && t.status === "OPEN");
-  const mode = armed ? "ARMED" : (angelOpen ? "PAPER · Angel open" : (live.dry_run === false ? "LIVE env" : "PAPER"));
+  const mode = armed ? "ARMED" : (angelOpen ? "NOT ARMED · Angel open" : (live.dry_run === false ? "LIVE env" : "NOT ARMED"));
   $("pills").innerHTML = [
     pill(mode, armed ? "bad" : (angelOpen ? "warn" : "ok")),
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
@@ -286,7 +286,7 @@ function render(d) {
         <td><input type="checkbox" data-intraday="${esc(name)}" ${intraOn ? "checked" : ""} ${gap ? "disabled" : ""} title="${gap ? "closes at next open" : "flatten at MARKET_CLOSE"}"/></td>
         <td><button type="button" class="btn danger" data-exit="${name}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="10">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="10">Tick Lots or ₹ on a live book</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -294,8 +294,8 @@ function render(d) {
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
     : (angelOpen
-      ? "Paper mode — leftover Angel shows below until Angel is flat. Exit squares leftover even in Paper, or clears it if you already squared in the Angel app. Does not Arm live."
-      : "Paper is already running. New Angel orders stay off until you Arm live.");
+      ? "Not armed — leftover Angel shows below until Angel is flat. Exit squares leftover even when not armed, or clears it if you already squared in the Angel app. Does not Arm live."
+      : "Not armed. New Angel orders stay off until you Arm live.");
   const paperBtn = $("btn-mode-paper");
   if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;
   const lp = d.live_pnl || {};
@@ -310,7 +310,7 @@ function render(d) {
     + " · open " + openN
     + " · closed " + closed
     + " · Angel sends " + placed
-    + ". Paper tape is not live ₹.";
+    + ". Angel app is the fill confirmation.";
   const booksEl = $("live-pnl-books");
   if (booksEl) {
     booksEl.innerHTML = liveBookScoreRows(lp, d).map((r) => {
@@ -376,15 +376,15 @@ $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "
 $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
 $("btn-save-books").onclick = () => {
   const body = collectArmBody("keep");
-  act("flash-money", "/api/desk/arm", body, "Saved. Paper/Live unchanged. Type RESTART to load RAM.");
+  act("flash-money", "/api/desk/arm", body, "Saved. Arm/Stop unchanged. Type RESTART to load RAM.");
 };
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
   if (!btn || btn.disabled) return;
   if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
-  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Leftover Angel squares even in Paper. Does not Arm live.")) return;
-  act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — leftover Angel squares even in Paper.");
+  if (!window.confirm("Flatten " + shortName(name) + " now? This book only. Leftover Angel squares even when not armed. Does not Arm live.")) return;
+  act("flash-money", "/api/desk/flatten", { strategy: name }, "Exit queued — leftover Angel squares even when not armed.");
 });
 $("btn-exit-all").onclick = () => {
   if (!window.confirm("Flatten EVERY book now?")) return;
@@ -479,10 +479,10 @@ $("btn-arm-live").onclick = () => {
   $("live-word").value = "";
 };
 $("btn-mode-paper").onclick = () => {
-  if (!window.confirm("Switch to Paper? Angel stops.")) return;
+  if (!window.confirm("Stop live? New Angel orders off.")) return;
   const body = collectArmBody("paper");
   body.confirm = "";
-  act("flash-money", "/api/desk/arm", body, "Paper mode. Open Angel contracts stay until you Arm live + Exit.");
+  act("flash-money", "/api/desk/arm", body, "Not armed. Open Angel contracts stay until you Exit.");
 };
 bootAuth().then((ok) => {
   if (ok === false) return;

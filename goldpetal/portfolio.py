@@ -138,12 +138,10 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Slim paper default: S5, S8, S13, S16, S18, S19, overnight gap (S4 off — Angel/ticks daily
+    Live desk default: S5, S8, S13, S16, S18, overnight gap (S4 off — Angel/ticks daily
     swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
-    false) — AMISE factory holds the research ML. S18 is live-eligible
-    with S5/S8/S13/S16/overnight gap — you Arm. S19 paper 1h body+close is on
-    (Live after 40%). S20 stays off until you ask.
-    AMISE slots S21+ ENABLE after Lab Approve.
+    false). S18 is live-eligible with S5/S8/S13/S16/overnight gap — you Arm.
+    S19 / S20 / FLOW_BRAIN stay off. No paper fills. AMISE slots stay off.
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -179,7 +177,7 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S16_HHHL_WICK_1H")
     if on("ENABLE_S18", "true"):
         enabled.add("S18_OHLC_VOL_HTF")
-    if on("ENABLE_S19", "true"):
+    if on("ENABLE_S19", "false"):
         enabled.add("S19_BODY_CLOSE_1H")
     if on("ENABLE_S20", "false"):
         enabled.add("S20_FADE_HL")
@@ -208,7 +206,6 @@ def portfolio_from_env() -> PortfolioConfig:
             "S13_HHHL_DAY",
             "S16_HHHL_WICK_1H",
             "S18_OHLC_VOL_HTF",
-            "S19_BODY_CLOSE_1H",
             "OVERNIGHT_GAP",
         }
 

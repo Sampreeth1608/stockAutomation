@@ -1,4 +1,4 @@
-"""Run Gold Petal strategies: paper by default; live Angel orders when gated."""
+"""Run Gold Petal strategies: idle until Arm live; then Angel orders when gated."""
 
 from __future__ import annotations
 
@@ -207,17 +207,17 @@ def run_once(
     contract = find_goldpetal_futures(force_refresh=True)
     session = login()
     broker = broker_from_session(session, contract)
-    # Seed Angel mirror from last *live* signal. Paper opens must not look like contracts.
+    # Seed Angel mirror from last live signal. Do not treat paper opens as contracts.
     try:
         seeded = mirror_positions_from_signals(
-            latest_signals(limit=400, live_only=not dry_run),
-            live_only=not dry_run,
+            latest_signals(limit=400, live_only=True),
+            live_only=True,
         )
         if seeded and hasattr(broker, "seed_positions"):
             broker.seed_positions(seeded)
             print(f"Broker positions seeded: {seeded}", flush=True)
         elif not dry_run:
-            print("Broker positions seeded: {} (paper opens are not live)", flush=True)
+            print("Broker positions seeded: {} (not-armed opens are not live)", flush=True)
     except Exception as exc:
         logger.warning("Could not seed broker positions: %s", exc)
 
@@ -272,7 +272,13 @@ def run_once(
     def _may_enter(
         strategy_name: str, regime: str, *, side: str = ""
     ) -> tuple[bool, str]:
-        """Portfolio regime + control-panel emergency/capital/ML gates for new entries."""
+        """Live desk books only, and only after Arm. No paper fills."""
+        from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+        if strategy_name not in LIVE_ELIGIBLE_BOOKS:
+            return False, "not_live_book"
+        if dry_run:
+            return False, "not_armed"
         if not portfolio.allows(strategy_name, regime):
             return False, f"regime={regime}"
         blocked, mood_why = mood_blocks_entry(
@@ -285,7 +291,7 @@ def run_once(
         )
 
     def _strategy_active(strategy_name: str) -> bool:
-        """False when ENABLE_* is off or desk force-disabled (stops paper emits)."""
+        """False when ENABLE_* is off or desk force-disabled."""
         if not portfolio.is_enabled(strategy_name):
             return False
         st = load_state()
@@ -416,7 +422,7 @@ def run_once(
         flush=True,
     )
     print(
-        f"FLOW     : ENABLE_FLOW_BRAIN paper tick LTP+TBQ+TSQ pressure "
+        f"FLOW     : ENABLE_FLOW_BRAIN off (not a live book) "
         f"[{'ON' if portfolio.is_enabled(strategy_fb.name) else 'OFF'}] "
         f"{strategy_fb.status_line}",
         flush=True,
@@ -479,13 +485,13 @@ def run_once(
         flush=True,
     )
     print(
-        f"S19      : ENABLE_S19 paper 1h aligned body+close FLIP "
+        f"S19      : ENABLE_S19 off (not a live book) "
         f"[{'ON' if portfolio.is_enabled(strategy_s19.name) else 'OFF'}] "
         f"{strategy_s19.status_line}",
         flush=True,
     )
     print(
-        f"S20      : ENABLE_S20 paper 1h fade HL (buy bounced low / short rejected high) "
+        f"S20      : ENABLE_S20 off (not a live book) "
         f"[{'ON' if portfolio.is_enabled(strategy_s20.name) else 'OFF'}] "
         f"{strategy_s20.status_line}",
         flush=True,
@@ -499,7 +505,7 @@ def run_once(
         )
     live_ok, live_why = is_live_mode_allowed()
     print(
-        f"Mode     : {'PAPER (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
+        f"Mode     : {'NOT ARMED (DRY_RUN)' if dry_run else ('LIVE' if live_ok else f'LIVE-ARMED but blocked ({live_why})')}",
         flush=True,
     )
     print(f"Broker   : {broker.status_line}", flush=True)
@@ -2197,8 +2203,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(slim default S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S19 paper until 40% WR% AC, "
-        f"FLOW_BRAIN off, S20 off, S18 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off)",
+        f"(live desk S5/S8/S13/S16/S18/overnight gap — S4 off, S11 off, S19/S20/FLOW off, "
+        f"S18 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off. No paper fills.)",
         flush=True,
     )
 

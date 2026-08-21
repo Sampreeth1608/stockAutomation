@@ -17,7 +17,7 @@ def test_station_is_the_operator_page() -> None:
     assert "Stop bot" in html
     assert "Start feed only" in html
     assert "Save strategies" in html
-    assert "Paper is already running" in html
+    assert "Not armed" in html
     assert "Stop live" in html
     assert ">Paper only<" not in html
     assert "Wallet ₹" in html
@@ -82,18 +82,18 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v60" in html
-    assert " · v60" in html
+    assert "gp-header-v61" in html
+    assert " · v61" in html
     assert 'id="desk-ver"' in html
-    assert ">v60</span>" in html
-    assert "<title>Gold Petal v60</title>" in html
+    assert ">v61</span>" in html
+    assert "<title>Gold Petal v61</title>" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
     assert "function renderBooksWhy" in html
     assert "waiting_1h_close" in html
     assert "need_prev_1h" in html
-    assert "squares leftover Angel even in Paper" in html
+    assert "squares leftover Angel even when not armed" in html
     assert "already squared in the Angel app" in html
     assert "Exit will not open a new book" in html
     assert "Exit flattens that book only after you Arm live" not in html
@@ -117,8 +117,8 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="amise"' not in html
     assert "AMISE" not in html
     assert "collectArmBody(\"keep\")" in html
-    assert "PAPER · Angel open" in html
-    assert "Save does not switch you to Paper" in html
+    assert "NOT ARMED · Angel open" in html
+    assert "Save does not Stop live" in html
     assert "Enable regime is off — observe only" not in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
@@ -162,7 +162,8 @@ def test_station_is_the_operator_page() -> None:
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
     assert "S5 / S8 / S13 / S16 / S18 / overnight gap" in html
-    assert "S19 / S20 stay paper until they hit 40%" in html
+    assert "S19 / S20 stay off" in html
+    assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "live_eligible" in html
     assert "exact IST click time" not in html
@@ -184,10 +185,10 @@ def test_station_is_the_operator_page() -> None:
     assert 'data-tab="ticks"' not in html
     assert 'data-tab="signals"' not in html
     assert 'id="books"' not in html
-    assert "Approve already papers" in html
-    assert "only Angel" in html
-    assert "40% WR% AC" in html
-    assert "no book at 40% WR% AC yet" in html
+    assert "This tab is Angel" in html
+    assert "40% WR% AC" not in html
+    assert "no book at 40% WR% AC yet" not in html
+    assert "Tick Lots or ₹ on a live book" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
@@ -202,7 +203,8 @@ def test_station_is_the_operator_page() -> None:
     assert "OVERNIGHT_GAP" in html
     assert "overnight gap" in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
-    assert "S19 / S20 stay paper until they hit 40%" in html
+    assert "S19 / S20 stay paper until they hit 40%" not in html
+    assert "S19 / S20 stay off" in html
     assert "Download ticks CSV" in html
     assert "every stored Angel snap-quote tick" in html
     assert "bid 1–5 price+qty" in html
@@ -232,8 +234,8 @@ def test_station_is_the_operator_page() -> None:
     paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S16_HHHL_WICK_1H" in paper
     assert "S18_OHLC_VOL_HTF" in paper
-    assert "S19_BODY_CLOSE_1H" in paper
-    assert "S20_FADE_HL" in paper
+    assert "S19_BODY_CLOSE_1H" not in paper
+    assert "S20_FADE_HL" not in paper
     assert "OVERNIGHT_GAP" in paper
     assert "S13_HHHL_DAY" in paper
     assert "S11_DISCOVERED" not in paper
@@ -267,24 +269,25 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Enable regime" not in html
     assert 'id="btn-regime"' not in html
     assert "/api/desk/regime" not in html
-    assert "PAPER · Angel open" in html
+    assert "NOT ARMED · Angel open" in html
     assert "collectArmBody(\"keep\")" in html
     assert "live path" not in html
     assert "live_unlocked && live.dry_run" not in html
-    assert "Exit squares leftover even in Paper" in html
+    assert "Exit squares leftover even when not armed" in html
     assert "already squared in the Angel app" in html
     assert "Angel CLOSE only if live-armed" not in html
     assert "AMISE" not in html
     assert "loadMl" not in html
     assert "loadLab" not in html
     assert "After charges" in html
-    assert "Approve already papers" in html
-    assert "only Angel" in html
-    assert "40% WR% AC" in html
+    assert "This page is Angel" in html
+    assert "40% WR% AC" not in html
     assert "S5 / S8 / S13 / S16 / S18 / overnight gap can go live" in html
-    assert "S19 / S20 stay paper until 40% WR% AC" in html
+    assert "S19 / S20 stay off" in html
+    assert "S19 / S20 stay paper until 40% WR% AC" not in html
     assert "S18 / S19 / S20 stay paper until 40% WR% AC" not in html
-    assert "no book at 40% WR% AC yet" in html
+    assert "no book at 40% WR% AC yet" not in html
+    assert "Tick Lots or ₹ on a live book" in html
     assert 'id="paper-books"' not in html
     assert "data-in=" not in html
     assert "function currentInBot" in html
@@ -407,7 +410,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "def book_health" in runner
     assert '"books": book_health()' in runner
     assert "mirror_positions_from_signals" in runner
-    assert "live_only=not dry_run" in runner
+    assert "live_only=True" in runner
+    assert "not_armed" in runner
+    assert "LIVE_ELIGIBLE_BOOKS" in runner
     assert "FORMULA_GATE_BOOKS" in runner
     assert "MOOD_EXEMPT_BOOKS" in runner
     assert "/api/bot/start" in text
@@ -475,8 +480,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v60" in cmd
-    assert "?v=60" in cmd
+    assert "Gold Petal v61" in cmd
+    assert "?v=61" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -527,7 +532,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v60"
+    assert payload["desk_build"] == "v61"
 
 
 def test_login_html_is_the_gate() -> None:

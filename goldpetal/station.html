@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v60</title>
+<title>Gold Petal v61</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v60: ticks CSV is full snap-quote (LTP TBQ depth OI), not OHLC-only -->
+<!-- gp-header-v61: live-only desk — no paper fills; S19/S20 off -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -171,7 +171,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v60</span>
+        <span class="ver" id="desk-ver">v61</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -183,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v60</div>
+      <div class="clock" id="clock">IST — · v61</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -215,7 +215,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="liveopen-panel">
         <h2>Live Open Positions</h2>
-        <p class="hint">Angel is the open count. If you already squared in the Angel app, this tab is empty once the bot reads Angel flat — Exit will not open a new book. <b>Exit</b> squares leftover Angel even in Paper — it does not Arm live. Closed round-trips are on Blotter. Arm / size stay on Live.</p>
+        <p class="hint">Angel is the open count. If you already squared in the Angel app, this tab is empty once the bot reads Angel flat — Exit will not open a new book. <b>Exit</b> squares leftover Angel even when not armed — it does not Arm live. Closed round-trips are on Blotter. Arm / size stay on Live.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -239,7 +239,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="live-panel" hidden>
         <h2>Real Angel P&amp;L</h2>
-        <p class="hint" id="live-pnl-note">After you Arm live, this is after-charges ₹ on the lots that actually filled (tax excluded). Raising Live Lots does not rewrite yesterday's closes. A paper fill is not an Angel order. Angel app is the fill confirmation. Open contracts are on Live Open Positions. Closed round-trips are on Blotter.</p>
+        <p class="hint" id="live-pnl-note">After you Arm live, this is after-charges ₹ on the lots that actually filled (tax excluded). Raising Live Lots does not rewrite yesterday's closes. Angel app is the fill confirmation. Open contracts are on Live Open Positions. Closed round-trips are on Blotter.</p>
         <div class="kpis">
           <div class="kpi"><b>Live open</b><span id="live-kpi-open">0</span></div>
           <div class="kpi"><b>Live closed</b><span id="live-kpi-closed">0</span></div>
@@ -256,10 +256,10 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:1.1rem">Live books + money</h2>
-        <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it is live-eligible (S5 / S8 / S13 / S16 / S18 / overnight gap, or another paper book at 40% WR% AC). Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. Overnight gap closes at next open, not MARKET_CLOSE. S19 / S20 stay paper until they hit 40% WR% AC. You Arm live — the desk does not. Open contracts are on Live Open Positions.</p>
+        <p class="hint">This tab is Angel. Books: S5 / S8 / S13 / S16 / S18 / overnight gap. Tick <b>Lots</b> or <b>₹</b> if you want that book to send Angel after Arm live. Overnight gap closes at next open, not MARKET_CLOSE. S19 / S20 stay off. You Arm live — the desk does not. Open contracts are on Live Open Positions.</p>
         <div class="arm-box">
-          <h3 id="arm-status">Paper</h3>
-          <p class="hint" id="money-line">Paper is running. Angel leftover contracts still show on Live Open Positions until Angel is flat.</p>
+          <h3 id="arm-status">Not armed</h3>
+          <p class="hint" id="money-line">Not armed. Angel leftover contracts still show on Live Open Positions until Angel is flat.</p>
           <ul class="steps" id="arm-steps"></ul>
           <div class="row">
             <label class="chk">Ceiling lots <input class="cap" type="number" id="live-max" min="1" max="1000" value="1"/></label>
@@ -273,11 +273,11 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
             <button class="btn danger" id="btn-arm-live" type="button">Arm live</button>
             <button class="btn ok" id="btn-mode-paper" type="button" hidden>Stop live</button>
           </div>
-          <p class="hint">Tick <b>₹</b>, type that book’s money in <b>amount</b> (or Wallet if only one ₹ book), then Save. That number is live capital — not the paper wallet split. Ceiling lots caps Angel size (hard max 1000). Leave test size at 3. Ceiling above 10: type <b>SIZE</b>, Save, RESTART — do not Arm live again.</p>
+          <p class="hint">Tick <b>₹</b>, type that book’s money in <b>amount</b> (or Wallet if only one ₹ book), then Save. That number is live capital. Ceiling lots caps Angel size (hard max 1000). Leave test size at 3. Ceiling above 10: type <b>SIZE</b>, Save, RESTART — do not Arm live again.</p>
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked; new books get the same box). Unticked = delivery overnight. Then Save. Type LIVE and Arm live only when you want Angel. After you are armed, Save + RESTART changes size — Save does not switch you to Paper.</p>
+        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked; new books get the same box). Unticked = delivery overnight. Then Save. Type LIVE and Arm live only when you want Angel. After you are armed, Save + RESTART changes size — Save does not Stop live.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th>Intraday</th><th></th></tr>
@@ -318,7 +318,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <p class="flash" id="flash-dl"></p>
         <h2 style="margin-top:1rem">Angel orders</h2>
-        <p class="hint">A row with an order id is what went to Angel. Skip Why: <code>bot_still_paper_restart_required</code> = type RESTART after Arm live. Empty after a paper fill = bot still paper in RAM. Live closed round-trips are on Blotter, not here.</p>
+        <p class="hint">A row with an order id is what went to Angel. Skip Why: <code>bot_still_paper_restart_required</code> = type RESTART after Arm live. Empty after Arm without RESTART = bot still not-armed in RAM. Live closed round-trips are on Blotter, not here.</p>
         <table>
           <thead>
             <tr><th>Time</th><th>Book</th><th>Side</th><th class="num">Qty</th><th>Result</th><th>Order</th><th>Why</th></tr>
@@ -365,7 +365,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <h2>Engine</h2>
         <p class="mono" id="engine-line">waiting for desk…</p>
         <p class="hint" id="books-why">Why each book is idle — waiting for desk…</p>
-        <p class="hint">1h books (S16 / S18 / S19) only decide on the finished hour. Between hours they say waiting_1h_close. need_prev_1h means this session has no earlier hour yet, so the first decision is the second hour close.</p>
+        <p class="hint">1h books (S16 / S18) only decide on the finished hour. Between hours they say waiting_1h_close. need_prev_1h means this session has no earlier hour yet, so the first decision is the second hour close.</p>
         <div class="row" style="margin-top:.4rem">
           <button class="btn ok" id="btn-bot-start" type="button">Start bot</button>
           <button class="btn danger" id="btn-bot-stop" type="button">Stop bot</button>
@@ -384,8 +384,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="pane">
         <h2>Mode</h2>
-        <p class="armed" id="mode-line">Paper</p>
-        <p class="hint">Paper is already running. Arm live is on the Live tab. Leftover Angel contracts still show there.</p>
+        <p class="armed" id="mode-line">Not armed</p>
+        <p class="hint">Not armed. Arm live is on the Live tab. Leftover Angel contracts still show there.</p>
         <div class="row" style="margin-top:.35rem">
           <button class="btn" id="btn-goto-live-side" type="button">Open Live tab</button>
         </div>
@@ -406,7 +406,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
 const $ = (id) => document.getElementById(id);
 const PAPER_BOOKS = [
   "S5_MINEDGE", "S8_NET_ZIGZAG",
-  "S13_HHHL_DAY", "S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF", "S19_BODY_CLOSE_1H", "S20_FADE_HL", "OVERNIGHT_GAP",
+  "S13_HHHL_DAY", "S16_HHHL_WICK_1H", "S18_OHLC_VOL_HTF", "OVERNIGHT_GAP",
 ];
 const SHORT = {
   S4_OVERNIGHT: "S4 HHHL swing", S5_MINEDGE: "S5 minedge", S8_NET_ZIGZAG: "S8 zigzag",
@@ -573,8 +573,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v60";
-    document.title = "Gold Petal v60";
+    if (clock) clock.textContent = "IST " + ist + " · v61";
+    document.title = "Gold Petal v61";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -775,7 +775,7 @@ function showMainTab() {
   if (hist) hist.hidden = true;
   if (watchTab === "dl") $("grid-meta").textContent = "Downloads — ticks, signals, trades, ZIP, Sheets. Pick From and To (IST).";
   if (watchTab === "live") $("grid-meta").textContent = "Live — Arm and size. Open Angel contracts are on Live Open Positions. Closed round-trips are on Blotter.";
-  if (watchTab === "liveopen") $("grid-meta").textContent = "Live Open Positions — Angel contracts still open. Exit squares leftover even in Paper. Closed round-trips are on Blotter.";
+  if (watchTab === "liveopen") $("grid-meta").textContent = "Live Open Positions — Angel contracts still open. Exit squares leftover even when not armed. Closed round-trips are on Blotter.";
   if (watchTab === "trades") $("grid-meta").textContent = "Blotter — live closed round-trips only.";
 }
 function rangeQs() {
@@ -931,7 +931,7 @@ function fillLiveClosed(p) {
       <td class="num ${pnlClass(ac)}">${money(ac)}</td>
       <td>${esc(t.exit_reason || t.entry_reason || "")}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8">No live closed trades yet — Arm live + RESTART, then wait for an Angel order id. A paper fill here does not count.</td></tr>`;
+  }).join("") || `<tr><td colspan="8">No live closed trades yet — Arm live + RESTART, then wait for an Angel order id.</td></tr>`;
 }
 function fillAngelOrders(p) {
   const el = $("dl-orders-body");
@@ -949,7 +949,7 @@ function fillAngelOrders(p) {
       <td>${esc(o.order_id || "")}</td>
       <td>${esc(o.reason || "")}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="7">No Angel order rows. Type RESTART after Arm live if a fill stayed paper.</td></tr>`;
+  }).join("") || `<tr><td colspan="7">No Angel order rows. Type RESTART after Arm live if the bot started before you armed.</td></tr>`;
 }
 function renderDesk(d) {
   lastDesk = d;
@@ -968,7 +968,7 @@ function renderDesk(d) {
   const feed = bot.feed_source || "off";
   const armed = !!live.would_place_real_orders;
   const angelOpen = ((d.live_pnl || lastTape.live_pnl || {}).positions || []).some((t) => t && t.status === "OPEN");
-  const mode = armed ? "ARMED" : (angelOpen ? "PAPER · Angel open" : (live.dry_run === false ? "LIVE env" : "PAPER"));
+  const mode = armed ? "ARMED" : (angelOpen ? "NOT ARMED · Angel open" : (live.dry_run === false ? "LIVE env" : "NOT ARMED"));
   $("pills").innerHTML = [
     pill(mode, armed ? "bad" : (angelOpen ? "warn" : "ok")),
     pill(bot.running ? "BOT ON" : "BOT OFF", bot.running ? "ok" : "warn"),
@@ -1019,7 +1019,7 @@ function renderDesk(d) {
         <td><input type="checkbox" data-intraday="${esc(name)}" ${intraOn ? "checked" : ""} ${gap ? "disabled" : ""} title="${gap ? "closes at next open" : "flatten at MARKET_CLOSE"}"/></td>
         <td><button type="button" class="btn danger tiny" data-exit="${esc(name)}" ${waiting ? "disabled" : ""}>${waiting ? "…" : "Exit"}</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="10">no book at 40% WR% AC yet</td></tr>`;
+    }).join("") || `<tr><td colspan="10">Tick Lots or ₹ on a live book</td></tr>`;
     $("live-max").value = live.live_max_lots || 1;
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
@@ -1030,18 +1030,18 @@ function renderDesk(d) {
   const armStatus = $("arm-status");
   const statusText = armed
     ? ("ARMED — " + (liveNames.join(", ") || "no book picked"))
-    : (angelOpen ? "Paper — Angel still has a contract" : "Paper — new Angel orders off");
+    : (angelOpen ? "Not armed — Angel still has a contract" : "Not armed — new Angel orders off");
   if (moneyEl) moneyEl.textContent = armed
     ? ("ARMED — live-picked books send Angel orders" + (liveNames.length ? (": " + liveNames.join(", ")) : "."))
     : (angelOpen
-      ? "Paper mode — leftover Angel shows on Live Open Positions until Angel is flat. Exit squares leftover even in Paper, or clears it if you already squared in the Angel app. Does not Arm live."
-      : "Paper is already running. New Angel orders stay off until you Arm live.");
+      ? "Not armed — leftover Angel shows on Live Open Positions until Angel is flat. Exit squares leftover even when not armed, or clears it if you already squared in the Angel app. Does not Arm live."
+      : "Not armed. New Angel orders stay off until you Arm live.");
   if (modeLine) {
     modeLine.textContent = statusText;
     modeLine.className = "armed";
     if (!armed) modeLine.style.color = "";
   }
-  if (armStatus) armStatus.textContent = armed ? "Armed" : "Paper";
+  if (armStatus) armStatus.textContent = armed ? "Armed" : "Not armed";
   const paperBtn = $("btn-mode-paper");
   if (paperBtn) paperBtn.hidden = !armed;
   const steps = $("arm-steps");
@@ -1058,14 +1058,13 @@ function renderDesk(d) {
       row(em, false, em ? "Emergency clear" : "Emergency on — Clear first"),
       row(trading, false, trading ? "Trading on" : "Trading off"),
       row(picked, true, picked ? ("Live books: " + liveNames.join(", ")) : "No live book picked — tick Lots or ₹ on a live-eligible book"),
-      row(liveEnv && unlocked, true, liveEnv && unlocked ? "Mode LIVE" : "Mode Paper — type LIVE to Arm live"),
+      row(liveEnv && unlocked, true, liveEnv && unlocked ? "Mode LIVE" : "Not armed — type LIVE to Arm live"),
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v60"];
+  const foot = ["v61"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v60";
-  if (lastHist.lots) foot.push(lastHist.lots + " lots");
+  if (ver) ver.textContent = d.desk_build || "v61";
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
   renderLivePnl();
@@ -1278,8 +1277,8 @@ function collectArmBody(mode) {
   return body;
 }
 function exitAll(flashId) {
-  if (!window.confirm("Flatten EVERY book now? Paper CLOSE each. Leftover Angel squares even in Paper. Does not Arm live. Does not stop paper books.")) return;
-  act(flashId, "/api/desk/flatten", { all: true }, "Exit all queued — leftover Angel squares even in Paper.");
+  if (!window.confirm("Flatten EVERY book now? Leftover Angel squares even when not armed. Does not Arm live.")) return;
+  act(flashId, "/api/desk/flatten", { all: true }, "Exit all queued — leftover Angel squares even when not armed.");
 }
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
@@ -1287,14 +1286,14 @@ document.addEventListener("click", (ev) => {
   if (!btn.closest("#live-books") && !btn.closest("#live-pnl-open")) return;
   const name = btn.dataset.exit;
   const label = shortName(name);
-  if (!window.confirm("Flatten " + label + " now? This book only. Leftover Angel squares even in Paper. Does not Arm live.")) return;
-  act("flash-liveopen", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — leftover Angel squares even in Paper.");
+  if (!window.confirm("Flatten " + label + " now? This book only. Leftover Angel squares even when not armed. Does not Arm live.")) return;
+  act("flash-liveopen", "/api/desk/flatten", { strategy: name }, "Exit queued for " + label + " — leftover Angel squares even when not armed.");
 });
 $("btn-exit-all-live").onclick = () => exitAll("flash-live");
 if ($("btn-exit-all-open")) $("btn-exit-all-open").onclick = () => exitAll("flash-liveopen");
 $("btn-save-live").onclick = () => {
   const body = collectArmBody("keep");
-  act("flash-live", "/api/desk/arm", body, "Saved. Paper/Live unchanged. Type RESTART to load RAM.");
+  act("flash-live", "/api/desk/arm", body, "Saved. Arm/Stop unchanged. Type RESTART to load RAM.");
 };
 $("btn-arm-live").onclick = () => {
   const word = ($("live-word").value || "").trim();
@@ -1305,10 +1304,10 @@ $("btn-arm-live").onclick = () => {
   $("live-word").value = "";
 };
 $("btn-mode-paper").onclick = () => {
-  if (!window.confirm("Switch to Paper? Angel stops. Open positions stay until you Exit.")) return;
+  if (!window.confirm("Stop live? New Angel orders off. Open positions stay until you Exit.")) return;
   const body = collectArmBody("paper");
   body.confirm = "";
-  act("flash-money", "/api/desk/arm", body, "Paper mode. Open Angel contracts stay until you Arm live + Exit.");
+  act("flash-money", "/api/desk/arm", body, "Not armed. Open Angel contracts stay until you Exit.");
 };
 document.addEventListener("change", (ev) => {
   const el = ev.target && ev.target.closest && ev.target.closest("input[data-size]");

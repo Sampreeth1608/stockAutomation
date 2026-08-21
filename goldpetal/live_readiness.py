@@ -1,9 +1,9 @@
 """Live-money readiness for the control panel (gates, size, .env writes).
 
-Paper 100 lots is not live size: tick Lots (contracts) or tick ₹ (budget / LTP).
+Paper fills are off. Tick Lots (contracts) or tick ₹ (budget / LTP).
 Both are capped by LIVE_MAX_LOTS (hard max 1000). Ceiling above 10 needs SIZE.
-DRY_RUN=false from this panel requires typing LIVE.
-Save writes .env only; Restart supervise loads it into the bot.
+DRY_RUN=false from this panel requires typing LIVE. Until then the bot
+does not open books. Save writes .env only; Restart supervise loads it.
 """
 
 from __future__ import annotations
@@ -46,8 +46,7 @@ PAPER_ONLY_BOOKS = frozenset(
         "FLOW_BRAIN",
     }
 )
-# Seed live books plus overnight gap and S18. Other paper books (S19/S20)
-# join the Live tab only after closed trades and WR% AC ≥ 40. You Arm live.
+# Live desk books. S19/S20/FLOW stay off — no paper path. You Arm live.
 LIVE_ELIGIBLE_BOOKS = frozenset(
     {
         "S5_MINEDGE",
@@ -64,7 +63,7 @@ NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN"})
 
 
 def summary_qualifies_live(summary: dict[str, Any] | None) -> bool:
-    """Closed paper trades and WR% after Angel charges (tax excluded) ≥ 40."""
+    """Closed live trades and WR% after Angel charges (tax excluded) ≥ 40."""
     if not summary:
         return False
     try:
@@ -110,13 +109,12 @@ def book_may_go_live(
     *,
     summaries: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
-    """Angel may use this book: seed live set, or any paper book at ≥40% WR% AC."""
+    """Angel may use this book: live desk set only. No paper-WR promotion."""
+    del summaries
     n = str(name).strip()
-    if n in NEVER_LIVE_BOOKS or n not in set(paper_strategy_names()):
+    if n in NEVER_LIVE_BOOKS:
         return False
-    if n in LIVE_ELIGIBLE_BOOKS:
-        return True
-    return n in qualified_live_names(summaries=summaries)
+    return n in LIVE_ELIGIBLE_BOOKS
 
 
 def ensure_overnight_gap_enable(*, path: Path | None = None) -> dict[str, Any]:
@@ -189,7 +187,7 @@ def apply_panel_live_env(
             "ok": False,
             "error": (
                 f"LIVE_MAX_LOTS from this panel must be 1–{PANEL_LIVE_MAX_LOTS} "
-                f"(got {lots}). Paper 100 is not live size."
+                f"(got {lots}). That is not live size."
             ),
         }
     if lots > SAFE_LIVE_MAX_LOTS and str(size_confirm).strip() != SIZE_CONFIRM_WORD:
@@ -203,7 +201,7 @@ def apply_panel_live_env(
     if not dry_run and str(confirm).strip() != LIVE_CONFIRM_WORD:
         return {
             "ok": False,
-            "error": "Type LIVE to set DRY_RUN=false. Leave Paper only checked for paper.",
+            "error": "Type LIVE to set DRY_RUN=false. Stay not-armed until you do.",
         }
     from analytics.env_bridge import write_env_updates
 
@@ -230,7 +228,7 @@ def panel_restart_allowed(confirm: str) -> tuple[bool, str]:
 
 
 def current_in_bot_names(*, path: Path | None = None) -> list[str]:
-    """ENABLE_* true names already in paper. Live tab does not edit this list."""
+    """ENABLE_* true names already on the live desk. Live tab does not edit this list."""
     from analytics.env_bridge import strategy_enable_snapshot
 
     snap = strategy_enable_snapshot(path=path)
@@ -253,20 +251,15 @@ def apply_desk_books(
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
-    Live pick is the seed live set (incl. overnight gap and S18), or a paper book at 40% WR% AC.
+    Live pick is the live desk set (S5/S8/S13/S16/S18/overnight gap).
     """
-    from control_state import load_state, paper_strategy_names, set_intraday_books, set_live_approved
+    from control_state import paper_strategy_names, set_intraday_books, set_live_approved
 
+    del qualified
     known = list(paper_strategy_names())
     in_set = [str(n).strip() for n in in_bot if str(n).strip() in known]
     live_raw = [str(n).strip() for n in live if str(n).strip() in known]
-    extra = (
-        {str(n).strip() for n in qualified if str(n).strip()}
-        if qualified is not None
-        else set(qualified_live_names())
-    )
-    prev = set(load_state(path=state_path).live_approved or [])
-    allowed = (set(LIVE_ELIGIBLE_BOOKS) | extra | prev) - set(NEVER_LIVE_BOOKS)
+    allowed = set(LIVE_ELIGIBLE_BOOKS) - set(NEVER_LIVE_BOOKS)
     live_set = [n for n in live_raw if n in in_set and n in allowed]
     skipped = [n for n in live_raw if n not in live_set]
     en = apply_panel_enables(in_set, path=path)
@@ -318,14 +311,14 @@ def apply_desk_arm(
     state_path: Path | None = None,
     capital_path: Path | None = None,
 ) -> dict[str, Any]:
-    """One save: live picks + Lots or ₹ per book + Paper or Live. Type LIVE to arm Angel.
+    """One save: live picks + Lots or ₹ per book + Arm or Stop live. Type LIVE to arm Angel.
 
     Tick Lots or tick ₹ on a row — that book is the live pick. Lots = contracts.
     ₹ = floor(budget / LTP), then ceiling lots. Do not write empty ₹ as 0.
-    Paper: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
-    mode=keep (Save strategies) does not change Paper/Live or unlock.
-    Does not restart the bot. Empty in_bot keeps current ENABLE_* (Approve
-    already papers). Live picks are unioned into in_bot so Angel is not skipped.
+    Not armed: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
+    mode=keep (Save strategies) does not change Arm/Stop or unlock.
+    Does not restart the bot. Empty in_bot keeps current ENABLE_*. Live picks
+    are unioned into in_bot so Angel is not skipped.
     Empty live list on keep keeps the current live picks (does not wipe).
     Does not ENABLE research books that are not live-eligible.
     """
@@ -344,7 +337,7 @@ def apply_desk_arm(
     if want == "live" and confirm_word != LIVE_CONFIRM_WORD:
         return {
             "ok": False,
-            "error": "Type LIVE to arm. Paper stays on until you do.",
+            "error": "Type LIVE to arm. New Angel orders stay off until you do.",
         }
 
     incoming = [str(n).strip() for n in (in_bot or []) if str(n).strip()]
@@ -357,7 +350,7 @@ def apply_desk_arm(
         ]
     if not incoming:
         incoming = current_in_bot_names(path=path)
-    can_live = set(LIVE_ELIGIBLE_BOOKS) | set(qualified_live_names())
+    can_live = set(LIVE_ELIGIBLE_BOOKS)
     for name in live_names:
         if name in can_live and name not in incoming:
             incoming.append(name)
@@ -419,22 +412,22 @@ def apply_desk_arm(
     if keep_mode:
         st = load_state(path=state_path)
         live_note = (
-            "Saved live picks / size / Intraday. Paper/Live mode unchanged. "
+            "Saved live picks / size / Intraday. Arm/Stop unchanged. "
             "Type RESTART to load RAM."
         )
     elif want == "live":
         st = set_live_unlocked(True, path=state_path, note="desk Arm live")
         live_note = (
             "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
-            "Angel fires only on live-picked books at ≥40% WR% AC (seed four S5/S8/S13/S16 included)."
+            "Angel fires only on live-picked books (S5/S8/S13/S16/S18/overnight gap)."
         )
         if not books.get("live_approved"):
             live_note += " No live book is picked yet — check Live on those rows first."
     else:
-        st = set_live_unlocked(False, path=state_path, note="desk Paper mode")
+        st = set_live_unlocked(False, path=state_path, note="desk Stop live")
         live_note = (
-            "Paper mode saved. New Angel orders are off. Open Angel contracts stay "
-            "until you Arm live + Exit. Type RESTART to load RAM."
+            "Not armed. New Angel orders are off. Open Angel contracts stay "
+            "until you Exit. Type RESTART to load RAM."
         )
 
     return {
@@ -460,10 +453,11 @@ def apply_panel_enables(
 
     mapping = strategy_enable_map()
     known = list(mapping.keys())
+    blocked = set(DESK_FORCE_OFF) | set(PAPER_ONLY_BOOKS)
     want = [
         str(n).strip()
         for n in enabled_names
-        if str(n).strip() in mapping and str(n).strip() not in DESK_FORCE_OFF
+        if str(n).strip() in mapping and str(n).strip() not in blocked
     ]
     res = apply_strategy_enables(want, known=known, path=path)
     res["enabled"] = want
@@ -544,7 +538,7 @@ def desk_snapshot(*, summaries: dict[str, dict[str, Any]] | None = None) -> dict
     live_ok, _why = is_live_mode_allowed()
     approved = list(st.live_approved or [])
     intra = set(st.intraday_books or [])
-    stats = summaries if summaries is not None else paper_summaries_for_live(wait=False)
+    stats = summaries if summaries is not None else {}
     armed = any(book_may_go_live(n, summaries=stats) for n in approved)
     from analytics.env_bridge import strategy_enable_snapshot
 
@@ -600,7 +594,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
     cap = _live_max()
     approved = list(st.live_approved or [])
     intra = set(st.intraday_books or [])
-    stats = paper_summaries_for_live()
+    stats: dict[str, dict[str, Any]] = {}
     armed = any(book_may_go_live(n, summaries=stats) for n in approved)
 
     steps = [
@@ -621,7 +615,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "ok": not dry,
             "label": "DRY_RUN=false in .env",
             "detail": (
-                "still true — paper only. Uncheck Paper only, type LIVE, Save, then Restart."
+                "still true — not armed. Type LIVE, Arm live, then Restart."
                 if dry
                 else "false — Angel orders can fire when other gates pass + after Restart"
             ),
@@ -639,7 +633,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "detail": (
                 ", ".join(n for n in approved if book_may_go_live(n, summaries=stats))
                 if any(book_may_go_live(n, summaries=stats) for n in approved)
-                else "none — paper stays paper. Live tab lists books at ≥40% WR% AC."
+                else "none — tick Lots or ₹ on a live book."
             ),
         },
         {
@@ -647,7 +641,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             "ok": True,
             "label": f"LIVE_MAX_LOTS={cap} (hard ceiling)",
             "detail": (
-                "Start live at 1–3. Paper 100 lots is NOT live size. "
+                "Start live at 1–3. Paper 100 lots is not live size. "
                 f"Live qty = min(book qty, {cap}). Hard cap {PANEL_LIVE_MAX_LOTS}. "
                 f"Ceiling above {SAFE_LIVE_MAX_LOTS} needs SIZE on the desk."
             ),
@@ -723,7 +717,7 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
             "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16/overnight gap. "
-            "You Arm live. S18/S19/S20/AMISE stay paper. Size is LIVE_MAX_LOTS (hard cap "
-            f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS}), not paper 100."
+            "You Arm live. S19/S20/AMISE stay off. Size is LIVE_MAX_LOTS (hard cap "
+            f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS})."
         ),
     }

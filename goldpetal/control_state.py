@@ -39,7 +39,7 @@ class ControlState:
     trading_enabled: bool = True
     # Live path stays locked until operator explicitly unlocks AND DRY_RUN=false.
     live_unlocked: bool = False
-    # Strategies the operator approved for paper after weekend review.
+    # Strategies the operator approved (desk allowlist; live still needs Arm).
     paper_approved: list[str] = field(default_factory=list)
     # Strategies approved to go live (still need live_unlocked + DRY_RUN=false).
     live_approved: list[str] = field(default_factory=list)
@@ -266,17 +266,17 @@ CORE_SLIM_PAPER: tuple[str, ...] = (
     "S13_HHHL_DAY",
     "S16_HHHL_WICK_1H",
     "S18_OHLC_VOL_HTF",
-    "S19_BODY_CLOSE_1H",
-    "S20_FADE_HL",
     "OVERNIGHT_GAP",
 )
 ALL_STRATEGY_NAMES: tuple[str, ...] = CORE_STRATEGY_NAMES + AMISE_SLOT_BOOKS
+# AMISE names stay in this constant for research tests. The live desk list
+# is paper_strategy_names() — S5/S8/S13/S16/S18/overnight gap only.
 SLIM_PAPER_STRATEGIES: tuple[str, ...] = CORE_SLIM_PAPER + AMISE_SLOT_BOOKS
 
 
 def paper_strategy_names() -> tuple[str, ...]:
-    """Desk / runner paper books: slim core + S21–S24 and any later AMISE slots."""
-    return CORE_SLIM_PAPER + amise_books_now()
+    """Live desk books. No paper-only S19/S20, no AMISE slots."""
+    return CORE_SLIM_PAPER
 
 
 def all_strategy_names() -> tuple[str, ...]:

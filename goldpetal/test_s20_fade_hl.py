@@ -178,7 +178,7 @@ def test_after_charges_excludes_tax() -> None:
 
 def test_paper_wired_not_live() -> None:
     assert S20_NAME in ALL_STRATEGY_NAMES
-    assert S20_NAME in SLIM_PAPER_STRATEGIES
+    assert S20_NAME not in SLIM_PAPER_STRATEGIES
     assert S20_NAME in PAPER_ONLY_BOOKS
     root = Path(__file__).resolve().parent
     station = (root / "station.html").read_text(encoding="utf-8")
@@ -187,7 +187,7 @@ def test_paper_wired_not_live() -> None:
     env_bridge = (root / "analytics" / "env_bridge.py").read_text(encoding="utf-8")
     assert S20_NAME in station
     paper = station.split("const PAPER_BOOKS")[1].split("];")[0]
-    assert S20_NAME in paper
+    assert S20_NAME not in paper
     assert "s20_from_env" in runner
     assert "ENABLE_S20" in runner
     assert 'on("ENABLE_S20", "false")' in portfolio

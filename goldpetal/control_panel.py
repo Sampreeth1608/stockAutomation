@@ -277,7 +277,12 @@ def desk_payload() -> dict[str, Any]:
             "note": "Live P&L unavailable",
         }
     try:
-        live_desk = desk_snapshot()
+        live_stats = {
+            str(r.get("strategy")): r
+            for r in (live_pnl.get("scoreboard") or [])
+            if isinstance(r, dict) and r.get("strategy")
+        }
+        live_desk = desk_snapshot(summaries=live_stats)
     except Exception:
         live_desk = {
             "dry_run": True,
@@ -302,7 +307,7 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v60",
+        "desk_build": "v61",
     }
 
 

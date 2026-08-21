@@ -88,7 +88,7 @@ def test_after_charges_excludes_tax() -> None:
 
 def test_paper_wired_not_live() -> None:
     assert S19_NAME in ALL_STRATEGY_NAMES
-    assert S19_NAME in SLIM_PAPER_STRATEGIES
+    assert S19_NAME not in SLIM_PAPER_STRATEGIES
     assert S19_NAME in PAPER_ONLY_BOOKS
     assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
     root = Path(__file__).resolve().parent
@@ -98,12 +98,12 @@ def test_paper_wired_not_live() -> None:
     env_bridge = (root / "analytics" / "env_bridge.py").read_text(encoding="utf-8")
     assert S19_NAME in station
     paper = station.split("const PAPER_BOOKS")[1].split("];")[0]
-    assert S19_NAME in paper
+    assert S19_NAME not in paper
     assert "s19_from_env" in runner
     assert "ENABLE_S19" in runner
     assert "ENABLE_S17" not in runner
-    assert 'on("ENABLE_S19", "true")' in portfolio
-    assert '"ENABLE_S19": "true"' in env_bridge
+    assert 'on("ENABLE_S19", "false")' in portfolio
+    assert '"ENABLE_S19": "false"' in env_bridge
 
 
 def test_hours_from_ohlc_keeps_volume() -> None:
