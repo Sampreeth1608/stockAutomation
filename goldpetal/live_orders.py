@@ -260,6 +260,44 @@ def lots_on_fill(
     return entry_qty or exit_qty
 
 
+def net_open_from_fills(*, path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Per-strategy Angel leftover from placed fills. BUY +qty, SELL -qty.
+
+    Signal tape can look FLAT (paper CLOSE, window cut) while Angel still
+    holds the contract. Live tab uses this net so leftover lots show OPEN.
+    """
+    nets: dict[str, int] = {}
+    last_tx: dict[str, str] = {}
+    for row in iter_placed_orders(path=path):
+        name = str(row.get("strategy") or "").strip()
+        qty = int(row.get("quantity") or 0)
+        tx = str(row.get("transaction") or "")
+        if not name or qty <= 0 or tx not in {"BUY", "SELL"}:
+            continue
+        signed = qty if tx == "BUY" else -qty
+        nets[name] = int(nets.get(name) or 0) + signed
+        last_tx[name] = tx
+    out: dict[str, dict[str, Any]] = {}
+    for name, net in nets.items():
+        if net == 0:
+            continue
+        side = "BUY" if net > 0 else "SHORT"
+        out[name] = {
+            "strategy": name,
+            "side": side,
+            "status": "OPEN",
+            "lots": abs(int(net)),
+            "entry_price": "",
+            "exit_price": "",
+            "pnl_after_charges": "",
+            "entry_reason": "angel fill leftover",
+            "exit_reason": "",
+            "source": "angel_fill",
+            "last_tx": last_tx.get(name) or "",
+        }
+    return out
+
+
 def lots_on_fill_for_trade(
     info: dict[str, Any],
     *,

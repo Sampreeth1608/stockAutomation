@@ -317,16 +317,25 @@ def apply_desk_arm(
     Tick Lots or tick ₹ on a row — that book is the live pick. Lots = contracts.
     ₹ = floor(budget / LTP), then ceiling lots. Do not write empty ₹ as 0.
     Paper: DRY_RUN=true and live stays locked. Live: DRY_RUN=false and unlock.
+    mode=keep (Save strategies) does not change Paper/Live or unlock.
     Does not restart the bot. Empty in_bot keeps current ENABLE_* (Approve
     already papers). Live picks are unioned into in_bot so Angel is not skipped.
+    Empty live list on keep keeps the current live picks (does not wipe).
     Does not ENABLE research books that are not live-eligible.
     """
-    want = str(mode or "paper").strip().lower()
+    want = str(mode or "keep").strip().lower()
     if want in {"armed", "angel", "on"}:
         want = "live"
+    keep_mode = want in {"", "keep", "same", "size"}
+    file_env = read_live_env(path=path)
+    if keep_mode:
+        want = "paper" if file_env["dry_run"] else "live"
     if want not in {"paper", "live"}:
-        return {"ok": False, "error": "mode must be paper or live"}
-    if want == "live" and str(confirm or "").strip() != LIVE_CONFIRM_WORD:
+        return {"ok": False, "error": "mode must be paper, live, or keep"}
+    confirm_word = str(confirm or "").strip()
+    if keep_mode and want == "live":
+        confirm_word = LIVE_CONFIRM_WORD
+    if want == "live" and confirm_word != LIVE_CONFIRM_WORD:
         return {
             "ok": False,
             "error": "Type LIVE to arm. Paper stays on until you do.",
@@ -334,6 +343,12 @@ def apply_desk_arm(
 
     incoming = [str(n).strip() for n in (in_bot or []) if str(n).strip()]
     live_names = [str(n).strip() for n in (live or []) if str(n).strip()]
+    if keep_mode and not live_names:
+        live_names = [
+            str(n).strip()
+            for n in (load_state(path=state_path).live_approved or [])
+            if str(n).strip()
+        ]
     if not incoming:
         incoming = current_in_bot_names(path=path)
     can_live = set(LIVE_ELIGIBLE_BOOKS) | set(qualified_live_names())
@@ -372,11 +387,18 @@ def apply_desk_arm(
         )
 
     dry = want != "live"
+    size_word = str(size_confirm or "").strip()
+    try:
+        want_lots = int(live_max_lots)
+    except (TypeError, ValueError):
+        want_lots = int(file_env.get("live_max_lots") or 1)
+    if keep_mode and want_lots == int(file_env.get("live_max_lots") or 0):
+        size_word = SIZE_CONFIRM_WORD
     env = apply_panel_live_env(
         dry_run=dry,
         live_max_lots=live_max_lots,
-        confirm=confirm,
-        size_confirm=size_confirm,
+        confirm=confirm_word,
+        size_confirm=size_word,
         path=path,
         sync_environ=path is None,
     )
@@ -388,7 +410,13 @@ def apply_desk_arm(
             "env": env,
         }
 
-    if want == "live":
+    if keep_mode:
+        st = load_state(path=state_path)
+        live_note = (
+            "Saved live picks / size / Intraday. Paper/Live mode unchanged. "
+            "Type RESTART to load RAM."
+        )
+    elif want == "live":
         st = set_live_unlocked(True, path=state_path, note="desk Arm live")
         live_note = (
             "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
@@ -399,7 +427,8 @@ def apply_desk_arm(
     else:
         st = set_live_unlocked(False, path=state_path, note="desk Paper mode")
         live_note = (
-            "Paper mode saved. Angel is off. Type RESTART to load RAM."
+            "Paper mode saved. New Angel orders are off. Open Angel contracts stay "
+            "until you Arm live + Exit. Type RESTART to load RAM."
         )
 
     return {

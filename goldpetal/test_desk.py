@@ -41,30 +41,25 @@ def test_station_is_the_operator_page() -> None:
     assert 'id="fit-strip"' not in html
     assert "You · trade" in html
     tabs = html.split('id="tabs"')[1].split("</div>")[0]
-    assert "Enable regime" in tabs
-    assert 'id="btn-regime"' in tabs
-    assert tabs.index('data-tab="you"') < tabs.index('id="btn-regime"')
-    assert 'id="mood-box"' in tabs
-    assert tabs.index('id="btn-regime"') < tabs.index('id="mood-box"')
+    assert "Enable regime" not in tabs
+    assert 'id="btn-regime"' not in tabs
+    assert 'id="mood-box"' not in tabs
     header = html.split('<header class="top">')[1].split("</header>")[0]
     assert 'id="mood-box"' not in header
     assert 'id="mood-pill"' not in header
-    mood_fn = html.split("function renderMood")[1].split("function fitFor")[0]
-    assert "box.hidden = !on" in mood_fn
-    assert "if (!on)" in mood_fn
-    assert ".mood-box[hidden]" in html
+    assert 'id="btn-regime"' not in html
+    assert "Enable regime" not in html
+    assert "function renderMood" not in html
+    assert "loadMood.busy" not in html
+    assert 'id="mood-pill"' not in html
+    assert "/api/desk/regime" not in html
+    assert ".mood-box" not in html
     assert "You — trade and teach" in html
     assert "/api/capture" in html
     assert "/api/capture/learn" in html
     assert "Send to Angel" in html
     assert "Learn my style" in html
     assert "type YOU" in html
-    assert "/api/mood" in html
-    assert 'id="mood-pill"' in html
-    assert "stand down" in html
-    assert "fall starting" in html
-    assert "MOOD_GATE" in html
-    assert "Enable regime" in html
     assert "NO TRADE" in html
     assert "Send to Angel" in html
     assert "you_skipped_rule_would_take" in html
@@ -76,7 +71,7 @@ def test_station_is_the_operator_page() -> None:
     assert "goldpetal_running" in run_fn
     sess_fn = html.split("function renderSessionLine")[1].split("function thead")[0]
     assert "waiting for desk" in sess_fn
-    quote = html.split("function renderQuote(")[1].split("function moodKind")[0]
+    quote = html.split("function renderQuote(")[1].split("function renderKpis")[0]
     assert "buy qty" not in quote
     assert "sell qty" not in quote
     assert "ticks" not in quote
@@ -84,8 +79,8 @@ def test_station_is_the_operator_page() -> None:
     assert "slice(11, 19)" not in quote
     assert "waiting for quote" in quote
     assert "tape stopped" not in quote
-    assert "gp-header-v50" in html
-    assert " · v50" in html
+    assert "gp-header-v51" in html
+    assert " · v51" in html
     assert "not today's Live Lots" in html
     assert "Raising Live Lots does not rewrite" in html
     assert "data-intraday" in html
@@ -96,12 +91,12 @@ def test_station_is_the_operator_page() -> None:
     assert "waiting for desk" in html
     assert "Gold Petal hours" in html
     assert "waiting for desk…" in html
-    assert "lastMood.gate_on === true" in html
+    assert "lastMood" not in html
     assert "setTimeout(() => loadAmise" not in html
-    assert "mkt.layers" in html
-    assert "80 ticks" in html
-    assert "reads this stack" in html
-    assert "AMISE invent" in html
+    assert "AMISE — invents challengers" in html
+    assert "collectArmBody(\"keep\")" in html
+    assert "PAPER · Angel open" in html
+    assert "Save does not switch you to Paper" in html
     assert "Enable regime is off — observe only" not in html
     assert "withDeskAuth" in html
     assert "X-GP-CSRF" in html
@@ -134,8 +129,8 @@ def test_station_is_the_operator_page() -> None:
     assert "Live round-trips" not in html
     assert 'id="blotter-live-closed"' in html
     assert 'id="dl-orders-body"' in html
-    assert 'id="btn-regime"' in html
-    assert "/api/desk/regime" in html
+    assert 'id="btn-regime"' not in html
+    assert "/api/desk/regime" not in html
     assert "function fillLiveClosed" in html
     assert "function fillAngelOrders" in html
     assert "<th>Pos</th>" in html
@@ -256,14 +251,14 @@ def test_lite_html_is_compact_controls() -> None:
     assert "Let it trade" in html
     assert "/api/capture/go" in html
     assert "/#you" in html
-    assert "/api/mood" in html
-    assert "id=\"mood-line\"" in html
-    assert "press Enable regime" in html
-    assert "regime off · books trade their formulas" in html
-    assert "MOOD_GATE" in html
-    assert "Enable regime" in html
-    assert 'id="btn-regime"' in html
-    assert "/api/desk/regime" in html
+    assert "/api/mood" not in html
+    assert "id=\"mood-line\"" not in html
+    assert "press Enable regime" not in html
+    assert "Enable regime" not in html
+    assert 'id="btn-regime"' not in html
+    assert "/api/desk/regime" not in html
+    assert "PAPER · Angel open" in html
+    assert "collectArmBody(\"keep\")" in html
     assert "/#lab" in html
     assert "/#amise" in html
     assert "AMISE" in html
@@ -461,7 +456,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v50" in cmd
+    assert "Gold Petal v51" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd

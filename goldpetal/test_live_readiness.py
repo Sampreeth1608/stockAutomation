@@ -782,6 +782,52 @@ def test_apply_desk_arm_intraday_ticks() -> None:
         capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
 
 
+def test_apply_desk_arm_keep_does_not_lock_live() -> None:
+    td = tempfile.TemporaryDirectory()
+    try:
+        import capital
+        import control_state
+        from live_readiness import apply_desk_arm
+
+        env = Path(td.name) / ".env"
+        env.write_text(
+            "ENABLE_S5=true\nDRY_RUN=false\nLIVE_MAX_LOTS=25\n",
+            encoding="utf-8",
+        )
+        state = Path(td.name) / "state.json"
+        cap = Path(td.name) / "capital.json"
+        control_state.STATE_PATH = state
+        capital.CAPITAL_PATH = cap
+        control_state.set_live_unlocked(True, path=state, note="armed")
+        control_state.set_live_approved(["S5_MINEDGE"], path=state)
+        res = apply_desk_arm(
+            mode="keep",
+            confirm="",
+            live_max_lots=25,
+            in_bot=["S5_MINEDGE"],
+            live=[],
+            path=env,
+            state_path=state,
+            capital_path=cap,
+        )
+        assert res["ok"] is True
+        assert res["mode"] == "live"
+        st = control_state.load_state(path=state)
+        assert st.live_unlocked is True
+        assert "S5_MINEDGE" in st.live_approved
+        text = env.read_text(encoding="utf-8")
+        assert "DRY_RUN=false" in text
+        assert "LIVE_MAX_LOTS=25" in text
+        assert "unchanged" in str(res.get("note") or "").lower() or "RESTART" in str(res.get("note") or "")
+    finally:
+        td.cleanup()
+        import capital as capital_mod
+        import control_state as cs
+
+        cs.STATE_PATH = cs.CONTROL_DIR / "state.json"
+        capital_mod.CAPITAL_PATH = capital_mod.CONTROL_DIR / "capital.json"
+
+
 if __name__ == "__main__":
     test_bot_age()
     print("ok age")
@@ -835,4 +881,6 @@ if __name__ == "__main__":
     print("ok desk books intraday")
     test_apply_desk_arm_intraday_ticks()
     print("ok arm intraday")
+    test_apply_desk_arm_keep_does_not_lock_live()
+    print("ok arm keep")
     print("ALL test_live_readiness OK")

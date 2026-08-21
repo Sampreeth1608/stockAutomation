@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v50: Live-tab Intraday tick flattens that book at MARKET_CLOSE -->
+<!-- gp-header-v51: Live tab shows Angel fill leftover; Save keeps Paper/Live; regime removed -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -34,6 +34,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 var(--font); letter-spacing: .01em;
   font-feature-settings: "ss01", "kern"; -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
+input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--gold); vertical-align: middle; }
 .station { display: grid; grid-template-rows: 62px minmax(0,1fr) 32px; height: 100%; }
 .tab[data-tab="you"] { color: var(--gold); }
 .top {
@@ -54,11 +55,6 @@ button, input, select { font: inherit; }
 .quote .ltp { font: 600 30px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
 .quote .ltp.stale { color: var(--muted); }
 .quote .meta { font: 12px/1.3 var(--mono); color: var(--muted); }
-.mood-box { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 22rem; }
-.mood-box[hidden] { display: none !important; }
-.mood-box .pill { width: fit-content; }
-.mood-box .hint { margin: 0; font: 11px/1.35 var(--mono); color: var(--muted); }
-#tabs .mood-box { max-width: 26rem; margin: .2rem .2rem .25rem .1rem; }
 .top-right { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
 .clock { font: 500 12px/1 var(--mono); color: var(--muted); margin-right: .35rem; }
 .pill { font: 500 11px/1 var(--mono); padding: .28rem .5rem; border-radius: 999px;
@@ -84,8 +80,6 @@ input:disabled { opacity: .45; }
 .btn.warn { background: #fbf6ec; border-color: #ead3a8; color: #8a5200; }
 .btn.danger { background: #fbf0ee; border-color: #efc4c0; color: #b81c16; }
 .btn.tiny { padding: .22rem .42rem; font-size: 11px; letter-spacing: .03em; }
-#btn-regime.on { background: #eef7f1; border-color: #b7dcc8; color: #0a6e3c; }
-#tabs #btn-regime { margin: .28rem .15rem .35rem .35rem; padding: .42rem .75rem; font-size: 13px; }
 .steps { margin: .35rem 0 .55rem; padding: 0; list-style: none; }
 .steps li { font: 13px/1.45 var(--mono); color: var(--muted); padding: .1rem 0; }
 .steps li.ok { color: var(--ok); }
@@ -184,7 +178,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v50</div>
+      <div class="clock" id="clock">IST — · v51</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -210,12 +204,6 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="tab" type="button" data-tab="lab">Lab<span id="lab-badge"></span></button>
           <button class="tab" type="button" data-tab="amise">AMISE<span id="amise-badge"></span></button>
           <button class="tab" type="button" data-tab="you">You · trade<span id="you-badge"></span></button>
-          <button class="btn warn" type="button" id="btn-regime" title="Turn market regime on or off. Type RESTART after. S16 formula and S13/overnight never veto.">Enable regime</button>
-          <div class="mood-box" id="mood-box" hidden title="Press Enable regime to show live Fit / TREND / CHOP. Off = books trade their formulas. heat / cool / burst / low profile / fall starting stay off the GOLD LTP row.">
-            <span class="pill" id="mood-pill">regime off</span>
-            <div class="hint" id="mood-hint">press Enable regime — books trade their formulas</div>
-          </div>
-          <span class="flash" id="flash-regime"></span>
         </div>
         <select id="hist-strat"><option value="">All books</option></select>
       </div>
@@ -254,7 +242,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="live-pnl-books"></tbody>
         </table>
         <h2 style="margin-top:.85rem">Live positions</h2>
-        <p class="hint">One row per live-picked book. OPEN is Angel size (not paper 100 lots). FLAT means that book has no live contract. Exit flattens that book only. Tick <b>Intraday</b> on Live-eligible books and Save to flatten that book at MARKET_CLOSE. Unticked books are delivery and hold overnight. Overnight gap still exits at next open. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
+        <p class="hint">One row per live-picked book. OPEN is Angel size from the fill log (not paper 100 lots). Leftover contracts stay OPEN even if Paper Positions went FLAT. Exit flattens that book only after you Arm live. Tick <b>Intraday</b> on Live-eligible books and Save to flatten that book at MARKET_CLOSE. Unticked books are delivery and hold overnight. Overnight gap still exits at next open. Live closed round-trips are on Blotter. Angel order ids are on Downloads.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Side</th><th>Status</th><th class="num">In</th><th class="num">Lots</th><th class="num">AC ₹</th><th></th></tr>
@@ -265,7 +253,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         <p class="hint">Approve already papers every book. This tab is only Angel. A book appears when it has closed paper trades and WR% AC of 40 or more. Tick <b>Lots</b> or <b>₹</b> if you want it to send Angel after Arm live. Overnight gap papers now. S18 / S19 / S20 / AMISE / overnight gap stay paper until they hit 40% WR% AC. You Arm live — the desk does not.</p>
         <div class="arm-box">
           <h3 id="arm-status">Paper</h3>
-          <p class="hint" id="money-line">Paper is running. Angel stays off until you Arm live.</p>
+          <p class="hint" id="money-line">Paper is running. Angel leftover contracts still show on Live positions.</p>
           <ul class="steps" id="arm-steps"></ul>
           <div class="row">
             <label class="chk">Ceiling lots <input class="cap" type="number" id="live-max" min="1" max="1000" value="1"/></label>
@@ -283,7 +271,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <p class="flash" id="flash-money"></p>
         </div>
         <h2>Live-eligible books</h2>
-        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked; new books get the same box). Unticked = delivery overnight. Then Save, type LIVE, Arm live, RESTART. After you are armed, only Save + RESTART to change size.</p>
+        <p class="hint">Tick <b>Lots</b> or <b>₹</b> — that book goes live (one tick only). Tick <b>Intraday</b> to flatten that book at MARKET_CLOSE (S16 starts ticked; new books get the same box). Unticked = delivery overnight. Then Save. Type LIVE and Arm live only when you want Angel. After you are armed, Save + RESTART changes size — Save does not switch you to Paper.</p>
         <table>
           <thead>
             <tr><th>Book</th><th>Pos</th><th class="num">WR% AC</th><th class="num">Closed</th><th>Lots</th><th class="num">qty</th><th>₹</th><th class="num">amount</th><th>Intraday</th><th></th></tr>
@@ -398,7 +386,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="amise-panel" hidden>
         <h2>AMISE — Adaptive Market Intelligence &amp; Strategy Engine</h2>
-        <p class="hint">One research system: AMISE <b>invents</b> challengers; it does <b>not</b> skip or flatten a book. Mood, regime, fit, guardian, and hour-gate scores are observe-only. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13; cheap-screen, then 3-fold + recipes + sklearn ranks + 2×/3× costs + holdout, then improve existing books). Approve on Lab names the next slot or updates a filled chair. Rollover starts a new candle. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
+        <p class="hint">One research system: AMISE <b>invents</b> challengers; it does <b>not</b> skip or flatten a book. Click <b>Run factory</b> (every rung 3m…daily, same-TF vs S16/S18, daily vs S13). Approve on Lab names the next slot or updates a filled chair. This tab never sets DRY_RUN=false. Keep <span class="mono">DRY_RUN=true</span>.</p>
         <div class="ml-banner" id="amise-live-block">Never DRY_RUN=false from this tab. Angel still needs Arm live on the Live tab.</div>
         <p class="flash" id="flash-amise"></p>
         <div class="row" style="margin-top:.45rem">
@@ -407,11 +395,8 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <span class="mono" id="amise-meta"></span>
         </div>
         <div id="amise-pipeline"></div>
-        <h2 style="margin-top:1rem">Market state</h2>
-        <p class="hint">AMISE <b>always</b> reads this stack (80 ticks, 5m…3h, day, week) to invent challengers — even when Enable regime is off. Enable only gates <b>your</b> books. This card never skips a paper book.</p>
-        <div id="amise-market"></div>
-        <h2 style="margin-top:1rem">Strategy manager — who fits this regime</h2>
-        <div id="amise-fits"></div>
+        <div id="amise-market" hidden></div>
+        <div id="amise-fits" hidden></div>
         <h2 style="margin-top:1rem">Profit Guardian</h2>
         <div id="amise-guardian"></div>
         <h2 style="margin-top:1rem">Factory / challengers</h2>
@@ -506,7 +491,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <div class="pane">
         <h2>Mode</h2>
         <p class="armed" id="mode-line">Paper</p>
-        <p class="hint">Paper is already running. Arm live is on the Live tab.</p>
+        <p class="hint">Paper is already running. Arm live is on the Live tab. Leftover Angel contracts still show there.</p>
         <div class="row" style="margin-top:.35rem">
           <button class="btn" id="btn-goto-live-side" type="button">Open Live tab</button>
         </div>
@@ -559,7 +544,6 @@ let lastMl = null;
 let lastLab = null;
 let lastAmise = null;
 let lastYou = null;
-let lastMood = { mood: "UNKNOWN", label: "mood warming up", gate_on: false, flatten_on: false };
 let mlRestartNeeded = false;
 
 function esc(s) {
@@ -709,7 +693,7 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v50";
+    if (clock) clock.textContent = "IST " + ist + " · v51";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -843,7 +827,7 @@ function allScore() {
   const rows = lastHist.scoreboard || [];
   return rows.find((r) => r.strategy === "ALL" || r.strategy == null) || rows[rows.length - 1] || {};
 }
-function renderQuote(withMood) {
+function renderQuote() {
   const el = $("ltp");
   const meta = $("quote-meta");
   if (!el) return;
@@ -856,116 +840,6 @@ function renderQuote(withMood) {
   el.textContent = hasPx ? money(ltp) : "—";
   el.classList.remove("stale");
   if (meta) meta.textContent = hasPx ? "" : "waiting for quote";
-  if (withMood !== false) renderMood();
-}
-function moodKind(mood) {
-  const m = String(mood || "").toUpperCase();
-  if (m === "FALL_START" || m === "BURST") return "bad";
-  if (m === "RISE_START" || m === "HEAT") return "ok";
-  if (m === "COOL" || m === "UNKNOWN") return "warn";
-  return "";
-}
-function renderMood(d) {
-  if (d) lastMood = d;
-  const pill = $("mood-pill");
-  const hint = $("mood-hint");
-  const btn = $("btn-regime");
-  const box = $("mood-box");
-  if (!pill) return;
-  const on = lastMood.gate_on === true;
-  if (btn) {
-    btn.textContent = on ? "Regime on" : "Enable regime";
-    btn.classList.toggle("on", on);
-    btn.classList.toggle("ok", on);
-    btn.classList.toggle("warn", !on);
-    btn.title = on
-      ? "Click to turn market regime OFF. Type RESTART after."
-      : "Click to turn market regime ON. Type RESTART after.";
-  }
-  if (box) box.hidden = !on;
-  if (!on) {
-    pill.className = "pill";
-    pill.textContent = "regime off";
-    pill.title = "Market regime is off. Books trade their formulas.";
-    if (hint) hint.textContent = "press Enable regime — books trade their formulas";
-    if (box) {
-      box.title = "Fit is a label until you press Enable regime. Then MOOD_GATE and TREND/CHOP/WIDE_SPREAD skip unfit books. Type RESTART. S16 1h formula and S13/overnight never veto.";
-    }
-    renderFits();
-    return;
-  }
-  const mood = lastMood.mood || "UNKNOWN";
-  pill.className = "pill " + moodKind(mood);
-  const regime = lastMood.regime && lastMood.regime !== "UNKNOWN" ? lastMood.regime : mood;
-  const align = lastMood.alignment || "";
-  pill.textContent = (lastMood.label || mood)
-    + (align && align !== "warming" ? " · " + align : "")
-    + (lastMood.transition ? " · " + lastMood.transition : "");
-  const mode = lastMood.flatten_on ? "regime ON · flatten" : "regime ON";
-  const bits = [mode, regime];
-  if (align) bits.push(align);
-  if (lastMood.structure) bits.push(lastMood.structure);
-  const pickKeys = { ticks80: 1, "1h": 1, day: 1, week: 1 };
-  (lastMood.layers || []).forEach((L) => {
-    if (L && pickKeys[L.key] && L.ready) {
-      bits.push(L.label + " " + (L.regime || L.mood) + (L.direction && L.direction !== "flat" ? " " + L.direction : ""));
-    }
-  });
-  if (lastMood.direction && lastMood.direction !== "flat") bits.push(lastMood.direction);
-  if (hint) hint.textContent = bits.join(" · ");
-  pill.title = bits.join(" · ");
-  if (box) {
-    box.title = "Regime on — 80 ticks + 5m…3h + day + week. Unfit books skip. Type RESTART. S16 1h formula and S13/overnight never veto.";
-  }
-  renderFits();
-}
-function fitFor(name) {
-  const rows = lastMood.fits || [];
-  return rows.find((r) => r.strategy === name) || null;
-}
-function fitLabel(f) {
-  if (!f) return "—";
-  const w = Number(f.weight);
-  const pct = Number.isFinite(w) ? Math.round(w * 100) + "%" : "";
-  const stance = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
-  return (pct ? pct + " " : "") + stance;
-}
-function renderFits() {
-  const line = $("fit-line");
-  const rows = lastMood.fits || [];
-  const gated = lastMood && lastMood.gate_on === true;
-  let text = gated
-    ? "one regime for the desk · regime ON · unfit books skip (S16 formula + S13/overnight exempt)"
-    : "one regime for the desk · regime off · books trade their formulas";
-  if (rows.length) {
-    text = rows.map((f) => {
-      const short = shortName(f.strategy).replace(/ .*/, "") || f.strategy;
-      return short + " " + fitLabel(f);
-    }).join(" · ");
-  }
-  if (line) line.textContent = text;
-  document.querySelectorAll("[data-fit]").forEach((el) => {
-    const f = fitFor(el.dataset.fit);
-    el.textContent = fitLabel(f);
-    el.title = (f && f.why) || "";
-    el.className = "num" + (f && f.stance === "stand_down" ? " bad" : (f && f.stance === "trade" ? " ok" : ""));
-  });
-}
-async function loadMood() {
-  if (loadMood.busy) return;
-  loadMood.busy = true;
-  try {
-    renderMood(await api("/api/mood"));
-    renderQuote();
-  } catch (e) {
-    renderMood({
-      mood: "UNKNOWN",
-      label: "mood unavailable",
-      reason: String(e.message || e),
-      gate_on: false,
-      flatten_on: false,
-    });
-  } finally { loadMood.busy = false; }
 }
 function renderKpis() {
   const all = allScore();
@@ -1018,7 +892,7 @@ function showMainTab() {
   if (watchTab === "dl") $("grid-meta").textContent = "Downloads — ticks, signals, trades, ZIP, Sheets. Pick From and To (IST).";
   if (watchTab === "ml") $("grid-meta").textContent = "ML packs — Approve → paper, then type RESTART";
   if (watchTab === "lab") $("grid-meta").textContent = "Research Lab — Approve a new S21+ slot or a same-chair improve. Never DRY_RUN=false";
-  if (watchTab === "amise") $("grid-meta").textContent = "AMISE — always uses market state to invent. Enable only gates your books. Approve on Lab.";
+  if (watchTab === "amise") $("grid-meta").textContent = "AMISE — invents challengers. Does not skip or flatten a book. Approve on Lab.";
   if (watchTab === "you") $("grid-meta").textContent = "You — records tape always. Angel only after Arm live + type YOU";
   if (watchTab === "live") $("grid-meta").textContent = "Live — Arm, size, open Angel contracts. Closed live round-trips are on Blotter. Angel order ids are on Downloads.";
   if (watchTab === "trades") $("grid-meta").textContent = "Blotter — paper closed above, live closed below. ML reads both.";
@@ -1350,8 +1224,6 @@ function gStatusClass(s) {
 }
 function renderAmise() {
   const d = lastAmise || {};
-  const mkt = d.market || {};
-  const mgr = d.manager || {};
   const g = d.guardian || {};
   const fac = d.factory || {};
   const risk = d.risk || {};
@@ -1368,33 +1240,10 @@ function renderAmise() {
     <p class="ml-meta">${esc((d.pipeline || []).join(" → "))}</p>
     <p class="hint">${esc(d.note || "")}</p>
   </div>`;
-  const layers = mkt.layers || [];
-  const layerTable = layers.length ? `<table>
-      <thead><tr><th>Horizon</th><th>Regime</th><th>Mood</th><th>Dir</th><th class="num">n</th></tr></thead>
-      <tbody>${layers.map((L) => `<tr>
-        <td>${esc(L.label || L.key || "")}</td>
-        <td>${esc(L.ready ? (L.regime || "—") : "warming")}</td>
-        <td>${esc(L.ready ? (L.mood || "—") : "need ticks")}</td>
-        <td>${esc(L.direction || "")}</td>
-        <td class="num">${esc(L.n_samples ?? "")}</td>
-      </tr>`).join("")}</tbody>
-    </table>` : "";
-  $("amise-market").innerHTML = `<div class="ml-card">
-    <h3>${esc(mkt.label || mkt.mood || "mood")}</h3>
-    <p class="ml-meta">${esc(mkt.regime || "UNKNOWN")} · ${esc(mkt.alignment || "")} · ${esc(mkt.structure || "")} · AMISE invent${mkt.gate_on ? " · your books gated" : " · your books ungated"}</p>
-    <p class="hint">${esc(mkt.reason || "AMISE uses this stack to invent. Enable regime only gates your own books.")}</p>
-    ${layerTable}
-  </div>`;
-  const fits = mgr.fits || mkt.fits || [];
-  $("amise-fits").innerHTML = fits.length ? `<table>
-    <thead><tr><th>Book</th><th>Stance</th><th class="num">Fit</th><th>Why</th></tr></thead>
-    <tbody>${fits.filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL").map((f) => `<tr>
-      <td>${esc(shortName(f.strategy))}</td>
-      <td class="${f.stance === "stand_down" ? "bad" : (f.stance === "trade" ? "ok" : "")}">${esc(f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold swing" : "trade"))}</td>
-      <td class="num">${esc(Math.round(Number(f.weight || 0) * 100))}%</td>
-      <td>${esc(f.why || "")}</td>
-    </tr>`).join("")}</tbody>
-  </table>` : `<p class="hint">Mood warming up — need ticks.</p>`;
+  const mktEl = $("amise-market");
+  if (mktEl) mktEl.innerHTML = "";
+  const fitsEl = $("amise-fits");
+  if (fitsEl) fitsEl.innerHTML = "";
   const books = g.books || [];
   $("amise-guardian").innerHTML = `<div class="ml-card">
     <h3>Portfolio ${esc(g.portfolio_status || "—")}</h3>
@@ -1919,9 +1768,11 @@ function renderDesk(d) {
   const bot = d.bot || {};
   const st = d.state || {};
   const feed = bot.feed_source || "off";
-  const mode = live.would_place_real_orders ? "ARMED" : (live.dry_run === false ? "LIVE env" : "PAPER");
+  const armed = !!live.would_place_real_orders;
+  const angelOpen = ((d.live_pnl || lastTape.live_pnl || {}).positions || []).some((t) => t && t.status === "OPEN");
+  const mode = armed ? "ARMED" : (angelOpen ? "PAPER · Angel open" : (live.dry_run === false ? "LIVE env" : "PAPER"));
   $("pills").innerHTML = [
-    pill(mode, live.would_place_real_orders ? "bad" : "ok"),
+    pill(mode, armed ? "bad" : (angelOpen ? "warn" : "ok")),
     pill(bot.running ? "BOT ON" : "BOT OFF", bot.running ? "ok" : "warn"),
     pill("FEED " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "CLEAR", st.emergency_off ? "bad" : "ok"),
@@ -1954,7 +1805,7 @@ function renderDesk(d) {
       const pos = posBy[name] || {};
       const posBit = pos.status === "OPEN" ? (pos.side || "OPEN") : (pos.status || "FLAT");
       const sizeMode = b.live_size_mode || "";
-      const lotsOn = sizeMode === "lots";
+      const lotsOn = sizeMode === "lots" || (!!b.live_approved && sizeMode !== "capital");
       const capOn = sizeMode === "capital";
       const intraOn = !!b.intraday;
       const gap = name === "OVERNIGHT_GAP";
@@ -1975,17 +1826,18 @@ function renderDesk(d) {
     $("cap-total").value = cap.total_capital_inr || "";
     $("cap-dd").value = cap.daily_loss_limit_inr || "";
   }
-  const armed = !!live.would_place_real_orders;
   const liveNames = (live.books || []).filter((b) => b.live_approved).map((b) => shortName(b.strategy));
   const moneyEl = $("money-line");
   const modeLine = $("mode-line");
   const armStatus = $("arm-status");
   const statusText = armed
     ? ("ARMED — " + (liveNames.join(", ") || "no book picked"))
-    : "Paper — Angel is off";
+    : (angelOpen ? "Paper — Angel still has a contract" : "Paper — new Angel orders off");
   if (moneyEl) moneyEl.textContent = armed
     ? ("ARMED — live-picked books send Angel orders" + (liveNames.length ? (": " + liveNames.join(", ")) : "."))
-    : "Paper is already running. Angel stays off until you Arm live.";
+    : (angelOpen
+      ? "Paper mode — new Angel orders are off. Live positions show leftover Angel contracts. Type LIVE, Arm live, RESTART, then Exit to square."
+      : "Paper is already running. New Angel orders stay off until you Arm live.");
   if (modeLine) {
     modeLine.textContent = statusText;
     modeLine.className = "armed";
@@ -2231,7 +2083,9 @@ function currentInBot(desk) {
   return [...new Set(names.concat(live))];
 }
 function collectLivePicks() {
-  return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+  const ticked = [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+  if (ticked.length) return ticked;
+  return [...new Set(((lastDesk.live_desk || {}).books || []).filter((b) => b.live_approved).map((b) => b.strategy))];
 }
 function collectIntraday() {
   const boxes = [...document.querySelectorAll("input[data-intraday]")];
@@ -2300,22 +2154,8 @@ document.addEventListener("click", (ev) => {
 });
 $("btn-exit-all-live").onclick = () => exitAll("flash-live");
 $("btn-save-live").onclick = () => {
-  const body = collectArmBody("paper");
-  body.mode = (lastDesk.live_desk && lastDesk.live_desk.dry_run === false) ? "live" : "paper";
-  if (body.mode === "live") body.confirm = "LIVE";
-  act("flash-live", "/api/desk/arm", body, "Live Lots / ₹ saved. Type RESTART to load RAM.");
-};
-$("btn-regime").onclick = async () => {
-  const on = !(lastMood && lastMood.gate_on === true);
-  try {
-    const res = await api("/api/desk/regime", { method: "POST", body: JSON.stringify({ on: on }) });
-    flash("flash-regime", res.note || (on ? "Regime ON — type RESTART on Engine" : "Regime off — type RESTART on Engine"));
-    lastMood = Object.assign({}, lastMood, { gate_on: !!res.gate_on });
-    renderMood();
-    await loadMood();
-  } catch (e) {
-    flash("flash-regime", String(e.message || e), true);
-  }
+  const body = collectArmBody("keep");
+  act("flash-live", "/api/desk/arm", body, "Saved. Paper/Live unchanged. Type RESTART to load RAM.");
 };
 $("btn-arm-live").onclick = () => {
   const word = ($("live-word").value || "").trim();
@@ -2329,7 +2169,7 @@ $("btn-mode-paper").onclick = () => {
   if (!window.confirm("Switch to Paper? Angel stops. Open positions stay until you Exit.")) return;
   const body = collectArmBody("paper");
   body.confirm = "";
-  act("flash-money", "/api/desk/arm", body, "Paper mode. Angel is off.");
+  act("flash-money", "/api/desk/arm", body, "Paper mode. Open Angel contracts stay until you Arm live + Exit.");
 };
 document.addEventListener("change", (ev) => {
   const el = ev.target && ev.target.closest && ev.target.closest("input[data-size]");
@@ -2397,10 +2237,6 @@ setInterval(() => { if (!typing() && watchTab === "ml") loadMl().catch(() => {})
 setInterval(() => { if (!typing() && watchTab === "lab") loadLab().catch(() => {}); }, 30000);
 setInterval(() => { if (!typing() && watchTab === "amise") loadAmise().catch(() => {}); }, 20000);
 setInterval(() => { if (!typing() && watchTab === "you") loadYou().catch(() => {}); }, 12000);
-setInterval(() => {
-  if (typing()) return;
-  if (lastMood.gate_on === true || watchTab === "amise") loadMood().catch(() => {});
-}, 12000);
 </script>
 </body>
 </html>

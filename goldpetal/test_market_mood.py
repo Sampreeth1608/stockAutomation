@@ -60,9 +60,10 @@ def test_fall_start_blocks_long_when_gated() -> None:
         assert st.allow_long is False
         assert st.flatten_long is True
         blocked, why = mood_blocks_entry(st, "BUY")
-        assert blocked and "block_long" in why
+        assert blocked is False
+        assert why == "mood_removed"
         want, _ = mood_wants_flatten(st, "long")
-        assert want is True
+        assert want is False
     finally:
         os.environ.pop("MOOD_GATE", None)
         os.environ.pop("MOOD_FLATTEN", None)
@@ -75,7 +76,7 @@ def test_observe_does_not_block() -> None:
         assert st.mood == "FALL_START"
         blocked, why = mood_blocks_entry(st, "BUY")
         assert blocked is False
-        assert why == "mood_observe"
+        assert why == "mood_removed"
     finally:
         os.environ.pop("MOOD_GATE", None)
 
@@ -85,18 +86,18 @@ def test_rise_start_blocks_short_when_gated() -> None:
     assert st.mood == "RISE_START"
     assert st.allow_short is False
     blocked, why = mood_blocks_entry(st, "SHORT")
-    assert blocked and "block_short" in why
+    assert blocked is False and why == "mood_removed"
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
-    assert skipped is False and skip_why == "mood_exempt"
+    assert skipped is False and skip_why == "mood_removed"
     overnight, overnight_why = mood_blocks_entry(st, "SHORT", strategy="OVERNIGHT_GAP")
-    assert overnight is False and overnight_why == "mood_exempt"
+    assert overnight is False and overnight_why == "mood_removed"
 
 
 def test_s13_never_mood_flatten() -> None:
     st = classify_samples(_fall(), gate=True, flatten=True)
     want, why = mood_wants_flatten(st, "long", strategy="S13_HHHL_DAY")
     assert want is False
-    assert why == "mood_exempt"
+    assert why == "mood_removed"
     assert "S13_HHHL_DAY" in MOOD_EXEMPT_BOOKS
     assert "S4_OVERNIGHT" in MOOD_EXEMPT_BOOKS
     assert "OVERNIGHT_GAP" in MOOD_EXEMPT_BOOKS
@@ -113,9 +114,9 @@ def test_quiet_stands_down_trend_books() -> None:
     s16 = st.fit_for("S16_HHHL_WICK_1H")
     assert s16 is not None and s16["stance"] == "trade"
     blocked16, why16 = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
-    assert blocked16 is False and why16 == "s16_1h_formula"
+    assert blocked16 is False and why16 == "mood_removed"
     buy16, buy_why = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
-    assert buy16 is False and buy_why == "s16_1h_formula"
+    assert buy16 is False and buy_why == "mood_removed"
     fb = st.fit_for("FLOW_BRAIN")
     assert fb is not None and fb["stance"] == "stand_down"
     s13 = st.fit_for("S13_HHHL_DAY")
@@ -123,11 +124,11 @@ def test_quiet_stands_down_trend_books() -> None:
     gap = st.fit_for("OVERNIGHT_GAP")
     assert gap is not None and gap["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
-    assert blocked is False and why == "mood_ok"
+    assert blocked is False and why == "mood_removed"
     blocked5, why5 = mood_blocks_entry(st, "BUY", strategy="S5_MINEDGE")
-    assert blocked5 is False and why5 == "mood_ok"
+    assert blocked5 is False and why5 == "mood_removed"
     skipped, skip_why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
-    assert skipped is False and skip_why == "mood_exempt"
+    assert skipped is False and skip_why == "mood_removed"
 
 
 def test_fall_prefers_short_on_trend_books() -> None:
@@ -138,24 +139,24 @@ def test_fall_prefers_short_on_trend_books() -> None:
     assert s8["preferred_side"] == "short"
     blocked_long, _ = mood_blocks_entry(st, "BUY", strategy="S8_NET_ZIGZAG")
     blocked_short, why_s = mood_blocks_entry(st, "SHORT", strategy="S8_NET_ZIGZAG")
-    assert blocked_long is True
+    assert blocked_long is False
     assert blocked_short is False
-    assert why_s == "mood_ok"
+    assert why_s == "mood_removed"
     buy16, why16 = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
     short16, why_s16 = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
-    assert buy16 is False and why16 == "s16_1h_formula"
-    assert short16 is False and why_s16 == "s16_1h_formula"
+    assert buy16 is False and why16 == "mood_removed"
+    assert short16 is False and why_s16 == "mood_removed"
 
 
 def test_burst_stands_down_intraday() -> None:
     st = classify_samples(_burst(), gate=True)
     assert st.mood == "BURST"
     blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-    assert blocked and "stand_down" in why
+    assert blocked is False and why == "mood_removed"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
-    assert s16_blocked is False and s16_why == "s16_1h_formula"
+    assert s16_blocked is False and s16_why == "mood_removed"
     flat16, flat_why = mood_wants_flatten(st, "short", strategy="S16_HHHL_WICK_1H")
-    assert flat16 is False and flat_why == "s16_1h_formula"
+    assert flat16 is False and flat_why == "mood_removed"
 
 
 def test_quiet_and_burst() -> None:
@@ -184,13 +185,13 @@ def test_warming_up_stands_down_and_blocks_shorts() -> None:
     s19 = st.fit_for("S19_BODY_CLOSE_1H")
     assert s19 is not None and s19["stance"] == "stand_down"
     blocked, why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-    assert blocked and "stand_down" in why
+    assert blocked is False and why == "mood_removed"
     blocked19, _ = mood_blocks_entry(st, "SHORT", strategy="S19_BODY_CLOSE_1H")
-    assert blocked19 is True
+    assert blocked19 is False
     skipped, skip_why = mood_blocks_entry(st, "SHORT", strategy="S13_HHHL_DAY")
-    assert skipped is False and skip_why == "mood_exempt"
+    assert skipped is False and skip_why == "mood_removed"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
-    assert s16_blocked is False and s16_why == "s16_1h_formula"
+    assert s16_blocked is False and s16_why == "mood_removed"
 
 
 def test_rise_start_blocks_hour_book_shorts() -> None:
@@ -203,10 +204,10 @@ def test_rise_start_blocks_hour_book_shorts() -> None:
         "S8_NET_ZIGZAG",
     ):
         blocked, why = mood_blocks_entry(st, "SHORT", strategy=name)
-        assert blocked, (name, why)
-        assert "prefers_long" in why or "block_short" in why, why
+        assert blocked is False, (name, why)
+        assert why == "mood_removed"
     s16_blocked, s16_why = mood_blocks_entry(st, "SHORT", strategy="S16_HHHL_WICK_1H")
-    assert s16_blocked is False and s16_why == "s16_1h_formula"
+    assert s16_blocked is False and s16_why == "mood_removed"
 
 
 def test_seed_from_db_blocks_short_on_rise() -> None:
@@ -243,7 +244,7 @@ def test_seed_from_db_blocks_short_on_rise() -> None:
             assert st.mood == snap.mood == "RISE_START"
             assert st.n_samples >= 8
             blocked, _why = mood_blocks_entry(st, "SHORT", strategy="S18_OHLC_VOL_HTF")
-            assert blocked is True
+            assert blocked is False
     finally:
         os.environ.pop("MOOD_GATE", None)
 
@@ -255,7 +256,7 @@ def test_mood_gate_defaults_off() -> None:
     assert mood_gate_on() is False
     os.environ["MOOD_GATE"] = "true"
     try:
-        assert mood_gate_on() is True
+        assert mood_gate_on() is False
     finally:
         os.environ.pop("MOOD_GATE", None)
 
@@ -273,11 +274,11 @@ def test_set_regime_gate_writes_env() -> None:
         try:
             res = set_regime_gate(True, path=env)
             assert res.get("ok") is True
-            assert res.get("gate_on") is True
+            assert res.get("gate_on") is False
             text = env.read_text(encoding="utf-8")
-            assert "MOOD_GATE=true" in text
-            assert "FLATTEN_ON_BAD_REGIME=true" in text
-            assert mood_gate_on() is True
+            assert "MOOD_GATE=false" in text
+            assert "FLATTEN_ON_BAD_REGIME=false" in text
+            assert mood_gate_on() is False
             res2 = set_regime_gate(False, path=env)
             assert res2.get("ok") is True
             assert res2.get("gate_on") is False
@@ -287,26 +288,18 @@ def test_set_regime_gate_writes_env() -> None:
             os.environ.pop("FLATTEN_ON_BAD_REGIME", None)
 
 
-def test_mood_desk_payload_note_follows_gate() -> None:
+def test_mood_desk_payload_note_says_removed() -> None:
     import tempfile
 
     from market_mood import mood_desk_payload
 
     missing = Path(tempfile.mkdtemp()) / "no-ticks.db"
-    os.environ["MOOD_GATE"] = "false"
-    try:
-        d = mood_desk_payload(missing)
-        assert d["gate_on"] is False
-        assert "OFF" in d["note"]
-        assert "Gate is on" not in d["note"]
-    finally:
-        os.environ.pop("MOOD_GATE", None)
     os.environ["MOOD_GATE"] = "true"
     try:
         d = mood_desk_payload(missing)
-        assert d["gate_on"] is True
-        assert "Market regime is ON" in d["note"]
-        assert "Market regime is OFF" not in d["note"]
+        assert d["gate_on"] is False
+        assert "removed" in d["note"].lower()
+        assert "Market regime is ON" not in d["note"]
     finally:
         os.environ.pop("MOOD_GATE", None)
 
@@ -353,15 +346,15 @@ def test_htf_fight_stands_down_hour_book_not_s16() -> None:
     s18 = st.fit_for("S18_OHLC_VOL_HTF")
     assert s18 is not None and s18["stance"] == "stand_down"
     blocked18, why18 = mood_blocks_entry(st, "BUY", strategy="S18_OHLC_VOL_HTF")
-    assert blocked18 is True and "stand_down" in why18
+    assert blocked18 is False and why18 == "mood_removed"
     buy16, why16 = mood_blocks_entry(st, "BUY", strategy="S16_HHHL_WICK_1H")
-    assert buy16 is False and why16 == "s16_1h_formula"
+    assert buy16 is False and why16 == "mood_removed"
     s5 = st.fit_for("S5_MINEDGE")
     assert s5 is not None and s5["stance"] == "trade"
     s13 = st.fit_for("S13_HHHL_DAY")
     assert s13 is not None and s13["stance"] == "hold_swing"
     blocked, why = mood_blocks_entry(st, "BUY", strategy="S13_HHHL_DAY")
-    assert blocked is False and why == "mood_exempt"
+    assert blocked is False and why == "mood_removed"
 
 
 def test_snapshot_mood_exposes_layers() -> None:
@@ -414,14 +407,14 @@ def test_not_a_paper_book() -> None:
     assert "MOOD" not in paper
     assert "MARKET_MOOD" not in PAPER_ONLY_BOOKS
     station = (root / "station.html").read_text(encoding="utf-8")
-    assert "/api/mood" in station
-    assert "mood-pill" in station
-    assert "data-fit" in station
-    assert 'id="btn-regime"' in station
-    assert "/api/desk/regime" in station
+    assert "/api/mood" not in station
+    assert "mood-pill" not in station
+    assert "data-fit" not in station
+    assert 'id="btn-regime"' not in station
+    assert "/api/desk/regime" not in station
     lite = (root / "lite.html").read_text(encoding="utf-8")
-    assert "/api/mood" in lite
-    assert 'id="btn-regime"' in lite
+    assert "/api/mood" not in lite
+    assert 'id="btn-regime"' not in lite
     panel = (root / "control_panel.py").read_text(encoding="utf-8")
     assert "/api/mood" in panel
     assert "/api/desk/regime" in panel
@@ -430,6 +423,7 @@ def test_not_a_paper_book() -> None:
     assert "FLATTEN_ON_BAD_REGIME=false" in env
     assert "MOOD_FLATTEN=false" in env
     assert "MOOD_FIT_MIN=0.40" in env
+    assert "Market regime was removed" in env
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")
     assert "mood_blocks_entry" in runner
     assert "OWN_GATE_BOOKS" in (root / "market_mood.py").read_text(encoding="utf-8")
@@ -441,8 +435,8 @@ def test_not_a_paper_book() -> None:
     assert "snapshot_mood_fast" in mood_py
     station = (root / "station.html").read_text(encoding="utf-8")
     assert "waiting for desk" in station
-    assert "loadMood.busy" in station
-    assert "lastMood.gate_on === true" in station
+    assert "loadMood.busy" not in station
+    assert "lastMood" not in station
     assert "MOOD_FLATTEN" in runner
     assert "seed_from_db" in runner
     assert "refresh_layers" in runner
@@ -531,7 +525,7 @@ def test_mood_desk_payload_cache_returns_a_copy() -> None:
         first["note"] = "mutated"
         second = mood_desk_payload(missing)
         assert "mutated" not in second["note"]
-        assert "OFF" in second["note"]
+        assert "removed" in second["note"].lower()
     finally:
         os.environ.pop("MOOD_GATE", None)
         clear_mood_cache()
@@ -552,7 +546,7 @@ if __name__ == "__main__":
     test_seed_from_db_blocks_short_on_rise()
     test_mood_gate_defaults_off()
     test_set_regime_gate_writes_env()
-    test_mood_desk_payload_note_follows_gate()
+    test_mood_desk_payload_note_says_removed()
     test_horizon_stack_has_operator_rungs()
     test_htf_fight_stands_down_hour_book_not_s16()
     test_snapshot_mood_exposes_layers()

@@ -377,6 +377,46 @@ def test_lots_on_fill_uses_traded_qty_not_later_arm() -> None:
         assert missing is None
 
 
+def test_net_open_from_fills_leftover_and_reverse() -> None:
+    from live_orders import net_open_from_fills
+
+    def _row(tx: str, qty: int, ts: str = "2026-08-21T10:00:00+05:30") -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "dry_run": False,
+                "skipped": False,
+                "reason": "placed",
+                "order_id": "1",
+                "transaction": tx,
+                "quantity": qty,
+                "strategy": "S5_MINEDGE",
+                "ts_ist": ts,
+            }
+        )
+
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "live_orders.jsonl"
+        path.write_text(_row("BUY", 3) + "\n", encoding="utf-8")
+        leftover = net_open_from_fills(path=path)
+        assert leftover["S5_MINEDGE"]["status"] == "OPEN"
+        assert leftover["S5_MINEDGE"]["side"] == "BUY"
+        assert leftover["S5_MINEDGE"]["lots"] == 3
+        assert leftover["S5_MINEDGE"]["source"] == "angel_fill"
+
+        path.write_text(_row("BUY", 3) + "\n" + _row("SELL", 3, "2026-08-21T11:00:00+05:30") + "\n", encoding="utf-8")
+        assert net_open_from_fills(path=path) == {}
+
+        path.write_text(
+            _row("BUY", 3) + "\n" + _row("SELL", 6, "2026-08-21T11:00:00+05:30") + "\n",
+            encoding="utf-8",
+        )
+        rev = net_open_from_fills(path=path)
+        assert rev["S5_MINEDGE"]["status"] == "OPEN"
+        assert rev["S5_MINEDGE"]["side"] == "SHORT"
+        assert rev["S5_MINEDGE"]["lots"] == 3
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -404,4 +444,6 @@ if __name__ == "__main__":
     print("ok mirror_skips_paper")
     test_lots_on_fill_uses_traded_qty_not_later_arm()
     print("ok lots_on_fill")
+    test_net_open_from_fills_leftover_and_reverse()
+    print("ok net_open_from_fills")
     print("ALL test_live_orders OK")

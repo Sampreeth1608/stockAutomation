@@ -402,8 +402,10 @@ def test_live_pnl_closed_uses_fill_lots_not_armed_size() -> None:
         note = str(pnl.get("note") or "")
         assert "fill" in note.lower() or "Live Lots" in note
         by_name = {t["strategy"]: t for t in pnl["positions"]}
-        assert by_name["S16_HHHL_WICK_1H"]["status"] == "FLAT"
+        assert by_name["S16_HHHL_WICK_1H"]["status"] == "OPEN"
         assert int(by_name["S16_HHHL_WICK_1H"].get("lots") or 0) == 25
+        assert by_name["S16_HHHL_WICK_1H"].get("source") == "angel_fill"
+        assert int(pnl["summary"]["open"]) == 1
 
 
 def test_live_pnl_positions_one_row_per_open_book() -> None:
@@ -474,6 +476,56 @@ def test_live_pnl_positions_flat_when_live_picked_and_no_open() -> None:
         assert int(board["S8_NET_ZIGZAG"]["closed"]) == 0
 
 
+def test_live_pnl_fill_leftover_shows_open_when_tape_flat() -> None:
+    """Angel leftover BUY still OPEN on Live even if the signal tape went FLAT."""
+    import live_orders
+    from control_state import ControlState
+
+    reset_trade_cache()
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        orders = Path(td) / "live_orders.jsonl"
+        init_db(db)
+        _tick(db)
+        orders.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": False,
+                    "skipped": False,
+                    "reason": "placed",
+                    "order_id": "9001",
+                    "transaction": "BUY",
+                    "quantity": 3,
+                    "strategy": "S5_MINEDGE",
+                    "ts_ist": "2026-08-21T10:00:02+05:30",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        st = ControlState(live_approved=["S5_MINEDGE"])
+        with (
+            patch.object(live_orders, "ORDERS_PATH", orders),
+            patch("desk_data.live_lots_for", return_value=3),
+            patch("control_state.load_state", return_value=st),
+            patch(
+                "live_readiness.read_live_env",
+                return_value={"dry_run": True, "live_max_lots": 3},
+            ),
+        ):
+            pnl = live_pnl_payload(db_path=db)
+        by_name = {t["strategy"]: t for t in pnl["positions"]}
+        assert by_name["S5_MINEDGE"]["status"] == "OPEN"
+        assert by_name["S5_MINEDGE"]["side"] == "BUY"
+        assert int(by_name["S5_MINEDGE"].get("lots") or 0) == 3
+        assert by_name["S5_MINEDGE"].get("source") == "angel_fill"
+        assert int(pnl["summary"]["open"]) >= 1
+        note = str(pnl.get("note") or "")
+        assert "leftover" in note.lower() or "Angel still has" in note
+        assert "Arm live" in note
+
+
 def test_latest_signals_live_only_skips_paper() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Path(td) / "ticks.db"
@@ -512,6 +564,9 @@ def test_latest_signals_live_only_skips_paper() -> None:
         assert len(live_rows) == 1
         assert live_rows[0]["strategy"] == "S8_NET_ZIGZAG"
         assert int(live_rows[0]["dry_run"] or 0) == 0
+        listed = list_signals(db_path=db, live_only=True)
+        assert len(listed) == 1
+        assert listed[0]["strategy"] == "S8_NET_ZIGZAG"
 
 
 if __name__ == "__main__":
@@ -529,5 +584,6 @@ if __name__ == "__main__":
     test_live_pnl_closed_uses_fill_lots_not_armed_size()
     test_live_pnl_positions_one_row_per_open_book()
     test_live_pnl_positions_flat_when_live_picked_and_no_open()
+    test_live_pnl_fill_leftover_shows_open_when_tape_flat()
     test_latest_signals_live_only_skips_paper()
     print("ALL test_desk_data OK")

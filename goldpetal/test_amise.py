@@ -132,7 +132,7 @@ def test_not_a_paper_book() -> None:
     assert "all_trades_cached" in amise_src
     assert "factory already running" in amise_src
     assert "Invent challengers" in amise_src
-    assert "Desk boot must not overwrite" in amise_src
+    assert "Market regime was removed" in amise_src
     assert "amise_invent_only" in (root / "trade_learner.py").read_text(encoding="utf-8")
     env = (root / ".env.example").read_text(encoding="utf-8")
     assert "amise.py" in env

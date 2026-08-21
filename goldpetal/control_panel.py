@@ -978,8 +978,8 @@ class ControlHandler(BaseHTTPRequestHandler):
                 res = ensure_mood_gate()
                 res["gate_on"] = bool(res.get("gate_on"))
                 res["note"] = (
-                    "Enable regime is a desk button. This path does not rewrite .env. "
-                    "Type RESTART after you toggle. Keep DRY_RUN=true."
+                    "Market regime was removed. This path does not rewrite .env. "
+                    "Books trade their formulas. Keep DRY_RUN=true."
                 )
                 self._send(*_json_bytes(res, 200 if res.get("ok") else 400))
                 return

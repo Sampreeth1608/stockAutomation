@@ -31,6 +31,7 @@ h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
   border-radius: 4px; cursor: pointer; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 input:disabled { opacity: .45; }
+input[type=checkbox] { width: 1.05rem; height: 1.05rem; accent-color: var(--gold); vertical-align: middle; }
 .btn.ok { background: #e8f6ee; border-color: #8fceb0; color: #0d7a45; }
 .btn.warn { background: #fff4e0; border-color: #e6c48a; color: #a15c00; }
 .btn.danger { background: #fdecea; border-color: #f0b4ae; color: #c4281c; }
@@ -51,11 +52,6 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
   <h1>Gold Petal Desk</h1>
   <p class="hint">Compact controls. <a href="/">Desk</a> · <a href="/#live">Live</a> · <a href="/#amise">AMISE</a> · <a href="/full">Archive / downloads</a> · <button class="btn" type="button" id="btn-lock-desk" hidden>Lock</button></p>
   <div class="pills" id="pills"></div>
-  <p class="hint" id="mood-line">regime off · books trade their formulas · press Enable regime</p>
-  <div class="row">
-    <button class="btn" type="button" id="btn-regime" title="Writes MOOD_GATE. Type RESTART after.">Enable regime</button>
-    <span class="flash" id="flash-regime"></span>
-  </div>
 
   <section class="card">
     <h2>Stop / go</h2>
@@ -93,7 +89,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       <thead><tr><th>Book</th><th>Open</th><th>Closed</th><th>WR%</th><th>AC ₹</th></tr></thead>
       <tbody id="live-pnl-books"></tbody>
     </table>
-    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel lots, FLAT = none).</p>
+    <p class="hint">Live positions: one row per live-picked book (OPEN = Angel fill leftover or live tape, FLAT = none). Paper FLAT does not hide an Angel leftover.</p>
     <table style="margin-top:.35rem">
       <thead><tr><th>Book</th><th>Side</th><th>Status</th><th>Lots</th><th></th></tr></thead>
       <tbody id="live-pnl-open"></tbody>
@@ -266,7 +262,6 @@ function liveBudgetDisplay(b, sb) {
   return n;
 }
 let lastLite = {};
-let lastMood = { gate_on: false };
 function livePosRows(p, d) {
   const fromPnl = (p.positions && p.positions.length) ? p.positions
     : ((p.open && p.open.length) ? p.open : []);
@@ -292,9 +287,11 @@ function render(d) {
   const bot = d.bot || {};
   const st = d.state || {};
   const feed = bot.feed_source || "off";
-  const mode = live.would_place_real_orders ? "ARMED" : (live.dry_run === false ? "LIVE env" : "PAPER");
+  const armed = !!live.would_place_real_orders;
+  const angelOpen = ((d.live_pnl || {}).positions || []).some((t) => t && t.status === "OPEN");
+  const mode = armed ? "ARMED" : (angelOpen ? "PAPER · Angel open" : (live.dry_run === false ? "LIVE env" : "PAPER"));
   $("pills").innerHTML = [
-    pill(mode, live.would_place_real_orders ? "bad" : "ok"),
+    pill(mode, armed ? "bad" : (angelOpen ? "warn" : "ok")),
     pill(bot.running ? "bot on" : "bot off", bot.running ? "ok" : "warn"),
     pill("feed " + feed, feed === "off" ? "warn" : "ok"),
     pill(st.emergency_off ? "EMERGENCY" : "ok", st.emergency_off ? "bad" : "ok"),
@@ -320,7 +317,7 @@ function render(d) {
       const budget = liveBudgetDisplay(b, sb);
       const liveLots = Math.min(1000, Math.max(1, Number(b.live_lots || sb.live_lots || 1) || 1));
       const sizeMode = b.live_size_mode || "";
-      const lotsOn = sizeMode === "lots";
+      const lotsOn = sizeMode === "lots" || (!!b.live_approved && sizeMode !== "capital");
       const capOn = sizeMode === "capital";
       const intraOn = !!b.intraday;
       const gap = name === "OVERNIGHT_GAP";
@@ -343,7 +340,9 @@ function render(d) {
   }
   $("money-line").textContent = live.would_place_real_orders
     ? "ARMED — live-picked books send Angel orders."
-    : "Paper is already running. Angel stays off until you Arm live.";
+    : (angelOpen
+      ? "Paper mode — leftover Angel contracts show below. Type LIVE, Arm live, RESTART, then Exit to square."
+      : "Paper is already running. New Angel orders stay off until you Arm live.");
   const paperBtn = $("btn-mode-paper");
   if (paperBtn) paperBtn.hidden = !live.would_place_real_orders;
   const lp = d.live_pnl || {};
@@ -464,10 +463,8 @@ $("btn-bot-restart").onclick = () => {
 $("btn-feed-start").onclick = () => act("flash-engine", "/api/feed/start", {}, "Feed-only started");
 $("btn-feed-stop").onclick = () => act("flash-engine", "/api/feed/stop", {}, "Feed-only stopped");
 $("btn-save-books").onclick = () => {
-  const armed = !!(lastLite.live_desk && lastLite.live_desk.dry_run === false);
-  const body = collectArmBody(armed ? "live" : "paper");
-  if (armed) body.confirm = "LIVE";
-  act("flash-money", "/api/desk/arm", body, "Saved. Type RESTART to load RAM.");
+  const body = collectArmBody("keep");
+  act("flash-money", "/api/desk/arm", body, "Saved. Paper/Live unchanged. Type RESTART to load RAM.");
 };
 document.addEventListener("click", (ev) => {
   const btn = ev.target && ev.target.closest && ev.target.closest("[data-exit]");
@@ -506,7 +503,9 @@ function currentInBot(desk) {
   return [...new Set(names.concat(live))];
 }
 function collectLivePicks() {
-  return [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+  const ticked = [...new Set([...document.querySelectorAll("input[data-size]:checked")].map((el) => el.dataset.book))];
+  if (ticked.length) return ticked;
+  return [...new Set(((lastLite.live_desk || {}).books || []).filter((b) => b.live_approved).map((b) => b.strategy))];
 }
 function collectIntraday() {
   const boxes = [...document.querySelectorAll("input[data-intraday]")];
@@ -571,7 +570,7 @@ $("btn-mode-paper").onclick = () => {
   if (!window.confirm("Switch to Paper? Angel stops.")) return;
   const body = collectArmBody("paper");
   body.confirm = "";
-  act("flash-money", "/api/desk/arm", body, "Paper mode. Angel is off.");
+  act("flash-money", "/api/desk/arm", body, "Paper mode. Open Angel contracts stay until you Arm live + Exit.");
 };
 bootAuth().then((ok) => {
   if (ok === false) return;
@@ -649,59 +648,6 @@ if ($("btn-you-go")) {
   };
 }
 loadYou().catch(() => {});
-async function loadMood() {
-  try {
-    const d = await api("/api/mood");
-    lastMood = d || lastMood;
-    const el = $("mood-line");
-    const btn = $("btn-regime");
-    if (!el) return;
-    const on = d.gate_on === true;
-    if (!on) {
-      el.textContent = "regime off · books trade their formulas · press Enable regime";
-    } else {
-      const mode = d.flatten_on ? "regime ON · flatten" : "regime ON";
-      const pick = (d.layers || []).filter((L) => L && L.ready && (L.key === "ticks80" || L.key === "1h" || L.key === "day" || L.key === "week"));
-      el.textContent = (d.label || d.mood || "mood") +
-        (d.regime ? " · " + d.regime : "") +
-        (d.alignment ? " · " + d.alignment : "") +
-        " · " + mode
-        + (pick.length ? " · " + pick.map((L) => (L.label || L.key) + " " + (L.regime || L.mood)).join(" · ") : "")
-        + " · not a paper book";
-      const fits = (d.fits || []).filter((f) => f.strategy !== "S19_BODY_CLOSE_1H" && f.strategy !== "S20_FADE_HL");
-      if (fits.length) {
-        el.textContent += " · " + fits.map((f) => {
-          const w = Math.round(Number(f.weight || 0) * 100);
-          const st = f.stance === "stand_down" ? "stand down" : (f.stance === "hold_swing" ? "hold" : "trade");
-          return (f.strategy || "").split("_")[0] + " " + w + "% " + st;
-        }).join(" · ");
-      }
-    }
-    if (btn) {
-      btn.textContent = on ? "Regime on" : "Enable regime";
-      btn.title = on
-        ? "Click to turn market regime OFF. Type RESTART after."
-        : "Click to turn market regime ON. Type RESTART after.";
-    }
-  } catch (e) {
-    const el = $("mood-line");
-    if (el) el.textContent = "mood unavailable · " + String(e.message || e);
-  }
-}
-loadMood().catch(() => {});
-if ($("btn-regime")) {
-  $("btn-regime").onclick = async () => {
-    const on = !(lastMood && lastMood.gate_on === true);
-    try {
-      const res = await api("/api/desk/regime", { method: "POST", body: JSON.stringify({ on: on }) });
-      flash("flash-regime", res.note || (on ? "Regime ON — type RESTART" : "Regime off — type RESTART"));
-      lastMood = Object.assign({}, lastMood, { gate_on: !!res.gate_on });
-      await loadMood();
-    } catch (e) {
-      flash("flash-regime", String(e.message || e), true);
-    }
-  };
-}
 $("ml-pending").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-ml]");
   if (!btn) return;
@@ -718,7 +664,6 @@ $("ml-pending").addEventListener("click", (ev) => {
 });
 setInterval(() => { if (!typing()) load().catch(() => {}); }, 6000);
 setInterval(() => { if (!typing()) loadMl().catch(() => {}); }, 15000);
-setInterval(() => { if (!typing()) loadMood().catch(() => {}); }, 4000);
 </script>
 </body>
 </html>

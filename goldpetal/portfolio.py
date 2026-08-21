@@ -125,20 +125,14 @@ class PortfolioConfig:
         return False
 
     def allows(self, strategy: str, regime: Regime) -> bool:
-        """When Enable regime is off, every enabled book may open."""
-        if strategy not in self.enabled:
-            return False
-        if not self.flatten_when_blocked:
-            return True
-        return self._in_regime(strategy, regime)
+        """Every enabled book may open. Market regime no longer gates entries."""
+        del regime
+        return strategy in self.enabled
 
     def should_flatten(self, strategy: str, regime: Regime) -> bool:
-        """Dump only when Enable regime is on and this book does not fit TREND/CHOP/WIDE_SPREAD."""
-        if not self.flatten_when_blocked:
-            return False
-        if strategy not in self.enabled:
-            return True
-        return not self._in_regime(strategy, regime)
+        """Never dump for regime. Market regime was removed."""
+        del strategy, regime
+        return False
 
 
 def portfolio_from_env() -> PortfolioConfig:

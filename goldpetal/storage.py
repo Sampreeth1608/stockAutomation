@@ -266,13 +266,17 @@ def list_signals(
     db_path: Path = DB_PATH,
     *,
     limit: int | None = None,
+    live_only: bool = False,
 ) -> list[sqlite3.Row]:
     init_db(db_path)
-    where = ""
+    clauses: list[str] = []
     params: list[Any] = []
     if strategy:
-        where = " WHERE strategy = ?"
+        clauses.append("strategy = ?")
         params.append(strategy)
+    if live_only:
+        clauses.append("dry_run = 0")
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     if limit is not None:
         query = f"""
             SELECT id, time_label, symbol, strategy, action, position_after, reason,
@@ -496,9 +500,12 @@ def _build_trades_one(
     lot_size_for: Callable[[dict[str, Any]], float | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Pair BUY/SHORT entries with CLOSE (or flip) for one strategy."""
-    rows = list_signals(strategy=strategy, db_path=db_path, limit=signal_limit)
-    if live_only:
-        rows = [r for r in rows if _signal_is_live(r)]
+    rows = list_signals(
+        strategy=strategy,
+        db_path=db_path,
+        limit=signal_limit,
+        live_only=live_only,
+    )
     trades: list[dict[str, Any]] = []
     open_trade: dict[str, Any] | None = None
     trade_no = 0

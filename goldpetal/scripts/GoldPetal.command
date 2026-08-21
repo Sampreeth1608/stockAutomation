@@ -3,7 +3,7 @@
 # The real station stays on the VM. This opens a private IAP SSH tunnel + Chrome.
 # If 8501 on the VM is down, it starts the station first (not the trading bot).
 # Run on the Mac. Never on the VM. Keep DRY_RUN=true.
-# GoldPetal.command v50
+# GoldPetal.command v51
 #
 # Port 22 on the VM public IP is closed on purpose. Direct ssh to 8.231.125.120
 # times out. Always use --tunnel-through-iap. Do not open 22 or 8501 to the internet.
@@ -123,7 +123,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-echo "======== Gold Petal v50 ========"
+echo "======== Gold Petal v51 ========"
 echo "This window is the private IAP tunnel. Leave it open. Closing it drops the desk."
 echo "Keep DRY_RUN=true. Do not open port 22 or 8501 to the internet."
 echo

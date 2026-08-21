@@ -62,7 +62,7 @@ def lab_fast_on() -> bool:
 
 
 def ensure_mood_gate(*, path: Path | None = None) -> dict[str, Any]:
-    """Desk boot must not overwrite Enable regime. Button owns MOOD_GATE."""
+    """Desk boot does not write MOOD_GATE. Market regime was removed."""
     del path
     from market_mood import mood_gate_on
 
@@ -413,10 +413,10 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         "enable_blocked": True,
         "dry_run_required": True,
         "brains": {
-            "market_state": "Always on for AMISE invent (80 ticks…week). Enable regime only gates your books.",
+            "market_state": "Always on for AMISE invent (80 ticks…week). Does not skip or flatten a book.",
             "relationships": "Which candle / flow atoms have edge on this tape?",
             "factory": "Invent challengers from this market state. Validate. Never auto-deploy. Never skip a live book.",
-            "manager": "Fit is a label for invent. Enable regime does not hide it. It does not pick who may open until you Enable.",
+            "manager": "Fit is a label for invent only. It does not pick who may open.",
             "guardian": "Is the champion's edge intact? Watch only. Never dump.",
             "risk": "Size / daily loss / emergency.",
             "you": "Approve / reject / paper. Capture what you see.",
@@ -471,8 +471,8 @@ def amise_desk_payload(*, db: Path | None = None) -> dict[str, Any]:
         ],
         "note": (
             "AMISE always reads market state (80 ticks + 5m…3h + day + week) "
-            "to invent challengers, even when Enable regime is off. Enable only "
-            "gates your own books. Factory: Run factory / auto lab (3m…daily, "
+            "to invent challengers. Market regime does not skip or flatten a book. "
+            "Factory: Run factory / auto lab (3m…daily, "
             "same-TF vs S16/S18, daily vs S13). It does not skip, flatten, or "
             "hour-gate a paper book. You Approve on Lab — that names the next "
             "slot (S21, S22, … S25 after S24) or overwrites a filled chair. "

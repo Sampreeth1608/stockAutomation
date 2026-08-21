@@ -1,10 +1,8 @@
-"""Shared Gold Petal market state.
+"""Shared tape read for AMISE invent. Not a trading gate.
 
-Desk header does not show live Fit / TRENDING until Enable regime.
-That writes MOOD_GATE and FLATTEN_ON_BAD_REGIME. Type RESTART on Engine.
-Tape is read on 80 ticks plus 5m…3h, the session day, and a week.
-Enable uses that stack to fit books. S13/overnight and S16 1h formula
-are never vetoed. Keep DRY_RUN=true.
+Market regime was removed from the desk and engine. classify_samples
+still labels the tape so AMISE can invent. mood_blocks_entry never skips.
+Keep DRY_RUN=true.
 """
 
 from __future__ import annotations
@@ -115,36 +113,30 @@ Stance = Literal["trade", "stand_down", "hold_swing"]
 
 
 def mood_gate_on() -> bool:
-    return (os.getenv("MOOD_GATE") or "false").strip().lower() in {"1", "true", "yes", "y"}
+    """Always off. Market regime was removed from the desk and engine."""
+    return False
 
 
 def set_regime_gate(on: bool, *, path: Path | None = None) -> dict[str, Any]:
-    """Desk Enable regime button. Off = formulas trade. On = Fit + TREND/CHOP/WIDE_SPREAD.
-    Does not set DRY_RUN=false. Does not Arm live. Type RESTART after this.
-    """
+    """Regime button is gone. Always writes MOOD_GATE=false. Does not Arm live."""
     from analytics.env_bridge import write_env_updates
 
-    val = "true" if on else "false"
     res = write_env_updates(
-        {"MOOD_GATE": val, "FLATTEN_ON_BAD_REGIME": val},
+        {"MOOD_GATE": "false", "FLATTEN_ON_BAD_REGIME": "false"},
         path=path,
     )
     if res.get("ok"):
-        os.environ["MOOD_GATE"] = val
-        os.environ["FLATTEN_ON_BAD_REGIME"] = val
+        os.environ["MOOD_GATE"] = "false"
+        os.environ["FLATTEN_ON_BAD_REGIME"] = "false"
     out = dict(res)
-    out["gate_on"] = on if res.get("ok") else mood_gate_on()
-    out["note"] = (
-        "Market regime ON. Unfit books will not open. Type RESTART on Engine."
-        if on
-        else "Market regime OFF. Books trade their formulas. Type RESTART on Engine."
-    )
+    out["gate_on"] = False
+    out["note"] = "Market regime was removed. Books trade their formulas."
     clear_mood_cache()
     return out
 
 
 def clear_mood_cache() -> None:
-    """Drop the 8s desk mood snapshot. Enable regime and tests call this."""
+    """Drop the 8s mood snapshot. Tests call this."""
     with _mood_lock:
         _mood_cache.clear()
 
@@ -777,52 +769,17 @@ def classify_samples(
 def mood_blocks_entry(
     state: MoodState, side: str, *, strategy: str = ""
 ) -> tuple[bool, str]:
-    """True = do not open. Off unless Enable regime (MOOD_GATE). S13/S16 skip."""
-    if strategy in MOOD_EXEMPT_BOOKS:
-        return False, "mood_exempt"
-    if strategy in FORMULA_GATE_BOOKS:
-        return False, "s16_1h_formula"
-    if not state.gate_on:
-        return False, "mood_observe"
-    act = str(side or "").strip().lower()
-    fit = state.fit_for(strategy) if strategy else None
-    if fit and fit.get("stance") == "stand_down":
-        return True, (
-            f"mood={state.mood} {state.regime} {strategy} stand_down "
-            f"w={float(fit.get('weight') or 0):.2f}"
-        )
-    if fit and float(fit.get("weight") or 1.0) < mood_fit_min():
-        return True, (
-            f"mood={state.mood} {state.regime} {strategy} low_fit "
-            f"w={float(fit.get('weight') or 0):.2f}"
-        )
-    if fit and act in {"buy", "long"} and fit.get("preferred_side") == "short":
-        return True, f"mood={state.mood} {state.regime} {strategy} prefers_short"
-    if fit and act in {"short", "sell"} and fit.get("preferred_side") == "long":
-        return True, f"mood={state.mood} {state.regime} {strategy} prefers_long"
-    if act in {"buy", "long"} and not state.allow_long:
-        return True, f"mood={state.mood} {state.regime} {strategy} block_long"
-    if act in {"short", "sell"} and not state.allow_short:
-        return True, f"mood={state.mood} {state.regime} {strategy} block_short"
-    return False, "mood_ok"
+    """Always allow. Market regime was removed from the desk and engine."""
+    del state, side, strategy
+    return False, "mood_removed"
 
 
 def mood_wants_flatten(
     state: MoodState, position: str, *, strategy: str = ""
 ) -> tuple[bool, str]:
-    """True = flatten open. Needs Enable regime plus MOOD_FLATTEN. Never S13/S16."""
-    if strategy in MOOD_EXEMPT_BOOKS:
-        return False, "mood_exempt"
-    if strategy in FORMULA_GATE_BOOKS:
-        return False, "s16_1h_formula"
-    if not state.gate_on or not state.flatten_on:
-        return False, "mood_no_flatten"
-    pos = str(position or "").strip().lower()
-    if pos == "long" and state.flatten_long:
-        return True, f"mood={state.mood} {state.regime} flatten_long"
-    if pos == "short" and state.flatten_short:
-        return True, f"mood={state.mood} {state.regime} flatten_short"
-    return False, "mood_hold"
+    """Never flatten for regime. Market regime was removed."""
+    del state, position, strategy
+    return False, "mood_removed"
 
 
 def downsample_samples(
@@ -1223,24 +1180,13 @@ def mood_desk_payload(db: Path | None = None, *, full: bool = False) -> dict[str
     d = st.to_dict()
     d["ok"] = True
     d["full"] = bool(full)
+    d["gate_on"] = False
+    d["flatten_on"] = False
     d["ts_ist"] = datetime.now(IST).isoformat(timespec="seconds")
-    if st.gate_on:
-        d["note"] = (
-            "Market regime is ON. Unfit books will not open. "
-            "Fit uses 80 ticks + 5m…3h + day + week; a book that fights the day/week stands down. "
-            "Held 1h shorts stay until the next hour close unless MOOD_FLATTEN=true. "
-            "S13/overnight and S16 1h formula never veto. "
-            "Does not ENABLE. Does not change S13/S16 formulas. Keep DRY_RUN=true."
-        )
-    else:
-        d["note"] = (
-            "Market regime is OFF. Books trade their formulas. "
-            "The 80-tick + 5m…3h + day + week stack still calculates in RAM. "
-            "AMISE always uses that stack to invent. Enable only gates your books. "
-            "Live labels stay off the GOLD LTP row until Enable regime. "
-            "AMISE may still observe the tape. Type RESTART after you toggle. "
-            "Does not ENABLE. Keep DRY_RUN=true."
-        )
+    d["note"] = (
+        "Market regime was removed. Books trade their formulas. "
+        "AMISE may still read the tape to invent. This does not skip or flatten a book."
+    )
     with _mood_lock:
         _mood_cache[key] = (time.monotonic(), d)
     return dict(d)

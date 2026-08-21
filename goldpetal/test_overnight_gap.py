@@ -413,7 +413,7 @@ def test_mood_exempt() -> None:
     st = classify_samples(fall, gate=True, flatten=True)
     blocked, why = mood_blocks_entry(st, "BUY", strategy=BOOK)
     assert blocked is False
-    assert why == "mood_exempt"
+    assert why == "mood_removed"
     assert BOOK in MOOD_EXEMPT_BOOKS
     fit = st.fit_for(BOOK)
     assert fit is not None

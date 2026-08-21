@@ -13,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from control_state import paper_strategy_names
-from live_orders import live_lots_for, lots_on_fill_for_trade, recent_orders
+from live_orders import live_lots_for, lots_on_fill_for_trade, net_open_from_fills, recent_orders
 from paper_report import summarize_trades
 from storage import build_trades, latest_signals, latest_ticks, set_db_path
 import storage as _storage
@@ -348,7 +348,7 @@ def _empty_live_pnl() -> dict[str, Any]:
 
 
 def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per live-picked book: OPEN trade if any, else FLAT."""
+    """One row per live-picked book: OPEN trade if any, else Angel fill leftover, else FLAT."""
     from control_state import load_state
     from live_readiness import NEVER_LIVE_BOOKS, book_may_go_live
 
@@ -357,6 +357,10 @@ def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]
         name = str(trade.get("strategy") or "").strip()
         if name:
             open_by[name] = trade
+    fill_open = net_open_from_fills()
+    for name, row in fill_open.items():
+        if name not in open_by:
+            open_by[name] = dict(row)
     names: list[str] = []
     seen: set[str] = set()
     approved = list(load_state().live_approved or [])
@@ -375,6 +379,8 @@ def _live_positions_by_book(open_t: list[dict[str, Any]]) -> list[dict[str, Any]
             row = dict(trade)
             if row.get("lots") in (None, ""):
                 row["lots"] = live_lots_for(name)
+            if str(row.get("status") or "").upper() != "OPEN":
+                row["status"] = "OPEN"
             rows.append(row)
             continue
         rows.append(
@@ -431,6 +437,14 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     closed = [t for t in rows if str(t.get("status", "")).startswith("CLOSED")]
     closed_rev = list(reversed(closed))
     positions = _live_positions_by_book(open_t)
+    angel_open = [p for p in positions if str(p.get("status") or "") == "OPEN"]
+    if angel_open:
+        seen_open = {str(t.get("strategy") or "") for t in open_t}
+        for row in angel_open:
+            name = str(row.get("strategy") or "")
+            if name and name not in seen_open:
+                open_t.append(row)
+                seen_open.add(name)
     board_names: list[str] = []
     seen: set[str] = set()
     for raw in [str(r.get("strategy") or "") for r in positions] + sorted(
@@ -444,6 +458,19 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
     scoreboard = [summarize_trades(rows, s) for s in board_names]
     summary = summarize_trades(rows, None)
     summary["strategy"] = "LIVE"
+    summary["open"] = len(angel_open)
+    open_names = {
+        str(p.get("strategy") or "")
+        for p in angel_open
+        if p.get("strategy")
+    }
+    for board in scoreboard:
+        name = str(board.get("strategy") or "")
+        if name in open_names:
+            try:
+                board["open"] = max(int(board.get("open") or 0), 1)
+            except (TypeError, ValueError):
+                board["open"] = 1
     orders = [_public_live_order(o) for o in recent_orders(limit=40)]
     placed = [o for o in orders if o.get("placed")]
     out = _empty_live_pnl()
@@ -465,7 +492,28 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
         for o in orders
         if o.get("skipped") or o.get("dry_run")
     }
-    if "bot_still_paper_restart_required" in skip_reasons:
+    leftover = [p for p in angel_open if p.get("source") == "angel_fill"]
+    dry = False
+    try:
+        from live_readiness import read_live_env
+
+        dry = bool(read_live_env().get("dry_run"))
+    except Exception:
+        dry = False
+    if leftover and dry:
+        n_open = len(angel_open)
+        lots_n = 0
+        for p in angel_open:
+            try:
+                lots_n += int(float(p.get("lots") or 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        out["note"] = (
+            f"Angel still has {n_open} open book(s), {lots_n} lots on the fill log. "
+            "Paper mode does not send new Angel orders. Type LIVE, Arm live, RESTART, "
+            "then Exit to square. Save strategies does not switch you to Paper."
+        )
+    elif "bot_still_paper_restart_required" in skip_reasons:
         out["note"] = (
             "Paper can fill while Angel does not: this bot started in paper. "
             "Type RESTART after Arm live. Live AC ₹ stays empty until an Angel order id appears."
