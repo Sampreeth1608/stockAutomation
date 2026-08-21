@@ -589,6 +589,9 @@ def test_live_pnl_hides_leftover_when_angel_already_flat() -> None:
         assert pnl["open"] == []
         assert float(pnl["summary"]["pnl_after_charges"]) == -1280.5
         assert float(pnl["summary"]["angel_pnl"]) == -1280.5
+        board = {r["strategy"]: r for r in pnl["scoreboard"]}
+        if "S5_MINEDGE" in board:
+            assert int(board["S5_MINEDGE"].get("open") or 0) == 0
 
 
 def test_live_pnl_leftover_newer_than_flat_cache_stays_open() -> None:

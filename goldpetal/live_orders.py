@@ -320,9 +320,21 @@ def _parse_num(raw: Any) -> float | None:
 
 
 def _angel_no_data(payload: dict[str, Any]) -> bool:
+    """Empty position/trade book — not a broker failure.
+
+    SmartAPI uses AB1016 (position not found) when the book is flat.
+    AB1019 / AB1014 are the same idea for other empty list calls.
+    """
     code = str(payload.get("errorcode") or payload.get("errorCode") or "").upper()
     msg = str(payload.get("message") or payload.get("error") or "").lower()
-    return "AB1019" in code or "no data" in msg or "no record" in msg
+    if any(tag in code for tag in ("AB1016", "AB1019", "AB1014")):
+        return True
+    return (
+        "no data" in msg
+        or "no record" in msg
+        or "position not found" in msg
+        or "trade not found" in msg
+    )
 
 
 def _as_row_list(chunk: Any) -> list[dict[str, Any]]:

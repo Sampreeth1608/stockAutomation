@@ -471,9 +471,17 @@ def _apply_angel_snapshot(out: dict[str, Any]) -> dict[str, Any]:
     pnl = snap.get("pnl")
     if pnl is None:
         pnl = snap.get("pnl_after_charges")
+    p: float | None = None
+    if pnl is not None:
+        try:
+            p = round(float(pnl), 2)
+        except (TypeError, ValueError):
+            p = None
     summary = dict(out.get("summary") or {})
     summary["angel_net"] = net
-    if angel_net_cache_is_flat():
+    summary["angel_ok"] = True
+    flat = angel_net_cache_is_flat()
+    if flat:
         flat_rows: list[dict[str, Any]] = []
         for row in list(out.get("positions") or []):
             r = dict(row)
@@ -486,25 +494,40 @@ def _apply_angel_snapshot(out: dict[str, Any]) -> dict[str, Any]:
         out["positions"] = flat_rows
         out["open"] = []
         summary["open"] = 0
-        if pnl is not None:
-            out["note"] = (
-                "Angel Gold Petal is flat. Live AC ₹ is Angel after charges (tax excluded). "
-                "Does not Arm live."
-            )
-        else:
-            out["note"] = (
-                "Angel Gold Petal is flat — no open live contracts. "
-                "Live AC ₹ still loading from Angel. Does not Arm live."
-            )
-    if pnl is not None and (angel_net_cache_is_flat() or net != 0):
-        try:
-            p = round(float(pnl), 2)
-        except (TypeError, ValueError):
-            p = None
+        boards: list[dict[str, Any]] = []
+        for board in list(out.get("scoreboard") or []):
+            b = dict(board)
+            b["open"] = 0
+            boards.append(b)
+        out["scoreboard"] = boards
         if p is not None:
             summary["pnl_after_charges"] = p
             summary["pnl_after_tax"] = p
             summary["angel_pnl"] = p
+            for b in boards:
+                if str(b.get("strategy") or "") == "LIVE":
+                    b["pnl_after_charges"] = p
+                    b["pnl_after_tax"] = p
+            out["note"] = (
+                "Angel Gold Petal is flat. Live AC ₹ is Angel after charges (tax excluded), "
+                "not the old fill-tape total. Does not Arm live."
+            )
+        else:
+            summary["pnl_after_charges"] = None
+            summary["pnl_after_tax"] = None
+            summary["angel_pnl"] = None
+            out["note"] = (
+                "Angel Gold Petal is flat — no open live contracts. "
+                "Live AC ₹ is Angel (not the old tape). Waiting for Angel P&L. Does not Arm live."
+            )
+    elif p is not None:
+        summary["pnl_after_charges"] = p
+        summary["pnl_after_tax"] = p
+        summary["angel_pnl"] = p
+        out["note"] = (
+            f"Angel Gold Petal net {net} lot(s). Live open and Live AC ₹ are Angel, "
+            "not the fill log. Does not Arm live."
+        )
     out["summary"] = summary
     return out
 

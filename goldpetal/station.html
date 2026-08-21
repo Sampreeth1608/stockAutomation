@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v56</title>
+<title>Gold Petal v57</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v56: Angel position() is the open count; AB1019 / empty book is flat; Live AC ₹ from Angel -->
+<!-- gp-header-v57: AB1016 empty position book is flat; Live AC ₹ is Angel, not the old fill tape -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -172,7 +172,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v56</span>
+        <span class="ver" id="desk-ver">v57</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -184,7 +184,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v56</div>
+      <div class="clock" id="clock">IST — · v57</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -617,8 +617,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v56";
-    document.title = "Gold Petal v56";
+    if (clock) clock.textContent = "IST " + ist + " · v57";
+    document.title = "Gold Petal v57";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -801,7 +801,8 @@ function renderKpis() {
   const pnl = afterChargesInr(sum);
   const wr = wrAfterCharges(sum);
   const pnlEl = $("kpi-pnl");
-  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || sum.closed || p.placed_count;
+  const angelOk = sum.angel_ok === true || sum.angel_net != null;
+  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || (!angelOk && (sum.closed || p.placed_count));
   pnlEl.textContent = showPnl ? money(pnl == null ? 0 : pnl) : "—";
   pnlEl.className = pnlClass(pnl);
   $("kpi-wr").textContent = (sum.closed) ? pct(wr) : "—";
@@ -1142,7 +1143,8 @@ function renderLivePnl() {
   $("live-kpi-closed").textContent = sum.closed || 0;
   const pnl = afterChargesInr(sum);
   const pnlEl = $("live-kpi-pnl");
-  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || sum.closed || p.placed_count;
+  const angelOk = sum.angel_ok === true || sum.angel_net != null;
+  const showPnl = (sum.angel_pnl != null && sum.angel_pnl !== "") || (!angelOk && (sum.closed || p.placed_count));
   pnlEl.textContent = showPnl ? money(pnl == null ? 0 : pnl) : "—";
   pnlEl.className = pnlClass(pnl);
   const wr = wrAfterCharges(sum);
@@ -1337,9 +1339,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v56"];
+  const foot = ["v57"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v56";
+  if (ver) ver.textContent = d.desk_build || "v57";
   if (lastHist.lots) foot.push(lastHist.lots + " lots");
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";

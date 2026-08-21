@@ -233,6 +233,24 @@ def run_once(
     symbol = contract["symbol"]
     token = contract["token"]
     exchange_type = contract["exchange_type"]
+    try:
+        from live_orders import refresh_angel_snapshot
+        from desk_data import invalidate_live_pnl_cache
+
+        snap = refresh_angel_snapshot(
+            getattr(session, "api", None),
+            symbol=str(symbol),
+            token=str(token),
+            min_interval_sec=0,
+        )
+        invalidate_live_pnl_cache()
+        print(
+            f"Angel Gold Petal net={snap.get('net')} pnl={snap.get('pnl')} "
+            f"cleared={snap.get('cleared') or []}",
+            flush=True,
+        )
+    except Exception as exc:
+        logger.warning("Angel snapshot at start failed: %s", exc)
 
     latest = {"cmp": None, "bp": None, "sp": None, "message": None}
     state = {
@@ -1589,19 +1607,18 @@ def run_once(
 
             try:
                 from live_orders import reconcile_fill_leftovers_with_angel
+                from desk_data import invalidate_live_pnl_cache
 
                 cleared = reconcile_fill_leftovers_with_angel(
                     getattr(session, "api", None),
                     symbol=str(contract.get("symbol") or ""),
                     token=str(contract.get("token") or ""),
                 )
+                try:
+                    invalidate_live_pnl_cache()
+                except Exception:
+                    pass
                 if cleared:
-                    try:
-                        from desk_data import invalidate_live_pnl_cache
-
-                        invalidate_live_pnl_cache()
-                    except Exception:
-                        pass
                     line = (
                         f"[{now.isoformat(timespec='seconds')}] [EXIT] "
                         f"Angel already flat — cleared leftover {', '.join(cleared)}"

@@ -496,6 +496,16 @@ def test_angel_net_empty_book_is_zero() -> None:
     assert kind == "ok" and net == 0
     kind, net = angel_net_lots_from_book(
         {
+            "status": False,
+            "errorcode": "AB1016",
+            "message": "Position not found",
+        },
+        symbol="GOLDPETAL26APRFUT",
+        token="99",
+    )
+    assert kind == "ok" and net == 0
+    kind, net = angel_net_lots_from_book(
+        {
             "status": True,
             "data": {
                 "net": [
@@ -699,8 +709,8 @@ def test_reconcile_uses_position_method_and_ab1019() -> None:
         api = _FakePositionApi(
             {
                 "status": False,
-                "errorcode": "AB1019",
-                "message": "AB1019 No Data",
+                "errorcode": "AB1016",
+                "message": "Position not found",
             }
         )
         cleared = reconcile_fill_leftovers_with_angel(
