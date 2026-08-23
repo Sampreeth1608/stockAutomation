@@ -46,7 +46,7 @@ def _seed(db: Path) -> None:
         net=10.0,
         net_delta=1.0,
         dry_run=True,
-        strategy="S5_MINEDGE",
+        strategy="S16_HHHL_WICK_1H",
         cmp=10000.0,
         db_path=db,
     )
@@ -60,7 +60,7 @@ def _seed(db: Path) -> None:
         net=12.0,
         net_delta=2.0,
         dry_run=True,
-        strategy="S5_MINEDGE",
+        strategy="S16_HHHL_WICK_1H",
         cmp=10005.0,
         db_path=db,
     )
@@ -100,8 +100,8 @@ def test_write_monitor_pack() -> None:
         books = build_book_rows(db_path=db)
         assert books[-1]["strategy"] == "ALL"
         assert "after_charges_₹" in BOOK_FIELDS
-        s5 = next(r for r in books if r["strategy"] == "S5_MINEDGE")
-        assert int(s5["closed"]) >= 1
+        s16 = next(r for r in books if r["strategy"] == "S16_HHHL_WICK_1H")
+        assert int(s16["closed"]) >= 1
         flow = next(r for r in books if r["strategy"] == "FLOW_BRAIN")
         assert flow["in_bot"] == "NO"
         how = "\n".join(r["step"] for r in how_to_rows())

@@ -236,7 +236,7 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
             net=20.0,
             net_delta=2.0,
             dry_run=False,
-            strategy="S5_MINEDGE",
+            strategy="S16_HHHL_WICK_1H",
             cmp=15010.0,
             db_path=db,
         )
@@ -250,7 +250,7 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
             net=10.0,
             net_delta=-2.0,
             dry_run=False,
-            strategy="S5_MINEDGE",
+            strategy="S16_HHHL_WICK_1H",
             cmp=15025.0,
             db_path=db,
         )
@@ -285,7 +285,7 @@ def test_live_pnl_excludes_paper_and_scales_live_lots() -> None:
         with patch("desk_data.live_lots_for", return_value=25):
             pnl = live_pnl_payload(db_path=db)
         names = {t["strategy"] for t in pnl["trades"]}
-        assert names == {"S5_MINEDGE"}
+        assert names == {"S16_HHHL_WICK_1H"}
         assert int(pnl["summary"]["closed"]) == 1
         closed = pnl["trades"][0]
         # No Angel fill log → 1-lot fallback, never today's 25-lot arm.
@@ -716,7 +716,8 @@ def test_paper_summaries_wait_false_does_not_rebuild() -> None:
         ):
             out = paper_strategy_summaries(db_path=db, wait=False)
         assert isinstance(out, dict)
-        assert "S5_MINEDGE" in out
+        assert "S16_HHHL_WICK_1H" in out
+        assert "S5_MINEDGE" not in out
 
 
 def test_latest_signals_live_only_skips_paper() -> None:

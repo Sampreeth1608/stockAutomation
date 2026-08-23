@@ -484,7 +484,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
     assert "Gold Petal v63" in cmd
-    assert "?v=62" in cmd
+    assert "?v=63" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
