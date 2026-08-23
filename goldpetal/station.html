@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v63</title>
+<title>Gold Petal v64</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v63: S16-only live desk — every other book archived off live -->
+<!-- gp-header-v64: S16-only live desk — every other book archived off live -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -171,7 +171,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v63</span>
+        <span class="ver" id="desk-ver">v64</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -183,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v63</div>
+      <div class="clock" id="clock">IST — · v64</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -292,13 +292,14 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
       <div class="scroll" id="dl-panel" hidden>
         <h2>Downloads</h2>
-        <p class="hint">CSV / ZIP / Sheets for the laptop. <b>Download ticks CSV</b> is every stored Angel snap-quote tick — not 1h OHLC bars: LTP, session OHLC, volume, last traded qty, average traded price, total buy qty, total sell qty, bid 1–5 price+qty, ask 1–5 price+qty, OI. Copy ticks → Sheets can choke on many days; use CSV for long ranges. Tape ticks, book signals, and Angel order ids live here. Date range is IST inclusive. Phone monitor ZIP is LIVE / ANGEL / books after charges. Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live, not raise lots.</p>
+        <p class="hint">CSV / ZIP / Sheets for the laptop. <b>Download strategy PDF</b> saves every book’s calculation (including S16) to this laptop’s Downloads folder. <b>Download ticks CSV</b> is every stored Angel snap-quote tick — not 1h OHLC bars: LTP, session OHLC, volume, last traded qty, average traded price, total buy qty, total sell qty, bid 1–5 price+qty, ask 1–5 price+qty, OI. Copy ticks → Sheets can choke on many days; use CSV for long ranges. Tape ticks, book signals, and Angel order ids live here. Date range is IST inclusive. Phone monitor ZIP is LIVE / ANGEL / books after charges. Start/stop stays in Risk and Engine. Sheets COMMANDS may pause/emergency only — not Arm live, not raise lots.</p>
         <div class="row" style="margin-top:.45rem">
           <label class="chk">From <input type="date" id="exp-from"/></label>
           <label class="chk">To <input type="date" id="exp-to"/></label>
           <span class="mono" id="exp-meta"></span>
         </div>
         <div class="row" style="margin-top:.7rem">
+          <button class="btn ok" type="button" id="btn-dl-strategies-pdf">Download strategy PDF</button>
           <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
           <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
           <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
@@ -572,8 +573,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v63";
-    document.title = "Gold Petal v63";
+    if (clock) clock.textContent = "IST " + ist + " · v64";
+    document.title = "Gold Petal v64";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -1061,9 +1062,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v63"];
+  const foot = ["v64"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v63";
+  if (ver) ver.textContent = d.desk_build || "v64";
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
   renderLivePnl();
@@ -1136,6 +1137,10 @@ function gotoLive() {
 $("btn-goto-live-side").onclick = gotoLive;
 $("exp-from").onchange = () => refreshExportMeta().catch(() => {});
 $("exp-to").onchange = () => refreshExportMeta().catch(() => {});
+$("btn-dl-strategies-pdf").onclick = () => {
+  downloadUrl("/api/docs/strategies.pdf");
+  flash("flash-dl", "Downloading goldpetal_all_strategies.pdf → laptop Downloads");
+};
 $("btn-dl-pack").onclick = () => {
   try {
     downloadUrl("/api/export/pack.zip?" + rangeQs());

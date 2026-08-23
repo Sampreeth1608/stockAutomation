@@ -129,6 +129,15 @@ from reasoning_cockpit import (
 
 ROOT = Path(__file__).resolve().parent
 S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
+STRATEGIES_PDF_PATH = ROOT / "docs" / "goldpetal_all_strategies.pdf"
+STRATEGIES_PDF_NAME = "goldpetal_all_strategies.pdf"
+
+
+def strategies_archive_pdf() -> tuple[bytes, str]:
+    """Bytes + filename for the archived-strategy PDF (laptop Downloads)."""
+    if not STRATEGIES_PDF_PATH.is_file():
+        raise FileNotFoundError(str(STRATEGIES_PDF_PATH))
+    return STRATEGIES_PDF_PATH.read_bytes(), STRATEGIES_PDF_NAME
 
 
 DESK_HTML_PATH = ROOT / "desk.html"
@@ -307,7 +316,7 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v63",
+        "desk_build": "v64",
     }
 
 
@@ -578,6 +587,26 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/timeframes":
                 status, body, ctype = _json_bytes({"timeframes": panel_timeframes()})
                 self._send(status, body, ctype)
+                return
+            if path in {
+                "/api/docs/strategies.pdf",
+                "/api/docs/goldpetal_all_strategies.pdf",
+            }:
+                try:
+                    blob, name = strategies_archive_pdf()
+                except FileNotFoundError:
+                    self._send(
+                        404,
+                        b"strategy archive PDF missing - copy docs/goldpetal_all_strategies.pdf",
+                        "text/plain; charset=utf-8",
+                    )
+                    return
+                self._send(
+                    200,
+                    blob,
+                    "application/pdf",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
                 return
             if path == "/api/export/defaults":
                 d0, d1 = default_date_range()

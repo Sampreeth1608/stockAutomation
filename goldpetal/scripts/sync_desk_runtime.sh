@@ -45,6 +45,7 @@ FILES=(
   goldpetal/station.html
   goldpetal/lite.html
   goldpetal/login.html
+  goldpetal/docs/goldpetal_all_strategies.pdf
   goldpetal/scripts/run_desk_vm.sh
   goldpetal/scripts/print_open_on_mac.sh
   goldpetal/scripts/sync_desk_runtime.sh
@@ -55,7 +56,7 @@ if [[ ! -d "$REPO/.git" ]]; then
   exit 1
 fi
 
-mkdir -p "$DEST/analytics" "$DEST/scripts"
+mkdir -p "$DEST/analytics" "$DEST/scripts" "$DEST/docs"
 echo "sync desk runtime  $BRANCH  →  $DEST"
 git -C "$REPO" fetch origin
 for rel in "${FILES[@]}"; do

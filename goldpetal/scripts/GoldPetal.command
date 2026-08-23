@@ -3,7 +3,7 @@
 # The real station stays on the VM. This opens a private IAP SSH tunnel + Chrome.
 # If 8501 on the VM is down, it starts the station first (not the trading bot).
 # Run on the Mac. Never on the VM. Keep DRY_RUN=true.
-# GoldPetal.command v63
+# GoldPetal.command v64
 #
 # Port 22 on the VM public IP is closed on purpose. Direct ssh to 8.231.125.120
 # times out. Always use --tunnel-through-iap. Do not open 22 or 8501 to the internet.
@@ -13,7 +13,7 @@ VM_USER="${GP_VM_USER:-sampreeth1608}"
 VM_NAME="${GP_VM_NAME:-sampreeth-love-story}"
 VM_ZONE="${GP_VM_ZONE:-asia-south1-c}"
 VM_PROJECT="${GP_VM_PROJECT:-sampreethlovestory}"
-DESK_URL="${GP_DESK_URL:-http://127.0.0.1:8501/?v=63}"
+DESK_URL="${GP_DESK_URL:-http://127.0.0.1:8501/?v=64}"
 REMOTE_DESK="${GP_REMOTE_DESK:-cd ~/goldpetal && GP_QUIET_OPEN=1 ./scripts/run_desk_vm.sh --restart}"
 
 TUNNEL_CMD=(gcloud compute ssh "${VM_USER}@${VM_NAME}"
@@ -51,6 +51,22 @@ open_browser() {
   else
     echo "Open Chrome: $DESK_URL"
   fi
+}
+
+save_strategy_pdf() {
+  # Chrome Downloads folder on this Mac. Desk must already answer on 8501.
+  local dest="${HOME}/Downloads/goldpetal_all_strategies.pdf"
+  local tmp="${dest}.part"
+  mkdir -p "${HOME}/Downloads"
+  if curl -fsL --max-time 20 "http://127.0.0.1:8501/api/docs/strategies.pdf" -o "$tmp"; then
+    if [[ "$(head -c 4 "$tmp" 2>/dev/null)" == "%PDF" ]]; then
+      mv "$tmp" "$dest"
+      echo "Saved strategy PDF → $dest"
+      return 0
+    fi
+  fi
+  rm -f "$tmp"
+  echo "Strategy PDF not copied yet. After Unlock desk: Downloads tab → Download strategy PDF."
 }
 
 print_tunnel() {
@@ -101,6 +117,7 @@ wait_and_open() {
   done
   if [[ "$up" == "1" ]]; then
     echo "Station UP  $DESK_URL"
+    save_strategy_pdf
   else
     echo "8501 still not answering. Chrome may stay blank until the station is up."
     echo "Leave the tunnel window open. In another Mac Terminal:"
@@ -123,7 +140,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-echo "======== Gold Petal v63 ========"
+echo "======== Gold Petal v64 ========"
 echo "This window is the private IAP tunnel. Leave it open. Closing it drops the desk."
 echo "Keep DRY_RUN=true. Do not open port 22 or 8501 to the internet."
 echo
@@ -139,6 +156,7 @@ fi
 
 if desk_answers; then
   echo "Station already on $DESK_URL"
+  save_strategy_pdf
   open_browser
   echo "Hard-refresh Chrome: Cmd+Shift+R"
   echo "If you see Unlock desk, that is the login, not a crash."

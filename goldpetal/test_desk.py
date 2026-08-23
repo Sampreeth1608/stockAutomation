@@ -82,11 +82,11 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v63" in html
-    assert " · v63" in html
+    assert "gp-header-v64" in html
+    assert " · v64" in html
     assert 'id="desk-ver"' in html
-    assert ">v63</span>" in html
-    assert "<title>Gold Petal v63</title>" in html
+    assert ">v64</span>" in html
+    assert "<title>Gold Petal v64</title>" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -214,6 +214,9 @@ def test_station_is_the_operator_page() -> None:
     assert "last traded qty" in html
     assert "total buy qty" in html
     assert "not 1h OHLC bars" in html
+    assert "Download strategy PDF" in html
+    assert "/api/docs/strategies.pdf" in html
+    assert "goldpetal_all_strategies.pdf" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -340,6 +343,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     html = (ROOT / "desk.html").read_text(encoding="utf-8")
     assert "Watch" in html
     assert "Download all (ZIP)" in html
+    assert "Download strategy PDF" in html
+    assert "/api/docs/strategies.pdf" in html
     assert "Copy trades → Sheets" in html
     assert "Download phone monitor" in html
     assert "/api/sheets/monitor.zip" in html
@@ -474,6 +479,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/strategy_overnight_gap.py" in sync
     assert "goldpetal/panel_export.py" in sync
     assert "goldpetal/export_full_ticks.py" in sync
+    assert "goldpetal/docs/goldpetal_all_strategies.pdf" in sync
+    assert '"$DEST/docs"' in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
@@ -483,8 +490,11 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v63" in cmd
-    assert "?v=63" in cmd
+    assert "Gold Petal v64" in cmd
+    assert "?v=64" in cmd
+    assert "save_strategy_pdf" in cmd
+    assert "Downloads/goldpetal_all_strategies.pdf" in cmd
+    assert "/api/docs/strategies.pdf" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -537,7 +547,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v63"
+    assert payload["desk_build"] == "v64"
 
 
 def test_login_html_is_the_gate() -> None:
@@ -551,6 +561,17 @@ def test_login_html_is_the_gate() -> None:
     assert "CSRF_HEADER" in auth
     assert "PUBLIC_BIND_HOSTS" in auth
     assert "path_requires_totp" in auth
+
+
+def test_strategies_archive_pdf_is_downloadable() -> None:
+    from control_panel import STRATEGIES_PDF_NAME, strategies_archive_pdf
+
+    blob, name = strategies_archive_pdf()
+    assert name == STRATEGIES_PDF_NAME
+    assert blob.startswith(b"%PDF")
+    assert len(blob) > 1000
+    runner = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "/api/docs/strategies.pdf" in runner
 
 
 def test_streamlit_cannot_write() -> None:
@@ -569,6 +590,7 @@ if __name__ == "__main__":
     test_full_html_keeps_watch_downloads()
     test_control_panel_serves_station_on_8501()
     test_desk_payload_includes_session()
+    test_strategies_archive_pdf_is_downloadable()
     test_login_html_is_the_gate()
     test_streamlit_cannot_write()
     print("ALL test_desk OK")
