@@ -307,7 +307,7 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v62",
+        "desk_build": "v63",
     }
 
 
@@ -1039,9 +1039,9 @@ def main() -> None:
     load_state()
     load_capital()
     try:
-        from live_readiness import ensure_overnight_gap_enable
+        from live_readiness import ensure_s16_only_desk
 
-        ensure_overnight_gap_enable()
+        ensure_s16_only_desk()
     except Exception:
         pass
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)

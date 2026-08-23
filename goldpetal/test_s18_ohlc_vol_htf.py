@@ -103,7 +103,7 @@ def test_pack_tick_confirms_use_net_and_prev_hl() -> None:
 
 def test_paper_wired_not_live() -> None:
     assert S18_NAME in ALL_STRATEGY_NAMES
-    assert S18_NAME in SLIM_PAPER_STRATEGIES
+    assert S18_NAME not in SLIM_PAPER_STRATEGIES
     root = Path(__file__).resolve().parent
     station = (root / "station.html").read_text(encoding="utf-8")
     runner = (root / "run_strategy.py").read_text(encoding="utf-8")

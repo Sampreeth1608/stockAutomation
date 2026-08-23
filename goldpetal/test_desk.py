@@ -82,11 +82,11 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v62" in html
-    assert " · v62" in html
+    assert "gp-header-v63" in html
+    assert " · v63" in html
     assert 'id="desk-ver"' in html
-    assert ">v62</span>" in html
-    assert "<title>Gold Petal v62</title>" in html
+    assert ">v63</span>" in html
+    assert "<title>Gold Petal v63</title>" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -161,9 +161,9 @@ def test_station_is_the_operator_page() -> None:
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
-    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap" in html
-    assert "S20 stays off" in html
-    assert "S19 / S20 stay off" not in html
+    assert "Only <b>S16 HHHL+wick 1h</b> can go live" in html
+    assert "Every other book is off live permanently" in html
+    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap" not in html
     assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "live_eligible" in html
@@ -206,7 +206,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S19 / S20 stay off" not in html
-    assert "S20 stays off" in html
+    assert "off live permanently" in html
     assert "Download ticks CSV" in html
     assert "every stored Angel snap-quote tick" in html
     assert "bid 1–5 price+qty" in html
@@ -235,11 +235,11 @@ def test_station_is_the_operator_page() -> None:
     assert "S16_HHHL_WICK_1H" in html
     paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S16_HHHL_WICK_1H" in paper
-    assert "S18_OHLC_VOL_HTF" in paper
-    assert "S19_BODY_CLOSE_1H" in paper
+    assert "S18_OHLC_VOL_HTF" not in paper
+    assert "S19_BODY_CLOSE_1H" not in paper
     assert "S20_FADE_HL" not in paper
-    assert "OVERNIGHT_GAP" in paper
-    assert "S13_HHHL_DAY" in paper
+    assert "OVERNIGHT_GAP" not in paper
+    assert "S13_HHHL_DAY" not in paper
     assert "S11_DISCOVERED" not in paper
     assert "S4_OVERNIGHT" not in paper
     assert "S12_HHHL30" not in paper
@@ -284,8 +284,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "After charges" in html
     assert "This page is Angel" in html
     assert "40% WR% AC" not in html
-    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap can go live" in html
-    assert "S20 stays off" in html
+    assert "Only S16 HHHL+wick 1h can go live" in html
+    assert "Every other book is off live permanently" in html
     assert "S19 / S20 stay off" not in html
     assert "S19 / S20 stay paper until 40% WR% AC" not in html
     assert "S18 / S19 / S20 stay paper until 40% WR% AC" not in html
@@ -483,7 +483,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v62" in cmd
+    assert "Gold Petal v63" in cmd
     assert "?v=62" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
@@ -493,16 +493,17 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert 'cd "$(dirname "$0")/.."' not in cmd
     from live_readiness import LIVE_ELIGIBLE_BOOKS, NEVER_LIVE_BOOKS, PAPER_ONLY_BOOKS
 
-    assert "S13_HHHL_DAY" in LIVE_ELIGIBLE_BOOKS
+    assert "S13_HHHL_DAY" not in LIVE_ELIGIBLE_BOOKS
     assert "S16_HHHL_WICK_1H" in LIVE_ELIGIBLE_BOOKS
-    assert "S18_OHLC_VOL_HTF" not in PAPER_ONLY_BOOKS
-    assert "S18_OHLC_VOL_HTF" in LIVE_ELIGIBLE_BOOKS
-    assert "S19_BODY_CLOSE_1H" not in PAPER_ONLY_BOOKS
-    assert "S19_BODY_CLOSE_1H" in LIVE_ELIGIBLE_BOOKS
+    assert LIVE_ELIGIBLE_BOOKS == frozenset({"S16_HHHL_WICK_1H"})
+    assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
+    assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
+    assert "S19_BODY_CLOSE_1H" in PAPER_ONLY_BOOKS
+    assert "S19_BODY_CLOSE_1H" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
-    assert "OVERNIGHT_GAP" not in PAPER_ONLY_BOOKS
-    assert "OVERNIGHT_GAP" not in NEVER_LIVE_BOOKS
-    assert "OVERNIGHT_GAP" in LIVE_ELIGIBLE_BOOKS
+    assert "OVERNIGHT_GAP" in PAPER_ONLY_BOOKS
+    assert "OVERNIGHT_GAP" in NEVER_LIVE_BOOKS
+    assert "OVERNIGHT_GAP" not in LIVE_ELIGIBLE_BOOKS
     assert "FLOW_BRAIN" in NEVER_LIVE_BOOKS
     from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
 
@@ -536,7 +537,7 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v62"
+    assert payload["desk_build"] == "v63"
 
 
 def test_login_html_is_the_gate() -> None:

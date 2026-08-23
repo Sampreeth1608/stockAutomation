@@ -305,6 +305,30 @@ def invalidate_live_pnl_cache() -> None:
     _LIVE_PNL_CACHE["payload"] = None
 
 
+def _leftover_open_book_names(db: Path | None = None) -> set[str]:
+    """Fill-log leftover plus still-open live signal books (for leftover Exit)."""
+    names: set[str] = set()
+    try:
+        names.update(str(n).strip() for n in net_open_from_fills() if str(n).strip())
+    except Exception:
+        pass
+    if db is None:
+        return names
+    try:
+        seen: set[str] = set()
+        for row in latest_signals(limit=800, db_path=db, live_only=True) or []:
+            name = str(row["strategy"] or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            pos = str(row["position_after"] or "").lower()
+            if pos in {"long", "short"}:
+                names.add(name)
+    except Exception:
+        pass
+    return names
+
+
 def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[str, Any]:
     """Angel-sized P&L from dry_run=0 signals on live-eligible books.
 
@@ -341,7 +365,10 @@ def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[
             for n in (load_state().live_approved or [])
             if n not in NEVER_LIVE_BOOKS and book_may_go_live(n)
         ]
-        payload = _build_live_pnl(db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved))
+        leftover = _leftover_open_book_names(db)
+        payload = _build_live_pnl(
+            db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved) | leftover
+        )
         _LIVE_PNL_CACHE.update({"at": time.time(), "payload": payload, "db": str(db)})
         return _apply_angel_snapshot(dict(payload))
     finally:
@@ -401,7 +428,10 @@ def _live_positions_by_book(
     approved = list(load_state().live_approved or [])
     for raw in list(approved) + list(open_by.keys()):
         name = str(raw or "").strip()
-        if not name or name in seen or name in NEVER_LIVE_BOOKS:
+        if not name or name in seen:
+            continue
+        # Archived books stay visible only while leftover is still OPEN (Exit).
+        if name in NEVER_LIVE_BOOKS and name not in open_by:
             continue
         if live_gate and name not in open_by and not book_may_go_live(name, summaries=summaries):
             continue
@@ -438,7 +468,7 @@ def _leftover_live_pnl() -> dict[str, Any]:
     """Fill-log leftover only. Used when the full Live P&L rebuild must not block LTP."""
     out = _empty_live_pnl()
     try:
-        # Skip the 40% WR% paper rebuild — S19 FLAT still lists from live_approved.
+        # Fill-log leftover only. Archived books appear while leftover is OPEN.
         positions = _live_positions_by_book([], live_gate=False)
     except Exception:
         return out

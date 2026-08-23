@@ -138,10 +138,8 @@ class PortfolioConfig:
 def portfolio_from_env() -> PortfolioConfig:
     """Load enable flags from env.
 
-    Live desk default: S5, S8, S13, S16, S18, S19, overnight gap (S4 off — Angel/ticks daily
-    swing pick was S13). S11 pack ML is off the hot path (ENABLE_S11 default
-    false). S18/S19 are live-eligible with S5/S8/S13/S16/overnight gap — you Arm.
-    S20 / FLOW_BRAIN stay off. No paper fills. AMISE slots stay off.
+    Live desk default: S16 HHHL+wick 1h only. Every other book defaults off.
+    Archive formulas in docs/goldpetal_all_strategies.pdf. You Arm live.
     """
     def on(key: str, default: str) -> bool:
         return os.getenv(key, default).strip().lower() in {"1", "true", "yes", "y"}
@@ -155,15 +153,15 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S3_ML")
     if on("ENABLE_S4", "false"):
         enabled.add("S4_OVERNIGHT")
-    if on("ENABLE_S5", "true"):
+    if on("ENABLE_S5", "false"):
         enabled.add("S5_MINEDGE")
     if on("ENABLE_S6", "false"):
         enabled.add("S6_MIN30")
     if on("ENABLE_FLOW_BRAIN", "false"):
         enabled.add("FLOW_BRAIN")
-    if on("ENABLE_OVERNIGHT_GAP", "true"):
+    if on("ENABLE_OVERNIGHT_GAP", "false"):
         enabled.add("OVERNIGHT_GAP")
-    if on("ENABLE_S8", "true"):
+    if on("ENABLE_S8", "false"):
         enabled.add("S8_NET_ZIGZAG")
     if on("ENABLE_S9", "false"):
         enabled.add("S9_STATE30")
@@ -171,13 +169,13 @@ def portfolio_from_env() -> PortfolioConfig:
         enabled.add("S10_LEGACY30")
     if on("ENABLE_S11", "false"):
         enabled.add("S11_DISCOVERED")
-    if on("ENABLE_S13", "true"):
+    if on("ENABLE_S13", "false"):
         enabled.add("S13_HHHL_DAY")
     if on("ENABLE_S16", "true"):
         enabled.add("S16_HHHL_WICK_1H")
-    if on("ENABLE_S18", "true"):
+    if on("ENABLE_S18", "false"):
         enabled.add("S18_OHLC_VOL_HTF")
-    if on("ENABLE_S19", "true"):
+    if on("ENABLE_S19", "false"):
         enabled.add("S19_BODY_CLOSE_1H")
     if on("ENABLE_S20", "false"):
         enabled.add("S20_FADE_HL")
@@ -200,15 +198,7 @@ def portfolio_from_env() -> PortfolioConfig:
             enabled.add(slot_name(n))
 
     if not enabled:
-        enabled = {
-            "S5_MINEDGE",
-            "S8_NET_ZIGZAG",
-            "S13_HHHL_DAY",
-            "S16_HHHL_WICK_1H",
-            "S18_OHLC_VOL_HTF",
-            "S19_BODY_CLOSE_1H",
-            "OVERNIGHT_GAP",
-        }
+        enabled = {"S16_HHHL_WICK_1H"}
 
     flatten = on("FLATTEN_ON_BAD_REGIME", "false")
     return PortfolioConfig(enabled=enabled, flatten_when_blocked=flatten)

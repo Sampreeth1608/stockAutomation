@@ -479,13 +479,13 @@ def run_once(
         flush=True,
     )
     print(
-        f"S18      : ENABLE_S18 1h OHLC+vol+day pack overlay (live-eligible, you Arm) "
+        f"S18      : ENABLE_S18 off (archived — S16 only live) "
         f"[{'ON' if portfolio.is_enabled(strategy_s18.name) else 'OFF'}] "
         f"{strategy_s18.status_line}",
         flush=True,
     )
     print(
-        f"S19      : ENABLE_S19 1h aligned body+close (live-eligible, you Arm) "
+        f"S19      : ENABLE_S19 off (archived — S16 only live) "
         f"[{'ON' if portfolio.is_enabled(strategy_s19.name) else 'OFF'}] "
         f"{strategy_s19.status_line}",
         flush=True,
@@ -1902,7 +1902,7 @@ def run_once(
             emit_s16_if_changed(now, message)
             # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; you Arm live
             emit_s18_if_changed(now, message)
-            # S19: 1h aligned body+close, FLIP at bar close; live-eligible, you Arm
+            # S19: archived off live — S16 only
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
@@ -2203,8 +2203,8 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(live desk S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S20/FLOW off, "
-        f"S18/S19 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off. No paper fills.)",
+        f"(live desk S16 HHHL+wick 1h only — every other book off permanently, "
+        f"you Arm S16, AMISE off. No paper fills.)",
         flush=True,
     )
 

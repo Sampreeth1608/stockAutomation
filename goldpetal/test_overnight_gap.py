@@ -366,13 +366,13 @@ def test_enable_default_true() -> None:
 
     os.environ.pop("ENABLE_OVERNIGHT_GAP", None)
     p = portfolio_from_env()
-    assert "OVERNIGHT_GAP" in p.enabled
+    assert "OVERNIGHT_GAP" not in p.enabled
     env = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "ENABLE_OVERNIGHT_GAP=true" in env
+    assert "ENABLE_OVERNIGHT_GAP=false" in env
     portfolio = (ROOT / "portfolio.py").read_text(encoding="utf-8")
-    assert 'on("ENABLE_OVERNIGHT_GAP", "true")' in portfolio
+    assert 'on("ENABLE_OVERNIGHT_GAP", "false")' in portfolio
     panel = (ROOT / "control_panel.py").read_text(encoding="utf-8")
-    assert "ensure_overnight_gap_enable" in panel
+    assert "ensure_s16_only_desk" in panel
 
 
 def test_wide_spread_allows() -> None:
@@ -387,17 +387,17 @@ def test_wide_spread_allows() -> None:
 
 
 def test_live_eligible_without_40() -> None:
-    assert BOOK not in PAPER_ONLY_BOOKS
-    assert BOOK not in NEVER_LIVE_BOOKS
-    assert BOOK in LIVE_ELIGIBLE_BOOKS
+    assert BOOK in PAPER_ONLY_BOOKS
+    assert BOOK in NEVER_LIVE_BOOKS
+    assert BOOK not in LIVE_ELIGIBLE_BOOKS
     assert book_may_go_live(
         BOOK,
         summaries={BOOK: {"closed": 0, "win_rate_after_charges": 0.0}},
-    ) is True
+    ) is False
     assert book_may_go_live(
         BOOK,
         summaries={BOOK: {"closed": 20, "win_rate_after_charges": 39.9}},
-    ) is True
+    ) is False
 
 
 def test_mood_exempt() -> None:
@@ -422,7 +422,7 @@ def test_mood_exempt() -> None:
 
 def test_on_desk_and_slim() -> None:
     assert BOOK in ALL_STRATEGY_NAMES
-    assert BOOK in SLIM_PAPER_STRATEGIES
+    assert BOOK not in SLIM_PAPER_STRATEGIES
 
 
 def test_eod_skip_and_restore() -> None:

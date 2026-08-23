@@ -37,26 +37,23 @@ LIVE_CONFIRM_WORD = "LIVE"
 SIZE_CONFIRM_WORD = "SIZE"
 RESTART_CONFIRM_WORD = "RESTART"
 
-# S4 daily HH/LL lost the Angel/ticks backtest to S13 (daily S16). Stay off.
-DESK_FORCE_OFF = frozenset({"S4_OVERNIGHT"})
-PAPER_ONLY_BOOKS = frozenset(
+# Every book except S16 is off live permanently. Archive: docs/goldpetal_all_strategies.pdf
+DESK_FORCE_OFF = frozenset(
     {
-        "S20_FADE_HL",
-        "FLOW_BRAIN",
-    }
-)
-# Live desk books. S20/FLOW stay off. You Arm live.
-LIVE_ELIGIBLE_BOOKS = frozenset(
-    {
+        "S4_OVERNIGHT",
         "S5_MINEDGE",
         "S8_NET_ZIGZAG",
         "S13_HHHL_DAY",
-        "S16_HHHL_WICK_1H",
         "S18_OHLC_VOL_HTF",
         "S19_BODY_CLOSE_1H",
+        "S20_FADE_HL",
         "OVERNIGHT_GAP",
+        "FLOW_BRAIN",
     }
 )
+PAPER_ONLY_BOOKS = frozenset(DESK_FORCE_OFF)
+# Only S16 HHHL+wick 1h may go live. You Arm live.
+LIVE_ELIGIBLE_BOOKS = frozenset({"S16_HHHL_WICK_1H"})
 LIVE_WR_MIN_PCT = 40.0
 LIVE_MIN_CLOSED = 1
 NEVER_LIVE_BOOKS = DESK_FORCE_OFF | frozenset({"FLOW_BRAIN"})
@@ -118,20 +115,50 @@ def book_may_go_live(
 
 
 def ensure_overnight_gap_enable(*, path: Path | None = None) -> dict[str, Any]:
-    """Keep overnight gap on. Tick Lots or ₹, then you Arm live. Next-open exit.
+    """Overnight gap stays off. S16 is the only live book."""
+    return ensure_s16_only_desk(path=path)
 
-    Does not Arm live. Does not set DRY_RUN=false. Type RESTART on Engine.
+
+def ensure_s16_only_desk(*, path: Path | None = None) -> dict[str, Any]:
+    """Write ENABLE_S16=true and every other desk book false. Does not Arm.
+
+    Does not set DRY_RUN=false. Does not tick Lots. Type RESTART on Engine.
     """
     from analytics.env_bridge import write_env_updates
+    from control_state import load_state, set_live_approved
 
-    res = write_env_updates({"ENABLE_OVERNIGHT_GAP": "true"}, path=path)
+    updates = {
+        "ENABLE_S4": "false",
+        "ENABLE_S5": "false",
+        "ENABLE_S8": "false",
+        "ENABLE_S13": "false",
+        "ENABLE_S16": "true",
+        "ENABLE_S18": "false",
+        "ENABLE_S19": "false",
+        "ENABLE_S20": "false",
+        "ENABLE_FLOW_BRAIN": "false",
+        "ENABLE_OVERNIGHT_GAP": "false",
+    }
+    res = write_env_updates(updates, path=path)
     if res.get("ok"):
-        os.environ["ENABLE_OVERNIGHT_GAP"] = "true"
+        for key, val in updates.items():
+            os.environ[key] = val
+    try:
+        st = load_state()
+        keep = [n for n in (st.live_approved or []) if n in LIVE_ELIGIBLE_BOOKS]
+        if list(st.live_approved or []) != keep:
+            set_live_approved(
+                keep,
+                note="S16-only desk: dropped non-S16 live picks (does not Arm)",
+            )
+    except Exception:
+        keep = []
     out = dict(res)
-    out["enabled"] = True
+    out["enabled"] = ["S16_HHHL_WICK_1H"]
+    out["live_approved"] = keep
     out["note"] = (
-        "Overnight gap is on. Tick Lots or ₹ on Live, then you Arm live. "
-        "Closes at next open, not MARKET_CLOSE. Type RESTART on Engine. "
+        "S16 HHHL+wick 1h is the only live book. Other books are off permanently. "
+        "Tick Lots or ₹ on S16, then you Arm live. Type RESTART on Engine. "
         "Does not Arm live."
     )
     return out
@@ -251,7 +278,7 @@ def apply_desk_books(
     """One save: ENABLE_* (in bot) + live_approved. Live pick requires in-bot.
 
     Does not change DRY_RUN, does not restart, does not unlock live.
-    Live pick is the live desk set (S5/S8/S13/S16/S18/S19/overnight gap).
+    Live pick is S16 HHHL+wick 1h only.
     """
     from control_state import paper_strategy_names, set_intraday_books, set_live_approved
 
@@ -419,7 +446,7 @@ def apply_desk_arm(
         st = set_live_unlocked(True, path=state_path, note="desk Arm live")
         live_note = (
             "ARMED setup saved. Type RESTART on Engine so the bot loads it. "
-            "Angel fires only on live-picked books (S5/S8/S13/S16/S18/S19/overnight gap)."
+            "Angel fires only on S16 HHHL+wick 1h after you tick Lots or ₹."
         )
         if not books.get("live_approved"):
             live_note += " No live book is picked yet — check Live on those rows first."
@@ -716,8 +743,8 @@ def live_readiness(*, now: datetime | None = None) -> dict[str, Any]:
         "note": (
             f"Operator desk is {OPERATOR_PANEL} ({OPERATOR_URL}). "
             "All of: emergency clear, trading ON, Unlock live, live_approved, "
-            "DRY_RUN=false, Restart supervise. First live test: S5/S8/S13/S16/S18/S19/overnight gap. "
-            "You Arm live. S20/AMISE stay off. Size is LIVE_MAX_LOTS (hard cap "
+            "DRY_RUN=false, Restart supervise. Only S16 HHHL+wick 1h is live-eligible. "
+            "You Arm live. Every other book stays off. Size is LIVE_MAX_LOTS (hard cap "
             f"{PANEL_LIVE_MAX_LOTS}; type SIZE above {SAFE_LIVE_MAX_LOTS})."
         ),
     }

@@ -11,7 +11,7 @@ else
   DEST="${GP_DESK_DIR:-$HOME/goldpetal}"
 fi
 REPO="${GP_REPO_DIR:-$HOME/goldpetal-repo}"
-BRANCH="${GP_SYNC_BRANCH:-origin/cursor/live-1lot-test-a4b2}"
+BRANCH="${GP_SYNC_BRANCH:-origin/cursor/s16-only-live-a4b2}"
 
 FILES=(
   goldpetal/live_orders.py

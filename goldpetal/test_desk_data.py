@@ -458,23 +458,24 @@ def test_live_pnl_positions_flat_when_live_picked_and_no_open() -> None:
         db = Path(td) / "ticks.db"
         init_db(db)
         _tick(db)
-        st = ControlState(live_approved=["S5_MINEDGE", "S8_NET_ZIGZAG"])
+        st = ControlState(live_approved=["S16_HHHL_WICK_1H"])
         with (
             patch("control_state.load_state", return_value=st),
             patch("desk_data.live_lots_for", return_value=1),
         ):
             pnl = live_pnl_payload(db_path=db)
         by_name = {t["strategy"]: t for t in pnl["positions"]}
-        assert by_name["S5_MINEDGE"]["status"] == "FLAT"
-        assert by_name["S5_MINEDGE"]["side"] == "FLAT"
-        assert by_name["S8_NET_ZIGZAG"]["status"] == "FLAT"
+        assert by_name["S16_HHHL_WICK_1H"]["status"] == "FLAT"
+        assert by_name["S16_HHHL_WICK_1H"]["side"] == "FLAT"
+        assert "S5_MINEDGE" not in by_name
+        assert "S8_NET_ZIGZAG" not in by_name
         assert pnl["open"] == []
         board = {r["strategy"]: r for r in pnl["scoreboard"]}
-        assert "S5_MINEDGE" in board
-        assert "S8_NET_ZIGZAG" in board
+        assert "S16_HHHL_WICK_1H" in board
+        assert "S5_MINEDGE" not in board
+        assert "S8_NET_ZIGZAG" not in board
         assert board["LIVE"]["strategy"] == "LIVE"
-        assert int(board["S5_MINEDGE"]["closed"]) == 0
-        assert int(board["S8_NET_ZIGZAG"]["closed"]) == 0
+        assert int(board["S16_HHHL_WICK_1H"]["closed"]) == 0
 
 
 def test_live_pnl_fill_leftover_shows_open_when_tape_flat() -> None:
@@ -584,7 +585,7 @@ def test_live_pnl_hides_leftover_when_angel_already_flat() -> None:
         ):
             pnl = live_pnl_payload(db_path=db)
         by_name = {t["strategy"]: t for t in pnl["positions"]}
-        assert by_name["S5_MINEDGE"]["status"] == "FLAT"
+        assert "S5_MINEDGE" not in by_name
         assert int(pnl["summary"]["open"] or 0) == 0
         assert pnl["open"] == []
         assert float(pnl["summary"]["pnl_after_charges"]) == -1280.5
@@ -701,7 +702,7 @@ def test_live_pnl_wait_false_uses_leftover_without_rebuild() -> None:
         assert by_name["S5_MINEDGE"]["status"] == "OPEN"
         assert by_name["S5_MINEDGE"]["side"] == "SHORT"
         assert int(by_name["S5_MINEDGE"].get("lots") or 0) == 3
-        assert by_name["S19_BODY_CLOSE_1H"]["status"] == "FLAT"
+        assert "S19_BODY_CLOSE_1H" not in by_name
 
 
 def test_paper_summaries_wait_false_does_not_rebuild() -> None:
