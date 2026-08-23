@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start S16 bot + desk after the VM boots (08:55 IST schedule).
-# Does not Arm live. Does not change DRY_RUN. Does not bind 0.0.0.0.
+# Does not Arm live. Does not change DRY_RUN. Desk stays on localhost.
 set -u
 export HOME="${HOME:-/home/sampreeth1608}"
 GP="${GP_DESK_DIR:-$HOME/goldpetal}"
