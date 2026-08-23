@@ -20,6 +20,9 @@ from control_state import (
 )
 from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots, mirror_positions_from_signals, square_fill_leftover
 
+# LiveBroker tests assume a weekday session. Real gate blocks weekends/holidays.
+live_orders.session_allows_live_orders = lambda now=None: True
+
 
 class _FakeApi:
     def __init__(self) -> None:
@@ -248,6 +251,7 @@ def test_s18_cannot_trade_live_even_when_approved() -> None:
             res = broker.place_signal(strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0)
         assert res.skipped and res.reason == "not_live_eligible"
         assert not api.calls
+        assert (not orders.exists()) or (not orders.read_text(encoding="utf-8").strip())
     finally:
         td.cleanup()
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
@@ -763,6 +767,33 @@ def test_broker_from_session_force_live_in_paper() -> None:
     os.environ["DRY_RUN"] = "true"
 
 
+def test_place_signal_silent_when_market_closed() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        os.environ["DRY_RUN"] = "false"
+        _arm_live(state, "S16_HHHL_WICK_1H")
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        sunday = datetime(2026, 8, 23, 12, 10, tzinfo=ZoneInfo("Asia/Kolkata"))
+        with patch("live_orders.session_allows_live_orders", return_value=False):
+            res = broker.place_signal(
+                strategy="S16_HHHL_WICK_1H", action="BUY", price=7200.0
+            )
+        assert res.skipped and res.reason == "market_closed"
+        assert not api.calls
+        assert (not orders.exists()) or (not orders.read_text(encoding="utf-8").strip())
+        del sunday
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+        live_orders.ORDERS_PATH = control_state.CONTROL_DIR / "live_orders.jsonl"
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -808,4 +839,6 @@ if __name__ == "__main__":
     print("ok leftover_square_emergency")
     test_broker_from_session_force_live_in_paper()
     print("ok force_live_in_paper")
+    test_place_signal_silent_when_market_closed()
+    print("ok market_closed silent")
     print("ALL test_live_orders OK")

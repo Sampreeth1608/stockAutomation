@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v65</title>
+<title>Gold Petal v66</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v65: S16-only live desk — ticks not stored; day calc in RAM -->
+<!-- gp-header-v66: S16-only — holiday skips hidden; download all stored ticks -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -171,7 +171,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v65</span>
+        <span class="ver" id="desk-ver">v66</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -183,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v65</div>
+      <div class="clock" id="clock">IST — · v66</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -303,6 +303,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <button class="btn ok" type="button" id="btn-dl-pack">Download all (ZIP)</button>
           <button class="btn" type="button" id="btn-dl-trades">Download trades CSV</button>
           <button class="btn" type="button" id="btn-dl-ticks">Download ticks CSV</button>
+          <button class="btn ok" type="button" id="btn-dl-ticks-all">Download all ticks</button>
           <button class="btn" type="button" id="btn-dl-signals">Download signals CSV</button>
         </div>
         <div class="row" style="margin-top:.45rem">
@@ -319,7 +320,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
         </div>
         <p class="flash" id="flash-dl"></p>
         <h2 style="margin-top:1rem">Angel orders</h2>
-        <p class="hint">A row with an order id is what went to Angel. Skip Why: <code>bot_still_paper_restart_required</code> = type RESTART after Arm live. Empty after Arm without RESTART = bot still not-armed in RAM. Live closed round-trips are on Blotter, not here.</p>
+        <p class="hint">A row with an order id is what went to Angel. Qty 0 / skip / empty Order is <b>not</b> an Angel order — <code>not_live_eligible</code> on a weekend or holiday never called placeOrder. Skip Why: <code>bot_still_paper_restart_required</code> = type RESTART after Arm live. Live closed round-trips are on Blotter, not here.</p>
         <table>
           <thead>
             <tr><th>Time</th><th>Book</th><th>Side</th><th class="num">Qty</th><th>Result</th><th>Order</th><th>Why</th></tr>
@@ -327,7 +328,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
           <tbody id="dl-orders-body"></tbody>
         </table>
         <h2 style="margin-top:1rem">Recent ticks</h2>
-        <p class="hint">Same feed that used to sit on Tape. Download ticks CSV for the date range above — full depth, not OHLC-only.</p>
+        <p class="hint">Last stored session (often Friday). Weekend / holiday has no new tape. <b>Download all ticks</b> writes every stored snap-quote to this laptop’s Downloads — full depth, not OHLC-only. S16 does not need this archive to calculate.</p>
         <table>
           <thead>
             <tr><th>Time</th><th class="num">LTP</th><th class="num">Bid qty</th><th class="num">Ask qty</th></tr>
@@ -573,8 +574,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v65";
-    document.title = "Gold Petal v65";
+    if (clock) clock.textContent = "IST " + ist + " · v66";
+    document.title = "Gold Petal v66";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -937,7 +938,9 @@ function fillLiveClosed(p) {
 function fillAngelOrders(p) {
   const el = $("dl-orders-body");
   if (!el) return;
-  const orders = (p && p.orders) || lastTape.live_orders || [];
+  const noise = { not_live_eligible: 1, market_closed: 1, not_live_book: 1, weekend_or_holiday: 1 };
+  const raw = (p && p.orders) || lastTape.live_orders || [];
+  const orders = raw.filter((o) => o && (o.order_id || !noise[o.reason]));
   el.innerHTML = orders.map((o) => {
     const placed = o.placed === true || (o.ok && !o.skipped && !o.dry_run);
     const result = placed ? "sent" : (o.skipped || o.dry_run ? "skip" : (o.ok ? "ok" : "fail"));
@@ -1063,9 +1066,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v65"];
+  const foot = ["v66"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v65";
+  if (ver) ver.textContent = d.desk_build || "v66";
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
   renderLivePnl();
@@ -1159,6 +1162,11 @@ $("btn-dl-ticks").onclick = () => {
     downloadUrl("/api/export/ticks.csv?" + rangeQs());
     flash("flash-dl", "Downloading ticks.csv");
   } catch (e) { flash("flash-dl", String(e.message || e), true); }
+};
+const btnTicksAll = $("btn-dl-ticks-all");
+if (btnTicksAll) btnTicksAll.onclick = () => {
+  downloadUrl("/api/export/ticks.csv?all=1");
+  flash("flash-dl", "Downloading every stored tick (full depth)");
 };
 $("btn-dl-signals").onclick = () => {
   try {

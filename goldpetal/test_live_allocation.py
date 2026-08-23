@@ -13,6 +13,8 @@ from capital import apply_live_capital_allocation, can_open_trade, load_capital,
 from control_state import load_state, set_live_approved, set_live_unlocked, set_emergency, set_trading_enabled
 from live_orders import LiveBroker, live_lots_for
 
+live_orders.session_allows_live_orders = lambda now=None: True
+
 
 def _tmp():
     td = tempfile.TemporaryDirectory()

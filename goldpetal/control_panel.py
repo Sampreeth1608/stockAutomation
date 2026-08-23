@@ -115,6 +115,7 @@ from panel_export import (
     export_summary,
     export_ticks_csv,
     export_trades_csv,
+    resolve_tick_export_range,
     rows_to_tsv,
     signals_in_range,
     ticks_in_range,
@@ -322,7 +323,7 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v65",
+        "desk_build": "v66",
         "store_ticks": store_ticks,
     }
 
@@ -629,6 +630,15 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/export/ticks.csv":
                 d_from = (qs.get("from") or [""])[0]
                 d_to = (qs.get("to") or [""])[0]
+                all_stored = str((qs.get("all") or [""])[0]).strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "all",
+                }
+                d_from, d_to = resolve_tick_export_range(
+                    d_from, d_to, all_stored=all_stored
+                )
                 csv_text = export_ticks_csv(d_from, d_to)
                 name = f"goldpetal_ticks_{d_from}_to_{d_to}.csv"
                 self._send(

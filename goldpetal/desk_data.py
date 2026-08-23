@@ -275,6 +275,20 @@ def reset_trade_cache() -> None:
     _LIVE_PNL_CACHE.update({"at": 0.0, "payload": None, "db": ""})
 
 
+_NOISE_SKIP = frozenset(
+    {"not_live_eligible", "market_closed", "not_live_book", "weekend_or_holiday"}
+)
+
+
+def _noise_skip_order(row: dict[str, Any]) -> bool:
+    """Skip rows that never went to Angel (archived book / holiday)."""
+    if not isinstance(row, dict):
+        return False
+    if row.get("order_id"):
+        return False
+    return str(row.get("reason") or "") in _NOISE_SKIP
+
+
 def _public_live_order(row: dict[str, Any]) -> dict[str, Any]:
     skipped = bool(row.get("skipped"))
     dry = bool(row.get("dry_run"))
@@ -640,7 +654,11 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
                 board["open"] = max(int(board.get("open") or 0), 1)
             except (TypeError, ValueError):
                 board["open"] = 1
-    orders = [_public_live_order(o) for o in recent_orders(limit=40)]
+    orders = [
+        _public_live_order(o)
+        for o in recent_orders(limit=80)
+        if not _noise_skip_order(o)
+    ]
     placed = [o for o in orders if o.get("placed")]
     out = _empty_live_pnl()
     out.update(
@@ -830,7 +848,9 @@ def tape_payload(
         payload["signals"] = [
             row_to_dict(r) for r in latest_signals(limit=signal_limit, db_path=db)
         ]
-        payload["live_orders"] = recent_orders(limit=40)
+        payload["live_orders"] = [
+            o for o in recent_orders(limit=80) if not _noise_skip_order(o)
+        ]
         payload.update(last_tick_snapshot(db_path=db))
     except Exception as exc:
         payload["error"] = str(exc)

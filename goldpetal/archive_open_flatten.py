@@ -46,7 +46,9 @@ def in_session_after_open(
     if now.tzinfo is None:
         now = now.replace(tzinfo=IST)
     now = now.astimezone(IST)
-    if now.weekday() >= 5:
+    from market_session import session_open
+
+    if not session_open(now):
         return False
     oh, om = _parse_hhmm(market_open)
     ch, cm = _parse_hhmm(market_close)

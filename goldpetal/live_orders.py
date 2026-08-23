@@ -823,6 +823,18 @@ def mirror_positions_from_signals(
     return seeded
 
 
+_SILENT_SKIP = frozenset(
+    {"not_live_eligible", "market_closed", "not_live_book", "weekend_or_holiday"}
+)
+
+
+def session_allows_live_orders(now: datetime | None = None) -> bool:
+    """No Angel placeOrder on weekends or MARKET_HOLIDAYS."""
+    from market_session import session_open
+
+    return session_open(now)
+
+
 def strategy_may_trade_live(strategy: str, *, action: str = "") -> tuple[bool, str]:
     ok, reason = is_live_mode_allowed()
     if not ok:
@@ -991,6 +1003,19 @@ class LiveBroker:
         price: float | None = None,
         tag: str = "",
     ) -> OrderResult:
+        if not session_allows_live_orders():
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=True,
+                skipped=True,
+                reason="market_closed",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            return res
         may, why = strategy_may_trade_live(strategy, action=action)
         if not may:
             self.skip_count += 1
@@ -1004,7 +1029,8 @@ class LiveBroker:
                 token=self.token,
             )
             self.last_result = res
-            _append_order_log(res.to_dict())
+            if why not in _SILENT_SKIP:
+                _append_order_log(res.to_dict())
             return res
 
         tx, new_pos, mult = self._tx_for_action(strategy, action)

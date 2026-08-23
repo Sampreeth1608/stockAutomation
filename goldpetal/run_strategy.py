@@ -85,16 +85,13 @@ def _market_window() -> tuple[str, str]:
 
 
 def is_market_open(now: datetime | None = None) -> bool:
-    """MCX Gold Petal default session: Mon-Fri 09:00-23:30 IST."""
-    now = now or datetime.now(IST)
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
-        return False
-    open_s, close_s = _market_window()
-    open_h, open_m = _parse_hhmm(open_s)
-    close_h, close_m = _parse_hhmm(close_s)
-    start = now.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
-    end = now.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
-    return start <= now <= end
+    """MCX Gold Petal session: Mon–Fri MARKET_OPEN–MARKET_CLOSE IST.
+
+    Weekends and MARKET_HOLIDAYS are closed. No Angel orders, no new ticks.
+    """
+    from market_session import session_open
+
+    return session_open(now)
 
 
 def _interval_minutes() -> int:
@@ -331,6 +328,10 @@ def run_once(
             except Exception:
                 pass
         if action in {"BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
+            from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+            if strategy not in LIVE_ELIGIBLE_BOOKS and strategy != "YOU_MANUAL":
+                return None
             res = broker.place_signal(
                 strategy=strategy,
                 action=action,
