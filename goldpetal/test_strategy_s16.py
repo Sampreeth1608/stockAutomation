@@ -390,6 +390,50 @@ def test_restart_does_not_repeat_already_recorded_close() -> None:
         td.cleanup()
 
 
+def test_day_state_restart_keeps_forming_hour() -> None:
+    import tempfile
+    from pathlib import Path
+
+    live = _s16()
+    live.on_tick(_t(10, 5), 100.0)
+    live.on_tick(_t(10, 30), 108.0)
+    path = Path(tempfile.mkdtemp()) / "s16_day.json"
+    live.persist_day_state(path)
+    restarted = _s16()
+    restarted.seed_from_day_state(path, now=_t(10, 40))
+    assert restarted._prev is None
+    assert restarted._bar_o == 100.0
+    assert restarted._bar_h == 108.0
+    assert restarted.on_tick(_t(10, 50), 107.0) is None
+    assert restarted.last_skip == "waiting_1h_close"
+    assert restarted.position == "flat"
+
+
+def test_day_state_restart_catches_up_closed_hour() -> None:
+    import tempfile
+    from pathlib import Path
+
+    live = _s16()
+    live.on_tick(_t(14, 0), 100.0)
+    live.on_tick(_t(14, 10), 105.0)
+    live.on_tick(_t(14, 20), 99.0)
+    live.on_tick(_t(14, 59), 104.0)
+    live.on_tick(_t(15, 0), 100.0)
+    live.on_tick(_t(15, 10), 120.0)
+    live.on_tick(_t(15, 59), 110.0)
+    path = Path(tempfile.mkdtemp()) / "s16_day.json"
+    live.persist_day_state(path)
+    restarted = _s16()
+    restarted.seed_from_day_state(path, now=_t(16, 7))
+    result = restarted.on_tick(_t(16, 7), 111.0)
+    assert result is not None
+    assert result.action == "BUY"
+    assert "C>prev → HH+green" in result.reason
+    assert "restart catch-up" in result.reason
+    assert restarted.position == "long"
+    assert restarted.entry_price == 110.0
+
+
 if __name__ == "__main__":
     test_forming_hour_does_not_trade()
     test_first_closed_hour_needs_prev()
@@ -408,4 +452,6 @@ if __name__ == "__main__":
     test_restart_after_4pm_catches_up_closed_hour()
     test_restart_catchup_skips_when_formula_has_no_side()
     test_restart_does_not_repeat_already_recorded_close()
+    test_day_state_restart_keeps_forming_hour()
+    test_day_state_restart_catches_up_closed_hour()
     print("ALL test_strategy_s16 OK")

@@ -12,12 +12,40 @@ from panel_export import (
     export_summary,
     export_ticks_csv,
     export_trades_csv,
+    resolve_tick_export_range,
     rows_to_tsv,
     signals_in_range,
+    stored_tick_date_range,
     ticks_in_range,
     trades_in_range,
 )
 from storage import init_db, save_signal, save_tick
+
+
+def test_stored_tick_range_is_all_days() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        save_tick(
+            {"last_traded_price": 1500000},
+            symbol="GOLDPETAL",
+            token="1",
+            received_at="2026-08-21T23:29:59+05:30",
+            db_path=db,
+        )
+        save_tick(
+            {"last_traded_price": 1510000},
+            symbol="GOLDPETAL",
+            token="1",
+            received_at="2026-08-19T10:00:00+05:30",
+            db_path=db,
+        )
+        span = stored_tick_date_range(db_path=db)
+        assert span == ("2026-08-19", "2026-08-21")
+        assert default_date_range(db_path=db) == span
+        assert resolve_tick_export_range(all_stored=True, db_path=db) == span
+        csv_t = export_ticks_csv(*span, db_path=db)
+        assert csv_t.count("\n") >= 3
 
 
 def test_default_range() -> None:
@@ -195,6 +223,7 @@ def test_ticks_csv_includes_depth_ltq_oi() -> None:
 
 if __name__ == "__main__":
     test_default_range()
+    test_stored_tick_range_is_all_days()
     test_ticks_and_trades_range_export()
     test_ticks_csv_includes_depth_ltq_oi()
     print("test_panel_export: OK")

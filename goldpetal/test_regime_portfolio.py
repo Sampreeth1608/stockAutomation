@@ -79,16 +79,16 @@ def test_env_defaults_include_s2(monkeypatch=None) -> None:
     assert "S2_BALANCE" not in p.enabled
     assert "S3_ML" not in p.enabled
     assert "S4_OVERNIGHT" not in p.enabled
-    assert "S5_MINEDGE" in p.enabled
-    assert "S13_HHHL_DAY" in p.enabled
+    assert "S5_MINEDGE" not in p.enabled
+    assert "S13_HHHL_DAY" not in p.enabled
     assert "S16_HHHL_WICK_1H" in p.enabled
     assert p.allows("S16_HHHL_WICK_1H", "WIDE_SPREAD")
-    assert "S18_OHLC_VOL_HTF" in p.enabled
-    assert "S19_BODY_CLOSE_1H" in p.enabled
+    assert "S18_OHLC_VOL_HTF" not in p.enabled
+    assert "S19_BODY_CLOSE_1H" not in p.enabled
     assert "S20_FADE_HL" not in p.enabled
-    assert "OVERNIGHT_GAP" in p.enabled
+    assert "OVERNIGHT_GAP" not in p.enabled
     assert "FLOW_BRAIN" not in p.enabled
-    assert "S8_NET_ZIGZAG" in p.enabled
+    assert "S8_NET_ZIGZAG" not in p.enabled
     assert "S9_STATE30" not in p.enabled
     assert "S10_LEGACY30" not in p.enabled
     assert "S11_DISCOVERED" not in p.enabled

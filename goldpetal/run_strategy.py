@@ -29,7 +29,16 @@ from market_mood import (
     mood_blocks_entry,
     mood_wants_flatten,
 )
-from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
+from storage import (
+    init_db,
+    latest_bar,
+    latest_signals,
+    save_bar,
+    save_signal as db_save_signal,
+    save_tick,
+    store_ticks_enabled,
+    write_last_quote,
+)
 from desk_data import tick_feed_stale
 from control_state import entries_blocked, is_live_mode_allowed, load_state
 from position_safety import (
@@ -39,22 +48,9 @@ from position_safety import (
     startup_reconcile,
     write_bot_health,
 )
-from strategy import BarSnapshot, PressureStrategy
-from strategy_balance import BalanceStrategy, balance_from_env
-from strategy_ml import MLStrategy, ml_strategy_from_env
-from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
-from strategy_net_zigzag import (
-    NetZigzagStrategy,
-    net_zigzag_from_env,
-    s10_legacy30_from_env,
-)
-from strategy_state_s9 import StateS9Strategy, state_s9_from_env
-from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env, s4_swing_from_env
-from strategy_s16 import S16HhhlWickStrategy, s16_from_env
-from strategy_s18 import S18OhlcVolHtfStrategy, s18_from_env
+from strategy import BarSnapshot
+from strategy_s16 import s16_from_env
 from strategy_wick import wick_record_actions
-from zigzag_recorder import recorder_from_env
-from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -89,16 +85,13 @@ def _market_window() -> tuple[str, str]:
 
 
 def is_market_open(now: datetime | None = None) -> bool:
-    """MCX Gold Petal default session: Mon-Fri 09:00-23:30 IST."""
-    now = now or datetime.now(IST)
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
-        return False
-    open_s, close_s = _market_window()
-    open_h, open_m = _parse_hhmm(open_s)
-    close_h, close_m = _parse_hhmm(close_s)
-    start = now.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
-    end = now.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
-    return start <= now <= end
+    """MCX Gold Petal session: Mon–Fri MARKET_OPEN–MARKET_CLOSE IST.
+
+    Weekends and MARKET_HOLIDAYS are closed. No Angel orders, no new ticks.
+    """
+    from market_session import session_open
+
+    return session_open(now)
 
 
 def _interval_minutes() -> int:
@@ -195,13 +188,16 @@ def run_once(
     stop_flag: dict,
 ) -> None:
     init_db()
-    try:
-        from trade_learner import get_learner
+    if store_ticks_enabled():
+        try:
+            from trade_learner import get_learner
 
-        get_learner().fit_from_db()
-        print(f"Learner  : {get_learner().status_line()}", flush=True)
-    except Exception as exc:
-        print(f"Learner  : skip ({type(exc).__name__}: {exc})", flush=True)
+            get_learner().fit_from_db()
+            print(f"Learner  : {get_learner().status_line()}", flush=True)
+        except Exception as exc:
+            print(f"Learner  : skip ({type(exc).__name__}: {exc})", flush=True)
+    else:
+        print("Learner  : off (STORE_TICKS=false — S16 day calc only)", flush=True)
     interval = _interval_minutes()
     dry_run = _dry_run()
     contract = find_goldpetal_futures(force_refresh=True)
@@ -332,6 +328,10 @@ def run_once(
             except Exception:
                 pass
         if action in {"BUY", "SHORT", "CLOSE", "REVERSE_LONG", "REVERSE_SHORT"}:
+            from live_readiness import LIVE_ELIGIBLE_BOOKS
+
+            if strategy not in LIVE_ELIGIBLE_BOOKS and strategy != "YOU_MANUAL":
+                return None
             res = broker.place_signal(
                 strategy=strategy,
                 action=action,
@@ -479,13 +479,13 @@ def run_once(
         flush=True,
     )
     print(
-        f"S18      : ENABLE_S18 1h OHLC+vol+day pack overlay (live-eligible, you Arm) "
+        f"S18      : ENABLE_S18 off (archived — S16 only live) "
         f"[{'ON' if portfolio.is_enabled(strategy_s18.name) else 'OFF'}] "
         f"{strategy_s18.status_line}",
         flush=True,
     )
     print(
-        f"S19      : ENABLE_S19 1h aligned body+close (live-eligible, you Arm) "
+        f"S19      : ENABLE_S19 off (archived — S16 only live) "
         f"[{'ON' if portfolio.is_enabled(strategy_s19.name) else 'OFF'}] "
         f"{strategy_s19.status_line}",
         flush=True,
@@ -617,6 +617,21 @@ def run_once(
         # and crash the tick handler on every 30m boundary.
         result_s1 = strategy_s1.on_bar(bar)
         if result_s1 is None:
+            if store_ticks_enabled():
+                save_bar(
+                    time_label=bar.time_label,
+                    symbol=symbol,
+                    token=token,
+                    cmp=bar.cmp,
+                    bp=bar.bp,
+                    sp=bar.sp,
+                    net=float(bar.bp) - float(bar.sp),
+                    price_delta=None,
+                    net_delta=None,
+                )
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
+        if store_ticks_enabled():
             save_bar(
                 time_label=bar.time_label,
                 symbol=symbol,
@@ -624,23 +639,10 @@ def run_once(
                 cmp=bar.cmp,
                 bp=bar.bp,
                 sp=bar.sp,
-                net=float(bar.bp) - float(bar.sp),
-                price_delta=None,
-                net_delta=None,
+                net=result_s1.net,
+                price_delta=result_s1.price_delta,
+                net_delta=result_s1.net_delta,
             )
-            state["next_bar_at"] = _next_boundary(now, interval)
-            return
-        save_bar(
-            time_label=bar.time_label,
-            symbol=symbol,
-            token=token,
-            cmp=bar.cmp,
-            bp=bar.bp,
-            sp=bar.sp,
-            net=result_s1.net,
-            price_delta=result_s1.price_delta,
-            net_delta=result_s1.net_delta,
-        )
         if not _strategy_active(strategy_s1.name):
             state["next_bar_at"] = _next_boundary(now, interval)
             return
@@ -1626,6 +1628,124 @@ def run_once(
                 line = f"[{ts}] [EXIT] {name} failed {row.get('error')}"
             print(line, flush=True)
             logger.info(line)
+        _emit_desk_exit_health(rows)
+
+    def emit_archive_open_flatten(now: datetime) -> None:
+        """At session open, square leftover Angel on every book except S16."""
+        from archive_open_flatten import (
+            REASON as ARCHIVE_OPEN_REASON,
+            in_session_after_open,
+            square_archived_leftovers_at_open,
+        )
+        from live_orders import net_open_from_fills, square_fill_leftover
+
+        if not in_session_after_open(
+            now, market_open=open_s, market_close=close_s
+        ):
+            return
+        with flatten_lock:
+            try:
+                leftover = dict(net_open_from_fills() or {})
+            except Exception:
+                leftover = {}
+            leftover_broker_box: dict[str, Any] = {"b": None}
+
+            def _square_leftover(name: str, row: dict) -> Any:
+                b = leftover_broker_box["b"]
+                if b is None:
+                    b = broker
+                    if not hasattr(b, "place_leftover_square"):
+                        b = broker_from_session(session, contract, force_live=True)
+                    leftover_broker_box["b"] = b
+                return square_fill_leftover(name, leftover=row, broker=b)
+
+            try:
+                from live_orders import reconcile_fill_leftovers_with_angel
+                from desk_data import invalidate_live_pnl_cache
+
+                cleared = reconcile_fill_leftovers_with_angel(
+                    getattr(session, "api", None),
+                    symbol=str(contract.get("symbol") or ""),
+                    token=str(contract.get("token") or ""),
+                )
+                try:
+                    invalidate_live_pnl_cache()
+                except Exception:
+                    pass
+                leftover = dict(net_open_from_fills() or {})
+                if cleared:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] [ARCHIVE-OPEN] "
+                        f"Angel already flat — cleared leftover {', '.join(cleared)}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
+            except Exception:
+                pass
+
+            rows = square_archived_leftovers_at_open(
+                now=now,
+                leftover=leftover,
+                square_leftover=_square_leftover,
+                market_open=open_s,
+                market_close=close_s,
+            )
+        if not rows:
+            return
+        ts = now.isoformat(timespec="seconds")
+        for row in rows:
+            name = str(row.get("strategy") or "")
+            obj = strat_map.get(name)
+            if obj is not None:
+                obj.position = "flat"
+                if hasattr(obj, "entry_price"):
+                    obj.entry_price = None
+                if hasattr(obj, "entry_date"):
+                    obj.entry_date = None
+            if row.get("ok"):
+                _record_signal(
+                    time_label=ts,
+                    action="CLOSE",
+                    position_after="flat",
+                    reason=str(row.get("reason") or ARCHIVE_OPEN_REASON),
+                    price_delta=None,
+                    net=0.0,
+                    net_delta=None,
+                    strategy=name,
+                    cmp=latest.get("cmp"),
+                )
+                if row.get("already_flat"):
+                    line = f"[{ts}] [ARCHIVE-OPEN] {name} Angel already flat"
+                else:
+                    broker_res = row.get("broker") or {}
+                    line = (
+                        f"[{ts}] [ARCHIVE-OPEN] leftover SQUARE {name} "
+                        f"tx={broker_res.get('transaction')} qty={row.get('lots')} "
+                        f"ok={broker_res.get('ok')} order={broker_res.get('order_id')}"
+                    )
+            else:
+                line = f"[{ts}] [ARCHIVE-OPEN] {name} failed {row.get('error')}"
+            print(line, flush=True)
+            logger.info(line)
+        write_bot_health(
+            {
+                "event": "archive_open_flatten",
+                "flattened": [
+                    {
+                        "strategy": r.get("strategy"),
+                        "ok": r.get("ok"),
+                        "already_flat": r.get("already_flat"),
+                    }
+                    for r in rows
+                ],
+                "positions": {
+                    n: getattr(o, "position", "flat") for n, o in strat_map.items()
+                },
+                "runner": "run_strategy",
+            }
+        )
+
+    def _emit_desk_exit_health(rows: list) -> None:
         write_bot_health(
             {
                 "event": "desk_exit",
@@ -1750,7 +1870,8 @@ def run_once(
             feed_watch["t"] = time.monotonic()
             feed_watch["got"] = True
             received_at = now.isoformat(timespec="seconds")
-            save_tick(message, symbol=symbol, token=token, received_at=received_at)
+            if store_ticks_enabled():
+                save_tick(message, symbol=symbol, token=token, received_at=received_at)
 
             cmp = _scale_price(message.get("last_traded_price"))
             bp = message.get("total_buy_quantity")
@@ -1774,7 +1895,11 @@ def run_once(
 
             state["tick_count"] += 1
             tick_count = state["tick_count"]
-            if tick_count == 1 or tick_count % 200 == 0:
+            try:
+                write_last_quote(ltp=latest.get("cmp"), received_at=received_at)
+            except Exception:
+                pass
+            if store_ticks_enabled() and (tick_count == 1 or tick_count % 200 == 0):
                 try:
                     from trade_learner import get_learner
 
@@ -1782,10 +1907,11 @@ def run_once(
                 except Exception:
                     pass
             if tick_count == 1 or tick_count % 200 == 0:
-                try:
-                    mood_det.refresh_layers()
-                except Exception:
-                    pass
+                if store_ticks_enabled():
+                    try:
+                        mood_det.refresh_layers()
+                    except Exception:
+                        pass
                 s3_extra = ""
                 if strategy_s3.enabled:
                     if strategy_s3.last_prob is not None:
@@ -1825,6 +1951,7 @@ def run_once(
                         "event": "heartbeat",
                         "ticks": tick_count,
                         "ltp": latest.get("cmp"),
+                        "store_ticks": store_ticks_enabled(),
                         "regime": rs.regime,
                         "positions": {
                             "S4": strategy_s4.position,
@@ -1902,7 +2029,7 @@ def run_once(
             emit_s16_if_changed(now, message)
             # S18: 1h OHLC+vol+yesterday pack overlay, FLIP at bar close; you Arm live
             emit_s18_if_changed(now, message)
-            # S19: 1h aligned body+close, FLIP at bar close; live-eligible, you Arm
+            # S19: archived off live — S16 only
             emit_s19_if_changed(now, message)
             # S20: 1h fade HL, FLIP at bar close; paper only
             emit_s20_if_changed(now, message)
@@ -1913,6 +2040,8 @@ def run_once(
 
             # Desk Exit button: flatten that book only (after this tick's entries)
             emit_desk_flatten(now)
+            # Archived leftovers: square at MARKET_OPEN. Only S16 trades after that.
+            emit_archive_open_flatten(now)
 
             # EOD flatten: Live-tab Intraday ticks (S16 default). Delivery books hold.
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
@@ -2138,32 +2267,65 @@ def main() -> None:
             print(f"{name}: skip ({type(exc).__name__}: {exc})", flush=True)
             return DisabledStrategy(name)
 
-    strategy_s1 = _load("S1_NETDELTA", PressureStrategy)
-    strategy_s2 = _load("S2_BALANCE", balance_from_env)
-    strategy_s3 = _load("S3_ML", ml_strategy_from_env)
-    strategy_s4 = _load("S4_OVERNIGHT", s4_swing_from_env)
-    strategy_s5 = _load("S5_MINEDGE", minedge_from_env)
-    strategy_s6 = _load("S6_MIN30", min30_from_env)
+    strategy_s1 = _load(
+        "S1_NETDELTA", _optional_book("S1_NETDELTA", "strategy", "PressureStrategy")
+    )
+    strategy_s2 = _load(
+        "S2_BALANCE", _optional_book("S2_BALANCE", "strategy_balance", "balance_from_env")
+    )
+    strategy_s3 = _load(
+        "S3_ML", _optional_book("S3_ML", "strategy_ml", "ml_strategy_from_env")
+    )
+    strategy_s4 = _load(
+        "S4_OVERNIGHT",
+        _optional_book("S4_OVERNIGHT", "strategy_hhhl_day", "s4_swing_from_env"),
+    )
+    strategy_s5 = _load(
+        "S5_MINEDGE",
+        _optional_book("S5_MINEDGE", "strategy_minedge", "minedge_from_env"),
+    )
+    strategy_s6 = _load(
+        "S6_MIN30", _optional_book("S6_MIN30", "strategy_minedge", "min30_from_env")
+    )
     strategy_fb = _load(
         "FLOW_BRAIN",
         _optional_book("FLOW_BRAIN", "strategy_flow_brain", "flow_brain_from_env"),
     )
-    strategy_s8 = _load("S8_NET_ZIGZAG", net_zigzag_from_env)
+    strategy_s8 = _load(
+        "S8_NET_ZIGZAG",
+        _optional_book("S8_NET_ZIGZAG", "strategy_net_zigzag", "net_zigzag_from_env"),
+    )
+    from zigzag_recorder import recorder_from_env
+
     zigzag_rec = recorder_from_env()
     if portfolio.is_enabled("S8_NET_ZIGZAG") and hasattr(strategy_s8, "cfg"):
         zigzag_rec.record_params(strategy_s8.cfg)
-    strategy_s9 = _load("S9_STATE30", state_s9_from_env)
+    strategy_s9 = _load(
+        "S9_STATE30",
+        _optional_book("S9_STATE30", "strategy_state_s9", "state_s9_from_env"),
+    )
+    from s9_state_journal import s9_journal_from_env
+
     s9_journal = s9_journal_from_env()
-    strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
+    strategy_s10 = _load(
+        "S10_LEGACY30",
+        _optional_book("S10_LEGACY30", "strategy_net_zigzag", "s10_legacy30_from_env"),
+    )
     def _s11_factory():
         from strategy_discovered import discovered_from_env
 
         return discovered_from_env()
 
     strategy_s11 = _load("S11_DISCOVERED", _s11_factory)
-    strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
+    strategy_s13 = _load(
+        "S13_HHHL_DAY",
+        _optional_book("S13_HHHL_DAY", "strategy_hhhl_day", "hhhl_day_from_env"),
+    )
     strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
-    strategy_s18 = _load("S18_OHLC_VOL_HTF", s18_from_env)
+    strategy_s18 = _load(
+        "S18_OHLC_VOL_HTF",
+        _optional_book("S18_OHLC_VOL_HTF", "strategy_s18", "s18_from_env"),
+    )
     strategy_s19 = _load(
         "S19_BODY_CLOSE_1H",
         _optional_book("S19_BODY_CLOSE_1H", "strategy_s19", "s19_from_env"),
@@ -2203,8 +2365,25 @@ def main() -> None:
         print(f"{slot.name}: {slot.status_line}", flush=True)
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
-        f"(live desk S5/S8/S13/S16/S18/S19/overnight gap — S4 off, S11 off, S20/FLOW off, "
-        f"S18/S19 and OVERNIGHT_GAP live-eligible (you Arm), AMISE off. No paper fills.)",
+        f"(live desk S16 HHHL+wick 1h only — every other book off permanently, "
+        f"archived leftovers square at MARKET_OPEN, you Arm S16, AMISE off. "
+        f"No paper fills.)",
+        flush=True,
+    )
+    if store_ticks_enabled():
+        print("TICKS    : storing to data/ticks.db", flush=True)
+    else:
+        print(
+            "TICKS    : not stored. S16 builds the 1h bar in RAM "
+            "(data/control/s16_day.json for mid-day restart). "
+            "Signals still saved. Desk LTP from last quote.",
+            flush=True,
+        )
+    print(
+        "RAM      : no tick archive does not free much RAM. "
+        "Bot ~200–400 MB. Desk on this VM ~80–200 MB. Linux+ssh ~400–600 MB. "
+        "Keep 2 GB (e2-small) minimum. 4 GB (e2-medium) if the desk stays on "
+        "this Google SSH VM. Do not use 1 GB.",
         flush=True,
     )
 

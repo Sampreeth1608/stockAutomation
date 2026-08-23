@@ -20,6 +20,9 @@ from control_state import (
 )
 from live_orders import LiveBroker, NullBroker, broker_from_session, live_lots, mirror_positions_from_signals, square_fill_leftover
 
+# LiveBroker tests assume a weekday session. Real gate blocks weekends/holidays.
+live_orders.session_allows_live_orders = lambda now=None: True
+
 
 class _FakeApi:
     def __init__(self) -> None:
@@ -130,7 +133,7 @@ def test_gates_block_without_approval(monkeypatch_paths=None) -> None:
         # not approved
         api = _FakeApi()
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
-        res = broker.place_signal(strategy="S13_HHHL_DAY", action="BUY", price=7200.0)
+        res = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY", price=7200.0)
         assert res.skipped and res.reason == "strategy_not_live_approved"
         assert not api.calls
     finally:
@@ -171,30 +174,30 @@ def test_place_buy_short_close_reverse() -> None:
         os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
         os.environ["LIVE_LOTS"] = "1"
         os.environ["LIVE_MAX_LOTS"] = "1"
-        _arm_live(state, "S13_HHHL_DAY")
+        _arm_live(state, "S16_HHHL_WICK_1H")
 
         api = _FakeApi()
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
 
-        r1 = broker.place_signal(strategy="S13_HHHL_DAY", action="BUY", price=7200.0)
+        r1 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY", price=7200.0)
         assert r1.ok and r1.transaction == "BUY" and r1.quantity == 1
-        assert broker.positions["S13_HHHL_DAY"] == "long"
+        assert broker.positions["S16_HHHL_WICK_1H"] == "long"
 
         # BUY again while long → no-op
-        r_noop = broker.place_signal(strategy="S13_HHHL_DAY", action="BUY")
+        r_noop = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY")
         assert r_noop.skipped
 
-        r2 = broker.place_signal(strategy="S13_HHHL_DAY", action="REVERSE_SHORT")
+        r2 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="REVERSE_SHORT")
         assert r2.ok and r2.transaction == "SELL" and r2.quantity == 2
-        assert broker.positions["S13_HHHL_DAY"] == "short"
+        assert broker.positions["S16_HHHL_WICK_1H"] == "short"
 
-        r3 = broker.place_signal(strategy="S13_HHHL_DAY", action="CLOSE")
+        r3 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="CLOSE")
         assert r3.ok and r3.transaction == "BUY" and r3.quantity == 1
-        assert broker.positions["S13_HHHL_DAY"] == "flat"
+        assert broker.positions["S16_HHHL_WICK_1H"] == "flat"
 
-        r4 = broker.place_signal(strategy="S13_HHHL_DAY", action="SHORT")
+        r4 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
         assert r4.ok and r4.transaction == "SELL"
-        r5 = broker.place_signal(strategy="S13_HHHL_DAY", action="REVERSE_LONG")
+        r5 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="REVERSE_LONG")
         assert r5.ok and r5.transaction == "BUY" and r5.quantity == 2
 
         assert orders.exists()
@@ -214,14 +217,14 @@ def test_seed_positions_and_emergency() -> None:
         live_orders.ORDERS_PATH = orders
         live_orders.CONTROL_DIR = Path(td.name)
         os.environ["DRY_RUN"] = "false"
-        _arm_live(state, "S8_NET_ZIGZAG")
+        _arm_live(state, "S16_HHHL_WICK_1H")
         api = _FakeApi()
         broker = LiveBroker(api, symbol="X", token="1")
-        broker.seed_positions({"S8_NET_ZIGZAG": "long"})
-        assert broker.positions["S8_NET_ZIGZAG"] == "long"
+        broker.seed_positions({"S16_HHHL_WICK_1H": "long"})
+        assert broker.positions["S16_HHHL_WICK_1H"] == "long"
 
         set_emergency(True, path=state)
-        res = broker.place_signal(strategy="S8_NET_ZIGZAG", action="CLOSE")
+        res = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="CLOSE")
         assert res.skipped and res.reason == "emergency_off"
         assert not api.calls
     finally:
@@ -229,7 +232,7 @@ def test_seed_positions_and_emergency() -> None:
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
-def test_s18_can_trade_live_when_approved_without_40() -> None:
+def test_s18_cannot_trade_live_even_when_approved() -> None:
     td, state, orders = _tmp_state()
     try:
         control_state.STATE_PATH = state
@@ -246,14 +249,15 @@ def test_s18_can_trade_live_when_approved_without_40() -> None:
 
         with patch("live_readiness.qualified_live_names", return_value=frozenset()):
             res = broker.place_signal(strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0)
-        assert res.ok and res.transaction == "BUY"
-        assert api.calls
+        assert res.skipped and res.reason == "not_live_eligible"
+        assert not api.calls
+        assert (not orders.exists()) or (not orders.read_text(encoding="utf-8").strip())
     finally:
         td.cleanup()
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
-def test_s18_can_trade_live_when_wr_40() -> None:
+def test_s16_can_trade_live_when_approved() -> None:
     from unittest.mock import patch
 
     td, state, orders = _tmp_state()
@@ -265,15 +269,15 @@ def test_s18_can_trade_live_when_wr_40() -> None:
         os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
         os.environ["LIVE_LOTS"] = "1"
         os.environ["LIVE_MAX_LOTS"] = "1"
-        _arm_live(state, "S18_OHLC_VOL_HTF")
+        _arm_live(state, "S16_HHHL_WICK_1H")
         api = _FakeApi()
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
         with patch(
             "live_readiness.qualified_live_names",
-            return_value=frozenset({"S18_OHLC_VOL_HTF"}),
+            return_value=frozenset({"S16_HHHL_WICK_1H"}),
         ):
             res = broker.place_signal(
-                strategy="S18_OHLC_VOL_HTF", action="BUY", price=7200.0
+                strategy="S16_HHHL_WICK_1H", action="BUY", price=7200.0
             )
         assert res.ok and res.transaction == "BUY"
         assert api.calls
@@ -763,6 +767,33 @@ def test_broker_from_session_force_live_in_paper() -> None:
     os.environ["DRY_RUN"] = "true"
 
 
+def test_place_signal_silent_when_market_closed() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        os.environ["DRY_RUN"] = "false"
+        _arm_live(state, "S16_HHHL_WICK_1H")
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        sunday = datetime(2026, 8, 23, 12, 10, tzinfo=ZoneInfo("Asia/Kolkata"))
+        with patch("live_orders.session_allows_live_orders", return_value=False):
+            res = broker.place_signal(
+                strategy="S16_HHHL_WICK_1H", action="BUY", price=7200.0
+            )
+        assert res.skipped and res.reason == "market_closed"
+        assert not api.calls
+        assert (not orders.exists()) or (not orders.read_text(encoding="utf-8").strip())
+        del sunday
+    finally:
+        td.cleanup()
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+        live_orders.ORDERS_PATH = control_state.CONTROL_DIR / "live_orders.jsonl"
+
+
 if __name__ == "__main__":
     test_live_lots_capped()
     print("ok live_lots")
@@ -780,10 +811,10 @@ if __name__ == "__main__":
     print("ok place_flow")
     test_seed_positions_and_emergency()
     print("ok seed_emergency")
-    test_s18_can_trade_live_when_approved_without_40()
-    print("ok s18 live without 40")
-    test_s18_can_trade_live_when_wr_40()
-    print("ok s18 live at 40")
+    test_s18_cannot_trade_live_even_when_approved()
+    print("ok s18 not live")
+    test_s16_can_trade_live_when_approved()
+    print("ok s16 live")
     test_broker_from_session_live_when_not_dry()
     print("ok broker_from_session")
     test_mirror_positions_skips_paper_when_live_only()
@@ -808,4 +839,6 @@ if __name__ == "__main__":
     print("ok leftover_square_emergency")
     test_broker_from_session_force_live_in_paper()
     print("ok force_live_in_paper")
+    test_place_signal_silent_when_market_closed()
+    print("ok market_closed silent")
     print("ALL test_live_orders OK")

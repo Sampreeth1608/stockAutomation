@@ -11,7 +11,7 @@ else
   DEST="${GP_DESK_DIR:-$HOME/goldpetal}"
 fi
 REPO="${GP_REPO_DIR:-$HOME/goldpetal-repo}"
-BRANCH="${GP_SYNC_BRANCH:-origin/cursor/live-1lot-test-a4b2}"
+BRANCH="${GP_SYNC_BRANCH:-origin/cursor/s16-only-live-a4b2}"
 
 FILES=(
   goldpetal/live_orders.py
@@ -26,6 +26,8 @@ FILES=(
   goldpetal/market_mood.py
   goldpetal/portfolio.py
   goldpetal/run_strategy.py
+  goldpetal/archive_open_flatten.py
+  goldpetal/market_session.py
   goldpetal/desk_flatten.py
   goldpetal/position_safety.py
   goldpetal/strategy_s16.py
@@ -45,9 +47,13 @@ FILES=(
   goldpetal/station.html
   goldpetal/lite.html
   goldpetal/login.html
+  goldpetal/docs/goldpetal_all_strategies.pdf
   goldpetal/scripts/run_desk_vm.sh
   goldpetal/scripts/print_open_on_mac.sh
   goldpetal/scripts/sync_desk_runtime.sh
+  goldpetal/scripts/boot_s16_session.sh
+  goldpetal/scripts/install_s16_boot.sh
+  goldpetal/scripts/gcp_s16_session_hours.sh
 )
 
 if [[ ! -d "$REPO/.git" ]]; then
@@ -55,7 +61,7 @@ if [[ ! -d "$REPO/.git" ]]; then
   exit 1
 fi
 
-mkdir -p "$DEST/analytics" "$DEST/scripts"
+mkdir -p "$DEST/analytics" "$DEST/scripts" "$DEST/docs"
 echo "sync desk runtime  $BRANCH  →  $DEST"
 git -C "$REPO" fetch origin
 for rel in "${FILES[@]}"; do
@@ -63,5 +69,11 @@ for rel in "${FILES[@]}"; do
   git -C "$REPO" show "${BRANCH}:${rel}" > "$DEST/$dest_rel"
   echo "  copied $dest_rel"
 done
-chmod +x "$DEST/scripts/run_desk_vm.sh" "$DEST/scripts/sync_desk_runtime.sh" || true
+chmod +x "$DEST/scripts/run_desk_vm.sh" "$DEST/scripts/sync_desk_runtime.sh" \
+  "$DEST/scripts/boot_s16_session.sh" "$DEST/scripts/install_s16_boot.sh" \
+  "$DEST/scripts/gcp_s16_session_hours.sh" || true
+if [[ -f "$DEST/.env" ]] && ! grep -qE '^[[:space:]]*STORE_TICKS=' "$DEST/.env"; then
+  printf '\n# S16 day calc — do not archive ticks\nSTORE_TICKS=false\n' >> "$DEST/.env"
+  echo "  appended STORE_TICKS=false to .env (other keys left as-is)"
+fi
 echo "desk runtime synced"

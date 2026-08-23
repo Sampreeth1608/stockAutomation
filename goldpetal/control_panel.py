@@ -115,6 +115,7 @@ from panel_export import (
     export_summary,
     export_ticks_csv,
     export_trades_csv,
+    resolve_tick_export_range,
     rows_to_tsv,
     signals_in_range,
     ticks_in_range,
@@ -129,6 +130,15 @@ from reasoning_cockpit import (
 
 ROOT = Path(__file__).resolve().parent
 S14_SHEET_DIR = ROOT / "data" / "s14_sheet"
+STRATEGIES_PDF_PATH = ROOT / "docs" / "goldpetal_all_strategies.pdf"
+STRATEGIES_PDF_NAME = "goldpetal_all_strategies.pdf"
+
+
+def strategies_archive_pdf() -> tuple[bytes, str]:
+    """Bytes + filename for the archived-strategy PDF (laptop Downloads)."""
+    if not STRATEGIES_PDF_PATH.is_file():
+        raise FileNotFoundError(str(STRATEGIES_PDF_PATH))
+    return STRATEGIES_PDF_PATH.read_bytes(), STRATEGIES_PDF_NAME
 
 
 DESK_HTML_PATH = ROOT / "desk.html"
@@ -298,6 +308,12 @@ def desk_payload() -> dict[str, Any]:
         capital = capital_snapshot()
     except Exception:
         capital = {}
+    try:
+        from storage import store_ticks_enabled
+
+        store_ticks = store_ticks_enabled()
+    except Exception:
+        store_ticks = False
     return {
         "bot": bot,
         "live_desk": live_desk,
@@ -307,7 +323,8 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v62",
+        "desk_build": "v66",
+        "store_ticks": store_ticks,
     }
 
 
@@ -579,6 +596,26 @@ class ControlHandler(BaseHTTPRequestHandler):
                 status, body, ctype = _json_bytes({"timeframes": panel_timeframes()})
                 self._send(status, body, ctype)
                 return
+            if path in {
+                "/api/docs/strategies.pdf",
+                "/api/docs/goldpetal_all_strategies.pdf",
+            }:
+                try:
+                    blob, name = strategies_archive_pdf()
+                except FileNotFoundError:
+                    self._send(
+                        404,
+                        b"strategy archive PDF missing - copy docs/goldpetal_all_strategies.pdf",
+                        "text/plain; charset=utf-8",
+                    )
+                    return
+                self._send(
+                    200,
+                    blob,
+                    "application/pdf",
+                    {"Content-Disposition": f'attachment; filename="{name}"'},
+                )
+                return
             if path == "/api/export/defaults":
                 d0, d1 = default_date_range()
                 status, body, ctype = _json_bytes({"date_from": d0, "date_to": d1})
@@ -593,6 +630,15 @@ class ControlHandler(BaseHTTPRequestHandler):
             if path == "/api/export/ticks.csv":
                 d_from = (qs.get("from") or [""])[0]
                 d_to = (qs.get("to") or [""])[0]
+                all_stored = str((qs.get("all") or [""])[0]).strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "all",
+                }
+                d_from, d_to = resolve_tick_export_range(
+                    d_from, d_to, all_stored=all_stored
+                )
                 csv_text = export_ticks_csv(d_from, d_to)
                 name = f"goldpetal_ticks_{d_from}_to_{d_to}.csv"
                 self._send(
@@ -1039,9 +1085,9 @@ def main() -> None:
     load_state()
     load_capital()
     try:
-        from live_readiness import ensure_overnight_gap_enable
+        from live_readiness import ensure_s16_only_desk
 
-        ensure_overnight_gap_enable()
+        ensure_s16_only_desk()
     except Exception:
         pass
     httpd = ThreadingHTTPServer((args.host, args.port), ControlHandler)

@@ -31,7 +31,7 @@ fi
 mkdir -p data/control
 
 CMD=("$PY" control_panel.py --host "$HOST" --port "$PORT")
-SYNC_BRANCH="${GP_SYNC_BRANCH:-origin/cursor/live-1lot-test-a4b2}"
+SYNC_BRANCH="${GP_SYNC_BRANCH:-origin/cursor/s16-only-live-a4b2}"
 REPO_DIR="${GP_REPO_DIR:-$HOME/goldpetal-repo}"
 SYNC_SCRIPT="$SCRIPT_DIR/sync_desk_runtime.sh"
 
@@ -101,7 +101,7 @@ wait_up() {
       if [[ -n "${hdr:-}" ]]; then
         echo "header ${hdr} (clock must show · ${hdr#gp-header-} after Cmd+Shift+R)"
       elif grep -q "Save strategies" /tmp/gp-desk-get.html 2>/dev/null; then
-        echo "WARNING: station.html has no gp-header-v* — copy station.html from origin/cursor/live-1lot-test-a4b2"
+        echo "WARNING: station.html has no gp-header-v* — copy station.html from origin/cursor/s16-only-live-a4b2"
       fi
       return 0
     fi

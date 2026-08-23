@@ -82,11 +82,16 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v62" in html
-    assert " · v62" in html
+    assert "gp-header-v66" in html
+    assert " · v66" in html
     assert 'id="desk-ver"' in html
-    assert ">v62</span>" in html
-    assert "<title>Gold Petal v62</title>" in html
+    assert ">v66</span>" in html
+    assert "<title>Gold Petal v66</title>" in html
+    assert "S16 in RAM" in html
+    assert "Download all ticks" in html
+    assert "btn-dl-ticks-all" in html
+    assert "not_live_eligible" in html
+    assert "noise[o.reason]" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -161,9 +166,10 @@ def test_station_is_the_operator_page() -> None:
     assert "p.positions" in html
     assert "Real Angel P&amp;L" in html
     assert "function renderLivePnl" in html
-    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap" in html
-    assert "S20 stays off" in html
-    assert "S19 / S20 stay off" not in html
+    assert "Only <b>S16 HHHL+wick 1h</b> can go live" in html
+    assert "Every other book is off live permanently" in html
+    assert "squares leftover from those old books" in html
+    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap" not in html
     assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "live_eligible" in html
@@ -206,7 +212,7 @@ def test_station_is_the_operator_page() -> None:
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
     assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S19 / S20 stay off" not in html
-    assert "S20 stays off" in html
+    assert "off live permanently" in html
     assert "Download ticks CSV" in html
     assert "every stored Angel snap-quote tick" in html
     assert "bid 1–5 price+qty" in html
@@ -214,6 +220,9 @@ def test_station_is_the_operator_page() -> None:
     assert "last traded qty" in html
     assert "total buy qty" in html
     assert "not 1h OHLC bars" in html
+    assert "Download strategy PDF" in html
+    assert "/api/docs/strategies.pdf" in html
+    assert "goldpetal_all_strategies.pdf" in html
     assert "Download all (ZIP)" in html
     assert "Copy trades → Sheets" in html
     assert "/api/export/pack.zip" in html
@@ -235,11 +244,11 @@ def test_station_is_the_operator_page() -> None:
     assert "S16_HHHL_WICK_1H" in html
     paper = html.split("const PAPER_BOOKS")[1].split("];")[0]
     assert "S16_HHHL_WICK_1H" in paper
-    assert "S18_OHLC_VOL_HTF" in paper
-    assert "S19_BODY_CLOSE_1H" in paper
+    assert "S18_OHLC_VOL_HTF" not in paper
+    assert "S19_BODY_CLOSE_1H" not in paper
     assert "S20_FADE_HL" not in paper
-    assert "OVERNIGHT_GAP" in paper
-    assert "S13_HHHL_DAY" in paper
+    assert "OVERNIGHT_GAP" not in paper
+    assert "S13_HHHL_DAY" not in paper
     assert "S11_DISCOVERED" not in paper
     assert "S4_OVERNIGHT" not in paper
     assert "S12_HHHL30" not in paper
@@ -284,8 +293,8 @@ def test_lite_html_is_compact_controls() -> None:
     assert "After charges" in html
     assert "This page is Angel" in html
     assert "40% WR% AC" not in html
-    assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap can go live" in html
-    assert "S20 stays off" in html
+    assert "Only S16 HHHL+wick 1h can go live" in html
+    assert "Every other book is off live permanently" in html
     assert "S19 / S20 stay off" not in html
     assert "S19 / S20 stay paper until 40% WR% AC" not in html
     assert "S18 / S19 / S20 stay paper until 40% WR% AC" not in html
@@ -340,6 +349,8 @@ def test_full_html_keeps_watch_downloads() -> None:
     html = (ROOT / "desk.html").read_text(encoding="utf-8")
     assert "Watch" in html
     assert "Download all (ZIP)" in html
+    assert "Download strategy PDF" in html
+    assert "/api/docs/strategies.pdf" in html
     assert "Copy trades → Sheets" in html
     assert "Download phone monitor" in html
     assert "/api/sheets/monitor.zip" in html
@@ -460,6 +471,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/control_state.py" in sync
     assert "goldpetal/market_mood.py" in sync
     assert "goldpetal/run_strategy.py" in sync
+    assert "goldpetal/archive_open_flatten.py" in sync
     assert "goldpetal/desk_flatten.py" in sync
     assert "goldpetal/position_safety.py" in sync
     assert "goldpetal/strategy_s16.py" in sync
@@ -474,6 +486,13 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/strategy_overnight_gap.py" in sync
     assert "goldpetal/panel_export.py" in sync
     assert "goldpetal/export_full_ticks.py" in sync
+    assert "goldpetal/docs/goldpetal_all_strategies.pdf" in sync
+    assert "STORE_TICKS=false" in sync
+    assert "goldpetal/market_session.py" in sync
+    assert "goldpetal/scripts/boot_s16_session.sh" in sync
+    assert "goldpetal/scripts/install_s16_boot.sh" in sync
+    assert "goldpetal/scripts/gcp_s16_session_hours.sh" in sync
+    assert '"$DEST/docs"' in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
     cmd = (ROOT / "scripts" / "GoldPetal.command").read_text(encoding="utf-8")
@@ -483,8 +502,14 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v62" in cmd
-    assert "?v=62" in cmd
+    assert "Gold Petal v66" in cmd
+    assert "?v=66" in cmd
+    assert "save_all_ticks" in cmd
+    assert "goldpetal_ticks_all.csv" in cmd
+    assert "ticks.csv?all=1" in cmd
+    assert "save_strategy_pdf" in cmd
+    assert "Downloads/goldpetal_all_strategies.pdf" in cmd
+    assert "/api/docs/strategies.pdf" in cmd
     assert "Starting the station on the VM" in cmd
     assert "Connection refused" in cmd
     assert "GP_QUIET_OPEN=1" in cmd
@@ -493,16 +518,17 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert 'cd "$(dirname "$0")/.."' not in cmd
     from live_readiness import LIVE_ELIGIBLE_BOOKS, NEVER_LIVE_BOOKS, PAPER_ONLY_BOOKS
 
-    assert "S13_HHHL_DAY" in LIVE_ELIGIBLE_BOOKS
+    assert "S13_HHHL_DAY" not in LIVE_ELIGIBLE_BOOKS
     assert "S16_HHHL_WICK_1H" in LIVE_ELIGIBLE_BOOKS
-    assert "S18_OHLC_VOL_HTF" not in PAPER_ONLY_BOOKS
-    assert "S18_OHLC_VOL_HTF" in LIVE_ELIGIBLE_BOOKS
-    assert "S19_BODY_CLOSE_1H" not in PAPER_ONLY_BOOKS
-    assert "S19_BODY_CLOSE_1H" in LIVE_ELIGIBLE_BOOKS
+    assert LIVE_ELIGIBLE_BOOKS == frozenset({"S16_HHHL_WICK_1H"})
+    assert "S18_OHLC_VOL_HTF" in PAPER_ONLY_BOOKS
+    assert "S18_OHLC_VOL_HTF" not in LIVE_ELIGIBLE_BOOKS
+    assert "S19_BODY_CLOSE_1H" in PAPER_ONLY_BOOKS
+    assert "S19_BODY_CLOSE_1H" not in LIVE_ELIGIBLE_BOOKS
     assert "S21_AMISE" not in LIVE_ELIGIBLE_BOOKS
-    assert "OVERNIGHT_GAP" not in PAPER_ONLY_BOOKS
-    assert "OVERNIGHT_GAP" not in NEVER_LIVE_BOOKS
-    assert "OVERNIGHT_GAP" in LIVE_ELIGIBLE_BOOKS
+    assert "OVERNIGHT_GAP" in PAPER_ONLY_BOOKS
+    assert "OVERNIGHT_GAP" in NEVER_LIVE_BOOKS
+    assert "OVERNIGHT_GAP" not in LIVE_ELIGIBLE_BOOKS
     assert "FLOW_BRAIN" in NEVER_LIVE_BOOKS
     from live_readiness import LIVE_WR_MIN_PCT, summary_qualifies_live
 
@@ -536,7 +562,9 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v62"
+    assert payload["desk_build"] == "v66"
+    assert "store_ticks" in payload
+    assert payload["store_ticks"] is False
 
 
 def test_login_html_is_the_gate() -> None:
@@ -550,6 +578,17 @@ def test_login_html_is_the_gate() -> None:
     assert "CSRF_HEADER" in auth
     assert "PUBLIC_BIND_HOSTS" in auth
     assert "path_requires_totp" in auth
+
+
+def test_strategies_archive_pdf_is_downloadable() -> None:
+    from control_panel import STRATEGIES_PDF_NAME, strategies_archive_pdf
+
+    blob, name = strategies_archive_pdf()
+    assert name == STRATEGIES_PDF_NAME
+    assert blob.startswith(b"%PDF")
+    assert len(blob) > 1000
+    runner = (ROOT / "control_panel.py").read_text(encoding="utf-8")
+    assert "/api/docs/strategies.pdf" in runner
 
 
 def test_streamlit_cannot_write() -> None:
@@ -568,6 +607,7 @@ if __name__ == "__main__":
     test_full_html_keeps_watch_downloads()
     test_control_panel_serves_station_on_8501()
     test_desk_payload_includes_session()
+    test_strategies_archive_pdf_is_downloadable()
     test_login_html_is_the_gate()
     test_streamlit_cannot_write()
     print("ALL test_desk OK")

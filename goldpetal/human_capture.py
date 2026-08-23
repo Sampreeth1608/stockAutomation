@@ -99,9 +99,17 @@ def session_status(now: datetime | None = None) -> dict[str, Any]:
     ch, cm = _parse_hhmm(close_s)
     start = clock.replace(hour=oh, minute=om, second=0, microsecond=0)
     end = clock.replace(hour=ch, minute=cm, second=0, microsecond=0)
+    from market_session import listed_holidays
+
     weekend = clock.weekday() >= 5
-    open_ok = (not weekend) and (start <= clock <= end)
-    if weekend:
+    holiday = clock.strftime("%Y-%m-%d") in listed_holidays()
+    open_ok = (not weekend) and (not holiday) and (start <= clock <= end)
+    if holiday:
+        label = (
+            f"market holiday {clock.strftime('%Y-%m-%d')} — "
+            f"no Angel orders · session is Mon–Fri {open_s}–{close_s} IST"
+        )
+    elif weekend:
         label = f"weekend — session is Mon–Fri {open_s}–{close_s} IST"
     elif open_ok:
         label = f"session open {open_s}–{close_s} IST"
@@ -113,6 +121,7 @@ def session_status(now: datetime | None = None) -> dict[str, Any]:
     return {
         "open": open_ok,
         "weekend": weekend,
+        "holiday": holiday,
         "open_hhmm": open_s,
         "close_hhmm": close_s,
         "now_ist": clock.isoformat(timespec="seconds"),

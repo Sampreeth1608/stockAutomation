@@ -22,7 +22,13 @@ from live_orders import (
     recent_orders,
 )
 from paper_report import summarize_trades
-from storage import build_trades, latest_signals, latest_ticks, set_db_path
+from storage import (
+    build_trades,
+    latest_signals,
+    latest_ticks,
+    read_last_quote,
+    set_db_path,
+)
 import storage as _storage
 from charges import paper_lots
 
@@ -269,6 +275,20 @@ def reset_trade_cache() -> None:
     _LIVE_PNL_CACHE.update({"at": 0.0, "payload": None, "db": ""})
 
 
+_NOISE_SKIP = frozenset(
+    {"not_live_eligible", "market_closed", "not_live_book", "weekend_or_holiday"}
+)
+
+
+def _noise_skip_order(row: dict[str, Any]) -> bool:
+    """Skip rows that never went to Angel (archived book / holiday)."""
+    if not isinstance(row, dict):
+        return False
+    if row.get("order_id"):
+        return False
+    return str(row.get("reason") or "") in _NOISE_SKIP
+
+
 def _public_live_order(row: dict[str, Any]) -> dict[str, Any]:
     skipped = bool(row.get("skipped"))
     dry = bool(row.get("dry_run"))
@@ -303,6 +323,30 @@ def _kick_live_pnl(db: Path) -> None:
 def invalidate_live_pnl_cache() -> None:
     _LIVE_PNL_CACHE["at"] = 0.0
     _LIVE_PNL_CACHE["payload"] = None
+
+
+def _leftover_open_book_names(db: Path | None = None) -> set[str]:
+    """Fill-log leftover plus still-open live signal books (for leftover Exit)."""
+    names: set[str] = set()
+    try:
+        names.update(str(n).strip() for n in net_open_from_fills() if str(n).strip())
+    except Exception:
+        pass
+    if db is None:
+        return names
+    try:
+        seen: set[str] = set()
+        for row in latest_signals(limit=800, db_path=db, live_only=True) or []:
+            name = str(row["strategy"] or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            pos = str(row["position_after"] or "").lower()
+            if pos in {"long", "short"}:
+                names.add(name)
+    except Exception:
+        pass
+    return names
 
 
 def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[str, Any]:
@@ -341,7 +385,10 @@ def live_pnl_payload(*, db_path: Path | None = None, wait: bool = True) -> dict[
             for n in (load_state().live_approved or [])
             if n not in NEVER_LIVE_BOOKS and book_may_go_live(n)
         ]
-        payload = _build_live_pnl(db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved))
+        leftover = _leftover_open_book_names(db)
+        payload = _build_live_pnl(
+            db, frozenset(LIVE_ELIGIBLE_BOOKS) | frozenset(approved) | leftover
+        )
         _LIVE_PNL_CACHE.update({"at": time.time(), "payload": payload, "db": str(db)})
         return _apply_angel_snapshot(dict(payload))
     finally:
@@ -401,7 +448,10 @@ def _live_positions_by_book(
     approved = list(load_state().live_approved or [])
     for raw in list(approved) + list(open_by.keys()):
         name = str(raw or "").strip()
-        if not name or name in seen or name in NEVER_LIVE_BOOKS:
+        if not name or name in seen:
+            continue
+        # Archived books stay visible only while leftover is still OPEN (Exit).
+        if name in NEVER_LIVE_BOOKS and name not in open_by:
             continue
         if live_gate and name not in open_by and not book_may_go_live(name, summaries=summaries):
             continue
@@ -438,7 +488,7 @@ def _leftover_live_pnl() -> dict[str, Any]:
     """Fill-log leftover only. Used when the full Live P&L rebuild must not block LTP."""
     out = _empty_live_pnl()
     try:
-        # Skip the 40% WR% paper rebuild — S19 FLAT still lists from live_approved.
+        # Fill-log leftover only. Archived books appear while leftover is OPEN.
         positions = _live_positions_by_book([], live_gate=False)
     except Exception:
         return out
@@ -604,7 +654,11 @@ def _build_live_pnl(db: Path, eligible: frozenset[str]) -> dict[str, Any]:
                 board["open"] = max(int(board.get("open") or 0), 1)
             except (TypeError, ValueError):
                 board["open"] = 1
-    orders = [_public_live_order(o) for o in recent_orders(limit=40)]
+    orders = [
+        _public_live_order(o)
+        for o in recent_orders(limit=80)
+        if not _noise_skip_order(o)
+    ]
     placed = [o for o in orders if o.get("placed")]
     out = _empty_live_pnl()
     out.update(
@@ -724,6 +778,22 @@ def last_tick_snapshot(*, db_path: Path | None = None, now: datetime | None = No
         meta = _last_tick_meta(db)
     except Exception:
         meta = {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+    try:
+        quote = read_last_quote()
+    except Exception:
+        quote = {}
+    q_at = str(quote.get("received_at") or "")
+    db_at = str(meta.get("last_tick_at") or "")
+    if q_at:
+        q_ts = parse_tick_at(q_at)
+        d_ts = parse_tick_at(db_at) if db_at else None
+        if q_ts is not None and (d_ts is None or q_ts >= d_ts):
+            meta = {
+                "tick_count": int(meta.get("tick_count") or 0),
+                "ltp": quote.get("ltp"),
+                "last_tick_at": q_at,
+                "store_ticks": bool(quote.get("store_ticks")),
+            }
     fresh = tape_freshness(last_tick_at=str(meta.get("last_tick_at") or ""), now=now)
     return {**meta, **fresh}
 
@@ -778,7 +848,9 @@ def tape_payload(
         payload["signals"] = [
             row_to_dict(r) for r in latest_signals(limit=signal_limit, db_path=db)
         ]
-        payload["live_orders"] = recent_orders(limit=40)
+        payload["live_orders"] = [
+            o for o in recent_orders(limit=80) if not _noise_skip_order(o)
+        ]
         payload.update(last_tick_snapshot(db_path=db))
     except Exception as exc:
         payload["error"] = str(exc)

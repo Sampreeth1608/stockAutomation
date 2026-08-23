@@ -54,7 +54,7 @@ def _seed(db: Path) -> None:
         net=10.0,
         net_delta=1.0,
         dry_run=True,
-        strategy="S5_MINEDGE",
+        strategy="S16_HHHL_WICK_1H",
         cmp=14320.0,
         db_path=db,
     )
@@ -68,7 +68,7 @@ def _seed(db: Path) -> None:
         net=12.0,
         net_delta=2.0,
         dry_run=True,
-        strategy="S5_MINEDGE",
+        strategy="S16_HHHL_WICK_1H",
         cmp=14355.0,
         db_path=db,
     )
@@ -96,10 +96,10 @@ def test_live_dashboard_is_honest() -> None:
         from storage import build_trades
         from charges import paper_lots
 
-        trades = build_trades(strategy="S5_MINEDGE", db_path=db, lot_size=paper_lots())
+        trades = build_trades(strategy="S16_HHHL_WICK_1H", db_path=db, lot_size=paper_lots())
         books = build_strategy_rows(trades, db_path=db)
-        s5 = next(r for r in books if r["strategy"] == "S5_MINEDGE")
-        assert "pf_after_charges" in s5
+        s16 = next(r for r in books if r["strategy"] == "S16_HHHL_WICK_1H")
+        assert "pf_after_charges" in s16
         flow = next(r for r in books if r["strategy"] == "FLOW_BRAIN")
         assert flow["in_bot"] == "NO"
         risk = {r["key"]: r["value"] for r in build_risk_rows()}

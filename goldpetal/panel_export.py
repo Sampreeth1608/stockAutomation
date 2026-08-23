@@ -55,8 +55,24 @@ def _parse_day(day: str, *, end: bool = False) -> str:
     return dt.isoformat(timespec="seconds")
 
 
-def default_date_range() -> tuple[str, str]:
-    """Default: last 7 calendar days through today (IST)."""
+def stored_tick_date_range(*, db_path: Path = DB_PATH) -> tuple[str, str] | None:
+    """First and last IST calendar day that actually has ticks."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT min(substr(received_at, 1, 10)), max(substr(received_at, 1, 10)) "
+            "FROM ticks WHERE received_at IS NOT NULL AND received_at != ''"
+        ).fetchone()
+    if not row or not row[0] or not row[1]:
+        return None
+    return str(row[0])[:10], str(row[1])[:10]
+
+
+def default_date_range(*, db_path: Path = DB_PATH) -> tuple[str, str]:
+    """All stored tick days when the DB has tape; else last 7 calendar days."""
+    stored = stored_tick_date_range(db_path=db_path)
+    if stored:
+        return stored
     today = datetime.now(IST).date()
     start = today - timedelta(days=6)
     return start.isoformat(), today.isoformat()
@@ -222,6 +238,22 @@ def rows_to_tsv(rows: list[dict[str, Any]], fields: list[str]) -> str:
             cells.append(s)
         lines.append("\t".join(cells))
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def resolve_tick_export_range(
+    date_from: str = "",
+    date_to: str = "",
+    *,
+    all_stored: bool = False,
+    db_path: Path = DB_PATH,
+) -> tuple[str, str]:
+    """Empty dates or all_stored → every day that has ticks."""
+    if all_stored or not str(date_from or "").strip() or not str(date_to or "").strip():
+        stored = stored_tick_date_range(db_path=db_path)
+        if stored:
+            return stored
+        return default_date_range(db_path=db_path)
+    return str(date_from).strip()[:10], str(date_to).strip()[:10]
 
 
 def export_ticks_csv(date_from: str, date_to: str, *, db_path: Path = DB_PATH) -> str:

@@ -210,11 +210,11 @@ def test_session_filter_skips_first_hour_vs_preopen() -> None:
 def test_paper_wired_1h_not_s17() -> None:
     assert "S16_HHHL_WICK_1H" in ALL_STRATEGY_NAMES
     assert "S16_HHHL_WICK_1H" in SLIM_PAPER_STRATEGIES
-    assert "S18_OHLC_VOL_HTF" in SLIM_PAPER_STRATEGIES
-    assert "S19_BODY_CLOSE_1H" in SLIM_PAPER_STRATEGIES
+    assert "S18_OHLC_VOL_HTF" not in SLIM_PAPER_STRATEGIES
+    assert "S19_BODY_CLOSE_1H" not in SLIM_PAPER_STRATEGIES
     assert "S20_FADE_HL" not in SLIM_PAPER_STRATEGIES
-    assert "OVERNIGHT_GAP" in SLIM_PAPER_STRATEGIES
-    assert "S13_HHHL_DAY" in SLIM_PAPER_STRATEGIES
+    assert "OVERNIGHT_GAP" not in SLIM_PAPER_STRATEGIES
+    assert "S13_HHHL_DAY" not in SLIM_PAPER_STRATEGIES
     assert "S4_OVERNIGHT" not in SLIM_PAPER_STRATEGIES
     assert "S12_HHHL30" not in SLIM_PAPER_STRATEGIES
     assert "S14_WICK30_STRICT" not in SLIM_PAPER_STRATEGIES
@@ -227,6 +227,8 @@ def test_paper_wired_1h_not_s17() -> None:
     assert "FORMULA_GATE_BOOKS" in runner
     assert "S17_CLOSE_HIGH_BODY" not in ALL_STRATEGY_NAMES
     assert "ENABLE_S17" not in runner
+    archive = Path(__file__).resolve().parent / "docs" / "goldpetal_all_strategies.pdf"
+    assert archive.is_file() and archive.stat().st_size > 1000
 
 
 def test_gap_compare_groups_every_tf_and_gap() -> None:

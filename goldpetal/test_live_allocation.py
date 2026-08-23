@@ -13,6 +13,8 @@ from capital import apply_live_capital_allocation, can_open_trade, load_capital,
 from control_state import load_state, set_live_approved, set_live_unlocked, set_emergency, set_trading_enabled
 from live_orders import LiveBroker, live_lots_for
 
+live_orders.session_allows_live_orders = lambda now=None: True
+
 
 def _tmp():
     td = tempfile.TemporaryDirectory()
@@ -134,7 +136,7 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
         apply_live_capital_allocation(
             [
                 {"strategy": "S4_OVERNIGHT", "budget_inr": 50_000, "max_lots": 3},
-                {"strategy": "S13_HHHL_DAY", "budget_inr": 50_000, "max_lots": 3},
+                {"strategy": "S16_HHHL_WICK_1H", "budget_inr": 50_000, "max_lots": 3},
             ],
             path=capital_path,
         )
@@ -147,7 +149,7 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
         set_emergency(False, path=state)
         set_trading_enabled(True, path=state)
         set_live_unlocked(True, path=state)
-        set_live_approved(["S13_HHHL_DAY"], path=state)
+        set_live_approved(["S16_HHHL_WICK_1H"], path=state)
         os.environ["DRY_RUN"] = "false"
         os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
         os.environ["LIVE_MAX_LOTS"] = "5"
@@ -162,7 +164,7 @@ def test_live_lots_for_uses_strategy_max_lots() -> None:
 
         api = _Api()
         broker = LiveBroker(api, symbol="GOLDPETAL", token="1")
-        res = broker.place_signal(strategy="S13_HHHL_DAY", action="BUY", price=7000.0)
+        res = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY", price=7000.0)
         assert res.ok and res.quantity == 3
         assert api.calls[0]["quantity"] == "3"
     finally:
