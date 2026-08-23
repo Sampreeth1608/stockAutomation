@@ -163,6 +163,7 @@ def test_station_is_the_operator_page() -> None:
     assert "function renderLivePnl" in html
     assert "Only <b>S16 HHHL+wick 1h</b> can go live" in html
     assert "Every other book is off live permanently" in html
+    assert "squares leftover from those old books" in html
     assert "S5 / S8 / S13 / S16 / S18 / S19 / overnight gap" not in html
     assert "S19 / S20 stay paper until they hit 40%" not in html
     assert "S18 / S19 / S20 stay paper until they hit 40%" not in html
@@ -465,6 +466,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/control_state.py" in sync
     assert "goldpetal/market_mood.py" in sync
     assert "goldpetal/run_strategy.py" in sync
+    assert "goldpetal/archive_open_flatten.py" in sync
     assert "goldpetal/desk_flatten.py" in sync
     assert "goldpetal/position_safety.py" in sync
     assert "goldpetal/strategy_s16.py" in sync

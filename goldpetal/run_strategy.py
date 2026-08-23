@@ -39,22 +39,9 @@ from position_safety import (
     startup_reconcile,
     write_bot_health,
 )
-from strategy import BarSnapshot, PressureStrategy
-from strategy_balance import BalanceStrategy, balance_from_env
-from strategy_ml import MLStrategy, ml_strategy_from_env
-from strategy_minedge import MinEdgeStrategy, min30_from_env, minedge_from_env
-from strategy_net_zigzag import (
-    NetZigzagStrategy,
-    net_zigzag_from_env,
-    s10_legacy30_from_env,
-)
-from strategy_state_s9 import StateS9Strategy, state_s9_from_env
-from strategy_hhhl_day import HhhlDayOvernightStrategy, hhhl_day_from_env, s4_swing_from_env
-from strategy_s16 import S16HhhlWickStrategy, s16_from_env
-from strategy_s18 import S18OhlcVolHtfStrategy, s18_from_env
+from strategy import BarSnapshot
+from strategy_s16 import s16_from_env
 from strategy_wick import wick_record_actions
-from zigzag_recorder import recorder_from_env
-from s9_state_journal import s9_journal_from_env
 from symbols import find_goldpetal_futures
 
 # Make prints show immediately even when piped to tee.
@@ -1626,6 +1613,124 @@ def run_once(
                 line = f"[{ts}] [EXIT] {name} failed {row.get('error')}"
             print(line, flush=True)
             logger.info(line)
+        _emit_desk_exit_health(rows)
+
+    def emit_archive_open_flatten(now: datetime) -> None:
+        """At session open, square leftover Angel on every book except S16."""
+        from archive_open_flatten import (
+            REASON as ARCHIVE_OPEN_REASON,
+            in_session_after_open,
+            square_archived_leftovers_at_open,
+        )
+        from live_orders import net_open_from_fills, square_fill_leftover
+
+        if not in_session_after_open(
+            now, market_open=open_s, market_close=close_s
+        ):
+            return
+        with flatten_lock:
+            try:
+                leftover = dict(net_open_from_fills() or {})
+            except Exception:
+                leftover = {}
+            leftover_broker_box: dict[str, Any] = {"b": None}
+
+            def _square_leftover(name: str, row: dict) -> Any:
+                b = leftover_broker_box["b"]
+                if b is None:
+                    b = broker
+                    if not hasattr(b, "place_leftover_square"):
+                        b = broker_from_session(session, contract, force_live=True)
+                    leftover_broker_box["b"] = b
+                return square_fill_leftover(name, leftover=row, broker=b)
+
+            try:
+                from live_orders import reconcile_fill_leftovers_with_angel
+                from desk_data import invalidate_live_pnl_cache
+
+                cleared = reconcile_fill_leftovers_with_angel(
+                    getattr(session, "api", None),
+                    symbol=str(contract.get("symbol") or ""),
+                    token=str(contract.get("token") or ""),
+                )
+                try:
+                    invalidate_live_pnl_cache()
+                except Exception:
+                    pass
+                leftover = dict(net_open_from_fills() or {})
+                if cleared:
+                    line = (
+                        f"[{now.isoformat(timespec='seconds')}] [ARCHIVE-OPEN] "
+                        f"Angel already flat — cleared leftover {', '.join(cleared)}"
+                    )
+                    print(line, flush=True)
+                    logger.info(line)
+            except Exception:
+                pass
+
+            rows = square_archived_leftovers_at_open(
+                now=now,
+                leftover=leftover,
+                square_leftover=_square_leftover,
+                market_open=open_s,
+                market_close=close_s,
+            )
+        if not rows:
+            return
+        ts = now.isoformat(timespec="seconds")
+        for row in rows:
+            name = str(row.get("strategy") or "")
+            obj = strat_map.get(name)
+            if obj is not None:
+                obj.position = "flat"
+                if hasattr(obj, "entry_price"):
+                    obj.entry_price = None
+                if hasattr(obj, "entry_date"):
+                    obj.entry_date = None
+            if row.get("ok"):
+                _record_signal(
+                    time_label=ts,
+                    action="CLOSE",
+                    position_after="flat",
+                    reason=str(row.get("reason") or ARCHIVE_OPEN_REASON),
+                    price_delta=None,
+                    net=0.0,
+                    net_delta=None,
+                    strategy=name,
+                    cmp=latest.get("cmp"),
+                )
+                if row.get("already_flat"):
+                    line = f"[{ts}] [ARCHIVE-OPEN] {name} Angel already flat"
+                else:
+                    broker_res = row.get("broker") or {}
+                    line = (
+                        f"[{ts}] [ARCHIVE-OPEN] leftover SQUARE {name} "
+                        f"tx={broker_res.get('transaction')} qty={row.get('lots')} "
+                        f"ok={broker_res.get('ok')} order={broker_res.get('order_id')}"
+                    )
+            else:
+                line = f"[{ts}] [ARCHIVE-OPEN] {name} failed {row.get('error')}"
+            print(line, flush=True)
+            logger.info(line)
+        write_bot_health(
+            {
+                "event": "archive_open_flatten",
+                "flattened": [
+                    {
+                        "strategy": r.get("strategy"),
+                        "ok": r.get("ok"),
+                        "already_flat": r.get("already_flat"),
+                    }
+                    for r in rows
+                ],
+                "positions": {
+                    n: getattr(o, "position", "flat") for n, o in strat_map.items()
+                },
+                "runner": "run_strategy",
+            }
+        )
+
+    def _emit_desk_exit_health(rows: list) -> None:
         write_bot_health(
             {
                 "event": "desk_exit",
@@ -1913,6 +2018,8 @@ def run_once(
 
             # Desk Exit button: flatten that book only (after this tick's entries)
             emit_desk_flatten(now)
+            # Archived leftovers: square at MARKET_OPEN. Only S16 trades after that.
+            emit_archive_open_flatten(now)
 
             # EOD flatten: Live-tab Intraday ticks (S16 default). Delivery books hold.
             day_key = now.astimezone(IST).strftime("%Y-%m-%d")
@@ -2138,32 +2245,65 @@ def main() -> None:
             print(f"{name}: skip ({type(exc).__name__}: {exc})", flush=True)
             return DisabledStrategy(name)
 
-    strategy_s1 = _load("S1_NETDELTA", PressureStrategy)
-    strategy_s2 = _load("S2_BALANCE", balance_from_env)
-    strategy_s3 = _load("S3_ML", ml_strategy_from_env)
-    strategy_s4 = _load("S4_OVERNIGHT", s4_swing_from_env)
-    strategy_s5 = _load("S5_MINEDGE", minedge_from_env)
-    strategy_s6 = _load("S6_MIN30", min30_from_env)
+    strategy_s1 = _load(
+        "S1_NETDELTA", _optional_book("S1_NETDELTA", "strategy", "PressureStrategy")
+    )
+    strategy_s2 = _load(
+        "S2_BALANCE", _optional_book("S2_BALANCE", "strategy_balance", "balance_from_env")
+    )
+    strategy_s3 = _load(
+        "S3_ML", _optional_book("S3_ML", "strategy_ml", "ml_strategy_from_env")
+    )
+    strategy_s4 = _load(
+        "S4_OVERNIGHT",
+        _optional_book("S4_OVERNIGHT", "strategy_hhhl_day", "s4_swing_from_env"),
+    )
+    strategy_s5 = _load(
+        "S5_MINEDGE",
+        _optional_book("S5_MINEDGE", "strategy_minedge", "minedge_from_env"),
+    )
+    strategy_s6 = _load(
+        "S6_MIN30", _optional_book("S6_MIN30", "strategy_minedge", "min30_from_env")
+    )
     strategy_fb = _load(
         "FLOW_BRAIN",
         _optional_book("FLOW_BRAIN", "strategy_flow_brain", "flow_brain_from_env"),
     )
-    strategy_s8 = _load("S8_NET_ZIGZAG", net_zigzag_from_env)
+    strategy_s8 = _load(
+        "S8_NET_ZIGZAG",
+        _optional_book("S8_NET_ZIGZAG", "strategy_net_zigzag", "net_zigzag_from_env"),
+    )
+    from zigzag_recorder import recorder_from_env
+
     zigzag_rec = recorder_from_env()
     if portfolio.is_enabled("S8_NET_ZIGZAG") and hasattr(strategy_s8, "cfg"):
         zigzag_rec.record_params(strategy_s8.cfg)
-    strategy_s9 = _load("S9_STATE30", state_s9_from_env)
+    strategy_s9 = _load(
+        "S9_STATE30",
+        _optional_book("S9_STATE30", "strategy_state_s9", "state_s9_from_env"),
+    )
+    from s9_state_journal import s9_journal_from_env
+
     s9_journal = s9_journal_from_env()
-    strategy_s10 = _load("S10_LEGACY30", s10_legacy30_from_env)
+    strategy_s10 = _load(
+        "S10_LEGACY30",
+        _optional_book("S10_LEGACY30", "strategy_net_zigzag", "s10_legacy30_from_env"),
+    )
     def _s11_factory():
         from strategy_discovered import discovered_from_env
 
         return discovered_from_env()
 
     strategy_s11 = _load("S11_DISCOVERED", _s11_factory)
-    strategy_s13 = _load("S13_HHHL_DAY", hhhl_day_from_env)
+    strategy_s13 = _load(
+        "S13_HHHL_DAY",
+        _optional_book("S13_HHHL_DAY", "strategy_hhhl_day", "hhhl_day_from_env"),
+    )
     strategy_s16 = _load("S16_HHHL_WICK_1H", s16_from_env)
-    strategy_s18 = _load("S18_OHLC_VOL_HTF", s18_from_env)
+    strategy_s18 = _load(
+        "S18_OHLC_VOL_HTF",
+        _optional_book("S18_OHLC_VOL_HTF", "strategy_s18", "s18_from_env"),
+    )
     strategy_s19 = _load(
         "S19_BODY_CLOSE_1H",
         _optional_book("S19_BODY_CLOSE_1H", "strategy_s19", "s19_from_env"),
@@ -2204,7 +2344,13 @@ def main() -> None:
     print(
         f"Portfolio enabled={sorted(portfolio.enabled)} "
         f"(live desk S16 HHHL+wick 1h only — every other book off permanently, "
-        f"you Arm S16, AMISE off. No paper fills.)",
+        f"archived leftovers square at MARKET_OPEN, you Arm S16, AMISE off. "
+        f"No paper fills.)",
+        flush=True,
+    )
+    print(
+        "RAM      : S16-only bot needs ~400–700 MB. Keep the VM at 2 GB (e2-small) "
+        "minimum. 4 GB (e2-medium) if the desk stays on this VM. Do not use 1 GB.",
         flush=True,
     )
 
