@@ -489,6 +489,9 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/docs/goldpetal_all_strategies.pdf" in sync
     assert "STORE_TICKS=false" in sync
     assert "goldpetal/market_session.py" in sync
+    assert "goldpetal/scripts/boot_s16_session.sh" in sync
+    assert "goldpetal/scripts/install_s16_boot.sh" in sync
+    assert "goldpetal/scripts/gcp_s16_session_hours.sh" in sync
     assert '"$DEST/docs"' in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
