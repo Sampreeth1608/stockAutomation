@@ -307,6 +307,12 @@ def desk_payload() -> dict[str, Any]:
         capital = capital_snapshot()
     except Exception:
         capital = {}
+    try:
+        from storage import store_ticks_enabled
+
+        store_ticks = store_ticks_enabled()
+    except Exception:
+        store_ticks = False
     return {
         "bot": bot,
         "live_desk": live_desk,
@@ -316,7 +322,8 @@ def desk_payload() -> dict[str, Any]:
         "flatten": flatten,
         "live_pnl": live_pnl,
         "books_health": books_health,
-        "desk_build": "v64",
+        "desk_build": "v65",
+        "store_ticks": store_ticks,
     }
 
 

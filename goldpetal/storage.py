@@ -3,12 +3,61 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 _PACKAGE_DB = Path(__file__).resolve().parent / "data" / "ticks.db"
 DB_PATH = _PACKAGE_DB
+CONTROL_DIR = Path(__file__).resolve().parent / "data" / "control"
+LAST_QUOTE_PATH = CONTROL_DIR / "last_quote.json"
+
+
+def store_ticks_enabled() -> bool:
+    """False = S16 day calc in RAM; do not archive every Angel tick.
+
+    Signals still go to sqlite. Default is off so the live desk does not
+    grow ticks.db. Set STORE_TICKS=true only if you want the tape/bars/CSV.
+    """
+    raw = os.getenv("STORE_TICKS")
+    if raw is None or str(raw).strip() == "":
+        return False
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def write_last_quote(
+    *,
+    ltp: float | None,
+    received_at: str,
+    path: Path | None = None,
+) -> Path:
+    """Tiny live quote for the desk when ticks.db is not being written."""
+    dest = path or LAST_QUOTE_PATH
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(
+        json.dumps(
+            {
+                "ltp": ltp,
+                "received_at": received_at,
+                "store_ticks": store_ticks_enabled(),
+            },
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+    return dest
+
+
+def read_last_quote(path: Path | None = None) -> dict[str, Any]:
+    dest = path or LAST_QUOTE_PATH
+    if not dest.exists():
+        return {}
+    try:
+        data = json.loads(dest.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def set_db_path(path: Path | str) -> Path:

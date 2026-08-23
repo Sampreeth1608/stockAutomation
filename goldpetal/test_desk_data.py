@@ -8,9 +8,13 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from desk_data import (
     history_payload,
     json_safe,
+    last_tick_snapshot,
     live_pnl_payload,
     paper_strategy_summaries,
     reset_trade_cache,
@@ -163,6 +167,26 @@ def test_tape_freshness_frozen_quote_is_not_live() -> None:
     assert stale["tape_age_sec"] > 3500
     live = tape_freshness(last_tick_at="2026-08-19T11:22:50+05:30", now=now)
     assert live["tape_live"] is True
+
+
+def test_last_tick_snapshot_uses_last_quote_when_ticks_empty() -> None:
+    ist = ZoneInfo("Asia/Kolkata")
+    with tempfile.TemporaryDirectory() as td:
+        db = Path(td) / "ticks.db"
+        init_db(db)
+        now = datetime(2026, 8, 19, 11, 23, tzinfo=ist)
+        with patch(
+            "desk_data.read_last_quote",
+            lambda: {
+                "ltp": 1234.5,
+                "received_at": "2026-08-19T11:22:50+05:30",
+                "store_ticks": False,
+            },
+        ):
+            snap = last_tick_snapshot(db_path=db, now=now)
+        assert snap["ltp"] == 1234.5
+        assert snap["tape_live"] is True
+        assert snap["last_tick_at"] == "2026-08-19T11:22:50+05:30"
 
 
 def test_tick_feed_stale_during_session() -> None:
@@ -771,6 +795,7 @@ if __name__ == "__main__":
     test_set_db_path_redirects_package_default()
     test_tape_payload_shows_ticks_without_trades()
     test_tape_freshness_frozen_quote_is_not_live()
+    test_last_tick_snapshot_uses_last_quote_when_ticks_empty()
     test_tick_feed_stale_during_session()
     test_history_payload_has_closed_trade_and_ticks()
     test_list_signals_limit_keeps_latest()

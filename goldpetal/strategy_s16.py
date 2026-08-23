@@ -25,8 +25,10 @@ Not live-unlocked. Paper 100 lots ≠ live.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -58,7 +60,13 @@ class S16HhhlWickStrategy:
 
     name = S16_NAME
 
-    def __init__(self, cfg: S16Config | None = None, *, seed: bool = True) -> None:
+    def __init__(
+        self,
+        cfg: S16Config | None = None,
+        *,
+        seed: bool = True,
+        persist_day: bool | None = None,
+    ) -> None:
         self.cfg = cfg or S16Config()
         self.position: Position = "flat"
         self.entry_price: float | None = None
@@ -71,6 +79,13 @@ class S16HhhlWickStrategy:
         self._catchup_prev: Candle | None = None
         self._catchup_cur: Candle | None = None
         self._last_signal_at: datetime | None = None
+        self._closed_today: list[Candle] = []
+        self._last_persist_m = 0.0
+        if persist_day is None:
+            from storage import store_ticks_enabled
+
+            persist_day = bool(seed) and not store_ticks_enabled()
+        self._persist_day = bool(persist_day)
         if seed:
             self.seed_from_ticks()
 
@@ -203,6 +218,7 @@ class S16HhhlWickStrategy:
             and closed.time[:10] == now.strftime("%Y-%m-%d")
         ):
             self._prev = closed
+            self._remember_closed(closed)
         return result
 
     def release_decision_lock(self) -> None:
@@ -296,53 +312,226 @@ class S16HhhlWickStrategy:
             result.reason = f"{result.reason} restart catch-up"
         return result
 
+    def _remember_closed(self, closed: Candle) -> None:
+        key = closed.time[:19]
+        self._closed_today = [c for c in self._closed_today if c.time[:19] != key]
+        self._closed_today.append(closed)
+        self._closed_today.sort(key=lambda c: c.time)
+
+    def day_state_path(self) -> Path:
+        return Path(__file__).resolve().parent / "data" / "control" / "s16_day.json"
+
+    def dump_day_state(self) -> dict[str, Any]:
+        forming = None
+        if self._bar_key is not None and self._bar_o is not None:
+            forming = {
+                "key": self._bar_key.isoformat(timespec="seconds"),
+                "open": float(self._bar_o),
+                "high": float(self._bar_h if self._bar_h is not None else self._bar_o),
+                "low": float(self._bar_l if self._bar_l is not None else self._bar_o),
+                "close": float(self._bar_c if self._bar_c is not None else self._bar_o),
+                "n": int(self._bar_n),
+            }
+        date = ""
+        if self._bar_key is not None:
+            date = self._bar_key.strftime("%Y-%m-%d")
+        elif self._closed_today:
+            date = self._closed_today[-1].time[:10]
+        return {
+            "date": date,
+            "closed": [
+                {
+                    "time": c.time,
+                    "open": float(c.open),
+                    "high": float(c.high),
+                    "low": float(c.low),
+                    "close": float(c.close),
+                }
+                for c in self._closed_today
+            ],
+            "forming": forming,
+        }
+
+    def persist_day_state(self, path: Path | None = None) -> None:
+        """Tiny today's 1h bars — not a tick archive. Formula unchanged."""
+        dest = path or self.day_state_path()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.dump_day_state()
+        if not payload.get("date"):
+            payload["date"] = datetime.now(IST).strftime("%Y-%m-%d")
+        dest.write_text(json.dumps(payload, default=str), encoding="utf-8")
+
+    def _maybe_persist_day(self) -> None:
+        if not self._persist_day:
+            return
+        now_m = time.monotonic()
+        if self._last_persist_m and now_m - self._last_persist_m < 2.0:
+            return
+        self._last_persist_m = now_m
+        try:
+            self.persist_day_state()
+        except Exception:
+            return
+
+    def seed_from_day_state(
+        self, path: Path | None = None, *, now: datetime | None = None
+    ) -> None:
+        """Restart from today's closed 1h bars + forming hour (no ticks.db)."""
+        dest = path or self.day_state_path()
+        if not dest.exists():
+            return
+        try:
+            data = json.loads(dest.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        if not isinstance(data, dict):
+            return
+        now = (now or datetime.now(IST)).astimezone(IST)
+        today = now.strftime("%Y-%m-%d")
+        if str(data.get("date") or "") != today:
+            return
+        closed: list[Candle] = []
+        for row in data.get("closed") or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                cand = Candle(
+                    time=str(row["time"]),
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if cand.time[:10] != today or not self._bar_started_in_session(cand):
+                continue
+            closed.append(cand)
+        closed.sort(key=lambda c: c.time)
+        self._closed_today = closed
+        step = timedelta(minutes=max(1, self.cfg.bar_minutes))
+        cur_key = self._floor_bar(now)
+        closed_key = cur_key - step
+        forming = data.get("forming") or {}
+        forming_key = None
+        if isinstance(forming, dict) and forming:
+            try:
+                forming_key = datetime.fromisoformat(str(forming["key"]))
+                if forming_key.tzinfo is None:
+                    forming_key = forming_key.replace(tzinfo=IST)
+                else:
+                    forming_key = forming_key.astimezone(IST)
+                forming_candle = Candle(
+                    time=forming_key.strftime("%Y-%m-%d %H:%M:%S"),
+                    open=float(forming["open"]),
+                    high=float(forming["high"]),
+                    low=float(forming["low"]),
+                    close=float(
+                        forming["close"]
+                        if forming.get("close") is not None
+                        else forming["open"]
+                    ),
+                )
+            except (KeyError, TypeError, ValueError):
+                forming_key = None
+                forming_candle = None
+            else:
+                if (
+                    forming_key == closed_key
+                    and forming_candle.time[:10] == today
+                    and self._bar_started_in_session(forming_candle)
+                ):
+                    self._remember_closed(forming_candle)
+                    closed = list(self._closed_today)
+        if closed:
+            last = closed[-1]
+            try:
+                last_key = datetime.strptime(last.time[:19], "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=IST
+                )
+            except ValueError:
+                last_key = None
+            self._prev = last
+            if (
+                last_key == closed_key
+                and len(closed) >= 2
+                and not self._already_decided_close(closed_key)
+            ):
+                self._catchup_prev = closed[-2]
+                self._catchup_cur = last
+        if forming_key != cur_key or not isinstance(forming, dict) or not forming:
+            return
+        try:
+            self._reset_bar(forming_key, float(forming["open"]))
+            self._bar_h = float(forming["high"])
+            self._bar_l = float(forming["low"])
+            self._bar_c = float(
+                forming["close"] if forming.get("close") is not None else forming["open"]
+            )
+            self._bar_n = max(1, int(forming.get("n") or 1))
+        except (KeyError, TypeError, ValueError):
+            return
+
     def seed_from_ticks(
         self, db_path: Path | None = None, *, now: datetime | None = None
     ) -> None:
         """Hydrate last closed 1h, catch up that close if restart missed it."""
         try:
+            from storage import store_ticks_enabled
+
             db = db_path or (Path(__file__).resolve().parent / "data" / "ticks.db")
-            if not db.exists():
-                return
-            self._seed_position_from_signals(db)
+            if db.exists():
+                self._seed_position_from_signals(db)
             now = (now or datetime.now(IST)).astimezone(IST)
-            step = timedelta(minutes=max(1, self.cfg.bar_minutes))
-            cur_key = self._floor_bar(now)
-            closed_key = cur_key - step
-            prev_key = closed_key - step
-            start = prev_key.strftime("%Y-%m-%dT%H:%M:%S")
-            con = sqlite3.connect(str(db))
-            try:
-                rows = con.execute(
-                    "SELECT received_at, ltp FROM ticks "
-                    "WHERE ltp IS NOT NULL AND received_at >= ? "
-                    "ORDER BY received_at ASC, id ASC",
-                    (start,),
-                ).fetchall()
-            finally:
-                con.close()
-            prev_c = self._session_candle(
-                prev_key, self._ohlc_from_rows(rows, prev_key), now
-            )
-            closed_c = self._session_candle(
-                closed_key, self._ohlc_from_rows(rows, closed_key), now
-            )
-            cur_ohlc = self._ohlc_from_rows(rows, cur_key)
-            if closed_c is not None:
-                self._prev = closed_c
-                if prev_c is not None and not self._already_decided_close(closed_key):
-                    self._catchup_prev = prev_c
-                    self._catchup_cur = closed_c
-            if cur_ohlc is None:
+            want_ticks = db_path is not None or store_ticks_enabled()
+            if want_ticks and db.exists():
+                self._hydrate_from_tick_rows(db, now)
                 return
-            o, h, l, c, n = cur_ohlc
-            self._reset_bar(cur_key, float(o))
-            self._bar_h = float(h)
-            self._bar_l = float(l)
-            self._bar_c = float(c)
-            self._bar_n = max(1, n)
+            self.seed_from_day_state(now=now)
+            if self._prev is None and self._bar_key is None and db.exists():
+                self._hydrate_from_tick_rows(db, now)
         except Exception:
             return
+
+    def _hydrate_from_tick_rows(self, db: Path, now: datetime) -> None:
+        step = timedelta(minutes=max(1, self.cfg.bar_minutes))
+        cur_key = self._floor_bar(now)
+        closed_key = cur_key - step
+        prev_key = closed_key - step
+        start = prev_key.strftime("%Y-%m-%dT%H:%M:%S")
+        con = sqlite3.connect(str(db))
+        try:
+            rows = con.execute(
+                "SELECT received_at, ltp FROM ticks "
+                "WHERE ltp IS NOT NULL AND received_at >= ? "
+                "ORDER BY received_at ASC, id ASC",
+                (start,),
+            ).fetchall()
+        finally:
+            con.close()
+        prev_c = self._session_candle(
+            prev_key, self._ohlc_from_rows(rows, prev_key), now
+        )
+        closed_c = self._session_candle(
+            closed_key, self._ohlc_from_rows(rows, closed_key), now
+        )
+        cur_ohlc = self._ohlc_from_rows(rows, cur_key)
+        if closed_c is not None:
+            self._prev = closed_c
+            self._remember_closed(closed_c)
+            if prev_c is not None:
+                self._remember_closed(prev_c)
+            if prev_c is not None and not self._already_decided_close(closed_key):
+                self._catchup_prev = prev_c
+                self._catchup_cur = closed_c
+        if cur_ohlc is None:
+            return
+        o, h, l, c, n = cur_ohlc
+        self._reset_bar(cur_key, float(o))
+        self._bar_h = float(h)
+        self._bar_l = float(l)
+        self._bar_c = float(c)
+        self._bar_n = max(1, n)
 
     def _ohlc_from_rows(
         self, rows: list[tuple[Any, Any]], key: datetime
@@ -371,6 +560,12 @@ class S16HhhlWickStrategy:
     ) -> SignalResult | None:
         del message
         now = now.astimezone(IST)
+        try:
+            return self._on_tick_body(now, ltp)
+        finally:
+            self._maybe_persist_day()
+
+    def _on_tick_body(self, now: datetime, ltp: float) -> SignalResult | None:
         self._drop_stale_prev(now)
         key = self._floor_bar(now)
         px = float(ltp)
@@ -399,7 +594,9 @@ class S16HhhlWickStrategy:
                 and closed.time[:10] == now.strftime("%Y-%m-%d")
             ):
                 self._prev = closed
+                self._remember_closed(closed)
             self._reset_bar(key, px)
+            self._last_persist_m = 0.0
             if flatten_why:
                 return self._flatten(px, flatten_why)
             return result if result is not None else catchup

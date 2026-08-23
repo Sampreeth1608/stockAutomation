@@ -29,7 +29,16 @@ from market_mood import (
     mood_blocks_entry,
     mood_wants_flatten,
 )
-from storage import init_db, latest_bar, latest_signals, save_bar, save_signal as db_save_signal, save_tick
+from storage import (
+    init_db,
+    latest_bar,
+    latest_signals,
+    save_bar,
+    save_signal as db_save_signal,
+    save_tick,
+    store_ticks_enabled,
+    write_last_quote,
+)
 from desk_data import tick_feed_stale
 from control_state import entries_blocked, is_live_mode_allowed, load_state
 from position_safety import (
@@ -182,13 +191,16 @@ def run_once(
     stop_flag: dict,
 ) -> None:
     init_db()
-    try:
-        from trade_learner import get_learner
+    if store_ticks_enabled():
+        try:
+            from trade_learner import get_learner
 
-        get_learner().fit_from_db()
-        print(f"Learner  : {get_learner().status_line()}", flush=True)
-    except Exception as exc:
-        print(f"Learner  : skip ({type(exc).__name__}: {exc})", flush=True)
+            get_learner().fit_from_db()
+            print(f"Learner  : {get_learner().status_line()}", flush=True)
+        except Exception as exc:
+            print(f"Learner  : skip ({type(exc).__name__}: {exc})", flush=True)
+    else:
+        print("Learner  : off (STORE_TICKS=false — S16 day calc only)", flush=True)
     interval = _interval_minutes()
     dry_run = _dry_run()
     contract = find_goldpetal_futures(force_refresh=True)
@@ -604,6 +616,21 @@ def run_once(
         # and crash the tick handler on every 30m boundary.
         result_s1 = strategy_s1.on_bar(bar)
         if result_s1 is None:
+            if store_ticks_enabled():
+                save_bar(
+                    time_label=bar.time_label,
+                    symbol=symbol,
+                    token=token,
+                    cmp=bar.cmp,
+                    bp=bar.bp,
+                    sp=bar.sp,
+                    net=float(bar.bp) - float(bar.sp),
+                    price_delta=None,
+                    net_delta=None,
+                )
+            state["next_bar_at"] = _next_boundary(now, interval)
+            return
+        if store_ticks_enabled():
             save_bar(
                 time_label=bar.time_label,
                 symbol=symbol,
@@ -611,23 +638,10 @@ def run_once(
                 cmp=bar.cmp,
                 bp=bar.bp,
                 sp=bar.sp,
-                net=float(bar.bp) - float(bar.sp),
-                price_delta=None,
-                net_delta=None,
+                net=result_s1.net,
+                price_delta=result_s1.price_delta,
+                net_delta=result_s1.net_delta,
             )
-            state["next_bar_at"] = _next_boundary(now, interval)
-            return
-        save_bar(
-            time_label=bar.time_label,
-            symbol=symbol,
-            token=token,
-            cmp=bar.cmp,
-            bp=bar.bp,
-            sp=bar.sp,
-            net=result_s1.net,
-            price_delta=result_s1.price_delta,
-            net_delta=result_s1.net_delta,
-        )
         if not _strategy_active(strategy_s1.name):
             state["next_bar_at"] = _next_boundary(now, interval)
             return
@@ -1855,7 +1869,8 @@ def run_once(
             feed_watch["t"] = time.monotonic()
             feed_watch["got"] = True
             received_at = now.isoformat(timespec="seconds")
-            save_tick(message, symbol=symbol, token=token, received_at=received_at)
+            if store_ticks_enabled():
+                save_tick(message, symbol=symbol, token=token, received_at=received_at)
 
             cmp = _scale_price(message.get("last_traded_price"))
             bp = message.get("total_buy_quantity")
@@ -1879,7 +1894,11 @@ def run_once(
 
             state["tick_count"] += 1
             tick_count = state["tick_count"]
-            if tick_count == 1 or tick_count % 200 == 0:
+            try:
+                write_last_quote(ltp=latest.get("cmp"), received_at=received_at)
+            except Exception:
+                pass
+            if store_ticks_enabled() and (tick_count == 1 or tick_count % 200 == 0):
                 try:
                     from trade_learner import get_learner
 
@@ -1887,10 +1906,11 @@ def run_once(
                 except Exception:
                     pass
             if tick_count == 1 or tick_count % 200 == 0:
-                try:
-                    mood_det.refresh_layers()
-                except Exception:
-                    pass
+                if store_ticks_enabled():
+                    try:
+                        mood_det.refresh_layers()
+                    except Exception:
+                        pass
                 s3_extra = ""
                 if strategy_s3.enabled:
                     if strategy_s3.last_prob is not None:
@@ -1930,6 +1950,7 @@ def run_once(
                         "event": "heartbeat",
                         "ticks": tick_count,
                         "ltp": latest.get("cmp"),
+                        "store_ticks": store_ticks_enabled(),
                         "regime": rs.regime,
                         "positions": {
                             "S4": strategy_s4.position,
@@ -2348,9 +2369,20 @@ def main() -> None:
         f"No paper fills.)",
         flush=True,
     )
+    if store_ticks_enabled():
+        print("TICKS    : storing to data/ticks.db", flush=True)
+    else:
+        print(
+            "TICKS    : not stored. S16 builds the 1h bar in RAM "
+            "(data/control/s16_day.json for mid-day restart). "
+            "Signals still saved. Desk LTP from last quote.",
+            flush=True,
+        )
     print(
-        "RAM      : S16-only bot needs ~400–700 MB. Keep the VM at 2 GB (e2-small) "
-        "minimum. 4 GB (e2-medium) if the desk stays on this VM. Do not use 1 GB.",
+        "RAM      : no tick archive does not free much RAM. "
+        "Bot ~200–400 MB. Desk on this VM ~80–200 MB. Linux+ssh ~400–600 MB. "
+        "Keep 2 GB (e2-small) minimum. 4 GB (e2-medium) if the desk stays on "
+        "this Google SSH VM. Do not use 1 GB.",
         flush=True,
     )
 

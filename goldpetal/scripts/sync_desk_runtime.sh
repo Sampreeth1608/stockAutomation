@@ -66,4 +66,8 @@ for rel in "${FILES[@]}"; do
   echo "  copied $dest_rel"
 done
 chmod +x "$DEST/scripts/run_desk_vm.sh" "$DEST/scripts/sync_desk_runtime.sh" || true
+if [[ -f "$DEST/.env" ]] && ! grep -qE '^[[:space:]]*STORE_TICKS=' "$DEST/.env"; then
+  printf '\n# S16 day calc — do not archive ticks\nSTORE_TICKS=false\n' >> "$DEST/.env"
+  echo "  appended STORE_TICKS=false to .env (other keys left as-is)"
+fi
 echo "desk runtime synced"

@@ -22,7 +22,13 @@ from live_orders import (
     recent_orders,
 )
 from paper_report import summarize_trades
-from storage import build_trades, latest_signals, latest_ticks, set_db_path
+from storage import (
+    build_trades,
+    latest_signals,
+    latest_ticks,
+    read_last_quote,
+    set_db_path,
+)
 import storage as _storage
 from charges import paper_lots
 
@@ -754,6 +760,22 @@ def last_tick_snapshot(*, db_path: Path | None = None, now: datetime | None = No
         meta = _last_tick_meta(db)
     except Exception:
         meta = {"tick_count": 0, "ltp": None, "last_tick_at": ""}
+    try:
+        quote = read_last_quote()
+    except Exception:
+        quote = {}
+    q_at = str(quote.get("received_at") or "")
+    db_at = str(meta.get("last_tick_at") or "")
+    if q_at:
+        q_ts = parse_tick_at(q_at)
+        d_ts = parse_tick_at(db_at) if db_at else None
+        if q_ts is not None and (d_ts is None or q_ts >= d_ts):
+            meta = {
+                "tick_count": int(meta.get("tick_count") or 0),
+                "ltp": quote.get("ltp"),
+                "last_tick_at": q_at,
+                "store_ticks": bool(quote.get("store_ticks")),
+            }
     fresh = tape_freshness(last_tick_at=str(meta.get("last_tick_at") or ""), now=now)
     return {**meta, **fresh}
 

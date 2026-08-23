@@ -82,11 +82,12 @@ def test_station_is_the_operator_page() -> None:
     assert "LIVE PATH" not in html
     desk_pills = html.split("function renderDesk")[1].split("function renderAll")[0]
     assert "live_unlocked && live.dry_run" not in desk_pills
-    assert "gp-header-v64" in html
-    assert " · v64" in html
+    assert "gp-header-v65" in html
+    assert " · v65" in html
     assert 'id="desk-ver"' in html
-    assert ">v64</span>" in html
-    assert "<title>Gold Petal v64</title>" in html
+    assert ">v65</span>" in html
+    assert "<title>Gold Petal v65</title>" in html
+    assert "S16 in RAM" in html
     assert "Angel is flat — no open live contracts" in html
     assert "status || \"\") === \"OPEN\"" in html
     assert "books_health" in html
@@ -482,6 +483,7 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "goldpetal/panel_export.py" in sync
     assert "goldpetal/export_full_ticks.py" in sync
     assert "goldpetal/docs/goldpetal_all_strategies.pdf" in sync
+    assert "STORE_TICKS=false" in sync
     assert '"$DEST/docs"' in sync
     assert "chmod +x" in mac
     assert "--tunnel-through-iap" in mac
@@ -492,8 +494,8 @@ def test_control_panel_serves_station_on_8501() -> None:
     assert "seq 1 40" in cmd
     assert "curl -sL" in cmd
     assert "Google Chrome" in cmd
-    assert "Gold Petal v64" in cmd
-    assert "?v=64" in cmd
+    assert "Gold Petal v65" in cmd
+    assert "?v=65" in cmd
     assert "save_strategy_pdf" in cmd
     assert "Downloads/goldpetal_all_strategies.pdf" in cmd
     assert "/api/docs/strategies.pdf" in cmd
@@ -549,7 +551,9 @@ def test_desk_payload_includes_session() -> None:
     assert "flatten" in payload
     assert "by_strategy" in payload["flatten"]
     assert isinstance(payload["books_health"], dict)
-    assert payload["desk_build"] == "v64"
+    assert payload["desk_build"] == "v65"
+    assert "store_ticks" in payload
+    assert payload["store_ticks"] is False
 
 
 def test_login_html_is_the_gate() -> None:

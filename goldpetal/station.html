@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Gold Petal v64</title>
+<title>Gold Petal v65</title>
 <meta http-equiv="Cache-Control" content="no-store"/>
 <meta name="theme-color" content="#7a5314"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Gold Petal Desk"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<!-- gp-header-v64: S16-only live desk — every other book archived off live -->
+<!-- gp-header-v65: S16-only live desk — ticks not stored; day calc in RAM -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet"/>
@@ -171,7 +171,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
     <div class="brand">
       <div class="brand-row">
         <h1>Gold Petal Desk</h1>
-        <span class="ver" id="desk-ver">v64</span>
+        <span class="ver" id="desk-ver">v65</span>
       </div>
       <div class="sub stopped" id="session-line">Gold Petal stopped · Mon–Fri 09:00–23:30 IST</div>
     </div>
@@ -183,7 +183,7 @@ label.chk { display: flex; gap: .35rem; align-items: center; color: var(--muted)
       </div>
     </div>
     <div class="top-right">
-      <div class="clock" id="clock">IST — · v64</div>
+      <div class="clock" id="clock">IST — · v65</div>
       <div id="pills"></div>
       <button class="btn tiny" type="button" id="btn-lock-desk" hidden>Lock</button>
     </div>
@@ -573,8 +573,8 @@ function tickClock() {
     const ist = now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false,
       weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const clock = $("clock");
-    if (clock) clock.textContent = "IST " + ist + " · v64";
-    document.title = "Gold Petal v64";
+    if (clock) clock.textContent = "IST " + ist + " · v65";
+    document.title = "Gold Petal v65";
   } catch (e) {}
   try { renderSessionLine(); } catch (e) {}
   try { renderQuote(false); } catch (e) {}
@@ -655,6 +655,7 @@ function renderSessionLine() {
     : (s.open ? ("Gold Petal hours · " + hours) : ("Gold Petal stopped · " + hours));
   if (s.weekend) line += " · weekend";
   if (armed) line += " · LIVE ARMED";
+  if (lastDesk.store_ticks === false) line += " · S16 in RAM";
   el.textContent = line;
   el.className = "sub " + (running ? "running" : "stopped");
 }
@@ -1062,9 +1063,9 @@ function renderDesk(d) {
     ].join("");
   }
   const db = lastTape.db_path || lastHist.db_path || "";
-  const foot = ["v64"];
+  const foot = ["v65"];
   const ver = $("desk-ver");
-  if (ver) ver.textContent = d.desk_build || "v64";
+  if (ver) ver.textContent = d.desk_build || "v65";
   if (db) foot.push(db.replace(/.*\//, "…/"));
   $("foot-left").textContent = foot.join(" · ") || "Gold Petal desk";
   renderLivePnl();
