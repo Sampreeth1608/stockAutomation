@@ -9,13 +9,15 @@ ZONE="${GP_VM_ZONE:-asia-south1-c}"
 REGION="${GP_VM_REGION:-asia-south1}"
 VM="${GP_VM_NAME:-sampreeth-love-story}"
 POLICY="${GP_SCHEDULE_NAME:-s16-session-hours}"
-START="${GP_START_CRON:-55 8 * * 1-5}"
+# GCP start/stop can run up to 15 minutes late. 08:40 leaves room before 09:00.
+START="${GP_START_CRON:-40 8 * * 1-5}"
 STOP="${GP_STOP_CRON:-55 23 * * 1-5}"
 TZ_NAME="${GP_SCHEDULE_TZ:-Asia/Kolkata}"
 
 echo "S16 is intraday: flatten at 23:30 IST, leftover at next 09:00 if a close is missed."
 echo "Stop 23:55 is 25 minutes after flatten. Start 08:55 is 5 minutes before open."
-echo "Prefer start 08:45 if Angel login / TOTP is slow: GP_START_CRON='45 8 * * 1-5'"
+echo "GCP start can be 15 minutes late — default start is 08:40 (not 08:55)."
+echo "Override: GP_START_CRON='55 8 * * 1-5' if you still want 08:55."
 echo
 echo "RAM while the VM is ON (session): 2 GB minimum (e2-small). 4 GB (e2-medium) if the desk stays on this VM. Do not use 1 GB."
 echo "Stopped VM: no vCPU/RAM charge. Boot disk still bills. Do not delete the boot disk."
@@ -25,9 +27,9 @@ echo "gcloud compute instances describe $VM --project=$PROJECT --zone=$ZONE --fo
 echo "gcloud compute disks list --project=$PROJECT --filter=\"zone:($ZONE)\" --format='table(name,sizeGb,type,users,status)'"
 echo
 echo "=== 2) Create Mon–Fri schedule (once) ==="
-echo "gcloud compute resource-policies create-instance-schedule $POLICY \\"
+echo "gcloud compute resource-policies create instance-schedule $POLICY \\"
 echo "  --project=$PROJECT --region=$REGION --timezone=$TZ_NAME \\"
-echo "  --description='S16 session: 08:55–23:55 IST Mon–Fri' \\"
+echo "  --description='S16 session: 08:40–23:55 IST Mon–Fri' \\"
 echo "  --vm-start-schedule='$START' \\"
 echo "  --vm-stop-schedule='$STOP'"
 echo
@@ -51,9 +53,9 @@ fi
 
 echo
 echo "Applying schedule $POLICY → $VM …"
-gcloud compute resource-policies create-instance-schedule "$POLICY" \
+gcloud compute resource-policies create instance-schedule "$POLICY" \
   --project="$PROJECT" --region="$REGION" --timezone="$TZ_NAME" \
-  --description="S16 session: 08:55–23:55 IST Mon–Fri" \
+  --description="S16 session: 08:40–23:55 IST Mon–Fri" \
   --vm-start-schedule="$START" \
   --vm-stop-schedule="$STOP" || echo "(policy may already exist — continuing)"
 gcloud compute instances add-resource-policies "$VM" \

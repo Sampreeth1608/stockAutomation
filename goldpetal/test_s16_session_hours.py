@@ -21,9 +21,10 @@ def test_boot_starts_supervise_and_local_desk() -> None:
 def test_gcp_schedule_is_weekday_ist() -> None:
     gcp = (ROOT / "scripts" / "gcp_s16_session_hours.sh").read_text(encoding="utf-8")
     assert "Asia/Kolkata" in gcp
-    assert "55 8 * * 1-5" in gcp
+    assert "40 8 * * 1-5" in gcp
     assert "55 23 * * 1-5" in gcp
-    assert "create-instance-schedule" in gcp
+    assert "create instance-schedule" in gcp
+    assert "create-instance-schedule" not in gcp
     assert "Do not delete the boot disk" in gcp
     assert "e2-small" in gcp
     assert "e2-medium" in gcp
