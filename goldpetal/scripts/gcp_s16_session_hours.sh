@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print (or --apply) a Mon–Fri GCP instance schedule for S16 session hours.
-# Default: start 08:55 IST, stop 23:55 IST. Weekend stays off.
+# Default: start 08:40 IST, stop 23:55 IST. Weekend stays off.
+# Verb is "create instance-schedule" (space). Hyphen form is invalid.
 # Run on the Mac (gcloud), not on the VM. Does not Arm live.
 # --apply actually attaches the schedule. Without it, print only.
 set -euo pipefail
@@ -15,9 +16,9 @@ STOP="${GP_STOP_CRON:-55 23 * * 1-5}"
 TZ_NAME="${GP_SCHEDULE_TZ:-Asia/Kolkata}"
 
 echo "S16 is intraday: flatten at 23:30 IST, leftover at next 09:00 if a close is missed."
-echo "Stop 23:55 is 25 minutes after flatten. Start 08:55 is 5 minutes before open."
-echo "GCP start can be 15 minutes late — default start is 08:40 (not 08:55)."
-echo "Override: GP_START_CRON='55 8 * * 1-5' if you still want 08:55."
+echo "Stop 23:55 is 25 minutes after flatten. Start 08:40 is 20 minutes before open."
+echo "GCP start can be 15 minutes late — 08:40 still lands before 09:00 leftover flatten."
+echo "Override: GP_START_CRON='55 8 * * 1-5' only if you still want 08:55."
 echo
 echo "RAM while the VM is ON (session): 2 GB minimum (e2-small). 4 GB (e2-medium) if the desk stays on this VM. Do not use 1 GB."
 echo "Stopped VM: no vCPU/RAM charge. Boot disk still bills. Do not delete the boot disk."
@@ -60,4 +61,4 @@ gcloud compute resource-policies create instance-schedule "$POLICY" \
   --vm-stop-schedule="$STOP" || echo "(policy may already exist — continuing)"
 gcloud compute instances add-resource-policies "$VM" \
   --project="$PROJECT" --zone="$ZONE" --resource-policies="$POLICY"
-echo "Schedule attached. Install VM @reboot first (install_s16_boot.sh) or Monday 08:55 comes up with no bot."
+echo "Schedule attached. @reboot must already be installed or Monday comes up with no bot."
