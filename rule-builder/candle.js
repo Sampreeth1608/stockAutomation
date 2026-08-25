@@ -280,6 +280,13 @@
     if (m.upperWick > m.lowerWick) wickDom = "upper";
     else if (m.lowerWick > m.upperWick) wickDom = "lower";
 
+    var bodyFill = m.range > 0 ? m.body / m.range : 0;
+    var closeAbovePrevHigh = cur.close > prev.high;
+    var volAbovePrev = (cur.volume || 0) > (prev.volume || 0);
+    var bodyFillsHalf = bodyFill > 0.5;
+    var openedAbovePrevClose = cur.open > prev.close;
+    var closeBelowPrevLow = cur.close < prev.low;
+
     return {
       time: cur.time,
       day: cur.day,
@@ -292,10 +299,12 @@
       prevHigh: prev.high,
       prevLow: prev.low,
       prevClose: prev.close,
+      prevVolume: prev.volume || 0,
       upperWick: round(m.upperWick),
       lowerWick: round(m.lowerWick),
       body: round(m.body),
       range: round(m.range),
+      bodyFill: round(bodyFill, 4),
       hh: hh,
       lh: lh,
       eqHigh: eqHigh,
@@ -304,6 +313,11 @@
       doji: doji,
       state: state,
       wickDom: wickDom,
+      closeAbovePrevHigh: closeAbovePrevHigh,
+      volAbovePrev: volAbovePrev,
+      bodyFillsHalf: bodyFillsHalf,
+      openedAbovePrevClose: openedAbovePrevClose,
+      closeBelowPrevLow: closeBelowPrevLow,
       closeVsPrevClose: cur.close - prev.close,
       closeVsPrevHigh: cur.close - prev.high,
       closeVsPrevLow: cur.close - prev.low,
@@ -584,6 +598,169 @@
     return stats;
   }
 
+  var TREE_LEAVES = [
+    {
+      id: "buy_break_vol_body",
+      path: "close > prev high, vol > prev, body fills half",
+      action: "BUY",
+      test: function (r) { return r.closeAbovePrevHigh && r.volAbovePrev && r.bodyFillsHalf; }
+    },
+    {
+      id: "buy_break_vol_thin",
+      path: "close > prev high, vol > prev, body does not fill half",
+      action: "BUY",
+      test: function (r) { return r.closeAbovePrevHigh && r.volAbovePrev && !r.bodyFillsHalf; }
+    },
+    {
+      id: "hold_break_lowvol",
+      path: "close > prev high, vol not above prev",
+      action: "HOLD",
+      test: function (r) { return r.closeAbovePrevHigh && !r.volAbovePrev; }
+    },
+    {
+      id: "buy_gap_open",
+      path: "close not above prev high, opened above prev close",
+      action: "BUY",
+      test: function (r) { return !r.closeAbovePrevHigh && r.openedAbovePrevClose; }
+    },
+    {
+      id: "sell_reject_uw",
+      path: "close not above prev high, opened not above prev close, vol > prev, UW > LW",
+      action: "SELL",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && r.volAbovePrev && r.wickDom === "upper";
+      }
+    },
+    {
+      id: "hold_vol_no_uw",
+      path: "close not above prev high, opened not above prev close, vol > prev, UW does not beat LW",
+      action: "HOLD",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && r.volAbovePrev && r.wickDom !== "upper";
+      }
+    },
+    {
+      id: "buy_close_below_low",
+      path: "close not above prev high, opened not above prev close, vol not above prev, close < prev low",
+      action: "BUY",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && !r.volAbovePrev && r.closeBelowPrevLow;
+      }
+    },
+    {
+      id: "hold_rest",
+      path: "close not above prev high, opened not above prev close, vol not above prev, close not below prev low",
+      action: "HOLD",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && !r.volAbovePrev && !r.closeBelowPrevLow;
+      }
+    }
+  ];
+
+  function treeAction(rec) {
+    if (rec.closeAbovePrevHigh) return rec.volAbovePrev ? "BUY" : "HOLD";
+    if (rec.openedAbovePrevClose) return "BUY";
+    if (rec.volAbovePrev) return rec.wickDom === "upper" ? "SELL" : "HOLD";
+    return rec.closeBelowPrevLow ? "BUY" : "HOLD";
+  }
+
+  function sideFromTree(rec) {
+    var action = treeAction(rec);
+    if (action === "BUY") return "long";
+    if (action === "SELL") return "short";
+    return null;
+  }
+
+  function emptyBook(n) {
+    return attachPnl({
+      n: n || 0,
+      pUp: null,
+      ptsPerTrade: null,
+      net: 0,
+      winRate: null,
+      wins: 0,
+      excess: null
+    }, []);
+  }
+
+  function scoreTreeLeaves(records) {
+    return TREE_LEAVES.map(function (leaf) {
+      var longRow = scoreSubset(records, leaf.test, "long");
+      var shortRow = scoreSubset(records, leaf.test, "short");
+      var actionRow = leaf.action === "BUY" ? longRow : leaf.action === "SELL" ? shortRow : emptyBook(longRow.n);
+      if (leaf.action === "HOLD") actionRow.n = longRow.n;
+      return {
+        id: leaf.id,
+        path: leaf.path,
+        action: leaf.action,
+        n: longRow.n,
+        long: longRow,
+        short: shortRow,
+        acted: actionRow
+      };
+    });
+  }
+
+  function scoreTreeFollow(records) {
+    var trades = [];
+    var rows = scoredRecords(records);
+    var buys = 0;
+    var sells = 0;
+    var holds = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var rec = rows[i];
+      var side = sideFromTree(rec);
+      if (!side) {
+        holds += 1;
+        continue;
+      }
+      if (side === "long") buys += 1;
+      else sells += 1;
+      trades.push({
+        side: side,
+        entry: rec.close,
+        exit: rec.nextClose,
+        pts: side === "short" ? -rec.sessionNextPts : rec.sessionNextPts,
+        time: rec.time,
+        month: rec.month,
+        kind: "TREE"
+      });
+    }
+    var stats = attachPnl({
+      n: trades.length,
+      net: round(trades.reduce(function (s, t) { return s + t.pts; }, 0), 4),
+      ptsPerTrade: trades.length ? round(trades.reduce(function (s, t) { return s + t.pts; }, 0) / trades.length, 4) : null,
+      winRate: trades.length ? round(trades.filter(function (t) { return t.pts > 0; }).length / trades.length, 4) : null
+    }, trades);
+    stats.buys = buys;
+    stats.sells = sells;
+    stats.holds = holds;
+    stats.scored = rows.length;
+    return stats;
+  }
+
+  function splitBySessionDays(records, trainDays) {
+    var days = [];
+    var seen = {};
+    (records || []).forEach(function (r) {
+      if (r.day && !seen[r.day]) {
+        seen[r.day] = true;
+        days.push(r.day);
+      }
+    });
+    days.sort();
+    var nTrain = trainDays == null ? 64 : trainDays;
+    var trainSet = {};
+    days.slice(0, nTrain).forEach(function (d) { trainSet[d] = true; });
+    return {
+      allDays: days,
+      trainDays: days.slice(0, nTrain),
+      testDays: days.slice(nTrain),
+      train: (records || []).filter(function (r) { return trainSet[r.day]; }),
+      test: (records || []).filter(function (r) { return !trainSet[r.day]; })
+    };
+  }
+
   function labFromText(text, minutes) {
     var native = parseBars(text);
     var nativeTf = inferBarMinutes(native);
@@ -611,7 +788,11 @@
       flipIntuition: scoreFlip(records, sideFromState),
       flipReversal: scoreFlip(records, reverseSide),
       flipIntuitionSession: scoreFlip(records, sideFromState, { flattenSession: true }),
-      flipReversalSession: scoreFlip(records, reverseSide, { flattenSession: true })
+      flipReversalSession: scoreFlip(records, reverseSide, { flattenSession: true }),
+      treeLeaves: scoreTreeLeaves(records),
+      treeFollow: scoreTreeFollow(records),
+      treeFlip: scoreFlip(records, sideFromTree),
+      treeFlipSession: scoreFlip(records, sideFromTree, { flattenSession: true })
     };
   }
 
@@ -633,6 +814,12 @@
     scoreCombination: scoreCombination,
     scoreFlip: scoreFlip,
     sideFromState: sideFromState,
+    treeAction: treeAction,
+    sideFromTree: sideFromTree,
+    scoreTreeLeaves: scoreTreeLeaves,
+    scoreTreeFollow: scoreTreeFollow,
+    splitBySessionDays: splitBySessionDays,
+    TREE_LEAVES: TREE_LEAVES,
     labFromText: labFromText
   };
 });

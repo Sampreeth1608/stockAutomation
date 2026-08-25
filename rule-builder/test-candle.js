@@ -141,6 +141,22 @@ var gold1h = lab.labFromText(gold1hText, 60);
 assertEqual("1h resample is identity", gold1h.barCount, 1343);
 assert(gold1h.baseline.n < gold1h.records.length, "overnight bars dropped from next-bar book");
 assert(gold1h.states[3].afterTax != null, "S4 after-tax is attached");
+assertEqual("tree has 8 leaves", gold1h.treeLeaves.length, 8);
+var leafN = gold1h.treeLeaves.reduce(function (s, L) { return s + L.n; }, 0);
+assertEqual("tree leaves partition scored bars", leafN, gold1h.baseline.n);
+assertEqual(
+  "tree follow counts cover the book",
+  gold1h.treeFollow.buys + gold1h.treeFollow.sells + gold1h.treeFollow.holds,
+  gold1h.baseline.n
+);
+
+console.log("tree flags");
+var prevT = bar("2026-08-01 10:00:00", 100, 110, 95, 108, 10);
+var brk = lab.formCandle(prevT, bar("2026-08-01 11:00:00", 109, 120, 108, 118, 40));
+assertEqual("close above prev high", brk.closeAbovePrevHigh, true);
+assertEqual("volume above prev", brk.volAbovePrev, true);
+assert(brk.bodyFillsHalf, "body fills over half on a strong close");
+assertEqual("tree BUY on breakout+volume", lab.treeAction(brk), "BUY");
 
 console.log("gold15 sample");
 var goldText = fs.readFileSync(path.join(__dirname, "data", "gold15.csv"), "utf8");

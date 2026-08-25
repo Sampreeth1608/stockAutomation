@@ -34,6 +34,14 @@
     "current close < current open\n" +
     "current upper wick > current lower wick";
 
+  var PRESET_TREE =
+    "close above prev high\n" +
+    "volume above prev\n" +
+    "body fills over half\n" +
+    "opened above prev close\n" +
+    "upper wick beats lower\n" +
+    "close below prev low";
+
   var HARD_CAP = 5000;
   var STORAGE_KEY = "ruleBuilder.v1";
 
@@ -550,6 +558,22 @@
         Object.assign({ label: "intuition flatten session" }, lab.flipIntuitionSession),
         Object.assign({ label: "reversal flatten session" }, lab.flipReversalSession)
       ], function (r) { return r.label; }) +
+      "</div><div class=\"score-grid\">" +
+      scoreTable("Breakout tree leaves (after tax = leaf action)", (lab.treeLeaves || []).map(function (leaf) {
+        return {
+          label: leaf.action + " · " + leaf.path,
+          n: leaf.n,
+          net: leaf.long.net,
+          grossInr: leaf.long.grossInr,
+          charges: leaf.long.charges,
+          afterTax: leaf.action === "HOLD" ? 0 : leaf.acted.afterTax
+        };
+      }), function (r) { return r.label; }) +
+      scoreTable("Breakout tree as a book", [
+        Object.assign({ label: "follow every BUY/SELL hour" }, lab.treeFollow),
+        Object.assign({ label: "FLIP when BUY/SELL side changes" }, lab.treeFlip),
+        Object.assign({ label: "FLIP flatten session" }, lab.treeFlipSession)
+      ], function (r) { return r.label; }) +
       "</div>";
 
     var rows = lab.records.slice().reverse().slice(0, 120);
@@ -666,6 +690,7 @@
     $("presetWickBtn").addEventListener("click", function () { setRulesText(PRESET_WICK); });
     $("presetS4WickBtn").addEventListener("click", function () { setRulesText(PRESET_S4_WICK); });
     $("presetAtomsBtn").addEventListener("click", function () { setRulesText(PRESET_ATOMS); });
+    $("presetTreeBtn").addEventListener("click", function () { setRulesText(PRESET_TREE); });
     $("clearBtn").addEventListener("click", function () { setRulesText(""); });
     $("treeViewBtn").addEventListener("click", function () { setView("tree"); });
     $("listViewBtn").addEventListener("click", function () { setView("list"); });

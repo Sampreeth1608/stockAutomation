@@ -3609,5 +3609,2263 @@
         }
       }
     }
+  ],
+  "tree": {
+    "leaves": [
+      {
+        "id": "buy_break_vol_body",
+        "path": "close > prev high, vol > prev, body fills half",
+        "action": "BUY",
+        "n": 118,
+        "longPts": 659,
+        "longPtsPerTrade": 5.5847,
+        "longAfterTax": 20407.9,
+        "actedAfterTax": 20407.9
+      },
+      {
+        "id": "buy_break_vol_thin",
+        "path": "close > prev high, vol > prev, body does not fill half",
+        "action": "BUY",
+        "n": 64,
+        "longPts": 314,
+        "longPtsPerTrade": 4.9063,
+        "longAfterTax": 8075.68,
+        "actedAfterTax": 8075.68
+      },
+      {
+        "id": "hold_break_lowvol",
+        "path": "close > prev high, vol not above prev",
+        "action": "HOLD",
+        "n": 83,
+        "longPts": 19,
+        "longPtsPerTrade": 0.2289,
+        "longAfterTax": -24138.33,
+        "actedAfterTax": 0
+      },
+      {
+        "id": "buy_gap_open",
+        "path": "close not above prev high, opened above prev close",
+        "action": "BUY",
+        "n": 103,
+        "longPts": 556,
+        "longPtsPerTrade": 5.3981,
+        "longAfterTax": 16486.63,
+        "actedAfterTax": 16486.63
+      },
+      {
+        "id": "sell_reject_uw",
+        "path": "close not above prev high, opened not above prev close, vol > prev, UW > LW",
+        "action": "SELL",
+        "n": 163,
+        "longPts": -1326,
+        "longPtsPerTrade": -8.135,
+        "longAfterTax": -183614.45,
+        "actedAfterTax": 57102.44
+      },
+      {
+        "id": "hold_vol_no_uw",
+        "path": "close not above prev high, opened not above prev close, vol > prev, UW does not beat LW",
+        "action": "HOLD",
+        "n": 230,
+        "longPts": -213,
+        "longPtsPerTrade": -0.9261,
+        "longAfterTax": -93054.43,
+        "actedAfterTax": 0
+      },
+      {
+        "id": "buy_close_below_low",
+        "path": "close not above prev high, opened not above prev close, vol not above prev, close < prev low",
+        "action": "BUY",
+        "n": 70,
+        "longPts": 314,
+        "longPtsPerTrade": 4.4857,
+        "longAfterTax": 6612.56,
+        "actedAfterTax": 6612.56
+      },
+      {
+        "id": "hold_rest",
+        "path": "close not above prev high, opened not above prev close, vol not above prev, close not below prev low",
+        "action": "HOLD",
+        "n": 419,
+        "longPts": 418,
+        "longPtsPerTrade": 0.9976,
+        "longAfterTax": -88921.07,
+        "actedAfterTax": 0
+      }
+    ],
+    "follow": {
+      "label": "follow tree",
+      "side": "tree",
+      "n": 518,
+      "winRate": 0.527,
+      "pts": 3169,
+      "ptsPerTrade": 6.1178,
+      "grossInr": 316900,
+      "charges": 161635.41,
+      "afterCharges": 155264.59,
+      "tax": 46579.38,
+      "afterTax": 108685.21,
+      "months": {
+        "2026-04": {
+          "n": 48,
+          "pts": -43,
+          "charges": 15358.69,
+          "grossInr": -4300,
+          "afterCharges": -19658.69
+        },
+        "2026-05": {
+          "n": 118,
+          "pts": 436,
+          "charges": 38554.74,
+          "grossInr": 43600,
+          "afterCharges": 5045.26
+        },
+        "2026-06": {
+          "n": 122,
+          "pts": 1190,
+          "charges": 37978.46,
+          "grossInr": 119000,
+          "afterCharges": 81021.54
+        },
+        "2026-07": {
+          "n": 129,
+          "pts": 902,
+          "charges": 38374.41,
+          "grossInr": 90200,
+          "afterCharges": 51825.59
+        },
+        "2026-08": {
+          "n": 101,
+          "pts": 684,
+          "charges": 31369.11,
+          "grossInr": 68400,
+          "afterCharges": 37030.89
+        }
+      }
+    },
+    "flip": {
+      "label": "flip tree",
+      "side": "flip",
+      "n": 241,
+      "winRate": 0.5187,
+      "pts": 2216,
+      "ptsPerTrade": 9.195,
+      "grossInr": 221600,
+      "charges": 75629.34,
+      "afterCharges": 145970.66,
+      "tax": 43791.2,
+      "afterTax": 102179.46,
+      "months": {
+        "2026-04": {
+          "n": 21,
+          "pts": -389,
+          "charges": 6716.77,
+          "grossInr": -38900,
+          "afterCharges": -45616.77
+        },
+        "2026-05": {
+          "n": 71,
+          "pts": 815,
+          "charges": 23141.9,
+          "grossInr": 81500,
+          "afterCharges": 58358.1
+        },
+        "2026-06": {
+          "n": 62,
+          "pts": 734,
+          "charges": 19431.72,
+          "grossInr": 73400,
+          "afterCharges": 53968.28
+        },
+        "2026-07": {
+          "n": 51,
+          "pts": -42,
+          "charges": 15183.32,
+          "grossInr": -4200,
+          "afterCharges": -19383.32
+        },
+        "2026-08": {
+          "n": 36,
+          "pts": 1098,
+          "charges": 11155.63,
+          "grossInr": 109800,
+          "afterCharges": 98644.37
+        }
+      }
+    },
+    "trainFollow": {
+      "label": "train follow",
+      "side": "tree",
+      "n": 352,
+      "winRate": 0.5256,
+      "pts": 2293,
+      "ptsPerTrade": 6.5142,
+      "grossInr": 229300,
+      "charges": 111057.88,
+      "afterCharges": 118242.12,
+      "tax": 35472.64,
+      "afterTax": 82769.48,
+      "months": {
+        "2026-04": {
+          "n": 48,
+          "pts": -43,
+          "charges": 15358.69,
+          "grossInr": -4300,
+          "afterCharges": -19658.69
+        },
+        "2026-05": {
+          "n": 118,
+          "pts": 436,
+          "charges": 38554.74,
+          "grossInr": 43600,
+          "afterCharges": 5045.26
+        },
+        "2026-06": {
+          "n": 122,
+          "pts": 1190,
+          "charges": 37978.46,
+          "grossInr": 119000,
+          "afterCharges": 81021.54
+        },
+        "2026-07": {
+          "n": 64,
+          "pts": 710,
+          "charges": 19165.99,
+          "grossInr": 71000,
+          "afterCharges": 51834.01
+        }
+      }
+    },
+    "testFollow": {
+      "label": "test follow",
+      "side": "tree",
+      "n": 166,
+      "winRate": 0.5301,
+      "pts": 876,
+      "ptsPerTrade": 5.2771,
+      "grossInr": 87600,
+      "charges": 50577.53,
+      "afterCharges": 37022.47,
+      "tax": 11106.74,
+      "afterTax": 25915.73,
+      "months": {
+        "2026-07": {
+          "n": 65,
+          "pts": 192,
+          "charges": 19208.42,
+          "grossInr": 19200,
+          "afterCharges": -8.42
+        },
+        "2026-08": {
+          "n": 101,
+          "pts": 684,
+          "charges": 31369.11,
+          "grossInr": 68400,
+          "afterCharges": 37030.89
+        }
+      }
+    }
+  },
+  "treeCombos": [
+    {
+      "label": "current close > previous high AND current body fill > 0.5",
+      "side": "long",
+      "n": 163,
+      "winRate": 0.4847,
+      "pts": 935,
+      "ptsPerTrade": 5.7362,
+      "grossInr": 93500,
+      "charges": 50878.35,
+      "afterCharges": 42621.65,
+      "tax": 12786.5,
+      "afterTax": 29835.15,
+      "months": {
+        "2026-04": {
+          "n": 12,
+          "pts": 39,
+          "charges": 3843.1,
+          "grossInr": 3900,
+          "afterCharges": 56.9
+        },
+        "2026-05": {
+          "n": 32,
+          "pts": 228,
+          "charges": 10465.03,
+          "grossInr": 22800,
+          "afterCharges": 12334.97
+        },
+        "2026-06": {
+          "n": 31,
+          "pts": -150,
+          "charges": 9709.45,
+          "grossInr": -15000,
+          "afterCharges": -24709.45
+        },
+        "2026-07": {
+          "n": 42,
+          "pts": 466,
+          "charges": 12523.56,
+          "grossInr": 46600,
+          "afterCharges": 34076.44
+        },
+        "2026-08": {
+          "n": 46,
+          "pts": 352,
+          "charges": 14337.21,
+          "grossInr": 35200,
+          "afterCharges": 20862.79
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume",
+      "side": "long",
+      "n": 182,
+      "winRate": 0.5055,
+      "pts": 973,
+      "ptsPerTrade": 5.3462,
+      "grossInr": 97300,
+      "charges": 56609.17,
+      "afterCharges": 40690.83,
+      "tax": 12207.25,
+      "afterTax": 28483.58,
+      "months": {
+        "2026-04": {
+          "n": 12,
+          "pts": -18,
+          "charges": 3844.2,
+          "grossInr": -1800,
+          "afterCharges": -5644.2
+        },
+        "2026-05": {
+          "n": 32,
+          "pts": 118,
+          "charges": 10490.04,
+          "grossInr": 11800,
+          "afterCharges": 1309.96
+        },
+        "2026-06": {
+          "n": 34,
+          "pts": 215,
+          "charges": 10604.12,
+          "grossInr": 21500,
+          "afterCharges": 10895.88
+        },
+        "2026-07": {
+          "n": 51,
+          "pts": 542,
+          "charges": 15187.98,
+          "grossInr": 54200,
+          "afterCharges": 39012.02
+        },
+        "2026-08": {
+          "n": 53,
+          "pts": 116,
+          "charges": 16482.83,
+          "grossInr": 11600,
+          "afterCharges": -4882.83
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 117,
+      "winRate": 0.5214,
+      "pts": 746,
+      "ptsPerTrade": 6.3761,
+      "grossInr": 74600,
+      "charges": 36427.03,
+      "afterCharges": 38172.97,
+      "tax": 11451.89,
+      "afterTax": 26721.08,
+      "months": {
+        "2026-04": {
+          "n": 9,
+          "pts": 33,
+          "charges": 2881.9,
+          "grossInr": 3300,
+          "afterCharges": 418.1
+        },
+        "2026-05": {
+          "n": 22,
+          "pts": 126,
+          "charges": 7191.79,
+          "grossInr": 12600,
+          "afterCharges": 5408.21
+        },
+        "2026-06": {
+          "n": 23,
+          "pts": 192,
+          "charges": 7163.73,
+          "grossInr": 19200,
+          "afterCharges": 12036.27
+        },
+        "2026-07": {
+          "n": 29,
+          "pts": 279,
+          "charges": 8645.3,
+          "grossInr": 27900,
+          "afterCharges": 19254.7
+        },
+        "2026-08": {
+          "n": 34,
+          "pts": 116,
+          "charges": 10544.31,
+          "grossInr": 11600,
+          "afterCharges": 1055.69
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current body fill > 0.5 AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 109,
+      "winRate": 0.4771,
+      "pts": 717,
+      "ptsPerTrade": 6.578,
+      "grossInr": 71700,
+      "charges": 33929.46,
+      "afterCharges": 37770.54,
+      "tax": 11331.16,
+      "afterTax": 26439.38,
+      "months": {
+        "2026-04": {
+          "n": 9,
+          "pts": 81,
+          "charges": 2876.9,
+          "grossInr": 8100,
+          "afterCharges": 5223.1
+        },
+        "2026-05": {
+          "n": 20,
+          "pts": 132,
+          "charges": 6542.03,
+          "grossInr": 13200,
+          "afterCharges": 6657.97
+        },
+        "2026-06": {
+          "n": 20,
+          "pts": -121,
+          "charges": 6257.27,
+          "grossInr": -12100,
+          "afterCharges": -18357.27
+        },
+        "2026-07": {
+          "n": 30,
+          "pts": 307,
+          "charges": 8951.99,
+          "grossInr": 30700,
+          "afterCharges": 21748.01
+        },
+        "2026-08": {
+          "n": 30,
+          "pts": 318,
+          "charges": 9301.27,
+          "grossInr": 31800,
+          "afterCharges": 22498.73
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current body fill > 0.5",
+      "side": "long",
+      "n": 118,
+      "winRate": 0.5169,
+      "pts": 659,
+      "ptsPerTrade": 5.5847,
+      "grossInr": 65900,
+      "charges": 36745.86,
+      "afterCharges": 29154.14,
+      "tax": 8746.24,
+      "afterTax": 20407.9,
+      "months": {
+        "2026-04": {
+          "n": 9,
+          "pts": 41,
+          "charges": 2881.62,
+          "grossInr": 4100,
+          "afterCharges": 1218.38
+        },
+        "2026-05": {
+          "n": 21,
+          "pts": 114,
+          "charges": 6873.8,
+          "grossInr": 11400,
+          "afterCharges": 4526.2
+        },
+        "2026-06": {
+          "n": 20,
+          "pts": -61,
+          "charges": 6251.4,
+          "grossInr": -6100,
+          "afterCharges": -12351.4
+        },
+        "2026-07": {
+          "n": 33,
+          "pts": 431,
+          "charges": 9843.18,
+          "grossInr": 43100,
+          "afterCharges": 33256.82
+        },
+        "2026-08": {
+          "n": 35,
+          "pts": 134,
+          "charges": 10895.86,
+          "grossInr": 13400,
+          "afterCharges": 2504.14
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 160,
+      "winRate": 0.475,
+      "pts": 750,
+      "ptsPerTrade": 4.6875,
+      "grossInr": 75000,
+      "charges": 49827.94,
+      "afterCharges": 25172.06,
+      "tax": 7551.62,
+      "afterTax": 17620.44,
+      "months": {
+        "2026-04": {
+          "n": 12,
+          "pts": -4,
+          "charges": 3837.42,
+          "grossInr": -400,
+          "afterCharges": -4237.42
+        },
+        "2026-05": {
+          "n": 31,
+          "pts": 137,
+          "charges": 10151.05,
+          "grossInr": 13700,
+          "afterCharges": 3548.95
+        },
+        "2026-06": {
+          "n": 34,
+          "pts": 58,
+          "charges": 10611.62,
+          "grossInr": 5800,
+          "afterCharges": -4811.62
+        },
+        "2026-07": {
+          "n": 41,
+          "pts": 221,
+          "charges": 12216.3,
+          "grossInr": 22100,
+          "afterCharges": 9883.7
+        },
+        "2026-08": {
+          "n": 42,
+          "pts": 338,
+          "charges": 13011.55,
+          "grossInr": 33800,
+          "afterCharges": 20788.45
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current body fill > 0.5 AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 82,
+      "winRate": 0.5122,
+      "pts": 503,
+      "ptsPerTrade": 6.1341,
+      "grossInr": 50300,
+      "charges": 25511.57,
+      "afterCharges": 24788.43,
+      "tax": 7436.53,
+      "afterTax": 17351.9,
+      "months": {
+        "2026-04": {
+          "n": 7,
+          "pts": 77,
+          "charges": 2238.22,
+          "grossInr": 7700,
+          "afterCharges": 5461.78
+        },
+        "2026-05": {
+          "n": 14,
+          "pts": 112,
+          "charges": 4561.03,
+          "grossInr": 11200,
+          "afterCharges": 6638.97
+        },
+        "2026-06": {
+          "n": 16,
+          "pts": -37,
+          "charges": 5006.19,
+          "grossInr": -3700,
+          "afterCharges": -8706.19
+        },
+        "2026-07": {
+          "n": 22,
+          "pts": 277,
+          "charges": 6571.06,
+          "grossInr": 27700,
+          "afterCharges": 21128.94
+        },
+        "2026-08": {
+          "n": 23,
+          "pts": 74,
+          "charges": 7135.07,
+          "grossInr": 7400,
+          "afterCharges": 264.93
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current upper wick > current lower wick AND current close < previous low",
+      "side": "short",
+      "n": 57,
+      "winRate": 0.5263,
+      "pts": 390,
+      "ptsPerTrade": 6.8421,
+      "grossInr": 39000,
+      "charges": 17782.18,
+      "afterCharges": 21217.82,
+      "tax": 6365.35,
+      "afterTax": 14852.47,
+      "months": {
+        "2026-04": {
+          "n": 6,
+          "pts": -34,
+          "charges": 1927.43,
+          "grossInr": -3400,
+          "afterCharges": -5327.43
+        },
+        "2026-05": {
+          "n": 12,
+          "pts": -79,
+          "charges": 3898.35,
+          "grossInr": -7900,
+          "afterCharges": -11798.35
+        },
+        "2026-06": {
+          "n": 17,
+          "pts": 415,
+          "charges": 5323.44,
+          "grossInr": 41500,
+          "afterCharges": 36176.56
+        },
+        "2026-07": {
+          "n": 16,
+          "pts": 102,
+          "charges": 4750.86,
+          "grossInr": 10200,
+          "afterCharges": 5449.14
+        },
+        "2026-08": {
+          "n": 6,
+          "pts": -14,
+          "charges": 1882.1,
+          "grossInr": -1400,
+          "afterCharges": -3282.1
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current upper wick > current lower wick AND current close < previous low",
+      "side": "short",
+      "n": 55,
+      "winRate": 0.5455,
+      "pts": 365,
+      "ptsPerTrade": 6.6364,
+      "grossInr": 36500,
+      "charges": 17212.5,
+      "afterCharges": 19287.5,
+      "tax": 5786.25,
+      "afterTax": 13501.25,
+      "months": {
+        "2026-04": {
+          "n": 4,
+          "pts": 35,
+          "charges": 1283.36,
+          "grossInr": 3500,
+          "afterCharges": 2216.64
+        },
+        "2026-05": {
+          "n": 11,
+          "pts": 18,
+          "charges": 3567,
+          "grossInr": 1800,
+          "afterCharges": -1767
+        },
+        "2026-06": {
+          "n": 23,
+          "pts": 283,
+          "charges": 7221.17,
+          "grossInr": 28300,
+          "afterCharges": 21078.83
+        },
+        "2026-07": {
+          "n": 11,
+          "pts": 43,
+          "charges": 3258.87,
+          "grossInr": 4300,
+          "afterCharges": 1041.13
+        },
+        "2026-08": {
+          "n": 6,
+          "pts": -14,
+          "charges": 1882.1,
+          "grossInr": -1400,
+          "afterCharges": -3282.1
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current body fill > 0.5 AND current upper wick > current lower wick AND current close < previous low",
+      "side": "short",
+      "n": 35,
+      "winRate": 0.5143,
+      "pts": 276,
+      "ptsPerTrade": 7.8857,
+      "grossInr": 27600,
+      "charges": 10953.89,
+      "afterCharges": 16646.11,
+      "tax": 4993.83,
+      "afterTax": 11652.28,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": 2,
+          "charges": 643.45,
+          "grossInr": 200,
+          "afterCharges": -443.45
+        },
+        "2026-05": {
+          "n": 6,
+          "pts": -40,
+          "charges": 1952.52,
+          "grossInr": -4000,
+          "afterCharges": -5952.52
+        },
+        "2026-06": {
+          "n": 15,
+          "pts": 344,
+          "charges": 4703.95,
+          "grossInr": 34400,
+          "afterCharges": 29696.05
+        },
+        "2026-07": {
+          "n": 6,
+          "pts": -16,
+          "charges": 1771.87,
+          "grossInr": -1600,
+          "afterCharges": -3371.87
+        },
+        "2026-08": {
+          "n": 6,
+          "pts": -14,
+          "charges": 1882.1,
+          "grossInr": -1400,
+          "afterCharges": -3282.1
+        }
+      }
+    },
+    {
+      "label": "current close > previous high",
+      "side": "long",
+      "n": 265,
+      "winRate": 0.4717,
+      "pts": 992,
+      "ptsPerTrade": 3.7434,
+      "grossInr": 99200,
+      "charges": 82647.5,
+      "afterCharges": 16552.5,
+      "tax": 4965.75,
+      "afterTax": 11586.75,
+      "months": {
+        "2026-04": {
+          "n": 20,
+          "pts": -94,
+          "charges": 6405.59,
+          "grossInr": -9400,
+          "afterCharges": -15805.59
+        },
+        "2026-05": {
+          "n": 50,
+          "pts": 173,
+          "charges": 16370.75,
+          "grossInr": 17300,
+          "afterCharges": 929.25
+        },
+        "2026-06": {
+          "n": 56,
+          "pts": 137,
+          "charges": 17512.57,
+          "grossInr": 13700,
+          "afterCharges": -3812.57
+        },
+        "2026-07": {
+          "n": 68,
+          "pts": 488,
+          "charges": 20243.68,
+          "grossInr": 48800,
+          "afterCharges": 28556.32
+        },
+        "2026-08": {
+          "n": 71,
+          "pts": 288,
+          "charges": 22114.91,
+          "grossInr": 28800,
+          "afterCharges": 6685.09
+        }
+      }
+    },
+    {
+      "label": "current open > previous close AND current close < previous low",
+      "side": "long",
+      "n": 30,
+      "winRate": 0.5,
+      "pts": 241,
+      "ptsPerTrade": 8.0333,
+      "grossInr": 24100,
+      "charges": 9346.94,
+      "afterCharges": 14753.06,
+      "tax": 4425.92,
+      "afterTax": 10327.14,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": 27,
+          "charges": 641.55,
+          "grossInr": 2700,
+          "afterCharges": 2058.45
+        },
+        "2026-05": {
+          "n": 10,
+          "pts": 5,
+          "charges": 3267.36,
+          "grossInr": 500,
+          "afterCharges": -2767.36
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": 90,
+          "charges": 2399.54,
+          "grossInr": 9000,
+          "afterCharges": 6600.46
+        },
+        "2026-07": {
+          "n": 5,
+          "pts": 50,
+          "charges": 1481.01,
+          "grossInr": 5000,
+          "afterCharges": 3518.99
+        },
+        "2026-08": {
+          "n": 5,
+          "pts": 69,
+          "charges": 1557.48,
+          "grossInr": 6900,
+          "afterCharges": 5342.52
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current body fill > 0.5 AND current open > previous close",
+      "side": "short",
+      "n": 23,
+      "winRate": 0.5652,
+      "pts": 185,
+      "ptsPerTrade": 8.0435,
+      "grossInr": 18500,
+      "charges": 7212.36,
+      "afterCharges": 11287.64,
+      "tax": 3386.29,
+      "afterTax": 7901.35,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": 34,
+          "charges": 642.61,
+          "grossInr": 3400,
+          "afterCharges": 2757.39
+        },
+        "2026-05": {
+          "n": 6,
+          "pts": 68,
+          "charges": 1948,
+          "grossInr": 6800,
+          "afterCharges": 4852
+        },
+        "2026-06": {
+          "n": 2,
+          "pts": -7,
+          "charges": 644.01,
+          "grossInr": -700,
+          "afterCharges": -1344.01
+        },
+        "2026-07": {
+          "n": 7,
+          "pts": -44,
+          "charges": 2101.62,
+          "grossInr": -4400,
+          "afterCharges": -6501.62
+        },
+        "2026-08": {
+          "n": 6,
+          "pts": 134,
+          "charges": 1876.12,
+          "grossInr": 13400,
+          "afterCharges": 11523.88
+        }
+      }
+    },
+    {
+      "label": "current upper wick > current lower wick AND current close < previous low",
+      "side": "short",
+      "n": 95,
+      "winRate": 0.5368,
+      "pts": 392,
+      "ptsPerTrade": 4.1263,
+      "grossInr": 39200,
+      "charges": 29714.91,
+      "afterCharges": 9485.09,
+      "tax": 2845.53,
+      "afterTax": 6639.56,
+      "months": {
+        "2026-04": {
+          "n": 10,
+          "pts": -14,
+          "charges": 3205.32,
+          "grossInr": -1400,
+          "afterCharges": -4605.32
+        },
+        "2026-05": {
+          "n": 23,
+          "pts": 17,
+          "charges": 7506.65,
+          "grossInr": 1700,
+          "afterCharges": -5806.65
+        },
+        "2026-06": {
+          "n": 26,
+          "pts": 312,
+          "charges": 8165.7,
+          "grossInr": 31200,
+          "afterCharges": 23034.3
+        },
+        "2026-07": {
+          "n": 26,
+          "pts": 163,
+          "charges": 7725.75,
+          "grossInr": 16300,
+          "afterCharges": 8574.25
+        },
+        "2026-08": {
+          "n": 10,
+          "pts": -86,
+          "charges": 3111.49,
+          "grossInr": -8600,
+          "afterCharges": -11711.49
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current body fill > 0.5 AND current open > previous close",
+      "side": "short",
+      "n": 36,
+      "winRate": 0.5833,
+      "pts": 198,
+      "ptsPerTrade": 5.5,
+      "grossInr": 19800,
+      "charges": 11240.65,
+      "afterCharges": 8559.35,
+      "tax": 2567.8,
+      "afterTax": 5991.55,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": 47,
+          "charges": 963.15,
+          "grossInr": 4700,
+          "afterCharges": 3736.85
+        },
+        "2026-05": {
+          "n": 10,
+          "pts": 48,
+          "charges": 3263.32,
+          "grossInr": 4800,
+          "afterCharges": 1536.68
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": 1,
+          "charges": 2453.3,
+          "grossInr": 100,
+          "afterCharges": -2353.3
+        },
+        "2026-07": {
+          "n": 8,
+          "pts": 20,
+          "charges": 2386.06,
+          "grossInr": 2000,
+          "afterCharges": -386.06
+        },
+        "2026-08": {
+          "n": 7,
+          "pts": 82,
+          "charges": 2174.82,
+          "grossInr": 8200,
+          "afterCharges": 6025.18
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close AND current close < previous low",
+      "side": "long",
+      "n": 20,
+      "winRate": 0.5,
+      "pts": 121,
+      "ptsPerTrade": 6.05,
+      "grossInr": 12100,
+      "charges": 6174.02,
+      "afterCharges": 5925.98,
+      "tax": 1777.79,
+      "afterTax": 4148.19,
+      "months": {
+        "2026-04": {
+          "n": 1,
+          "pts": -13,
+          "charges": 320.44,
+          "grossInr": -1300,
+          "afterCharges": -1620.44
+        },
+        "2026-05": {
+          "n": 6,
+          "pts": 11,
+          "charges": 1952.78,
+          "grossInr": 1100,
+          "afterCharges": -852.78
+        },
+        "2026-06": {
+          "n": 6,
+          "pts": 52,
+          "charges": 1797.05,
+          "grossInr": 5200,
+          "afterCharges": 3402.95
+        },
+        "2026-07": {
+          "n": 5,
+          "pts": 50,
+          "charges": 1481.01,
+          "grossInr": 5000,
+          "afterCharges": 3518.99
+        },
+        "2026-08": {
+          "n": 2,
+          "pts": 21,
+          "charges": 622.74,
+          "grossInr": 2100,
+          "afterCharges": 1477.26
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current open > previous close AND current upper wick > current lower wick",
+      "side": "short",
+      "n": 21,
+      "winRate": 0.5714,
+      "pts": 96,
+      "ptsPerTrade": 4.5714,
+      "grossInr": 9600,
+      "charges": 6544.54,
+      "afterCharges": 3055.46,
+      "tax": 916.64,
+      "afterTax": 2138.82,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": 66,
+          "charges": 965.29,
+          "grossInr": 6600,
+          "afterCharges": 5634.71
+        },
+        "2026-05": {
+          "n": 4,
+          "pts": 54,
+          "charges": 1300.3,
+          "grossInr": 5400,
+          "afterCharges": 4099.7
+        },
+        "2026-06": {
+          "n": 3,
+          "pts": -62,
+          "charges": 950.79,
+          "grossInr": -6200,
+          "afterCharges": -7150.79
+        },
+        "2026-07": {
+          "n": 4,
+          "pts": -17,
+          "charges": 1190.25,
+          "grossInr": -1700,
+          "afterCharges": -2890.25
+        },
+        "2026-08": {
+          "n": 7,
+          "pts": 55,
+          "charges": 2137.91,
+          "grossInr": 5500,
+          "afterCharges": 3362.09
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current open > previous close AND current upper wick > current lower wick",
+      "side": "short",
+      "n": 24,
+      "winRate": 0.5833,
+      "pts": 95,
+      "ptsPerTrade": 3.9583,
+      "grossInr": 9500,
+      "charges": 7455.45,
+      "afterCharges": 2044.55,
+      "tax": 613.37,
+      "afterTax": 1431.18,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": 66,
+          "charges": 965.29,
+          "grossInr": 6600,
+          "afterCharges": 5634.71
+        },
+        "2026-05": {
+          "n": 4,
+          "pts": 54,
+          "charges": 1300.3,
+          "grossInr": 5400,
+          "afterCharges": 4099.7
+        },
+        "2026-06": {
+          "n": 4,
+          "pts": -61,
+          "charges": 1261.5,
+          "grossInr": -6100,
+          "afterCharges": -7361.5
+        },
+        "2026-07": {
+          "n": 6,
+          "pts": -19,
+          "charges": 1790.45,
+          "grossInr": -1900,
+          "afterCharges": -3690.45
+        },
+        "2026-08": {
+          "n": 7,
+          "pts": 55,
+          "charges": 2137.91,
+          "grossInr": 5500,
+          "afterCharges": 3362.09
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current body fill > 0.5 AND current close < previous low",
+      "side": "short",
+      "n": 126,
+      "winRate": 0.4921,
+      "pts": 408,
+      "ptsPerTrade": 3.2381,
+      "grossInr": 40800,
+      "charges": 39143.35,
+      "afterCharges": 1656.65,
+      "tax": 497,
+      "afterTax": 1159.65,
+      "months": {
+        "2026-04": {
+          "n": 12,
+          "pts": 129,
+          "charges": 3836.68,
+          "grossInr": 12900,
+          "afterCharges": 9063.32
+        },
+        "2026-05": {
+          "n": 21,
+          "pts": -194,
+          "charges": 6887.94,
+          "grossInr": -19400,
+          "afterCharges": -26287.94
+        },
+        "2026-06": {
+          "n": 41,
+          "pts": 422,
+          "charges": 12767.12,
+          "grossInr": 42200,
+          "afterCharges": 29432.88
+        },
+        "2026-07": {
+          "n": 34,
+          "pts": 205,
+          "charges": 10086.55,
+          "grossInr": 20500,
+          "afterCharges": 10413.45
+        },
+        "2026-08": {
+          "n": 18,
+          "pts": -154,
+          "charges": 5565.06,
+          "grossInr": -15400,
+          "afterCharges": -20965.06
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current open > previous close",
+      "side": "short",
+      "n": 36,
+      "winRate": 0.5556,
+      "pts": 128,
+      "ptsPerTrade": 3.5556,
+      "grossInr": 12800,
+      "charges": 11227.9,
+      "afterCharges": 1572.1,
+      "tax": 471.63,
+      "afterTax": 1100.47,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": 66,
+          "charges": 965.29,
+          "grossInr": 6600,
+          "afterCharges": 5634.71
+        },
+        "2026-05": {
+          "n": 7,
+          "pts": 53,
+          "charges": 2295.7,
+          "grossInr": 5300,
+          "afterCharges": 3004.3
+        },
+        "2026-06": {
+          "n": 5,
+          "pts": -77,
+          "charges": 1575.84,
+          "grossInr": -7700,
+          "afterCharges": -9275.84
+        },
+        "2026-07": {
+          "n": 8,
+          "pts": -58,
+          "charges": 2384.19,
+          "grossInr": -5800,
+          "afterCharges": -8184.19
+        },
+        "2026-08": {
+          "n": 13,
+          "pts": 144,
+          "charges": 4006.88,
+          "grossInr": 14400,
+          "afterCharges": 10393.12
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current open > previous close AND current close < previous low",
+      "side": "long",
+      "n": 24,
+      "winRate": 0.4167,
+      "pts": 75,
+      "ptsPerTrade": 3.125,
+      "grossInr": 7500,
+      "charges": 7530.61,
+      "afterCharges": -30.61,
+      "tax": 0,
+      "afterTax": -30.61,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": 27,
+          "charges": 641.55,
+          "grossInr": 2700,
+          "afterCharges": 2058.45
+        },
+        "2026-05": {
+          "n": 9,
+          "pts": -18,
+          "charges": 2951.07,
+          "grossInr": -1800,
+          "afterCharges": -4751.07
+        },
+        "2026-06": {
+          "n": 6,
+          "pts": 12,
+          "charges": 1799.04,
+          "grossInr": 1200,
+          "afterCharges": -599.04
+        },
+        "2026-07": {
+          "n": 3,
+          "pts": -23,
+          "charges": 891.95,
+          "grossInr": -2300,
+          "afterCharges": -3191.95
+        },
+        "2026-08": {
+          "n": 4,
+          "pts": 77,
+          "charges": 1247,
+          "grossInr": 7700,
+          "afterCharges": 6453
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current open > previous close AND current upper wick > current lower wick",
+      "side": "short",
+      "n": 36,
+      "winRate": 0.5,
+      "pts": 106,
+      "ptsPerTrade": 2.9444,
+      "grossInr": 10600,
+      "charges": 11244.66,
+      "afterCharges": -644.66,
+      "tax": 0,
+      "afterTax": -644.66,
+      "months": {
+        "2026-04": {
+          "n": 5,
+          "pts": 119,
+          "charges": 1610.44,
+          "grossInr": 11900,
+          "afterCharges": 10289.56
+        },
+        "2026-05": {
+          "n": 9,
+          "pts": 12,
+          "charges": 2927.92,
+          "grossInr": 1200,
+          "afterCharges": -1727.92
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": -112,
+          "charges": 2471.17,
+          "grossInr": -11200,
+          "afterCharges": -13671.17
+        },
+        "2026-07": {
+          "n": 6,
+          "pts": 35,
+          "charges": 1785.71,
+          "grossInr": 3500,
+          "afterCharges": 1714.29
+        },
+        "2026-08": {
+          "n": 8,
+          "pts": 52,
+          "charges": 2449.42,
+          "grossInr": 5200,
+          "afterCharges": 2750.58
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current open > previous close",
+      "side": "short",
+      "n": 49,
+      "winRate": 0.551,
+      "pts": 144,
+      "ptsPerTrade": 2.9388,
+      "grossInr": 14400,
+      "charges": 15346.1,
+      "afterCharges": -946.1,
+      "tax": 0,
+      "afterTax": -946.1,
+      "months": {
+        "2026-04": {
+          "n": 5,
+          "pts": 71,
+          "charges": 1608.61,
+          "grossInr": 7100,
+          "afterCharges": 5491.39
+        },
+        "2026-05": {
+          "n": 11,
+          "pts": 111,
+          "charges": 3598.12,
+          "grossInr": 11100,
+          "afterCharges": 7501.88
+        },
+        "2026-06": {
+          "n": 7,
+          "pts": -118,
+          "charges": 2213.16,
+          "grossInr": -11800,
+          "afterCharges": -14013.16
+        },
+        "2026-07": {
+          "n": 11,
+          "pts": -65,
+          "charges": 3283.8,
+          "grossInr": -6500,
+          "afterCharges": -9783.8
+        },
+        "2026-08": {
+          "n": 15,
+          "pts": 145,
+          "charges": 4642.41,
+          "grossInr": 14500,
+          "afterCharges": 9857.59
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current close < previous low",
+      "side": "short",
+      "n": 200,
+      "winRate": 0.505,
+      "pts": 595,
+      "ptsPerTrade": 2.975,
+      "grossInr": 59500,
+      "charges": 62235,
+      "afterCharges": -2735,
+      "tax": 0,
+      "afterTax": -2735,
+      "months": {
+        "2026-04": {
+          "n": 23,
+          "pts": 106,
+          "charges": 7355.03,
+          "grossInr": 10600,
+          "afterCharges": 3244.97
+        },
+        "2026-05": {
+          "n": 40,
+          "pts": -55,
+          "charges": 13094.53,
+          "grossInr": -5500,
+          "afterCharges": -18594.53
+        },
+        "2026-06": {
+          "n": 56,
+          "pts": 374,
+          "charges": 17431.12,
+          "grossInr": 37400,
+          "afterCharges": 19968.88
+        },
+        "2026-07": {
+          "n": 56,
+          "pts": 386,
+          "charges": 16621.01,
+          "grossInr": 38600,
+          "afterCharges": 21978.99
+        },
+        "2026-08": {
+          "n": 25,
+          "pts": -216,
+          "charges": 7733.31,
+          "grossInr": -21600,
+          "afterCharges": -29333.31
+        }
+      }
+    },
+    {
+      "label": "current open > previous close",
+      "side": "long",
+      "n": 152,
+      "winRate": 0.5263,
+      "pts": 412,
+      "ptsPerTrade": 2.7105,
+      "grossInr": 41200,
+      "charges": 47392.66,
+      "afterCharges": -6192.66,
+      "tax": 0,
+      "afterTax": -6192.66,
+      "months": {
+        "2026-04": {
+          "n": 15,
+          "pts": -32,
+          "charges": 4804.22,
+          "grossInr": -3200,
+          "afterCharges": -8004.22
+        },
+        "2026-05": {
+          "n": 38,
+          "pts": -108,
+          "charges": 12380.35,
+          "grossInr": -10800,
+          "afterCharges": -23180.35
+        },
+        "2026-06": {
+          "n": 38,
+          "pts": 324,
+          "charges": 11714.22,
+          "grossInr": 32400,
+          "afterCharges": 20685.78
+        },
+        "2026-07": {
+          "n": 30,
+          "pts": 95,
+          "charges": 8907.33,
+          "grossInr": 9500,
+          "afterCharges": 592.67
+        },
+        "2026-08": {
+          "n": 31,
+          "pts": 133,
+          "charges": 9586.54,
+          "grossInr": 13300,
+          "afterCharges": 3713.46
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close AND current upper wick > current lower wick",
+      "side": "short",
+      "n": 30,
+      "winRate": 0.5,
+      "pts": 31,
+      "ptsPerTrade": 1.0333,
+      "grossInr": 3100,
+      "charges": 9296.83,
+      "afterCharges": -6196.83,
+      "tax": 0,
+      "afterTax": -6196.83,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": 28,
+          "charges": 958.12,
+          "grossInr": 2800,
+          "afterCharges": 1841.88
+        },
+        "2026-05": {
+          "n": 7,
+          "pts": 39,
+          "charges": 2250.3,
+          "grossInr": 3900,
+          "afterCharges": 1649.7
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": -2,
+          "charges": 2470.77,
+          "grossInr": -200,
+          "afterCharges": -2670.77
+        },
+        "2026-07": {
+          "n": 7,
+          "pts": -105,
+          "charges": 2084.08,
+          "grossInr": -10500,
+          "afterCharges": -12584.08
+        },
+        "2026-08": {
+          "n": 5,
+          "pts": 71,
+          "charges": 1533.56,
+          "grossInr": 7100,
+          "afterCharges": 5566.44
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 30,
+      "winRate": 0.5,
+      "pts": -31,
+      "ptsPerTrade": -1.0333,
+      "grossInr": -3100,
+      "charges": 9296.63,
+      "afterCharges": -12396.63,
+      "tax": 0,
+      "afterTax": -12396.63,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": -28,
+          "charges": 957.91,
+          "grossInr": -2800,
+          "afterCharges": -3757.91
+        },
+        "2026-05": {
+          "n": 7,
+          "pts": -39,
+          "charges": 2250,
+          "grossInr": -3900,
+          "afterCharges": -6150
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": 2,
+          "charges": 2470.8,
+          "grossInr": 200,
+          "afterCharges": -2270.8
+        },
+        "2026-07": {
+          "n": 7,
+          "pts": 105,
+          "charges": 2084.92,
+          "grossInr": 10500,
+          "afterCharges": 8415.08
+        },
+        "2026-08": {
+          "n": 5,
+          "pts": -71,
+          "charges": 1533,
+          "grossInr": -7100,
+          "afterCharges": -8633
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current open > previous close",
+      "side": "short",
+      "n": 79,
+      "winRate": 0.5316,
+      "pts": 106,
+      "ptsPerTrade": 1.3418,
+      "grossInr": 10600,
+      "charges": 24699.37,
+      "afterCharges": -14099.37,
+      "tax": 0,
+      "afterTax": -14099.37,
+      "months": {
+        "2026-04": {
+          "n": 9,
+          "pts": 92,
+          "charges": 2890.31,
+          "grossInr": 9200,
+          "afterCharges": 6309.69
+        },
+        "2026-05": {
+          "n": 20,
+          "pts": 130,
+          "charges": 6546.65,
+          "grossInr": 13000,
+          "afterCharges": 6453.35
+        },
+        "2026-06": {
+          "n": 16,
+          "pts": -190,
+          "charges": 4908.44,
+          "grossInr": -19000,
+          "afterCharges": -23908.44
+        },
+        "2026-07": {
+          "n": 14,
+          "pts": 51,
+          "charges": 4163.7,
+          "grossInr": 5100,
+          "afterCharges": 936.3
+        },
+        "2026-08": {
+          "n": 20,
+          "pts": 23,
+          "charges": 6190.27,
+          "grossInr": 2300,
+          "afterCharges": -3890.27
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current open > previous close AND current close < previous low",
+      "side": "short",
+      "n": 24,
+      "winRate": 0.5417,
+      "pts": -75,
+      "ptsPerTrade": -3.125,
+      "grossInr": -7500,
+      "charges": 7529.99,
+      "afterCharges": -15029.99,
+      "tax": 0,
+      "afterTax": -15029.99,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": -27,
+          "charges": 641.33,
+          "grossInr": -2700,
+          "afterCharges": -3341.33
+        },
+        "2026-05": {
+          "n": 9,
+          "pts": 18,
+          "charges": 2951.21,
+          "grossInr": 1800,
+          "afterCharges": -1151.21
+        },
+        "2026-06": {
+          "n": 6,
+          "pts": -12,
+          "charges": 1798.93,
+          "grossInr": -1200,
+          "afterCharges": -2998.93
+        },
+        "2026-07": {
+          "n": 3,
+          "pts": 23,
+          "charges": 892.14,
+          "grossInr": 2300,
+          "afterCharges": 1407.86
+        },
+        "2026-08": {
+          "n": 4,
+          "pts": -77,
+          "charges": 1246.38,
+          "grossInr": -7700,
+          "afterCharges": -8946.38
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current open > previous close AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 21,
+      "winRate": 0.4286,
+      "pts": -96,
+      "ptsPerTrade": -4.5714,
+      "grossInr": -9600,
+      "charges": 6543.8,
+      "afterCharges": -16143.8,
+      "tax": 0,
+      "afterTax": -16143.8,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": -66,
+          "charges": 964.77,
+          "grossInr": -6600,
+          "afterCharges": -7564.77
+        },
+        "2026-05": {
+          "n": 4,
+          "pts": -54,
+          "charges": 1299.88,
+          "grossInr": -5400,
+          "afterCharges": -6699.88
+        },
+        "2026-06": {
+          "n": 3,
+          "pts": 62,
+          "charges": 951.29,
+          "grossInr": 6200,
+          "afterCharges": 5248.71
+        },
+        "2026-07": {
+          "n": 4,
+          "pts": 17,
+          "charges": 1190.38,
+          "grossInr": 1700,
+          "afterCharges": 509.62
+        },
+        "2026-08": {
+          "n": 7,
+          "pts": -55,
+          "charges": 2137.48,
+          "grossInr": -5500,
+          "afterCharges": -7637.48
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current open > previous close AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 24,
+      "winRate": 0.4167,
+      "pts": -95,
+      "ptsPerTrade": -3.9583,
+      "grossInr": -9500,
+      "charges": 7454.73,
+      "afterCharges": -16954.73,
+      "tax": 0,
+      "afterTax": -16954.73,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": -66,
+          "charges": 964.77,
+          "grossInr": -6600,
+          "afterCharges": -7564.77
+        },
+        "2026-05": {
+          "n": 4,
+          "pts": -54,
+          "charges": 1299.88,
+          "grossInr": -5400,
+          "afterCharges": -6699.88
+        },
+        "2026-06": {
+          "n": 4,
+          "pts": 61,
+          "charges": 1262,
+          "grossInr": 6100,
+          "afterCharges": 4838
+        },
+        "2026-07": {
+          "n": 6,
+          "pts": 19,
+          "charges": 1790.6,
+          "grossInr": 1900,
+          "afterCharges": 109.4
+        },
+        "2026-08": {
+          "n": 7,
+          "pts": -55,
+          "charges": 2137.48,
+          "grossInr": -5500,
+          "afterCharges": -7637.48
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close AND current close < previous low",
+      "side": "short",
+      "n": 20,
+      "winRate": 0.45,
+      "pts": -121,
+      "ptsPerTrade": -6.05,
+      "grossInr": -12100,
+      "charges": 6173.04,
+      "afterCharges": -18273.04,
+      "tax": 0,
+      "afterTax": -18273.04,
+      "months": {
+        "2026-04": {
+          "n": 1,
+          "pts": 13,
+          "charges": 320.54,
+          "grossInr": 1300,
+          "afterCharges": 979.46
+        },
+        "2026-05": {
+          "n": 6,
+          "pts": -11,
+          "charges": 1952.69,
+          "grossInr": -1100,
+          "afterCharges": -3052.69
+        },
+        "2026-06": {
+          "n": 6,
+          "pts": -52,
+          "charges": 1796.63,
+          "grossInr": -5200,
+          "afterCharges": -6996.63
+        },
+        "2026-07": {
+          "n": 5,
+          "pts": -50,
+          "charges": 1480.61,
+          "grossInr": -5000,
+          "afterCharges": -6480.61
+        },
+        "2026-08": {
+          "n": 2,
+          "pts": -21,
+          "charges": 622.57,
+          "grossInr": -2100,
+          "afterCharges": -2722.57
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close",
+      "side": "long",
+      "n": 61,
+      "winRate": 0.4754,
+      "pts": 2,
+      "ptsPerTrade": 0.0328,
+      "grossInr": 200,
+      "charges": 19003.16,
+      "afterCharges": -18803.16,
+      "tax": 0,
+      "afterTax": -18803.16,
+      "months": {
+        "2026-04": {
+          "n": 6,
+          "pts": -6,
+          "charges": 1917.49,
+          "grossInr": -600,
+          "afterCharges": -2517.49
+        },
+        "2026-05": {
+          "n": 17,
+          "pts": 21,
+          "charges": 5497.87,
+          "grossInr": 2100,
+          "afterCharges": -3397.87
+        },
+        "2026-06": {
+          "n": 13,
+          "pts": -26,
+          "charges": 4001,
+          "grossInr": -2600,
+          "afterCharges": -6601
+        },
+        "2026-07": {
+          "n": 15,
+          "pts": 112,
+          "charges": 4462.66,
+          "grossInr": 11200,
+          "afterCharges": 6737.34
+        },
+        "2026-08": {
+          "n": 10,
+          "pts": -99,
+          "charges": 3124.14,
+          "grossInr": -9900,
+          "afterCharges": -13024.14
+        }
+      }
+    },
+    {
+      "label": "current body fill > 0.5 AND current open > previous close",
+      "side": "short",
+      "n": 61,
+      "winRate": 0.5082,
+      "pts": -2,
+      "ptsPerTrade": -0.0328,
+      "grossInr": -200,
+      "charges": 19003.11,
+      "afterCharges": -19203.11,
+      "tax": 0,
+      "afterTax": -19203.11,
+      "months": {
+        "2026-04": {
+          "n": 6,
+          "pts": 6,
+          "charges": 1917.52,
+          "grossInr": 600,
+          "afterCharges": -1317.52
+        },
+        "2026-05": {
+          "n": 17,
+          "pts": -21,
+          "charges": 5497.71,
+          "grossInr": -2100,
+          "afterCharges": -7597.71
+        },
+        "2026-06": {
+          "n": 13,
+          "pts": 26,
+          "charges": 4001.2,
+          "grossInr": 2600,
+          "afterCharges": -1401.2
+        },
+        "2026-07": {
+          "n": 15,
+          "pts": -112,
+          "charges": 4461.76,
+          "grossInr": -11200,
+          "afterCharges": -15661.76
+        },
+        "2026-08": {
+          "n": 10,
+          "pts": 99,
+          "charges": 3124.92,
+          "grossInr": 9900,
+          "afterCharges": 6775.08
+        }
+      }
+    },
+    {
+      "label": "current open > previous close AND current upper wick > current lower wick",
+      "side": "short",
+      "n": 67,
+      "winRate": 0.4478,
+      "pts": 12,
+      "ptsPerTrade": 0.1791,
+      "grossInr": 1200,
+      "charges": 20830.27,
+      "afterCharges": -19630.27,
+      "tax": 0,
+      "afterTax": -19630.27,
+      "months": {
+        "2026-04": {
+          "n": 7,
+          "pts": 89,
+          "charges": 2242.42,
+          "grossInr": 8900,
+          "afterCharges": 6657.58
+        },
+        "2026-05": {
+          "n": 16,
+          "pts": 22,
+          "charges": 5201.09,
+          "grossInr": 2200,
+          "afterCharges": -3001.09
+        },
+        "2026-06": {
+          "n": 19,
+          "pts": -132,
+          "charges": 5878.04,
+          "grossInr": -13200,
+          "afterCharges": -19078.04
+        },
+        "2026-07": {
+          "n": 14,
+          "pts": -38,
+          "charges": 4158.88,
+          "grossInr": -3800,
+          "afterCharges": -7958.88
+        },
+        "2026-08": {
+          "n": 11,
+          "pts": 71,
+          "charges": 3349.84,
+          "grossInr": 7100,
+          "afterCharges": 3750.16
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current open > previous close AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 36,
+      "winRate": 0.5,
+      "pts": -106,
+      "ptsPerTrade": -2.9444,
+      "grossInr": -10600,
+      "charges": 11243.85,
+      "afterCharges": -21843.85,
+      "tax": 0,
+      "afterTax": -21843.85,
+      "months": {
+        "2026-04": {
+          "n": 5,
+          "pts": -119,
+          "charges": 1609.49,
+          "grossInr": -11900,
+          "afterCharges": -13509.49
+        },
+        "2026-05": {
+          "n": 9,
+          "pts": -12,
+          "charges": 2927.84,
+          "grossInr": -1200,
+          "afterCharges": -4127.84
+        },
+        "2026-06": {
+          "n": 8,
+          "pts": 112,
+          "charges": 2472.09,
+          "grossInr": 11200,
+          "afterCharges": 8727.91
+        },
+        "2026-07": {
+          "n": 6,
+          "pts": -35,
+          "charges": 1785.42,
+          "grossInr": -3500,
+          "afterCharges": -5285.42
+        },
+        "2026-08": {
+          "n": 8,
+          "pts": -52,
+          "charges": 2449.01,
+          "grossInr": -5200,
+          "afterCharges": -7649.01
+        }
+      }
+    },
+    {
+      "label": "current open > previous close AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 67,
+      "winRate": 0.5373,
+      "pts": -12,
+      "ptsPerTrade": -0.1791,
+      "grossInr": -1200,
+      "charges": 20830.25,
+      "afterCharges": -22030.25,
+      "tax": 0,
+      "afterTax": -22030.25,
+      "months": {
+        "2026-04": {
+          "n": 7,
+          "pts": -89,
+          "charges": 2241.71,
+          "grossInr": -8900,
+          "afterCharges": -11141.71
+        },
+        "2026-05": {
+          "n": 16,
+          "pts": -22,
+          "charges": 5200.94,
+          "grossInr": -2200,
+          "afterCharges": -7400.94
+        },
+        "2026-06": {
+          "n": 19,
+          "pts": 132,
+          "charges": 5879.13,
+          "grossInr": 13200,
+          "afterCharges": 7320.87
+        },
+        "2026-07": {
+          "n": 14,
+          "pts": 38,
+          "charges": 4159.19,
+          "grossInr": 3800,
+          "afterCharges": -359.19
+        },
+        "2026-08": {
+          "n": 11,
+          "pts": -71,
+          "charges": 3349.28,
+          "grossInr": -7100,
+          "afterCharges": -10449.28
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current volume > previous volume AND current open > previous close",
+      "side": "long",
+      "n": 36,
+      "winRate": 0.4444,
+      "pts": -128,
+      "ptsPerTrade": -3.5556,
+      "grossInr": -12800,
+      "charges": 11226.91,
+      "afterCharges": -24026.91,
+      "tax": 0,
+      "afterTax": -24026.91,
+      "months": {
+        "2026-04": {
+          "n": 3,
+          "pts": -66,
+          "charges": 964.77,
+          "grossInr": -6600,
+          "afterCharges": -7564.77
+        },
+        "2026-05": {
+          "n": 7,
+          "pts": -53,
+          "charges": 2295.28,
+          "grossInr": -5300,
+          "afterCharges": -7595.28
+        },
+        "2026-06": {
+          "n": 5,
+          "pts": 77,
+          "charges": 1576.46,
+          "grossInr": 7700,
+          "afterCharges": 6123.54
+        },
+        "2026-07": {
+          "n": 8,
+          "pts": 58,
+          "charges": 2384.66,
+          "grossInr": 5800,
+          "afterCharges": 3415.34
+        },
+        "2026-08": {
+          "n": 13,
+          "pts": -144,
+          "charges": 4005.74,
+          "grossInr": -14400,
+          "afterCharges": -18405.74
+        }
+      }
+    },
+    {
+      "label": "current close > previous high AND current body fill > 0.5 AND current open > previous close",
+      "side": "long",
+      "n": 23,
+      "winRate": 0.4348,
+      "pts": -185,
+      "ptsPerTrade": -8.0435,
+      "grossInr": -18500,
+      "charges": 7210.9,
+      "afterCharges": -25710.9,
+      "tax": 0,
+      "afterTax": -25710.9,
+      "months": {
+        "2026-04": {
+          "n": 2,
+          "pts": -34,
+          "charges": 642.35,
+          "grossInr": -3400,
+          "afterCharges": -4042.35
+        },
+        "2026-05": {
+          "n": 6,
+          "pts": -68,
+          "charges": 1947.46,
+          "grossInr": -6800,
+          "afterCharges": -8747.46
+        },
+        "2026-06": {
+          "n": 2,
+          "pts": 7,
+          "charges": 644.07,
+          "grossInr": 700,
+          "afterCharges": 55.93
+        },
+        "2026-07": {
+          "n": 7,
+          "pts": 44,
+          "charges": 2101.97,
+          "grossInr": 4400,
+          "afterCharges": 2298.03
+        },
+        "2026-08": {
+          "n": 6,
+          "pts": -134,
+          "charges": 1875.05,
+          "grossInr": -13400,
+          "afterCharges": -15275.05
+        }
+      }
+    },
+    {
+      "label": "current volume > previous volume AND current body fill > 0.5 AND current upper wick > current lower wick",
+      "side": "long",
+      "n": 140,
+      "winRate": 0.5,
+      "pts": 157,
+      "ptsPerTrade": 1.1214,
+      "grossInr": 15700,
+      "charges": 43733.06,
+      "afterCharges": -28033.06,
+      "tax": 0,
+      "afterTax": -28033.06,
+      "months": {
+        "2026-04": {
+          "n": 13,
+          "pts": 129,
+          "charges": 4162.63,
+          "grossInr": 12900,
+          "afterCharges": 8737.37
+        },
+        "2026-05": {
+          "n": 25,
+          "pts": 102,
+          "charges": 8159.03,
+          "grossInr": 10200,
+          "afterCharges": 2040.97
+        },
+        "2026-06": {
+          "n": 39,
+          "pts": -391,
+          "charges": 12207.13,
+          "grossInr": -39100,
+          "afterCharges": -51307.13
+        },
+        "2026-07": {
+          "n": 31,
+          "pts": 271,
+          "charges": 9234.13,
+          "grossInr": 27100,
+          "afterCharges": 17865.87
+        },
+        "2026-08": {
+          "n": 32,
+          "pts": 46,
+          "charges": 9970.14,
+          "grossInr": 4600,
+          "afterCharges": -5370.14
+        }
+      }
+    }
   ]
 }

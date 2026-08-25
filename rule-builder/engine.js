@@ -17,10 +17,11 @@
   var METRICS = [
     { id: "upperWick", label: "upper wick", names: ["upper wick", "upper shadow", "top wick", "top shadow"] },
     { id: "lowerWick", label: "lower wick", names: ["lower wick", "lower shadow", "bottom wick", "bottom shadow"] },
+    { id: "bodyFill", label: "body fill", names: ["body fill", "body fraction"] },
     { id: "body", label: "body", names: ["candle body", "real body", "body size", "body"] },
     { id: "range", label: "range", names: ["true range", "range", "spread"] },
     { id: "volume", label: "volume", names: ["volume"] },
-    { id: "open", label: "open", names: ["opening", "open"] },
+    { id: "open", label: "open", names: ["opened", "opening", "open"] },
     { id: "high", label: "high", names: ["high"] },
     { id: "low", label: "low", names: ["low"] },
     { id: "close", label: "close", names: ["closing", "close"] }
@@ -49,6 +50,48 @@
       lhs: { type: "field", bar: "current", metric: "close", label: "close" },
       op: "lt",
       rhs: { type: "field", bar: "current", metric: "open", label: "open" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?(close|closing)(\s+is)?\s+above\s+(prev|previous|last)\s+high\??$/,
+      name: "Close above previous high",
+      lhs: { type: "field", bar: "current", metric: "close", label: "close" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "high", label: "high" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?volume(\s+is)?\s+above\s+(prev|previous|last)(\s+volume)?\??$/,
+      name: "Volume above previous",
+      lhs: { type: "field", bar: "current", metric: "volume", label: "volume" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "volume", label: "volume" }
+    },
+    {
+      pattern: /^(current\s+|the\s+)?body\s+fills?\s+(over|more than|greater than)\s+(a\s+)?half\??$/,
+      name: "Body fills over half",
+      lhs: { type: "field", bar: "current", metric: "bodyFill", label: "body fill" },
+      op: "gt",
+      rhs: { type: "number", value: 0.5, percent: false }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?open(ed)?(\s+is)?\s+above\s+(prev|previous|last)\s+close\??$/,
+      name: "Opened above previous close",
+      lhs: { type: "field", bar: "current", metric: "open", label: "open" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "close", label: "close" }
+    },
+    {
+      pattern: /^(current\s+|the\s+)?upper\s+wick\s+beats\s+(the\s+)?(current\s+)?lower(\s+wick)?\??$/,
+      name: "Upper wick beats lower",
+      lhs: { type: "field", bar: "current", metric: "upperWick", label: "upper wick" },
+      op: "gt",
+      rhs: { type: "field", bar: "current", metric: "lowerWick", label: "lower wick" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?(close|closing)(\s+is)?\s+below\s+(prev|previous|last)\s+low\??$/,
+      name: "Close below previous low",
+      lhs: { type: "field", bar: "current", metric: "close", label: "close" },
+      op: "lt",
+      rhs: { type: "field", bar: "previous", metric: "low", label: "low" }
     }
   ];
 
@@ -82,7 +125,7 @@
         var name = metric.names[j];
         if (lower === name || lower.indexOf(name) === 0) {
           var after = text.slice(name.length);
-          if (!after || /^\s/.test(after) || after === "") {
+          if (!after.trim()) {
             return { id: metric.id, label: metric.label, matchedLength: name.length };
           }
         }
@@ -448,6 +491,7 @@
       case "upperWick": return h - Math.max(o, cl);
       case "lowerWick": return Math.min(o, cl) - l;
       case "body": return Math.abs(cl - o);
+      case "bodyFill": return (h - l) > 0 ? Math.abs(cl - o) / (h - l) : 0;
       case "range": return h - l;
       default: return null;
     }

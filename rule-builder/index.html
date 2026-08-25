@@ -40,6 +40,7 @@ if current upper wick < current lower wick"></textarea>
           <button type="button" id="presetTrendBtn">Trend preset</button>
           <button type="button" id="presetWickBtn">Wick preset</button>
           <button type="button" id="presetAtomsBtn">HH / LH / body / wick</button>
+          <button type="button" id="presetTreeBtn">Breakout tree splits</button>
           <button type="button" id="presetS4WickBtn">S4 + upper wick</button>
           <button type="button" class="btn-ghost" id="clearBtn">Clear</button>
         </div>
@@ -152,13 +153,18 @@ if current upper wick < current lower wick"></textarea>
           <li><code>Bullish body: close greater than open</code></li>
           <li><code>current body &gt; 2</code></li>
           <li><code>bullish candle</code></li>
-          <li><code>if current close &gt; current open combining with if current high &gt; previous high</code></li>
+          <li><code>close above prev high</code></li>
+          <li><code>volume above prev</code></li>
+          <li><code>body fills over half</code></li>
+          <li><code>opened above prev close</code></li>
+          <li><code>upper wick beats lower</code></li>
+          <li><code>close below prev low</code></li>
         </ul>
         <h3>Fields</h3>
         <ul>
           <li>Bars: <code>current</code>, <code>previous</code> (also prev, last, prior)</li>
           <li>Prices: open, high, low, close, volume</li>
-          <li>Derived: upper wick, lower wick, body, range</li>
+          <li>Derived: upper wick, lower wick, body, body fill (body/range), range</li>
         </ul>
         <h3>Comparisons</h3>
         <ul>

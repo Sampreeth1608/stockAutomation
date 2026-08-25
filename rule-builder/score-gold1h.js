@@ -207,8 +207,89 @@ printMonths(liveNext.find(function (r) {
   return r.side === "short" &&
     r.label === "current high < previous high AND current close < current open AND current upper wick > current lower wick";
 }));
-console.log("FLIP intuition hold overnight monthly:");
 printMonths(flipRows[0]);
+
+var TREE_ATOMS = [
+  "close above prev high",
+  "volume above prev",
+  "body fills over half",
+  "opened above prev close",
+  "upper wick beats lower",
+  "close below prev low"
+];
+
+function printTreeLeaves(title, leaves) {
+  console.log("\n=== " + title + " ===");
+  console.log(
+    pad("act", 6, true) +
+      pad("n", 6) +
+      pad("long pts", 10) +
+      pad("pts/tr", 8) +
+      pad("long after tax", 16) +
+      pad("acted after tax", 16) +
+      "  path"
+  );
+  leaves.forEach(function (leaf) {
+    console.log(
+      pad(leaf.action, 6, true) +
+        pad(leaf.n, 6) +
+        pad(fmt(leaf.long.net, 1), 10) +
+        pad(fmt(leaf.long.ptsPerTrade, 2), 8) +
+        pad(inr(leaf.long.afterTax), 16) +
+        pad(leaf.action === "HOLD" ? "₹0 (flat)" : inr(leaf.acted.afterTax), 16) +
+        "  " + leaf.path
+    );
+  });
+}
+
+function printFollow(label, follow) {
+  console.log(
+    label +
+      "  trades=" + follow.n +
+      "  BUY=" + follow.buys +
+      "  SELL=" + follow.sells +
+      "  HOLD=" + follow.holds +
+      "  pts=" + fmt(follow.net, 1) +
+      "  after-tax " + inr(follow.afterTax)
+  );
+}
+
+printTreeLeaves("Breakout tree leaves on full 1h book (next-bar long pts, then the leaf's BUY/SELL after tax)", result.treeLeaves);
+printFollow("Follow tree (BUY long / SELL short / HOLD skip, every signal hour)", result.treeFollow);
+printFollow("FLIP tree (only when BUY/SELL side changes; HOLD keeps the position)", Object.assign({ buys: "—", sells: "—", holds: result.treeFlip.skippedNone }, result.treeFlip));
+
+var split = lab.splitBySessionDays(records, 64);
+console.log(
+  "\n64/28 session-day split: train " + split.trainDays[0] + " → " + split.trainDays[split.trainDays.length - 1] +
+    " (" + split.trainDays.length + " days) · test " + (split.testDays[0] || "—") + " → " +
+    (split.testDays[split.testDays.length - 1] || "—") + " (" + split.testDays.length + " days)"
+);
+printTreeLeaves("Train 64 days", lab.scoreTreeLeaves(split.train));
+printFollow("Train follow-tree", lab.scoreTreeFollow(split.train));
+printTreeLeaves("Test 28 days", lab.scoreTreeLeaves(split.test));
+printFollow("Test follow-tree", lab.scoreTreeFollow(split.test));
+
+["closeAbovePrevHigh", "volAbovePrev", "bodyFillsHalf", "openedAbovePrevClose", "closeBelowPrevLow"].forEach(function (key) {
+  var yes = fromBook(key + " = yes", lab.nextBarTrades(records, function (r) { return r[key]; }, "long"), { side: "long" });
+  var no = fromBook(key + " = no", lab.nextBarTrades(records, function (r) { return !r[key]; }, "long"), { side: "long" });
+  console.log(
+    pad(key, 24, true) +
+      " YES n=" + yes.n + " pts/tr=" + fmt(yes.ptsPerTrade, 2) + " after-tax " + inr(yes.afterTax) +
+      "   NO n=" + no.n + " pts/tr=" + fmt(no.ptsPerTrade, 2) + " after-tax " + inr(no.afterTax)
+  );
+});
+
+var treeRules = engine.parseRules(TREE_ATOMS.join("\n"));
+var treeCombos = engine.generateCombinations(treeRules, { minK: 1, maxK: 6, limit: 5000 }).combinations;
+var treeComboRows = [];
+treeCombos.forEach(function (combo) {
+  ["long", "short"].forEach(function (side) {
+    treeComboRows.push(fromBook(combo.canonical, comboTrades(records, combo, side), { side: side, size: combo.size }));
+  });
+});
+var liveTree = treeComboRows.filter(function (r) { return r.n >= 20; });
+liveTree.sort(function (a, b) { return b.afterTax - a.afterTax; });
+printTable("Tree-split AND combinations (n≥20) · next-bar · sorted by after-tax", liveTree.slice(0, 24));
 
 var jsonPath = path.join(__dirname, "data", "goldpetal-1h-scorecard.json");
 fs.writeFileSync(jsonPath, JSON.stringify({
@@ -220,6 +301,25 @@ fs.writeFileSync(jsonPath, JSON.stringify({
   lots: 100,
   taxRate: 0.30,
   nextBar: liveNext.map(slim),
-  flip: flipRows.map(slim)
+  flip: flipRows.map(slim),
+  tree: {
+    leaves: result.treeLeaves.map(function (leaf) {
+      return {
+        id: leaf.id,
+        path: leaf.path,
+        action: leaf.action,
+        n: leaf.n,
+        longPts: leaf.long.net,
+        longPtsPerTrade: leaf.long.ptsPerTrade,
+        longAfterTax: leaf.long.afterTax,
+        actedAfterTax: leaf.action === "HOLD" ? 0 : leaf.acted.afterTax
+      };
+    }),
+    follow: slim(Object.assign({ label: "follow tree", side: "tree" }, result.treeFollow)),
+    flip: slim(Object.assign({ label: "flip tree", side: "flip" }, result.treeFlip)),
+    trainFollow: slim(Object.assign({ label: "train follow", side: "tree" }, lab.scoreTreeFollow(split.train))),
+    testFollow: slim(Object.assign({ label: "test follow", side: "tree" }, lab.scoreTreeFollow(split.test)))
+  },
+  treeCombos: liveTree.slice(0, 40).map(slim)
 }, null, 2));
 console.log("\nWrote " + jsonPath);

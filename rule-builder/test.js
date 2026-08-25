@@ -77,6 +77,24 @@ assert("parses numeric rhs", num.ok && num.rhs.type === "number" && num.rhs.valu
 var bullish = engine.parseRule("bullish candle", 0);
 assert("shortcut bullish", bullish.ok && bullish.lhs.metric === "close" && bullish.op === "gt");
 
+var closeAh = engine.parseRule("close above prev high?", 0);
+assert("shortcut close above prev high", closeAh.ok && closeAh.lhs.metric === "close" && closeAh.rhs.metric === "high" && closeAh.rhs.bar === "previous");
+
+var volPrev = engine.parseRule("volume above prev", 0);
+assert("shortcut volume above prev", volPrev.ok && volPrev.lhs.metric === "volume" && volPrev.rhs.bar === "previous");
+
+var half = engine.parseRule("body fills over half", 0);
+assert("shortcut body fills over half", half.ok && half.lhs.metric === "bodyFill" && half.rhs.value === 0.5);
+
+var opened = engine.parseRule("opened above prev close", 0);
+assert("shortcut opened above prev close", opened.ok && opened.lhs.metric === "open" && opened.rhs.metric === "close");
+
+var beats = engine.parseRule("upper wick beats lower", 0);
+assert("shortcut upper wick beats lower", beats.ok && beats.lhs.metric === "upperWick" && beats.rhs.metric === "lowerWick");
+
+var belowLow = engine.parseRule("close below prev low", 0);
+assert("shortcut close below prev low", belowLow.ok && belowLow.rhs.metric === "low" && belowLow.op === "lt");
+
 var bad = engine.parseRule("hello world", 0);
 assert("rejects nonsense", !bad.ok && /comparison/i.test(bad.error));
 

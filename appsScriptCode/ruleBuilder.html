@@ -822,6 +822,7 @@ if current upper wick < current lower wick"></textarea>
           <button type="button" id="presetTrendBtn">Trend preset</button>
           <button type="button" id="presetWickBtn">Wick preset</button>
           <button type="button" id="presetAtomsBtn">HH / LH / body / wick</button>
+          <button type="button" id="presetTreeBtn">Breakout tree splits</button>
           <button type="button" id="presetS4WickBtn">S4 + upper wick</button>
           <button type="button" class="btn-ghost" id="clearBtn">Clear</button>
         </div>
@@ -934,13 +935,18 @@ if current upper wick < current lower wick"></textarea>
           <li><code>Bullish body: close greater than open</code></li>
           <li><code>current body &gt; 2</code></li>
           <li><code>bullish candle</code></li>
-          <li><code>if current close &gt; current open combining with if current high &gt; previous high</code></li>
+          <li><code>close above prev high</code></li>
+          <li><code>volume above prev</code></li>
+          <li><code>body fills over half</code></li>
+          <li><code>opened above prev close</code></li>
+          <li><code>upper wick beats lower</code></li>
+          <li><code>close below prev low</code></li>
         </ul>
         <h3>Fields</h3>
         <ul>
           <li>Bars: <code>current</code>, <code>previous</code> (also prev, last, prior)</li>
           <li>Prices: open, high, low, close, volume</li>
-          <li>Derived: upper wick, lower wick, body, range</li>
+          <li>Derived: upper wick, lower wick, body, body fill (body/range), range</li>
         </ul>
         <h3>Comparisons</h3>
         <ul>
@@ -973,10 +979,11 @@ if current upper wick < current lower wick"></textarea>
   var METRICS = [
     { id: "upperWick", label: "upper wick", names: ["upper wick", "upper shadow", "top wick", "top shadow"] },
     { id: "lowerWick", label: "lower wick", names: ["lower wick", "lower shadow", "bottom wick", "bottom shadow"] },
+    { id: "bodyFill", label: "body fill", names: ["body fill", "body fraction"] },
     { id: "body", label: "body", names: ["candle body", "real body", "body size", "body"] },
     { id: "range", label: "range", names: ["true range", "range", "spread"] },
     { id: "volume", label: "volume", names: ["volume"] },
-    { id: "open", label: "open", names: ["opening", "open"] },
+    { id: "open", label: "open", names: ["opened", "opening", "open"] },
     { id: "high", label: "high", names: ["high"] },
     { id: "low", label: "low", names: ["low"] },
     { id: "close", label: "close", names: ["closing", "close"] }
@@ -1005,6 +1012,48 @@ if current upper wick < current lower wick"></textarea>
       lhs: { type: "field", bar: "current", metric: "close", label: "close" },
       op: "lt",
       rhs: { type: "field", bar: "current", metric: "open", label: "open" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?(close|closing)(\s+is)?\s+above\s+(prev|previous|last)\s+high\??$/,
+      name: "Close above previous high",
+      lhs: { type: "field", bar: "current", metric: "close", label: "close" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "high", label: "high" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?volume(\s+is)?\s+above\s+(prev|previous|last)(\s+volume)?\??$/,
+      name: "Volume above previous",
+      lhs: { type: "field", bar: "current", metric: "volume", label: "volume" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "volume", label: "volume" }
+    },
+    {
+      pattern: /^(current\s+|the\s+)?body\s+fills?\s+(over|more than|greater than)\s+(a\s+)?half\??$/,
+      name: "Body fills over half",
+      lhs: { type: "field", bar: "current", metric: "bodyFill", label: "body fill" },
+      op: "gt",
+      rhs: { type: "number", value: 0.5, percent: false }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?open(ed)?(\s+is)?\s+above\s+(prev|previous|last)\s+close\??$/,
+      name: "Opened above previous close",
+      lhs: { type: "field", bar: "current", metric: "open", label: "open" },
+      op: "gt",
+      rhs: { type: "field", bar: "previous", metric: "close", label: "close" }
+    },
+    {
+      pattern: /^(current\s+|the\s+)?upper\s+wick\s+beats\s+(the\s+)?(current\s+)?lower(\s+wick)?\??$/,
+      name: "Upper wick beats lower",
+      lhs: { type: "field", bar: "current", metric: "upperWick", label: "upper wick" },
+      op: "gt",
+      rhs: { type: "field", bar: "current", metric: "lowerWick", label: "lower wick" }
+    },
+    {
+      pattern: /^(current\s+|this\s+)?(close|closing)(\s+is)?\s+below\s+(prev|previous|last)\s+low\??$/,
+      name: "Close below previous low",
+      lhs: { type: "field", bar: "current", metric: "close", label: "close" },
+      op: "lt",
+      rhs: { type: "field", bar: "previous", metric: "low", label: "low" }
     }
   ];
 
@@ -1038,7 +1087,7 @@ if current upper wick < current lower wick"></textarea>
         var name = metric.names[j];
         if (lower === name || lower.indexOf(name) === 0) {
           var after = text.slice(name.length);
-          if (!after || /^\s/.test(after) || after === "") {
+          if (!after.trim()) {
             return { id: metric.id, label: metric.label, matchedLength: name.length };
           }
         }
@@ -1404,6 +1453,7 @@ if current upper wick < current lower wick"></textarea>
       case "upperWick": return h - Math.max(o, cl);
       case "lowerWick": return Math.min(o, cl) - l;
       case "body": return Math.abs(cl - o);
+      case "bodyFill": return (h - l) > 0 ? Math.abs(cl - o) / (h - l) : 0;
       case "range": return h - l;
       default: return null;
     }
@@ -1891,6 +1941,13 @@ if current upper wick < current lower wick"></textarea>
     if (m.upperWick > m.lowerWick) wickDom = "upper";
     else if (m.lowerWick > m.upperWick) wickDom = "lower";
 
+    var bodyFill = m.range > 0 ? m.body / m.range : 0;
+    var closeAbovePrevHigh = cur.close > prev.high;
+    var volAbovePrev = (cur.volume || 0) > (prev.volume || 0);
+    var bodyFillsHalf = bodyFill > 0.5;
+    var openedAbovePrevClose = cur.open > prev.close;
+    var closeBelowPrevLow = cur.close < prev.low;
+
     return {
       time: cur.time,
       day: cur.day,
@@ -1903,10 +1960,12 @@ if current upper wick < current lower wick"></textarea>
       prevHigh: prev.high,
       prevLow: prev.low,
       prevClose: prev.close,
+      prevVolume: prev.volume || 0,
       upperWick: round(m.upperWick),
       lowerWick: round(m.lowerWick),
       body: round(m.body),
       range: round(m.range),
+      bodyFill: round(bodyFill, 4),
       hh: hh,
       lh: lh,
       eqHigh: eqHigh,
@@ -1915,6 +1974,11 @@ if current upper wick < current lower wick"></textarea>
       doji: doji,
       state: state,
       wickDom: wickDom,
+      closeAbovePrevHigh: closeAbovePrevHigh,
+      volAbovePrev: volAbovePrev,
+      bodyFillsHalf: bodyFillsHalf,
+      openedAbovePrevClose: openedAbovePrevClose,
+      closeBelowPrevLow: closeBelowPrevLow,
       closeVsPrevClose: cur.close - prev.close,
       closeVsPrevHigh: cur.close - prev.high,
       closeVsPrevLow: cur.close - prev.low,
@@ -2195,6 +2259,169 @@ if current upper wick < current lower wick"></textarea>
     return stats;
   }
 
+  var TREE_LEAVES = [
+    {
+      id: "buy_break_vol_body",
+      path: "close > prev high, vol > prev, body fills half",
+      action: "BUY",
+      test: function (r) { return r.closeAbovePrevHigh && r.volAbovePrev && r.bodyFillsHalf; }
+    },
+    {
+      id: "buy_break_vol_thin",
+      path: "close > prev high, vol > prev, body does not fill half",
+      action: "BUY",
+      test: function (r) { return r.closeAbovePrevHigh && r.volAbovePrev && !r.bodyFillsHalf; }
+    },
+    {
+      id: "hold_break_lowvol",
+      path: "close > prev high, vol not above prev",
+      action: "HOLD",
+      test: function (r) { return r.closeAbovePrevHigh && !r.volAbovePrev; }
+    },
+    {
+      id: "buy_gap_open",
+      path: "close not above prev high, opened above prev close",
+      action: "BUY",
+      test: function (r) { return !r.closeAbovePrevHigh && r.openedAbovePrevClose; }
+    },
+    {
+      id: "sell_reject_uw",
+      path: "close not above prev high, opened not above prev close, vol > prev, UW > LW",
+      action: "SELL",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && r.volAbovePrev && r.wickDom === "upper";
+      }
+    },
+    {
+      id: "hold_vol_no_uw",
+      path: "close not above prev high, opened not above prev close, vol > prev, UW does not beat LW",
+      action: "HOLD",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && r.volAbovePrev && r.wickDom !== "upper";
+      }
+    },
+    {
+      id: "buy_close_below_low",
+      path: "close not above prev high, opened not above prev close, vol not above prev, close < prev low",
+      action: "BUY",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && !r.volAbovePrev && r.closeBelowPrevLow;
+      }
+    },
+    {
+      id: "hold_rest",
+      path: "close not above prev high, opened not above prev close, vol not above prev, close not below prev low",
+      action: "HOLD",
+      test: function (r) {
+        return !r.closeAbovePrevHigh && !r.openedAbovePrevClose && !r.volAbovePrev && !r.closeBelowPrevLow;
+      }
+    }
+  ];
+
+  function treeAction(rec) {
+    if (rec.closeAbovePrevHigh) return rec.volAbovePrev ? "BUY" : "HOLD";
+    if (rec.openedAbovePrevClose) return "BUY";
+    if (rec.volAbovePrev) return rec.wickDom === "upper" ? "SELL" : "HOLD";
+    return rec.closeBelowPrevLow ? "BUY" : "HOLD";
+  }
+
+  function sideFromTree(rec) {
+    var action = treeAction(rec);
+    if (action === "BUY") return "long";
+    if (action === "SELL") return "short";
+    return null;
+  }
+
+  function emptyBook(n) {
+    return attachPnl({
+      n: n || 0,
+      pUp: null,
+      ptsPerTrade: null,
+      net: 0,
+      winRate: null,
+      wins: 0,
+      excess: null
+    }, []);
+  }
+
+  function scoreTreeLeaves(records) {
+    return TREE_LEAVES.map(function (leaf) {
+      var longRow = scoreSubset(records, leaf.test, "long");
+      var shortRow = scoreSubset(records, leaf.test, "short");
+      var actionRow = leaf.action === "BUY" ? longRow : leaf.action === "SELL" ? shortRow : emptyBook(longRow.n);
+      if (leaf.action === "HOLD") actionRow.n = longRow.n;
+      return {
+        id: leaf.id,
+        path: leaf.path,
+        action: leaf.action,
+        n: longRow.n,
+        long: longRow,
+        short: shortRow,
+        acted: actionRow
+      };
+    });
+  }
+
+  function scoreTreeFollow(records) {
+    var trades = [];
+    var rows = scoredRecords(records);
+    var buys = 0;
+    var sells = 0;
+    var holds = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var rec = rows[i];
+      var side = sideFromTree(rec);
+      if (!side) {
+        holds += 1;
+        continue;
+      }
+      if (side === "long") buys += 1;
+      else sells += 1;
+      trades.push({
+        side: side,
+        entry: rec.close,
+        exit: rec.nextClose,
+        pts: side === "short" ? -rec.sessionNextPts : rec.sessionNextPts,
+        time: rec.time,
+        month: rec.month,
+        kind: "TREE"
+      });
+    }
+    var stats = attachPnl({
+      n: trades.length,
+      net: round(trades.reduce(function (s, t) { return s + t.pts; }, 0), 4),
+      ptsPerTrade: trades.length ? round(trades.reduce(function (s, t) { return s + t.pts; }, 0) / trades.length, 4) : null,
+      winRate: trades.length ? round(trades.filter(function (t) { return t.pts > 0; }).length / trades.length, 4) : null
+    }, trades);
+    stats.buys = buys;
+    stats.sells = sells;
+    stats.holds = holds;
+    stats.scored = rows.length;
+    return stats;
+  }
+
+  function splitBySessionDays(records, trainDays) {
+    var days = [];
+    var seen = {};
+    (records || []).forEach(function (r) {
+      if (r.day && !seen[r.day]) {
+        seen[r.day] = true;
+        days.push(r.day);
+      }
+    });
+    days.sort();
+    var nTrain = trainDays == null ? 64 : trainDays;
+    var trainSet = {};
+    days.slice(0, nTrain).forEach(function (d) { trainSet[d] = true; });
+    return {
+      allDays: days,
+      trainDays: days.slice(0, nTrain),
+      testDays: days.slice(nTrain),
+      train: (records || []).filter(function (r) { return trainSet[r.day]; }),
+      test: (records || []).filter(function (r) { return !trainSet[r.day]; })
+    };
+  }
+
   function labFromText(text, minutes) {
     var native = parseBars(text);
     var nativeTf = inferBarMinutes(native);
@@ -2222,7 +2449,11 @@ if current upper wick < current lower wick"></textarea>
       flipIntuition: scoreFlip(records, sideFromState),
       flipReversal: scoreFlip(records, reverseSide),
       flipIntuitionSession: scoreFlip(records, sideFromState, { flattenSession: true }),
-      flipReversalSession: scoreFlip(records, reverseSide, { flattenSession: true })
+      flipReversalSession: scoreFlip(records, reverseSide, { flattenSession: true }),
+      treeLeaves: scoreTreeLeaves(records),
+      treeFollow: scoreTreeFollow(records),
+      treeFlip: scoreFlip(records, sideFromTree),
+      treeFlipSession: scoreFlip(records, sideFromTree, { flattenSession: true })
     };
   }
 
@@ -2244,6 +2475,12 @@ if current upper wick < current lower wick"></textarea>
     scoreCombination: scoreCombination,
     scoreFlip: scoreFlip,
     sideFromState: sideFromState,
+    treeAction: treeAction,
+    sideFromTree: sideFromTree,
+    scoreTreeLeaves: scoreTreeLeaves,
+    scoreTreeFollow: scoreTreeFollow,
+    splitBySessionDays: splitBySessionDays,
+    TREE_LEAVES: TREE_LEAVES,
     labFromText: labFromText
   };
 });
@@ -2285,6 +2522,14 @@ if current upper wick < current lower wick"></textarea>
     "current high < previous high\n" +
     "current close < current open\n" +
     "current upper wick > current lower wick";
+
+  var PRESET_TREE =
+    "close above prev high\n" +
+    "volume above prev\n" +
+    "body fills over half\n" +
+    "opened above prev close\n" +
+    "upper wick beats lower\n" +
+    "close below prev low";
 
   var HARD_CAP = 5000;
   var STORAGE_KEY = "ruleBuilder.v1";
@@ -2802,6 +3047,22 @@ if current upper wick < current lower wick"></textarea>
         Object.assign({ label: "intuition flatten session" }, lab.flipIntuitionSession),
         Object.assign({ label: "reversal flatten session" }, lab.flipReversalSession)
       ], function (r) { return r.label; }) +
+      "</div><div class=\"score-grid\">" +
+      scoreTable("Breakout tree leaves (after tax = leaf action)", (lab.treeLeaves || []).map(function (leaf) {
+        return {
+          label: leaf.action + " · " + leaf.path,
+          n: leaf.n,
+          net: leaf.long.net,
+          grossInr: leaf.long.grossInr,
+          charges: leaf.long.charges,
+          afterTax: leaf.action === "HOLD" ? 0 : leaf.acted.afterTax
+        };
+      }), function (r) { return r.label; }) +
+      scoreTable("Breakout tree as a book", [
+        Object.assign({ label: "follow every BUY/SELL hour" }, lab.treeFollow),
+        Object.assign({ label: "FLIP when BUY/SELL side changes" }, lab.treeFlip),
+        Object.assign({ label: "FLIP flatten session" }, lab.treeFlipSession)
+      ], function (r) { return r.label; }) +
       "</div>";
 
     var rows = lab.records.slice().reverse().slice(0, 120);
@@ -2918,6 +3179,7 @@ if current upper wick < current lower wick"></textarea>
     $("presetWickBtn").addEventListener("click", function () { setRulesText(PRESET_WICK); });
     $("presetS4WickBtn").addEventListener("click", function () { setRulesText(PRESET_S4_WICK); });
     $("presetAtomsBtn").addEventListener("click", function () { setRulesText(PRESET_ATOMS); });
+    $("presetTreeBtn").addEventListener("click", function () { setRulesText(PRESET_TREE); });
     $("clearBtn").addEventListener("click", function () { setRulesText(""); });
     $("treeViewBtn").addEventListener("click", function () { setView("tree"); });
     $("listViewBtn").addEventListener("click", function () { setView("list"); });
