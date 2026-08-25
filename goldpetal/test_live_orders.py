@@ -210,6 +210,83 @@ def test_place_buy_short_close_reverse() -> None:
         control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
 
 
+def test_short_uses_held_lots_plus_target_not_double_or_remainder() -> None:
+    """5 long leftover + live size 8 → SHORT must SELL 13, not 8 and not 2."""
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "false"
+        os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
+        os.environ["LIVE_LOTS"] = "8"
+        os.environ["LIVE_MAX_LOTS"] = "8"
+        _arm_live(state, "S16_HHHL_WICK_1H")
+
+        api = _FakeApi()
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        broker.seed_held_lots("S16_HHHL_WICK_1H", 5)
+        r_buy = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY")
+        assert r_buy.ok and r_buy.transaction == "BUY" and r_buy.quantity == 3
+        assert broker.position_lots["S16_HHHL_WICK_1H"] == 8
+
+        api2 = _FakeApi()
+        broker2 = LiveBroker(api2, symbol="GOLDPETAL26APRFUT", token="99")
+        broker2.seed_held_lots("S16_HHHL_WICK_1H", 5)
+        r_short = broker2.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
+        assert r_short.ok and r_short.transaction == "SELL" and r_short.quantity == 13
+        assert broker2.positions["S16_HHHL_WICK_1H"] == "short"
+        assert broker2.position_lots["S16_HHHL_WICK_1H"] == -8
+    finally:
+        td.cleanup()
+        os.environ["LIVE_LOTS"] = "1"
+        os.environ["LIVE_MAX_LOTS"] = "1"
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
+class _NetApi(_FakeApi):
+    def __init__(self, net: int) -> None:
+        super().__init__()
+        self.net = net
+
+    def position(self):
+        return {
+            "status": True,
+            "data": [
+                {
+                    "tradingsymbol": "GOLDPETAL26APRFUT",
+                    "symboltoken": "99",
+                    "netqty": str(self.net),
+                }
+            ],
+        }
+
+
+def test_short_reads_angel_net_when_memory_is_flat() -> None:
+    """Angel still long 5, bot thinks flat, size 8 → SELL 13 so the short is 8 lots."""
+    td, state, orders = _tmp_state()
+    try:
+        control_state.STATE_PATH = state
+        live_orders.ORDERS_PATH = orders
+        live_orders.CONTROL_DIR = Path(td.name)
+        os.environ["DRY_RUN"] = "false"
+        os.environ["LIVE_REQUIRE_APPROVAL"] = "true"
+        os.environ["LIVE_LOTS"] = "8"
+        os.environ["LIVE_MAX_LOTS"] = "8"
+        _arm_live(state, "S16_HHHL_WICK_1H")
+
+        api = _NetApi(5)
+        broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
+        r = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
+        assert r.ok and r.transaction == "SELL" and r.quantity == 13
+        assert api.calls[0]["quantity"] == "13"
+    finally:
+        td.cleanup()
+        os.environ["LIVE_LOTS"] = "1"
+        os.environ["LIVE_MAX_LOTS"] = "1"
+        control_state.STATE_PATH = control_state.CONTROL_DIR / "state.json"
+
+
 def test_seed_positions_and_emergency() -> None:
     td, state, orders = _tmp_state()
     try:
@@ -809,6 +886,10 @@ if __name__ == "__main__":
     print("ok you_manual")
     test_place_buy_short_close_reverse()
     print("ok place_flow")
+    test_short_uses_held_lots_plus_target_not_double_or_remainder()
+    print("ok size change 5 to 8")
+    test_short_reads_angel_net_when_memory_is_flat()
+    print("ok short uses angel net")
     test_seed_positions_and_emergency()
     print("ok seed_emergency")
     test_s18_cannot_trade_live_even_when_approved()
