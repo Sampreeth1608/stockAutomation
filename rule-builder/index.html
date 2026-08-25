@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rule Combination Builder · Stock Automation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">SA</div>
+        <div>
+          <h1>Rule combination builder</h1>
+          <p>Write candlestick rules in plain English. The app parses them and builds every AND combination as a tree.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="btn btn-ghost" id="homeLink" href="../appsScriptCode/index.html">Stock lookup</a>
+        <button type="button" class="btn-ghost" id="helpBtn">How it reads English</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel composer" aria-labelledby="rulesHeading">
+        <div class="panel-head">
+          <h2 id="rulesHeading">Your rules</h2>
+          <span class="hint">One rule per line, or paste a sentence with “combining with”</span>
+        </div>
+        <label class="field-label" for="rulesInput">Plain English</label>
+        <textarea id="rulesInput" spellcheck="false" placeholder="if current close > current open
+if current high > previous high
+if current upper wick < current lower wick"></textarea>
+        <div class="row">
+          <button type="button" id="exampleBtn">Load example</button>
+          <button type="button" id="presetTrendBtn">Trend preset</button>
+          <button type="button" id="presetWickBtn">Wick preset</button>
+          <button type="button" class="btn-ghost" id="clearBtn">Clear</button>
+        </div>
+        <p class="status-line" id="parseStatus"></p>
+        <div class="rule-cards" id="ruleCards"></div>
+
+        <div class="settings" role="group" aria-label="Combination settings">
+          <label class="stat-box">
+            <span>Min rules in a combo</span>
+            <input id="minK" type="number" min="1" value="1" />
+          </label>
+          <label class="stat-box">
+            <span>Max rules in a combo</span>
+            <input id="maxK" type="number" min="1" placeholder="all" />
+          </label>
+          <label class="stat-box">
+            <span>Show at most (n)</span>
+            <input id="limitN" type="number" min="1" value="100" />
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="buildBtn">Build combinations</button>
+        </div>
+
+        <details class="candles" id="candlePanel">
+          <summary>Test combinations on sample candles</summary>
+          <p class="hint">Combinations that match both candles are highlighted. Upper wick = high − max(open, close). Lower wick = min(open, close) − low. Body = |close − open|.</p>
+          <div class="ohlc-grid">
+            <div class="ohlc-card">
+              <h3>Current candle</h3>
+              <label>Open <input id="curOpen" type="number" step="any" value="100" /></label>
+              <label>High <input id="curHigh" type="number" step="any" value="110" /></label>
+              <label>Low <input id="curLow" type="number" step="any" value="90" /></label>
+              <label>Close <input id="curClose" type="number" step="any" value="108" /></label>
+              <div class="derived" id="curDerived"></div>
+            </div>
+            <div class="ohlc-card">
+              <h3>Previous candle</h3>
+              <label>Open <input id="prevOpen" type="number" step="any" value="99" /></label>
+              <label>High <input id="prevHigh" type="number" step="any" value="105" /></label>
+              <label>Low <input id="prevLow" type="number" step="any" value="95" /></label>
+              <label>Close <input id="prevClose" type="number" step="any" value="101" /></label>
+              <div class="derived" id="prevDerived"></div>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel results" aria-labelledby="resultsHeading">
+        <div class="results-toolbar">
+          <div>
+            <h2 id="resultsHeading" class="hidden">Combinations</h2>
+            <div class="stats" id="stats"></div>
+          </div>
+          <div class="view-toggle">
+            <button type="button" id="treeViewBtn" aria-pressed="true">Tree</button>
+            <button type="button" id="listViewBtn" aria-pressed="false">List</button>
+            <button type="button" id="expandBtn">Expand</button>
+            <button type="button" id="collapseBtn">Collapse</button>
+            <button type="button" id="copyBtn">Copy</button>
+            <button type="button" id="exportBtn">Export JSON</button>
+          </div>
+        </div>
+        <div class="results-body">
+          <div class="empty" id="emptyState">
+            <h3>No combinations yet</h3>
+            <p>Write rules on the left, then build. Each combination is an AND of the selected rules.</p>
+          </div>
+          <div id="treeView"></div>
+          <div id="listView" class="hidden"></div>
+        </div>
+        <div class="detail hidden" id="detail"></div>
+      </section>
+    </main>
+
+    <dialog class="help-dialog" id="helpDialog">
+      <div class="inner">
+        <h2>How to write rules</h2>
+        <p>Type comparisons the way you would say them. One rule per line is best. You can also paste a single sentence that uses <code>combining with</code> or extra <code>if</code>s.</p>
+        <h3>Examples</h3>
+        <ul>
+          <li><code>if current close &gt; current open</code></li>
+          <li><code>if current high &gt; previous high</code></li>
+          <li><code>if current upper wick &lt; current lower wick</code></li>
+          <li><code>Bullish body: close greater than open</code></li>
+          <li><code>current body &gt; 2</code></li>
+          <li><code>bullish candle</code></li>
+        </ul>
+        <h3>Fields</h3>
+        <ul>
+          <li>Bars: <code>current</code>, <code>previous</code> (also prev, last, prior)</li>
+          <li>Prices: open, high, low, close, volume</li>
+          <li>Derived: upper wick, lower wick, body, range</li>
+        </ul>
+        <h3>Comparisons</h3>
+        <ul>
+          <li><code>&gt; &lt; &gt;= &lt;= = !=</code></li>
+          <li>Words: greater than, less than, above, below, at least, equal to</li>
+        </ul>
+        <h3>Combinations</h3>
+        <p>If you write 3 rules, the tree contains every non-empty AND mix: 3 singles, 3 pairs, and 1 triple (7 total). Use min/max size to keep only pairs, only triples, and so on. Use “show at most n” to cap how many are drawn.</p>
+        <p><button type="button" class="btn-primary" id="closeHelpBtn">Close</button></p>
+      </div>
+    </dialog>
+
+    <script src="engine.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
