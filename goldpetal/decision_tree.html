@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Decision Tree Combinator</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --card: #ffffff;
+  --line: #d0d0d0;
+  --text: #111111;
+  --muted: #555555;
+  --ok: #0d7a45;
+  --warn: #a15c00;
+  --bad: #c4281c;
+  --gold: #8a5a12;
+  --yes: #0d7a45;
+  --no: #a15c00;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 ui-sans-serif, system-ui, sans-serif; }
+body { max-width: 1180px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: .02em; }
+h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--gold); margin: 0 0 .7rem; }
+.sub { color: var(--muted); margin: 0 0 1rem; font-size: .9rem; }
+.bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-start;
+  justify-content: space-between; margin-bottom: 1rem; }
+.pill { font: 12px/1 ui-monospace, monospace; padding: .28rem .5rem;
+  border: 1px solid var(--line); border-radius: 3px; color: var(--muted); background: #fff; }
+.pill.ok { color: var(--ok); border-color: #8fceb0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  padding: 1rem 1.05rem; margin: 0 0 .85rem; }
+.grid { display: grid; gap: .85rem; grid-template-columns: 1fr; }
+@media (min-width: 960px) {
+  .grid.two { grid-template-columns: 1.15fr .85fr; }
+}
+.row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+.btn { appearance: none; border: 1px solid var(--line); background: #f4f4f4;
+  color: var(--text); font: 650 13px/1 ui-sans-serif, system-ui; padding: .55rem .85rem;
+  border-radius: 4px; cursor: pointer; }
+.btn:hover { border-color: var(--gold); color: var(--gold); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.ok { background: #e8f6ee; border-color: #8fceb0; color: #0d7a45; }
+.btn.warn { background: #fff4e0; border-color: #e6c48a; color: #a15c00; }
+.btn.danger { background: #fdecea; border-color: #f0b4ae; color: #c4281c; }
+.btn.tiny { padding: .28rem .45rem; font-size: 12px; }
+input[type=text], input[type=number], select, textarea {
+  background: #fff; color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: .4rem .5rem; font: 13px ui-monospace, monospace; }
+input[type=text].wide { width: 11rem; }
+input[type=text].wider { width: 16rem; }
+input[type=number] { width: 4.2rem; }
+select { width: 8.2rem; }
+textarea { width: 100%; min-height: 5.2rem; resize: vertical; }
+label.chk { display: flex; gap: .4rem; align-items: center; color: var(--muted); font-size: .9rem; }
+.hint { color: var(--muted); font-size: .82rem; margin: .45rem 0 0; }
+.flash { min-height: 1.2rem; color: var(--gold); font-size: .88rem; margin: .45rem 0 0; }
+.flash.bad { color: var(--bad); }
+.mono { font-family: ui-monospace, monospace; }
+.scroll { overflow: auto; max-height: 26rem; border: 1px solid var(--line); border-radius: 4px; }
+.scroll.tall { max-height: 38rem; }
+table { width: 100%; border-collapse: collapse; font: 13px/1.35 ui-monospace, monospace; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; padding: .35rem .4rem; border-bottom: 1px solid var(--line); }
+td { padding: .4rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.ok { color: var(--ok); }
+td.bad { color: var(--bad); }
+td.warn { color: var(--warn); }
+.chip { appearance: none; border: 1px solid var(--line); background: #fff;
+  color: var(--text); font: 12px/1.2 ui-sans-serif, system-ui; padding: .38rem .55rem;
+  border-radius: 99px; cursor: pointer; }
+.chip:hover { border-color: var(--gold); }
+.chip.on { background: #f4f4f4; color: var(--muted); cursor: default; }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.fam { margin: 0 0 .7rem; }
+.fam h3 { margin: 0 0 .35rem; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--muted); font-weight: 650; }
+.rule-row { display: grid; grid-template-columns: auto 1fr auto; gap: .45rem;
+  align-items: start; padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.rule-row:last-child { border-bottom: 0; }
+.rid { font: 12px ui-monospace, monospace; color: var(--gold); padding-top: .15rem; }
+.counts { font: 650 14px/1.4 ui-sans-serif, system-ui; margin: 0; }
+.tree-wrap { overflow: auto; padding: .4rem .2rem 1rem; }
+.dnode { min-width: 9.5rem; max-width: 18rem; }
+.dbox { border: 1px solid var(--line); border-radius: 6px; padding: .45rem .55rem;
+  text-align: center; background: #fff; }
+.dbox.split { border-color: #c8b48a; background: #fffaf0; }
+.dbox.leaf { background: #f4f4f4; }
+.dbox.leaf.BUY { background: #e8f6ee; border-color: #8fceb0; }
+.dbox.leaf.SHORT { background: #fdecea; border-color: #f0b4ae; }
+.dbox.leaf.FLAT { background: #f4f4f4; }
+.dbox.leaf.impossible { background: #fafafa; color: #888; }
+.dtitle { font: 650 13px/1.25 ui-sans-serif, system-ui; }
+.dmeta { color: var(--muted); font-size: 11px; margin-top: .2rem; }
+.dkids { display: flex; gap: 1rem; justify-content: center; margin-top: .65rem; }
+.darm { display: flex; flex-direction: column; align-items: center; gap: .35rem; }
+.dtag { font: 650 11px/1 ui-monospace, monospace; letter-spacing: .08em;
+  padding: .18rem .4rem; border-radius: 3px; }
+.dtag.yes { color: var(--yes); background: #e8f6ee; }
+.dtag.no { color: var(--no); background: #fff4e0; }
+pre.ascii { margin: 0; padding: .7rem; font: 12px/1.4 ui-monospace, monospace;
+  white-space: pre; overflow: auto; max-height: 22rem; }
+.empty { color: var(--muted); font-size: .9rem; }
+.action { font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div>
+      <h1>Decision Tree Combinator</h1>
+      <p class="sub">You write the rules. The engine lists every AND combination and draws a yes/no tree. Research only — nothing papers, nothing goes live.</p>
+    </div>
+    <div class="row">
+      <span class="pill ok" id="lab-pill">DECISION_TREE</span>
+      <span class="pill">not paper · not live</span>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <section class="card">
+      <h2>Your rules</h2>
+      <p class="hint">Tree asks rules in this list order. Use arrows to change the order. Rules in the same group cannot both be true.</p>
+      <div class="row" style="margin-top:.7rem">
+        <input id="r-name" class="wide" type="text" placeholder="name (green candle)" maxlength="80"/>
+        <input id="r-when" class="wider" type="text" placeholder="when (close &gt; open)" maxlength="160"/>
+        <select id="r-polarity">
+          <option value="filter">filter</option>
+          <option value="long">long / BUY</option>
+          <option value="short">short / SHORT</option>
+          <option value="no_trade">no trade</option>
+        </select>
+        <input id="r-group" class="wide" type="text" placeholder="group (optional)" maxlength="40"/>
+        <button class="btn ok" id="btn-add" type="button">Add rule</button>
+      </div>
+      <div id="rule-list" style="margin-top:.8rem"></div>
+      <div class="row" style="margin-top:.85rem">
+        <label class="chk">Max AND size
+          <input id="max-and" type="number" min="1" max="6" value="3"/>
+        </label>
+        <label class="chk"><input id="allow-mixed" type="checkbox"/> Allow long AND short in one pack</label>
+      </div>
+      <div class="row" style="margin-top:.7rem">
+        <button class="btn ok" id="btn-gen" type="button">Generate combinations</button>
+        <button class="btn" id="btn-starter" type="button">Load 3-rule starter</button>
+        <button class="btn danger" id="btn-clear" type="button">Clear rules</button>
+      </div>
+      <p class="hint">Starter: green candle + volume up + above VWAP. Suggested leaf action is BUY / SHORT / FLAT from the polarities you set — you can still read every path yourself.</p>
+      <p class="flash" id="flash-rules"></p>
+      <details style="margin-top:.7rem">
+        <summary class="hint" style="cursor:pointer">Paste several rules (one per line: name | when | polarity | group)</summary>
+        <textarea id="bulk" placeholder="green candle | close > open | long | color"></textarea>
+        <div class="row" style="margin-top:.45rem">
+          <button class="btn" id="btn-bulk" type="button">Add pasted rules</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Catalog (click to add)</h2>
+      <p class="hint">These are named conditions, not a live strategy. Same-group chips (green/red, above/below VWAP) are mutex.</p>
+      <div id="catalog"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Result</h2>
+    <p class="counts" id="counts">Add rules, then generate.</p>
+    <p class="flash" id="flash-result"></p>
+    <div class="row" style="margin-top:.55rem">
+      <button class="btn" id="btn-copy" type="button" disabled>Copy tree text</button>
+      <button class="btn" id="btn-save" type="button" disabled>Save on disk</button>
+      <button class="btn" id="btn-load" type="button">Load last save</button>
+    </div>
+  </section>
+
+  <section class="card" id="tree-card">
+    <h2>Decision tree</h2>
+    <p class="hint">YES means the rule is true. NO means it is not. Impossible branches are mutex (two rules in the same group both true).</p>
+    <div class="tree-wrap" id="tree"></div>
+    <details style="margin-top:.6rem">
+      <summary class="hint" style="cursor:pointer">ASCII tree</summary>
+      <pre class="ascii" id="ascii"></pre>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>AND combinations</h2>
+    <p class="hint">Every non-empty pack of up to Max AND size, skipping mutex and (unless you allow it) long+short in the same pack.</p>
+    <div class="scroll" id="and-wrap">
+      <table>
+        <thead>
+          <tr><th></th><th>Combination</th><th>Size</th><th>Suggested</th><th>Sentence</th></tr>
+        </thead>
+        <tbody id="and-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tree leaves (every yes/no path)</h2>
+    <p class="hint">Each leaf is one full assignment: which rules are true and which are false.</p>
+    <div class="scroll tall" id="leaf-wrap">
+      <table>
+        <thead>
+          <tr><th></th><th>Path</th><th>True</th><th>False</th><th>Suggested</th></tr>
+        </thead>
+        <tbody id="leaf-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+<script>
+const STARTER = [
+  { name: "green candle", when: "close > open", polarity: "long", group: "color", source: "custom" },
+  { name: "volume up", when: "volume > previous bar", polarity: "filter", group: "vol_dir", source: "custom" },
+  { name: "above VWAP", when: "price > session VWAP", polarity: "long", group: "vwap", source: "custom" },
+];
+
+const state = {
+  rules: [],
+  last: null,
+};
+
+function el(tag, attrs, kids) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") node.className = v;
+      else if (k === "text") node.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+      else if (v === false || v == null) continue;
+      else node.setAttribute(k, v === true ? "" : String(v));
+    }
+  }
+  for (const kid of kids || []) node.appendChild(kid);
+  return node;
+}
+
+function flash(id, msg, bad) {
+  const node = document.getElementById(id);
+  node.textContent = msg || "";
+  node.className = bad ? "flash bad" : "flash";
+}
+
+function slugUsed() {
+  return new Set(state.rules.map((r) => r.id));
+}
+
+function slug(name, used) {
+  let base = String(name || "rule").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "R";
+  if (/^[0-9]/.test(base)) base = "R_" + base;
+  let cand = base;
+  let n = 2;
+  while (used.has(cand)) {
+    cand = base + "_" + n;
+    n += 1;
+  }
+  used.add(cand);
+  return cand;
+}
+
+function addRule(raw) {
+  const used = slugUsed();
+  const name = String(raw.name || "").trim();
+  if (!name) {
+    flash("flash-rules", "Give the rule a name.", true);
+    return false;
+  }
+  if (state.rules.length >= 10) {
+    flash("flash-rules", "Cap is 10 rules.", true);
+    return false;
+  }
+  state.rules.push({
+    id: slug(raw.id || raw.catalog_id || name, used),
+    name,
+    when: String(raw.when || "").trim(),
+    polarity: raw.polarity || "filter",
+    group: String(raw.group || "").trim(),
+    source: raw.source || "custom",
+    catalog_id: raw.catalog_id || "",
+  });
+  flash("flash-rules", "");
+  renderRules();
+  renderCatalog();
+  return true;
+}
+
+function parseBulkLine(line) {
+  const text = String(line || "").trim();
+  if (!text || text.startsWith("#")) return null;
+  if (text.includes("|")) {
+    const p = text.split("|").map((s) => s.trim());
+    return { name: p[0], when: p[1] || "", polarity: p[2] || "filter", group: p[3] || "" };
+  }
+  if (text.includes(":")) {
+    const i = text.indexOf(":");
+    return { name: text.slice(0, i).trim(), when: text.slice(i + 1).trim(), polarity: "filter", group: "" };
+  }
+  return { name: text, when: "", polarity: "filter", group: "" };
+}
+
+function moveRule(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= state.rules.length) return;
+  const tmp = state.rules[i];
+  state.rules[i] = state.rules[j];
+  state.rules[j] = tmp;
+  renderRules();
+}
+
+function renderRules() {
+  const box = document.getElementById("rule-list");
+  box.replaceChildren();
+  if (!state.rules.length) {
+    box.appendChild(el("p", { class: "empty", text: "No rules yet. Add your own or click the catalog." }));
+    return;
+  }
+  state.rules.forEach((rule, i) => {
+    const meta = [rule.when || "no condition text", rule.polarity, rule.group ? "group " + rule.group : ""]
+      .filter(Boolean).join(" · ");
+    box.appendChild(el("div", { class: "rule-row" }, [
+      el("div", { class: "rid", text: rule.id }),
+      el("div", {}, [
+        el("div", { text: rule.name }),
+        el("div", { class: "hint", text: meta }),
+      ]),
+      el("div", { class: "row" }, [
+        el("button", { class: "btn tiny", type: "button", onclick: () => moveRule(i, -1), text: "↑" }),
+        el("button", { class: "btn tiny", type: "button", onclick: () => moveRule(i, 1), text: "↓" }),
+        el("button", { class: "btn tiny danger", type: "button", onclick: () => {
+          state.rules.splice(i, 1);
+          renderRules();
+          renderCatalog();
+        }, text: "Remove" }),
+      ]),
+    ]));
+  });
+}
+
+function catalogIdsUsed() {
+  return new Set(state.rules.map((r) => r.catalog_id).filter(Boolean));
+}
+
+function renderCatalog(families) {
+  const box = document.getElementById("catalog");
+  const data = families || box._families;
+  if (!data) return;
+  box._families = data;
+  box.replaceChildren();
+  const used = catalogIdsUsed();
+  for (const fam of data) {
+    const wrap = el("div", { class: "fam" }, [el("h3", { text: fam.family })]);
+    const chips = el("div", { class: "chips" });
+    for (const row of fam.rules) {
+      const on = used.has(row.id);
+      const chip = el("button", {
+        class: "chip" + (on ? " on" : ""),
+        type: "button",
+        disabled: on,
+        text: row.name,
+        title: row.when + " · " + row.polarity + (row.group ? " · group " + row.group : ""),
+      });
+      if (!on) {
+        chip.addEventListener("click", () => {
+          addRule({
+            name: row.name,
+            when: row.when,
+            polarity: row.polarity,
+            group: row.group,
+            source: "catalog",
+            catalog_id: row.id,
+            id: row.id,
+          });
+        });
+      }
+      chips.appendChild(chip);
+    }
+    wrap.appendChild(chips);
+    box.appendChild(wrap);
+  }
+}
+
+function actionClass(action, impossible) {
+  if (impossible) return "bad";
+  if (action === "BUY") return "ok";
+  if (action === "SHORT") return "bad";
+  return "warn";
+}
+
+function fillTable(body, rows, kind) {
+  body.replaceChildren();
+  if (!rows.length) {
+    const tr = el("tr", {}, [el("td", { colspan: "5", class: "empty", text: "None." })]);
+    body.appendChild(tr);
+    return;
+  }
+  rows.forEach((row, i) => {
+    const action = row.impossible ? "IMPOSSIBLE" : row.action;
+    const cells = [
+      el("td", { text: String(i + 1) }),
+      el("td", { text: row.label }),
+    ];
+    if (kind === "and") {
+      cells.push(el("td", { text: String(row.size) }));
+      cells.push(el("td", { class: actionClass(row.action, row.impossible) + " action", text: action }));
+      cells.push(el("td", { text: row.sentence || "" }));
+    } else {
+      cells.push(el("td", { text: (row.true_ids || []).join(", ") || "—" }));
+      cells.push(el("td", { text: (row.false_ids || []).join(", ") || "—" }));
+      cells.push(el("td", { class: actionClass(row.action, row.impossible) + " action", text: action }));
+    }
+    body.appendChild(el("tr", {}, cells));
+  });
+}
+
+function renderTree(node) {
+  const box = document.getElementById("tree");
+  box.replaceChildren();
+  if (!node) {
+    box.appendChild(el("p", { class: "empty", text: "No tree (add 1–8 rules and generate)." }));
+    return;
+  }
+  box.appendChild(drawNode(node));
+}
+
+function drawNode(node) {
+  if (!node) return el("div");
+  if (node.kind === "leaf") {
+    const cls = "dbox leaf " + (node.impossible ? "impossible" : (node.action || "FLAT"));
+    const title = node.impossible ? "Impossible" : (node.action || "FLAT");
+    const meta = node.impossible ? (node.reason || "") : (node.label || "");
+    return el("div", { class: "dnode" }, [
+      el("div", { class: cls }, [
+        el("div", { class: "dtitle", text: title }),
+        el("div", { class: "dmeta", text: meta }),
+      ]),
+    ]);
+  }
+  const kids = el("div", { class: "dkids" });
+  if (node.yes) {
+    kids.appendChild(el("div", { class: "darm" }, [
+      el("div", { class: "dtag yes", text: "YES" }),
+      drawNode(node.yes),
+    ]));
+  }
+  if (node.no) {
+    kids.appendChild(el("div", { class: "darm" }, [
+      el("div", { class: "dtag no", text: "NO" }),
+      drawNode(node.no),
+    ]));
+  }
+  return el("div", { class: "dnode" }, [
+    el("div", { class: "dbox split" }, [
+      el("div", { class: "dtitle", text: node.label || "rule?" }),
+      el("div", { class: "dmeta", text: node.rule_id || "" }),
+    ]),
+    kids,
+  ]);
+}
+
+function showResult(payload) {
+  state.last = payload;
+  document.getElementById("btn-copy").disabled = !payload.ok;
+  document.getElementById("btn-save").disabled = !payload.ok;
+  const counts = payload.counts || {};
+  if (!payload.ok) {
+    document.getElementById("counts").textContent = "Could not build.";
+    flash("flash-result", (payload.errors || []).join(" · "), true);
+    renderTree(null);
+    fillTable(document.getElementById("and-body"), []);
+    fillTable(document.getElementById("leaf-body"), [], "leaf");
+    document.getElementById("ascii").textContent = "";
+    return;
+  }
+  document.getElementById("counts").textContent =
+    `${counts.rules || 0} rules → ${counts.and_packs || 0} AND packs (up to ${counts.max_and || 0}) · ` +
+    `${counts.leaves || 0} tree leaves · ${counts.pruned || 0} impossible`;
+  const warn = (payload.warnings || []).join(" · ");
+  flash("flash-result", warn);
+  renderTree(payload.tree);
+  fillTable(document.getElementById("and-body"), payload.and_packs || [], "and");
+  fillTable(document.getElementById("leaf-body"), payload.leaves || [], "leaf");
+  document.getElementById("ascii").textContent = payload.ascii || "";
+}
+
+async function generate() {
+  flash("flash-result", "Building…");
+  try {
+    const res = await fetch("/api/build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rules: state.rules,
+        max_and: Number(document.getElementById("max-and").value || 3),
+        allow_mixed: document.getElementById("allow-mixed").checked,
+        include_tree: true,
+      }),
+    });
+    const payload = await res.json();
+    showResult(payload);
+  } catch (err) {
+    flash("flash-result", "Could not reach the combinator. Is decision_tree_app.py running?", true);
+  }
+}
+
+async function loadCatalog() {
+  const res = await fetch("/api/catalog");
+  const payload = await res.json();
+  renderCatalog(payload.families || []);
+}
+
+document.getElementById("btn-add").addEventListener("click", () => {
+  const ok = addRule({
+    name: document.getElementById("r-name").value,
+    when: document.getElementById("r-when").value,
+    polarity: document.getElementById("r-polarity").value,
+    group: document.getElementById("r-group").value,
+    source: "custom",
+  });
+  if (ok) {
+    document.getElementById("r-name").value = "";
+    document.getElementById("r-when").value = "";
+    document.getElementById("r-group").value = "";
+    document.getElementById("r-name").focus();
+  }
+});
+document.getElementById("btn-bulk").addEventListener("click", () => {
+  const lines = document.getElementById("bulk").value.split("\n");
+  let n = 0;
+  for (const line of lines) {
+    const parsed = parseBulkLine(line);
+    if (parsed && addRule(parsed)) n += 1;
+  }
+  flash("flash-rules", n ? `Added ${n} pasted rule(s).` : "No rules in the paste box.", !n);
+});
+document.getElementById("btn-starter").addEventListener("click", () => {
+  state.rules = [];
+  STARTER.forEach(addRule);
+  flash("flash-rules", "Starter loaded. Generate to see 7 AND packs and 8 tree leaves.");
+  generate();
+});
+document.getElementById("btn-clear").addEventListener("click", () => {
+  state.rules = [];
+  state.last = null;
+  renderRules();
+  renderCatalog();
+  showResult({ ok: true, counts: {}, and_packs: [], leaves: [], tree: null, ascii: "" });
+  document.getElementById("counts").textContent = "Add rules, then generate.";
+  flash("flash-rules", "");
+});
+document.getElementById("btn-gen").addEventListener("click", generate);
+document.getElementById("btn-copy").addEventListener("click", async () => {
+  const text = (state.last && state.last.report) || (state.last && state.last.ascii) || "";
+  try {
+    await navigator.clipboard.writeText(text);
+    flash("flash-result", "Copied the tree text.");
+  } catch {
+    flash("flash-result", "Could not copy — select the ASCII tree instead.", true);
+  }
+});
+document.getElementById("btn-save").addEventListener("click", async () => {
+  if (!state.last) return;
+  const res = await fetch("/api/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rules: state.rules, result: state.last }),
+  });
+  const payload = await res.json();
+  flash("flash-result", payload.ok ? "Saved to data/decision_tree/last.json" : (payload.error || "save failed"), !payload.ok);
+});
+document.getElementById("btn-load").addEventListener("click", async () => {
+  const res = await fetch("/api/load");
+  const payload = await res.json();
+  if (!payload.saved || !payload.payload) {
+    flash("flash-result", "No saved tree yet.", true);
+    return;
+  }
+  state.rules = payload.payload.rules || [];
+  renderRules();
+  renderCatalog();
+  if (payload.payload.result) showResult(payload.payload.result);
+  flash("flash-result", "Loaded last save.");
+});
+
+renderRules();
+loadCatalog().catch(() => {
+  flash("flash-rules", "Catalog did not load. Start with python3 decision_tree_app.py", true);
+});
+</script>
+</body>
+</html>
