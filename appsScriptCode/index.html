@@ -5,6 +5,9 @@
   </head>
   <body style="background-color:#000000;">
     <h1 style="color:#ffffff"> Stock Automation </h1>
+    <p style="margin:0 0 16px 0">
+      <a id="ruleBuilderLink" href="../rule-builder/index.html" style="color:#00FFE3">Rule combination builder</a>
+    </p>
     <p style="color:#00FFE3"> This is a basic user interface (UI) to interact with scripts written in apps script running on cloud.</p>
     <label for="stockname" style="color:white"> Enter stock name : </label> <!-- "for" attribute here should be equal to id of the tag for which label is used -->
     <input type="text" id="stockname" minlength="1" size="10"><br>
@@ -45,6 +48,10 @@
       const button = document.querySelector("#button")
       const inputElement = document.querySelector("#stockname")
       const divElement = document.querySelector("#parent")
+      const ruleBuilderLink = document.querySelector("#ruleBuilderLink")
+      if (typeof google !== "undefined" && google.script && ruleBuilderLink) {
+        ruleBuilderLink.href = window.location.href.split("?")[0] + "?page=rules"
+      }
       button.addEventListener("click", getStockInformation)
       
       function getStockInformation() {
