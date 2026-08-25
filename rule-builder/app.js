@@ -18,6 +18,11 @@
     "current upper wick < current lower wick\n" +
     "current close > previous high";
 
+  var PRESET_S4_WICK =
+    "current high < previous high\n" +
+    "current close < current open\n" +
+    "current upper wick > current lower wick";
+
   var HARD_CAP = 5000;
   var STORAGE_KEY = "ruleBuilder.v1";
 
@@ -27,7 +32,10 @@
     tree: null,
     view: "tree",
     selectedId: null,
-    expanded: {}
+    expanded: {},
+    csvText: "",
+    lab: null,
+    comboScores: {}
   };
 
   var els = {};
@@ -195,6 +203,10 @@
       var hits = result.combinations.filter(comboMatches).length;
       chip("Match sample <strong>" + hits + "</strong> / " + result.shown);
     }
+    if (state.lab) {
+      chip("Gold " + state.lab.tf + "m <strong>" + state.lab.baseline.n + "</strong> bars");
+      chip("Drift <strong>" + fmtNum(state.lab.baseline.ptsPerTrade, 2) + "</strong>");
+    }
   }
 
   function selectCombo(id) {
@@ -217,13 +229,21 @@
       return;
     }
     var match = comboMatches(combo);
+    var gold = state.comboScores[combo.id];
+    var goldLine = gold
+      ? "<p>Gold next-bar long · n=" + gold.n +
+        " · P(up)=" + fmtNum(gold.pUp, 3) +
+        " · pts/trade=" + fmtNum(gold.ptsPerTrade, 2) +
+        " · excess=" + fmtNum(gold.excess, 2) + "</p>"
+      : "";
     box.classList.remove("hidden");
     box.innerHTML =
       "<h3>" + combo.id + " · " + combo.size + " rule" + (combo.size === 1 ? "" : "s") +
       (match ? " · matches sample candles" : " · does not match sample") + "</h3>" +
       "<p class=\"canonical\">" + escapeHtml(combo.canonical) + "</p>" +
       "<p>" + escapeHtml(combo.english) + "</p>" +
-      "<p>Joined with <strong>AND</strong> · " + escapeHtml(combo.ids.join(" + ")) + "</p>";
+      "<p>Joined with <strong>AND</strong> · " + escapeHtml(combo.ids.join(" + ")) + "</p>" +
+      goldLine;
   }
 
   function escapeHtml(text) {
@@ -334,19 +354,23 @@
     if (!state.result || !state.result.combinations.length) return;
     var table = document.createElement("table");
     table.className = "list";
-    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th></tr></thead>";
+    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th><th>Gold n</th><th>P(up)</th><th>Excess</th></tr></thead>";
     var tbody = document.createElement("tbody");
     state.result.combinations.forEach(function (combo) {
       var tr = document.createElement("tr");
       tr.setAttribute("data-combo", combo.id);
       if (state.selectedId === combo.id) tr.classList.add("selected");
       if (comboMatches(combo)) tr.classList.add("match");
+      var gold = state.comboScores[combo.id] || {};
       tr.innerHTML =
         "<td>" + combo.id + "</td>" +
         "<td>" + combo.size + "</td>" +
         "<td>" + escapeHtml(combo.ids.join(" + ")) + "</td>" +
         "<td>" + escapeHtml(combo.canonical) + "</td>" +
-        "<td>" + (comboMatches(combo) ? "match" : "no") + "</td>";
+        "<td>" + (comboMatches(combo) ? "match" : "no") + "</td>" +
+        "<td>" + (gold.n != null ? gold.n : "—") + "</td>" +
+        "<td>" + fmtNum(gold.pUp, 3) + "</td>" +
+        "<td>" + fmtNum(gold.excess, 2) + "</td>";
       tr.addEventListener("click", function () { selectCombo(combo.id); });
       tbody.appendChild(tr);
     });
@@ -388,6 +412,7 @@
       limit: Math.min(HARD_CAP, isNaN(limit) ? HARD_CAP : limit)
     });
     state.tree = RuleEngine.buildCombinationTree(state.result);
+    scoreCombinationsOnLab();
     if (!state.selectedId && state.result.combinations[0]) {
       state.selectedId = state.result.combinations[0].id;
     }
@@ -455,6 +480,102 @@
     URL.revokeObjectURL(url);
   }
 
+  function fmtNum(n, d) {
+    if (n == null || isNaN(n)) return "—";
+    return Number(n).toFixed(d == null ? 2 : d);
+  }
+
+  function scoreCombinationsOnLab() {
+    state.comboScores = {};
+    if (!state.lab || !state.result) return;
+    state.result.combinations.forEach(function (combo) {
+      state.comboScores[combo.id] = CandleLab.scoreCombination(state.lab.records, combo);
+    });
+  }
+
+  function scoreTable(title, rows, nameFn) {
+    var html = "<div class=\"score-card\"><h3>" + title + "</h3><table class=\"lab-table\"><thead><tr>" +
+      "<th>Rule</th><th>n</th><th>P(up)</th><th>pts/tr</th><th>excess</th></tr></thead><tbody>";
+    rows.forEach(function (row) {
+      var cls = row.excess > 0 ? "pos" : row.excess < 0 ? "neg" : "";
+      html += "<tr><td>" + escapeHtml(nameFn(row)) + "</td><td>" + row.n + "</td><td>" +
+        fmtNum(row.pUp, 3) + "</td><td>" + fmtNum(row.ptsPerTrade, 2) + "</td><td class=\"" + cls + "\">" +
+        fmtNum(row.excess, 2) + "</td></tr>";
+    });
+    return html + "</tbody></table></div>";
+  }
+
+  function renderLab() {
+    var status = $("labStatus");
+    var cards = $("labScorecards");
+    var log = $("candleLog");
+    if (!state.lab) {
+      cards.innerHTML = "";
+      log.innerHTML = "";
+      return;
+    }
+    var lab = state.lab;
+    status.className = "status-line";
+    status.textContent =
+      lab.nativeCount + " 15m bars → " + lab.barCount + " × " + lab.tf + "m · " +
+      lab.first + " → " + lab.last + " · drift " + fmtNum(lab.baseline.ptsPerTrade, 2) +
+      " pts/bar · P(up) " + fmtNum(lab.baseline.pUp, 3) +
+      " · FLIP same-side skips " + lab.flipReversal.skippedSame;
+    cards.innerHTML = "<div class=\"score-grid\">" +
+      scoreTable("Your four states (next-bar long)", lab.states, function (r) { return r.state + " · " + r.label; }) +
+      scoreTable("Wick dominance", lab.wicks, function (r) { return r.label; }) +
+      "</div><div class=\"score-grid\">" +
+      scoreTable("State + wick (n≥1)", lab.stateWicks.filter(function (r) { return r.n > 0; }), function (r) { return r.label; }) +
+      "</div>";
+
+    var rows = lab.records.slice().reverse().slice(0, 120);
+    var table = "<div class=\"log-wrap\"><table class=\"lab-table\"><thead><tr>" +
+      "<th>Time</th><th>State</th><th>O</th><th>H</th><th>L</th><th>C</th><th>UW</th><th>LW</th><th>Wick</th><th>Next</th>" +
+      "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      var nextCls = r.nextPts > 0 ? "pos" : r.nextPts < 0 ? "neg" : "";
+      table += "<tr><td>" + escapeHtml(r.time) + "</td><td class=\"state-" + r.state + "\">" + r.state +
+        "</td><td>" + r.open + "</td><td>" + r.high + "</td><td>" + r.low + "</td><td>" + r.close +
+        "</td><td>" + fmtNum(r.upperWick, 1) + "</td><td>" + fmtNum(r.lowerWick, 1) +
+        "</td><td>" + r.wickDom + "</td><td class=\"" + nextCls + "\">" + fmtNum(r.nextPts, 1) + "</td></tr>";
+    });
+    log.innerHTML = table + "</tbody></table></div>";
+  }
+
+  function applyCsvText(text, label) {
+    state.csvText = text;
+    var tf = parseInt($("tfSelect").value, 10) || 30;
+    try {
+      state.lab = CandleLab.labFromText(text, tf);
+    } catch (err) {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "Could not read candles: " + (err && err.message ? err.message : err);
+      return;
+    }
+    if (!state.lab.barCount) {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "No OHLC rows found in " + (label || "file") + ".";
+      state.lab = null;
+      renderLab();
+      return;
+    }
+    scoreCombinationsOnLab();
+    renderLab();
+    renderResults();
+  }
+
+  function loadGold15() {
+    fetch("data/gold15.csv").then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.text();
+    }).then(function (text) {
+      applyCsvText(text, "Gold15");
+    }).catch(function () {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "Could not fetch data/gold15.csv. Upload the CSV instead.";
+    });
+  }
+
   function persist() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -506,6 +627,7 @@
     $("exampleBtn").addEventListener("click", function () { setRulesText(EXAMPLE); });
     $("presetTrendBtn").addEventListener("click", function () { setRulesText(PRESET_TREND); });
     $("presetWickBtn").addEventListener("click", function () { setRulesText(PRESET_WICK); });
+    $("presetS4WickBtn").addEventListener("click", function () { setRulesText(PRESET_S4_WICK); });
     $("clearBtn").addEventListener("click", function () { setRulesText(""); });
     $("treeViewBtn").addEventListener("click", function () { setView("tree"); });
     $("listViewBtn").addEventListener("click", function () { setView("list"); });
@@ -536,7 +658,20 @@
       }
     });
 
+    $("loadGoldBtn").addEventListener("click", loadGold15);
+    $("tfSelect").addEventListener("change", function () {
+      if (state.csvText) applyCsvText(state.csvText, "reload");
+    });
+    $("csvFile").addEventListener("change", function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { applyCsvText(String(reader.result || ""), file.name); };
+      reader.readAsText(file);
+    });
+
     buildCombinations();
+    loadGold15();
   }
 
   if (document.readyState === "loading") {

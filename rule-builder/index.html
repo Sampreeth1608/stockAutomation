@@ -39,6 +39,7 @@ if current upper wick < current lower wick"></textarea>
           <button type="button" id="exampleBtn">Load example</button>
           <button type="button" id="presetTrendBtn">Trend preset</button>
           <button type="button" id="presetWickBtn">Wick preset</button>
+          <button type="button" id="presetS4WickBtn">S4 + upper wick</button>
           <button type="button" class="btn-ghost" id="clearBtn">Clear</button>
         </div>
         <p class="status-line" id="parseStatus"></p>
@@ -113,6 +114,30 @@ if current upper wick < current lower wick"></textarea>
       </section>
     </main>
 
+    <section class="panel lab" id="labPanel" aria-labelledby="labHeading">
+      <div class="panel-head">
+        <h2 id="labHeading">Candle record</h2>
+        <span class="hint">Current vs previous only. Score is next-bar long, excess = pts/trade minus all-bars drift. Flip still fires only when side changes.</span>
+      </div>
+      <div class="row">
+        <label class="file-btn">
+          Upload CSV
+          <input type="file" id="csvFile" accept=".csv,text/csv,text/plain,.txt" />
+        </label>
+        <button type="button" id="loadGoldBtn">Load Gold15 sample</button>
+        <label class="tf-label">Timeframe
+          <select id="tfSelect">
+            <option value="15">15 min</option>
+            <option value="30" selected>30 min</option>
+            <option value="60">60 min</option>
+          </select>
+        </label>
+      </div>
+      <p class="status-line" id="labStatus">Load Gold15 or upload a CSV with time, open, high, low, close, volume.</p>
+      <div id="labScorecards"></div>
+      <div id="candleLog"></div>
+    </section>
+
     <dialog class="help-dialog" id="helpDialog">
       <div class="inner">
         <h2>How to write rules</h2>
@@ -145,6 +170,7 @@ if current upper wick < current lower wick"></textarea>
     </dialog>
 
     <script src="engine.js"></script>
+    <script src="candle.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

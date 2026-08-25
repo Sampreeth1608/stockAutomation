@@ -656,8 +656,114 @@ label.field-label {
   color: var(--danger);
 }
 
-.hidden {
-  display: none !important;
+.lab {
+  max-width: 1440px;
+  margin: 0 auto 24px;
+  padding: 18px;
+}
+
+.file-btn {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.file-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tf-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tf-label select {
+  background: #0a1018;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--mono);
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.score-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lab-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lab-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+}
+
+.lab-table tr.pos td:last-child,
+.lab-table td.pos {
+  color: var(--ok);
+}
+
+.lab-table tr.neg td:last-child,
+.lab-table td.neg {
+  color: var(--danger);
+}
+
+.log-wrap {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.state-S1 { color: var(--accent-2); }
+.state-S2 { color: var(--warn); }
+.state-S3 { color: var(--accent); }
+.state-S4 { color: var(--ok); }
+
+@media (max-width: 900px) {
+  .score-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
@@ -715,6 +821,7 @@ if current upper wick < current lower wick"></textarea>
           <button type="button" id="exampleBtn">Load example</button>
           <button type="button" id="presetTrendBtn">Trend preset</button>
           <button type="button" id="presetWickBtn">Wick preset</button>
+          <button type="button" id="presetS4WickBtn">S4 + upper wick</button>
           <button type="button" class="btn-ghost" id="clearBtn">Clear</button>
         </div>
         <p class="status-line" id="parseStatus"></p>
@@ -788,6 +895,30 @@ if current upper wick < current lower wick"></textarea>
         <div class="detail hidden" id="detail"></div>
       </section>
     </main>
+
+    <section class="panel lab" id="labPanel" aria-labelledby="labHeading">
+      <div class="panel-head">
+        <h2 id="labHeading">Candle record</h2>
+        <span class="hint">Current vs previous only. Score is next-bar long, excess = pts/trade minus all-bars drift. Flip still fires only when side changes.</span>
+      </div>
+      <div class="row">
+        <label class="file-btn">
+          Upload CSV
+          <input type="file" id="csvFile" accept=".csv,text/csv,text/plain,.txt" />
+        </label>
+        <button type="button" id="loadGoldBtn">Load Gold15 sample</button>
+        <label class="tf-label">Timeframe
+          <select id="tfSelect">
+            <option value="15">15 min</option>
+            <option value="30" selected>30 min</option>
+            <option value="60">60 min</option>
+          </select>
+        </label>
+      </div>
+      <p class="status-line" id="labStatus">Load Gold15 or upload a CSV with time, open, high, low, close, volume.</p>
+      <div id="labScorecards"></div>
+      <div id="candleLog"></div>
+    </section>
 
     <dialog class="help-dialog" id="helpDialog">
       <div class="inner">
@@ -1329,6 +1460,469 @@ if current upper wick < current lower wick"></textarea>
 
 </script>
     <script>
+/**
+ * Current-vs-previous candle lab.
+ * Only this bar vs the last bar: high, open, close, wicks.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(typeof require === "function" ? require("./engine.js") : root.RuleEngine);
+  } else {
+    root.CandleLab = factory(root.RuleEngine);
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this, function (RuleEngine) {
+  "use strict";
+
+  function round(n, d) {
+    var f = Math.pow(10, d == null ? 4 : d);
+    return Math.round(n * f) / f;
+  }
+
+  function parseStamp(raw) {
+    var m = String(raw).trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return null;
+    return {
+      day: m[1] + "-" + m[2] + "-" + m[3],
+      hour: parseInt(m[4], 10),
+      minute: parseInt(m[5], 10),
+      second: parseInt(m[6] || "0", 10),
+      text: m[1] + "-" + m[2] + "-" + m[3] + " " + m[4] + ":" + m[5] + ":" + (m[6] || "00")
+    };
+  }
+
+  function minsOf(stamp) {
+    return stamp.hour * 60 + stamp.minute;
+  }
+
+  function hhmm(mins) {
+    var h = Math.floor(mins / 60);
+    var m = mins % 60;
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+
+  function looksTime(line) {
+    return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(String(line).trim());
+  }
+
+  function looksDay(line) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(line).trim());
+  }
+
+  function num(v) {
+    var n = parseFloat(String(v).replace(/,/g, ""));
+    return isNaN(n) ? null : n;
+  }
+
+  function splitCsvLine(line) {
+    return String(line).split(",").map(function (p) { return p.trim(); });
+  }
+
+  function parseBars(text) {
+    var raw = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (!raw) return [];
+    var lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) {
+      return l && l.charAt(0) !== "#";
+    });
+    if (!lines.length) return [];
+
+    if (lines[0].toLowerCase().indexOf("time") !== -1 && lines[0].indexOf(",") !== -1) {
+      return parseCommaCsv(lines);
+    }
+    if (looksTime(lines[0]) && lines[0].indexOf(",") !== -1) {
+      return parseCommaCsv(["time,open,high,low,close,volume,day"].concat(lines));
+    }
+    return parseColumnDump(lines);
+  }
+
+  function parseCommaCsv(lines) {
+    var header = splitCsvLine(lines[0]).map(function (h) { return h.toLowerCase(); });
+    var idx = {};
+    header.forEach(function (h, i) { idx[h] = i; });
+    var bars = [];
+    for (var i = 1; i < lines.length; i++) {
+      var parts = splitCsvLine(lines[i]);
+      if (parts.length < 5) continue;
+      var timeRaw = parts[idx.time != null ? idx.time : 0];
+      var stamp = parseStamp(timeRaw);
+      if (!stamp) continue;
+      var bar = {
+        time: stamp.text,
+        day: parts[idx.day] || stamp.day,
+        open: num(parts[idx.open != null ? idx.open : 1]),
+        high: num(parts[idx.high != null ? idx.high : 2]),
+        low: num(parts[idx.low != null ? idx.low : 3]),
+        close: num(parts[idx.close != null ? idx.close : 4]),
+        volume: num(parts[idx.volume != null ? idx.volume : 5]) || 0
+      };
+      if (bar.open == null || bar.high == null || bar.low == null || bar.close == null) continue;
+      bars.push(bar);
+    }
+    return bars;
+  }
+
+  function parseColumnDump(lines) {
+    var i = 0;
+    while (i < lines.length && !looksTime(lines[i])) i++;
+    var bars = [];
+    while (i + 5 < lines.length) {
+      if (!looksTime(lines[i])) {
+        i += 1;
+        continue;
+      }
+      var stamp = parseStamp(lines[i]);
+      var o = num(lines[i + 1]);
+      var h = num(lines[i + 2]);
+      var l = num(lines[i + 3]);
+      var c = num(lines[i + 4]);
+      var v = num(lines[i + 5]);
+      var day = stamp ? stamp.day : "";
+      var next = i + 6;
+      if (next < lines.length && looksDay(lines[next])) {
+        day = lines[next];
+        next += 1;
+      }
+      if (stamp && o != null && h != null && l != null && c != null) {
+        bars.push({
+          time: stamp.text,
+          day: day,
+          open: o,
+          high: h,
+          low: l,
+          close: c,
+          volume: v || 0
+        });
+      }
+      i = next;
+    }
+    return bars;
+  }
+
+  function resample(bars, minutes) {
+    minutes = parseInt(minutes, 10) || 15;
+    if (minutes <= 15) {
+      return bars.slice();
+    }
+    var groups = [];
+    var map = {};
+    for (var i = 0; i < bars.length; i++) {
+      var bar = bars[i];
+      var stamp = parseStamp(bar.time);
+      if (!stamp) continue;
+      var floored = Math.floor(minsOf(stamp) / minutes) * minutes;
+      var key = stamp.day + " " + hhmm(floored);
+      var g = map[key];
+      if (!g) {
+        g = {
+          time: stamp.day + " " + hhmm(floored) + ":00",
+          day: stamp.day,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume || 0
+        };
+        map[key] = g;
+        groups.push(g);
+      } else {
+        g.high = Math.max(g.high, bar.high);
+        g.low = Math.min(g.low, bar.low);
+        g.close = bar.close;
+        g.volume += bar.volume || 0;
+      }
+    }
+    return groups;
+  }
+
+  function measure(bar) {
+    var o = bar.open;
+    var h = bar.high;
+    var l = bar.low;
+    var c = bar.close;
+    return {
+      upperWick: h - Math.max(o, c),
+      lowerWick: Math.min(o, c) - l,
+      body: Math.abs(c - o),
+      range: h - l
+    };
+  }
+
+  function formCandle(prev, cur) {
+    var m = measure(cur);
+    var hh = cur.high > prev.high;
+    var lh = cur.high < prev.high;
+    var eqHigh = cur.high === prev.high;
+    var bull = cur.close > cur.open;
+    var bear = cur.close < cur.open;
+    var doji = cur.close === cur.open;
+    var state = "OTHER";
+    if (eqHigh) state = "EQ";
+    else if (doji) state = hh ? "HH_DOJI" : "LH_DOJI";
+    else if (hh && bull) state = "S1";
+    else if (hh && bear) state = "S2";
+    else if (lh && bull) state = "S3";
+    else if (lh && bear) state = "S4";
+
+    var wickDom = "equal";
+    if (m.upperWick > m.lowerWick) wickDom = "upper";
+    else if (m.lowerWick > m.upperWick) wickDom = "lower";
+
+    return {
+      time: cur.time,
+      day: cur.day,
+      open: cur.open,
+      high: cur.high,
+      low: cur.low,
+      close: cur.close,
+      volume: cur.volume || 0,
+      prevOpen: prev.open,
+      prevHigh: prev.high,
+      prevLow: prev.low,
+      prevClose: prev.close,
+      upperWick: round(m.upperWick),
+      lowerWick: round(m.lowerWick),
+      body: round(m.body),
+      range: round(m.range),
+      hh: hh,
+      lh: lh,
+      eqHigh: eqHigh,
+      bull: bull,
+      bear: bear,
+      doji: doji,
+      state: state,
+      wickDom: wickDom,
+      closeVsPrevClose: cur.close - prev.close,
+      closeVsPrevHigh: cur.close - prev.high,
+      closeVsPrevLow: cur.close - prev.low,
+      pair: { previous: prev, current: cur }
+    };
+  }
+
+  function recordSeries(bars) {
+    var out = [];
+    for (var i = 1; i < bars.length; i++) {
+      var rec = formCandle(bars[i - 1], bars[i]);
+      if (i + 1 < bars.length) {
+        rec.nextClose = bars[i + 1].close;
+        rec.nextPts = round(bars[i + 1].close - bars[i].close, 4);
+        rec.nextUp = rec.nextPts > 0;
+        rec.hasNext = true;
+      } else {
+        rec.nextClose = null;
+        rec.nextPts = null;
+        rec.nextUp = null;
+        rec.hasNext = false;
+      }
+      out.push(rec);
+    }
+    return out;
+  }
+
+  function scoredRecords(records) {
+    return records.filter(function (r) { return r.hasNext; });
+  }
+
+  function summarize(records) {
+    var rows = scoredRecords(records);
+    var n = rows.length;
+    if (!n) {
+      return { n: 0, pUp: null, ptsPerTrade: null, net: 0, winRate: null, wins: 0 };
+    }
+    var net = 0;
+    var wins = 0;
+    for (var i = 0; i < rows.length; i++) {
+      net += rows[i].nextPts;
+      if (rows[i].nextPts > 0) wins += 1;
+    }
+    return {
+      n: n,
+      pUp: round(wins / n, 4),
+      ptsPerTrade: round(net / n, 4),
+      net: round(net, 4),
+      winRate: round(wins / n, 4),
+      wins: wins
+    };
+  }
+
+  function scoreSubset(all, predicate) {
+    var base = summarize(all);
+    var sub = scoredRecords(all).filter(predicate);
+    var stats = summarize(sub);
+    stats.excess = stats.n ? round(stats.ptsPerTrade - (base.ptsPerTrade || 0), 4) : null;
+    stats.share = base.n ? round(sub.length / base.n, 4) : 0;
+    stats.baseline = base.ptsPerTrade;
+    stats.baselinePUp = base.pUp;
+    return stats;
+  }
+
+  function stateScorecard(records) {
+    var names = ["S1", "S2", "S3", "S4", "EQ"];
+    var labels = {
+      S1: "HH + close>open",
+      S2: "HH + close<open",
+      S3: "LH + close>open",
+      S4: "LH + close<open",
+      EQ: "equal high"
+    };
+    return names.map(function (name) {
+      var row = scoreSubset(records, function (r) { return r.state === name; });
+      row.state = name;
+      row.label = labels[name];
+      return row;
+    });
+  }
+
+  function wickScorecard(records) {
+    return [
+      { key: "upper", label: "upper wick > lower wick" },
+      { key: "lower", label: "lower wick > upper wick" },
+      { key: "equal", label: "equal wicks" }
+    ].map(function (item) {
+      var row = scoreSubset(records, function (r) { return r.wickDom === item.key; });
+      row.wickDom = item.key;
+      row.label = item.label;
+      return row;
+    });
+  }
+
+  function stateWickScorecard(records) {
+    var states = ["S1", "S2", "S3", "S4"];
+    var wicks = ["upper", "lower"];
+    var out = [];
+    for (var s = 0; s < states.length; s++) {
+      for (var w = 0; w < wicks.length; w++) {
+        (function (state, wick) {
+          var row = scoreSubset(records, function (r) {
+            return r.state === state && r.wickDom === wick;
+          });
+          row.state = state;
+          row.wickDom = wick;
+          row.label = state + " + " + wick + " wick dominant";
+          out.push(row);
+        })(states[s], wicks[w]);
+      }
+    }
+    return out;
+  }
+
+  function scoreRules(records, rules) {
+    var valid = (rules || []).filter(function (r) { return r && r.ok; });
+    return scoreSubset(records, function (rec) {
+      if (!valid.length) return false;
+      for (var i = 0; i < valid.length; i++) {
+        if (!RuleEngine.evaluateRule(valid[i], rec.pair)) return false;
+      }
+      return true;
+    });
+  }
+
+  function scoreCombination(records, combo) {
+    return scoreSubset(records, function (rec) {
+      return RuleEngine.evaluateCombination(combo, rec.pair);
+    });
+  }
+
+  function sideFromState(rec) {
+    if (rec.state === "S1" || rec.state === "S3") return "long";
+    if (rec.state === "S2" || rec.state === "S4") return "short";
+    return null;
+  }
+
+  function scoreFlip(records, sideOf) {
+    var rows = scoredRecords(records);
+    var pos = "flat";
+    var entry = null;
+    var trades = [];
+    var skippedSame = 0;
+    var skippedNone = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var rec = rows[i];
+      var want = sideOf(rec);
+      if (!want) {
+        skippedNone += 1;
+        continue;
+      }
+      if (want === pos) {
+        skippedSame += 1;
+        continue;
+      }
+      if (pos !== "flat" && entry != null) {
+        var pts = pos === "long" ? rec.close - entry : entry - rec.close;
+        trades.push({
+          side: pos,
+          entry: entry,
+          exit: rec.close,
+          time: rec.time,
+          pts: round(pts, 4),
+          kind: "FLIP"
+        });
+      }
+      pos = want;
+      entry = rec.close;
+    }
+    var net = 0;
+    var wins = 0;
+    for (var t = 0; t < trades.length; t++) {
+      net += trades[t].pts;
+      if (trades[t].pts > 0) wins += 1;
+    }
+    return {
+      n: trades.length,
+      net: round(net, 4),
+      ptsPerTrade: trades.length ? round(net / trades.length, 4) : null,
+      winRate: trades.length ? round(wins / trades.length, 4) : null,
+      skippedSame: skippedSame,
+      skippedNone: skippedNone,
+      trades: trades
+    };
+  }
+
+  function labFromText(text, minutes) {
+    var native = parseBars(text);
+    var bars = resample(native, minutes || 15);
+    var records = recordSeries(bars);
+    var base = summarize(records);
+    return {
+      nativeCount: native.length,
+      barCount: bars.length,
+      tf: minutes || 15,
+      first: bars[0] ? bars[0].time : null,
+      last: bars.length ? bars[bars.length - 1].time : null,
+      baseline: base,
+      records: records,
+      states: stateScorecard(records),
+      wicks: wickScorecard(records),
+      stateWicks: stateWickScorecard(records),
+      flipIntuition: scoreFlip(records, sideFromState),
+      flipReversal: scoreFlip(records, function (r) {
+        var side = sideFromState(r);
+        if (side === "long") return "short";
+        if (side === "short") return "long";
+        return null;
+      })
+    };
+  }
+
+  return {
+    parseBars: parseBars,
+    resample: resample,
+    measure: measure,
+    formCandle: formCandle,
+    recordSeries: recordSeries,
+    summarize: summarize,
+    scoreSubset: scoreSubset,
+    stateScorecard: stateScorecard,
+    wickScorecard: wickScorecard,
+    stateWickScorecard: stateWickScorecard,
+    scoreRules: scoreRules,
+    scoreCombination: scoreCombination,
+    scoreFlip: scoreFlip,
+    sideFromState: sideFromState,
+    labFromText: labFromText
+  };
+});
+
+</script>
+    <script>
 (function () {
   "use strict";
 
@@ -1349,6 +1943,11 @@ if current upper wick < current lower wick"></textarea>
     "current upper wick < current lower wick\n" +
     "current close > previous high";
 
+  var PRESET_S4_WICK =
+    "current high < previous high\n" +
+    "current close < current open\n" +
+    "current upper wick > current lower wick";
+
   var HARD_CAP = 5000;
   var STORAGE_KEY = "ruleBuilder.v1";
 
@@ -1358,7 +1957,10 @@ if current upper wick < current lower wick"></textarea>
     tree: null,
     view: "tree",
     selectedId: null,
-    expanded: {}
+    expanded: {},
+    csvText: "",
+    lab: null,
+    comboScores: {}
   };
 
   var els = {};
@@ -1526,6 +2128,10 @@ if current upper wick < current lower wick"></textarea>
       var hits = result.combinations.filter(comboMatches).length;
       chip("Match sample <strong>" + hits + "</strong> / " + result.shown);
     }
+    if (state.lab) {
+      chip("Gold " + state.lab.tf + "m <strong>" + state.lab.baseline.n + "</strong> bars");
+      chip("Drift <strong>" + fmtNum(state.lab.baseline.ptsPerTrade, 2) + "</strong>");
+    }
   }
 
   function selectCombo(id) {
@@ -1548,13 +2154,21 @@ if current upper wick < current lower wick"></textarea>
       return;
     }
     var match = comboMatches(combo);
+    var gold = state.comboScores[combo.id];
+    var goldLine = gold
+      ? "<p>Gold next-bar long · n=" + gold.n +
+        " · P(up)=" + fmtNum(gold.pUp, 3) +
+        " · pts/trade=" + fmtNum(gold.ptsPerTrade, 2) +
+        " · excess=" + fmtNum(gold.excess, 2) + "</p>"
+      : "";
     box.classList.remove("hidden");
     box.innerHTML =
       "<h3>" + combo.id + " · " + combo.size + " rule" + (combo.size === 1 ? "" : "s") +
       (match ? " · matches sample candles" : " · does not match sample") + "</h3>" +
       "<p class=\"canonical\">" + escapeHtml(combo.canonical) + "</p>" +
       "<p>" + escapeHtml(combo.english) + "</p>" +
-      "<p>Joined with <strong>AND</strong> · " + escapeHtml(combo.ids.join(" + ")) + "</p>";
+      "<p>Joined with <strong>AND</strong> · " + escapeHtml(combo.ids.join(" + ")) + "</p>" +
+      goldLine;
   }
 
   function escapeHtml(text) {
@@ -1665,19 +2279,23 @@ if current upper wick < current lower wick"></textarea>
     if (!state.result || !state.result.combinations.length) return;
     var table = document.createElement("table");
     table.className = "list";
-    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th></tr></thead>";
+    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th><th>Gold n</th><th>P(up)</th><th>Excess</th></tr></thead>";
     var tbody = document.createElement("tbody");
     state.result.combinations.forEach(function (combo) {
       var tr = document.createElement("tr");
       tr.setAttribute("data-combo", combo.id);
       if (state.selectedId === combo.id) tr.classList.add("selected");
       if (comboMatches(combo)) tr.classList.add("match");
+      var gold = state.comboScores[combo.id] || {};
       tr.innerHTML =
         "<td>" + combo.id + "</td>" +
         "<td>" + combo.size + "</td>" +
         "<td>" + escapeHtml(combo.ids.join(" + ")) + "</td>" +
         "<td>" + escapeHtml(combo.canonical) + "</td>" +
-        "<td>" + (comboMatches(combo) ? "match" : "no") + "</td>";
+        "<td>" + (comboMatches(combo) ? "match" : "no") + "</td>" +
+        "<td>" + (gold.n != null ? gold.n : "—") + "</td>" +
+        "<td>" + fmtNum(gold.pUp, 3) + "</td>" +
+        "<td>" + fmtNum(gold.excess, 2) + "</td>";
       tr.addEventListener("click", function () { selectCombo(combo.id); });
       tbody.appendChild(tr);
     });
@@ -1719,6 +2337,7 @@ if current upper wick < current lower wick"></textarea>
       limit: Math.min(HARD_CAP, isNaN(limit) ? HARD_CAP : limit)
     });
     state.tree = RuleEngine.buildCombinationTree(state.result);
+    scoreCombinationsOnLab();
     if (!state.selectedId && state.result.combinations[0]) {
       state.selectedId = state.result.combinations[0].id;
     }
@@ -1786,6 +2405,102 @@ if current upper wick < current lower wick"></textarea>
     URL.revokeObjectURL(url);
   }
 
+  function fmtNum(n, d) {
+    if (n == null || isNaN(n)) return "—";
+    return Number(n).toFixed(d == null ? 2 : d);
+  }
+
+  function scoreCombinationsOnLab() {
+    state.comboScores = {};
+    if (!state.lab || !state.result) return;
+    state.result.combinations.forEach(function (combo) {
+      state.comboScores[combo.id] = CandleLab.scoreCombination(state.lab.records, combo);
+    });
+  }
+
+  function scoreTable(title, rows, nameFn) {
+    var html = "<div class=\"score-card\"><h3>" + title + "</h3><table class=\"lab-table\"><thead><tr>" +
+      "<th>Rule</th><th>n</th><th>P(up)</th><th>pts/tr</th><th>excess</th></tr></thead><tbody>";
+    rows.forEach(function (row) {
+      var cls = row.excess > 0 ? "pos" : row.excess < 0 ? "neg" : "";
+      html += "<tr><td>" + escapeHtml(nameFn(row)) + "</td><td>" + row.n + "</td><td>" +
+        fmtNum(row.pUp, 3) + "</td><td>" + fmtNum(row.ptsPerTrade, 2) + "</td><td class=\"" + cls + "\">" +
+        fmtNum(row.excess, 2) + "</td></tr>";
+    });
+    return html + "</tbody></table></div>";
+  }
+
+  function renderLab() {
+    var status = $("labStatus");
+    var cards = $("labScorecards");
+    var log = $("candleLog");
+    if (!state.lab) {
+      cards.innerHTML = "";
+      log.innerHTML = "";
+      return;
+    }
+    var lab = state.lab;
+    status.className = "status-line";
+    status.textContent =
+      lab.nativeCount + " 15m bars → " + lab.barCount + " × " + lab.tf + "m · " +
+      lab.first + " → " + lab.last + " · drift " + fmtNum(lab.baseline.ptsPerTrade, 2) +
+      " pts/bar · P(up) " + fmtNum(lab.baseline.pUp, 3) +
+      " · FLIP same-side skips " + lab.flipReversal.skippedSame;
+    cards.innerHTML = "<div class=\"score-grid\">" +
+      scoreTable("Your four states (next-bar long)", lab.states, function (r) { return r.state + " · " + r.label; }) +
+      scoreTable("Wick dominance", lab.wicks, function (r) { return r.label; }) +
+      "</div><div class=\"score-grid\">" +
+      scoreTable("State + wick (n≥1)", lab.stateWicks.filter(function (r) { return r.n > 0; }), function (r) { return r.label; }) +
+      "</div>";
+
+    var rows = lab.records.slice().reverse().slice(0, 120);
+    var table = "<div class=\"log-wrap\"><table class=\"lab-table\"><thead><tr>" +
+      "<th>Time</th><th>State</th><th>O</th><th>H</th><th>L</th><th>C</th><th>UW</th><th>LW</th><th>Wick</th><th>Next</th>" +
+      "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      var nextCls = r.nextPts > 0 ? "pos" : r.nextPts < 0 ? "neg" : "";
+      table += "<tr><td>" + escapeHtml(r.time) + "</td><td class=\"state-" + r.state + "\">" + r.state +
+        "</td><td>" + r.open + "</td><td>" + r.high + "</td><td>" + r.low + "</td><td>" + r.close +
+        "</td><td>" + fmtNum(r.upperWick, 1) + "</td><td>" + fmtNum(r.lowerWick, 1) +
+        "</td><td>" + r.wickDom + "</td><td class=\"" + nextCls + "\">" + fmtNum(r.nextPts, 1) + "</td></tr>";
+    });
+    log.innerHTML = table + "</tbody></table></div>";
+  }
+
+  function applyCsvText(text, label) {
+    state.csvText = text;
+    var tf = parseInt($("tfSelect").value, 10) || 30;
+    try {
+      state.lab = CandleLab.labFromText(text, tf);
+    } catch (err) {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "Could not read candles: " + (err && err.message ? err.message : err);
+      return;
+    }
+    if (!state.lab.barCount) {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "No OHLC rows found in " + (label || "file") + ".";
+      state.lab = null;
+      renderLab();
+      return;
+    }
+    scoreCombinationsOnLab();
+    renderLab();
+    renderResults();
+  }
+
+  function loadGold15() {
+    fetch("data/gold15.csv").then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.text();
+    }).then(function (text) {
+      applyCsvText(text, "Gold15");
+    }).catch(function () {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "Could not fetch data/gold15.csv. Upload the CSV instead.";
+    });
+  }
+
   function persist() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -1837,6 +2552,7 @@ if current upper wick < current lower wick"></textarea>
     $("exampleBtn").addEventListener("click", function () { setRulesText(EXAMPLE); });
     $("presetTrendBtn").addEventListener("click", function () { setRulesText(PRESET_TREND); });
     $("presetWickBtn").addEventListener("click", function () { setRulesText(PRESET_WICK); });
+    $("presetS4WickBtn").addEventListener("click", function () { setRulesText(PRESET_S4_WICK); });
     $("clearBtn").addEventListener("click", function () { setRulesText(""); });
     $("treeViewBtn").addEventListener("click", function () { setView("tree"); });
     $("listViewBtn").addEventListener("click", function () { setView("list"); });
@@ -1867,7 +2583,20 @@ if current upper wick < current lower wick"></textarea>
       }
     });
 
+    $("loadGoldBtn").addEventListener("click", loadGold15);
+    $("tfSelect").addEventListener("change", function () {
+      if (state.csvText) applyCsvText(state.csvText, "reload");
+    });
+    $("csvFile").addEventListener("change", function (event) {
+      var file = event.target.files && event.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { applyCsvText(String(reader.result || ""), file.name); };
+      reader.readAsText(file);
+    });
+
     buildCombinations();
+    loadGold15();
   }
 
   if (document.readyState === "loading") {

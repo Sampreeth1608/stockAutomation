@@ -644,8 +644,114 @@ label.field-label {
   color: var(--danger);
 }
 
-.hidden {
-  display: none !important;
+.lab {
+  max-width: 1440px;
+  margin: 0 auto 24px;
+  padding: 18px;
+}
+
+.file-btn {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.file-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tf-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tf-label select {
+  background: #0a1018;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--mono);
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.score-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lab-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lab-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+}
+
+.lab-table tr.pos td:last-child,
+.lab-table td.pos {
+  color: var(--ok);
+}
+
+.lab-table tr.neg td:last-child,
+.lab-table td.neg {
+  color: var(--danger);
+}
+
+.log-wrap {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.state-S1 { color: var(--accent-2); }
+.state-S2 { color: var(--warn); }
+.state-S3 { color: var(--accent); }
+.state-S4 { color: var(--ok); }
+
+@media (max-width: 900px) {
+  .score-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
