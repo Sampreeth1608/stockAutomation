@@ -5,6 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rule Combination Builder · Stock Automation</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233cf0d1'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='14' font-family='Arial' font-weight='700' fill='%2306221d'%3ESA%3C/text%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -800,6 +801,7 @@ if current upper wick < current lower wick"></textarea>
           <li><code>Bullish body: close greater than open</code></li>
           <li><code>current body &gt; 2</code></li>
           <li><code>bullish candle</code></li>
+          <li><code>if current close &gt; current open combining with if current high &gt; previous high</code></li>
         </ul>
         <h3>Fields</h3>
         <ul>
@@ -1850,8 +1852,10 @@ if current upper wick < current lower wick"></textarea>
     }, 200);
     $("rulesInput").addEventListener("input", liveParse);
 
+    var liveBuild = debounce(buildCombinations, 250);
     ["minK", "maxK", "limitN"].forEach(function (id) {
       $(id).addEventListener("change", buildCombinations);
+      $(id).addEventListener("input", liveBuild);
     });
 
     ["curOpen", "curHigh", "curLow", "curClose", "prevOpen", "prevHigh", "prevLow", "prevClose"].forEach(function (id) {

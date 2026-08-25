@@ -521,8 +521,10 @@
     }, 200);
     $("rulesInput").addEventListener("input", liveParse);
 
+    var liveBuild = debounce(buildCombinations, 250);
     ["minK", "maxK", "limitN"].forEach(function (id) {
       $(id).addEventListener("change", buildCombinations);
+      $(id).addEventListener("input", liveBuild);
     });
 
     ["curOpen", "curHigh", "curLow", "curClose", "prevOpen", "prevHigh", "prevLow", "prevClose"].forEach(function (id) {
