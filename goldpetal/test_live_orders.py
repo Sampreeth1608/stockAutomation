@@ -188,17 +188,22 @@ def test_place_buy_short_close_reverse() -> None:
         assert r_noop.skipped
 
         r2 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="REVERSE_SHORT")
-        assert r2.ok and r2.transaction == "SELL" and r2.quantity == 2
+        # Flatten leftover 1 long, then SHORT exactly 1 — never SELL 2.
+        assert r2.ok and r2.transaction == "SELL" and r2.quantity == 1
         assert broker.positions["S16_HHHL_WICK_1H"] == "short"
+        assert api.calls[-2]["transactiontype"] == "SELL" and api.calls[-2]["quantity"] == "1"
+        assert api.calls[-1]["transactiontype"] == "SELL" and api.calls[-1]["quantity"] == "1"
 
         r3 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="CLOSE")
         assert r3.ok and r3.transaction == "BUY" and r3.quantity == 1
         assert broker.positions["S16_HHHL_WICK_1H"] == "flat"
 
         r4 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
-        assert r4.ok and r4.transaction == "SELL"
+        assert r4.ok and r4.transaction == "SELL" and r4.quantity == 1
         r5 = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="REVERSE_LONG")
-        assert r5.ok and r5.transaction == "BUY" and r5.quantity == 2
+        assert r5.ok and r5.transaction == "BUY" and r5.quantity == 1
+        assert api.calls[-2]["transactiontype"] == "BUY" and api.calls[-2]["quantity"] == "1"
+        assert api.calls[-1]["transactiontype"] == "BUY" and api.calls[-1]["quantity"] == "1"
 
         assert orders.exists()
         lines = orders.read_text(encoding="utf-8").strip().splitlines()
@@ -211,7 +216,7 @@ def test_place_buy_short_close_reverse() -> None:
 
 
 def test_short_uses_held_lots_plus_target_not_double_or_remainder() -> None:
-    """5 long leftover + live size 8 → SHORT must SELL 13, not 8 and not 2."""
+    """5 long leftover + live size 8 → flatten 5, then BUY/SELL exactly 8. Never 3 or 13."""
     td, state, orders = _tmp_state()
     try:
         control_state.STATE_PATH = state
@@ -227,16 +232,27 @@ def test_short_uses_held_lots_plus_target_not_double_or_remainder() -> None:
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
         broker.seed_held_lots("S16_HHHL_WICK_1H", 5)
         r_buy = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="BUY")
-        assert r_buy.ok and r_buy.transaction == "BUY" and r_buy.quantity == 3
+        assert r_buy.ok and r_buy.transaction == "BUY" and r_buy.quantity == 8
         assert broker.position_lots["S16_HHHL_WICK_1H"] == 8
+        assert api.calls[0]["transactiontype"] == "SELL" and api.calls[0]["quantity"] == "5"
+        assert api.calls[1]["transactiontype"] == "BUY" and api.calls[1]["quantity"] == "8"
 
         api2 = _FakeApi()
         broker2 = LiveBroker(api2, symbol="GOLDPETAL26APRFUT", token="99")
         broker2.seed_held_lots("S16_HHHL_WICK_1H", 5)
         r_short = broker2.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
-        assert r_short.ok and r_short.transaction == "SELL" and r_short.quantity == 13
+        assert r_short.ok and r_short.transaction == "SELL" and r_short.quantity == 8
         assert broker2.positions["S16_HHHL_WICK_1H"] == "short"
         assert broker2.position_lots["S16_HHHL_WICK_1H"] == -8
+        assert api2.calls[0]["transactiontype"] == "SELL" and api2.calls[0]["quantity"] == "5"
+        assert api2.calls[1]["transactiontype"] == "SELL" and api2.calls[1]["quantity"] == "8"
+
+        api3 = _FakeApi()
+        broker3 = LiveBroker(api3, symbol="GOLDPETAL26APRFUT", token="99")
+        r_flat = broker3.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
+        assert r_flat.ok and r_flat.quantity == 8
+        assert len(api3.calls) == 1
+        assert api3.calls[0]["transactiontype"] == "SELL" and api3.calls[0]["quantity"] == "8"
     finally:
         td.cleanup()
         os.environ["LIVE_LOTS"] = "1"
@@ -263,7 +279,7 @@ class _NetApi(_FakeApi):
 
 
 def test_short_reads_angel_net_when_memory_is_flat() -> None:
-    """Angel still long 5, bot thinks flat, size 8 → SELL 13 so the short is 8 lots."""
+    """Angel still long 5, bot thinks flat, size 8 → SELL 5 flatten, then SELL 8 short."""
     td, state, orders = _tmp_state()
     try:
         control_state.STATE_PATH = state
@@ -278,8 +294,9 @@ def test_short_reads_angel_net_when_memory_is_flat() -> None:
         api = _NetApi(5)
         broker = LiveBroker(api, symbol="GOLDPETAL26APRFUT", token="99")
         r = broker.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
-        assert r.ok and r.transaction == "SELL" and r.quantity == 13
-        assert api.calls[0]["quantity"] == "13"
+        assert r.ok and r.transaction == "SELL" and r.quantity == 8
+        assert api.calls[0]["transactiontype"] == "SELL" and api.calls[0]["quantity"] == "5"
+        assert api.calls[1]["transactiontype"] == "SELL" and api.calls[1]["quantity"] == "8"
     finally:
         td.cleanup()
         os.environ["LIVE_LOTS"] = "1"

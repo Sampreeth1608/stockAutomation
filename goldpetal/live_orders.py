@@ -5,8 +5,8 @@ Safety stack (all required unless noted):
   2. control panel live_unlocked=true
   3. trading_enabled and not emergency_off
   4. strategy listed in live_approved (8787 Live money checkboxes)
-  5. quantity = delta to target lots (Angel net / fill leftover),
-     capped by LIVE_MAX_LOTS. Same target for BUY and SHORT.
+  5. BUY/SHORT order quantity is always live_lots_for (e.g. 8).
+     Leftover longs/shorts are flattened in a separate order first.
 
 Exception: desk Exit on a fill-log leftover squares that book's leftover
 lots even in Paper (DRY_RUN / live locked). That is CLOSE only — it does
@@ -947,8 +947,9 @@ class LiveBroker:
         self.variety = os.getenv("LIVE_VARIETY", "NORMAL").strip() or "NORMAL"
         # Local mirror of what we believe we hold per strategy (flat/long/short).
         self.positions: dict[str, str] = {}
-        # Signed lots per strategy (+ long, − short). Side-only memory is not enough
-        # after a LIVE_LOTS change: 5 long then SHORT at 8 must SELL 13, not 2×8 or 8.
+        # Signed lots per strategy (+ long, − short). Used only to flatten leftovers
+        # before a new BUY/SHORT of exactly live_lots_for. Open orders are never
+        # "5 leftover + 8 target" combined into one 13-lot ticket.
         self.position_lots: dict[str, int] = {}
         self.last_result: OrderResult | None = None
         self.placed_count = 0
@@ -1034,29 +1035,6 @@ class LiveBroker:
             return 0, "memory_flat"
         return None, "unknown_held_lots"
 
-    def _tx_for_action(
-        self, strategy: str, action: str
-    ) -> tuple[str | None, str, int, str]:
-        """Return (BUY/SELL or None, new_position, lots, held_source).
-
-        Qty is the delta from lots we actually hold to the target book.
-        BUY and SHORT use the same live_lots_for target. A leftover 5-lot
-        long flipping to an 8-lot short is SELL 13, not SELL 2 or SELL 16.
-        """
-        wanted = self._wanted_signed(strategy, action)
-        pos = self.positions.get(strategy, "flat")
-        if wanted is None:
-            return None, pos, 0, "bad_action"
-        held, src = self._held_signed(strategy)
-        if held is None:
-            return None, pos, 0, src
-        delta = int(wanted) - int(held)
-        new_pos = "long" if wanted > 0 else "short" if wanted < 0 else "flat"
-        if delta == 0:
-            return None, new_pos, 0, "already_at_target"
-        tx = "BUY" if delta > 0 else "SELL"
-        return tx, new_pos, abs(delta), src
-
     def place_signal(
         self,
         *,
@@ -1095,8 +1073,24 @@ class LiveBroker:
                 _append_order_log(res.to_dict())
             return res
 
-        tx, new_pos, qty, held_src = self._tx_for_action(strategy, action)
-        if tx is None:
+        wanted = self._wanted_signed(strategy, action)
+        if wanted is None:
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason=f"no_tx_for_action={action} pos={self.positions.get(strategy)} held=bad_action",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log(res.to_dict())
+            return res
+
+        held, held_src = self._held_signed(strategy)
+        if held is None:
             self.skip_count += 1
             res = OrderResult(
                 ok=False,
@@ -1109,21 +1103,79 @@ class LiveBroker:
                 strategy=strategy,
                 symbol=self.symbol,
                 token=self.token,
-                quantity=int(qty or 0),
             )
             self.last_result = res
             _append_order_log(res.to_dict())
             return res
 
+        if int(held) == int(wanted):
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason=(
+                    f"no_tx_for_action={action} pos={self.positions.get(strategy)}"
+                    f" held=already_at_target"
+                ),
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            _append_order_log(res.to_dict())
+            return res
+
+        if int(held) != 0:
+            flatten_tx = "SELL" if held > 0 else "BUY"
+            flat_res = self._submit(
+                strategy=strategy,
+                tx=flatten_tx,
+                qty=min(HARD_LIVE_MAX_LOTS, abs(int(held))),
+                new_pos="flat",
+                tag=tag,
+                price=price,
+                extra_log={
+                    "flatten_before_open": wanted != 0,
+                    "held_src": held_src,
+                    "held_lots": int(held),
+                },
+                held_after=0,
+            )
+            if not flat_res.ok:
+                return flat_res
+            if wanted == 0:
+                return flat_res
+
+        if wanted == 0:
+            self.skip_count += 1
+            res = OrderResult(
+                ok=False,
+                dry_run=False,
+                skipped=True,
+                reason="already_flat",
+                strategy=strategy,
+                symbol=self.symbol,
+                token=self.token,
+            )
+            self.last_result = res
+            return res
+
+        tx = "BUY" if wanted > 0 else "SELL"
+        new_pos = "long" if wanted > 0 else "short"
         return self._submit(
             strategy=strategy,
             tx=tx,
-            qty=qty,
+            qty=abs(int(wanted)),
             new_pos=new_pos,
             tag=tag,
             price=price,
-            extra_log={"held_src": held_src, "target_lots": self._quantity(strategy)},
-            held_after=self._wanted_signed(strategy, action),
+            extra_log={
+                "held_src": held_src,
+                "target_lots": abs(int(wanted)),
+                "flattened_first": int(held) != 0,
+            },
+            held_after=wanted,
         )
 
     def place_leftover_square(
