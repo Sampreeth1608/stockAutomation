@@ -247,8 +247,10 @@ def test_short_uses_held_lots_plus_target_not_double_or_remainder() -> None:
         assert api2.calls[0]["transactiontype"] == "SELL" and api2.calls[0]["quantity"] == "5"
         assert api2.calls[1]["transactiontype"] == "SELL" and api2.calls[1]["quantity"] == "8"
 
+        live_orders.ORDERS_PATH = Path(td.name) / "live_orders_flat.jsonl"
         api3 = _FakeApi()
         broker3 = LiveBroker(api3, symbol="GOLDPETAL26APRFUT", token="99")
+        broker3.seed_held_lots("S16_HHHL_WICK_1H", 0)
         r_flat = broker3.place_signal(strategy="S16_HHHL_WICK_1H", action="SHORT")
         assert r_flat.ok and r_flat.quantity == 8
         assert len(api3.calls) == 1
