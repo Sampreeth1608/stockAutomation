@@ -516,10 +516,8 @@
     $("helpBtn").addEventListener("click", function () { $("helpDialog").showModal(); });
     $("closeHelpBtn").addEventListener("click", function () { $("helpDialog").close(); });
 
-    var liveParse = debounce(function () {
-      parseInput();
-    }, 200);
-    $("rulesInput").addEventListener("input", liveParse);
+    var liveBuildFromText = debounce(buildCombinations, 400);
+    $("rulesInput").addEventListener("input", liveBuildFromText);
 
     var liveBuild = debounce(buildCombinations, 250);
     ["minK", "maxK", "limitN"].forEach(function (id) {
