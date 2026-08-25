@@ -22,6 +22,7 @@ echo "Override: GP_START_CRON='55 8 * * 1-5' only if you still want 08:55."
 echo
 echo "RAM while the VM is ON (session): 2 GB minimum (e2-small). 4 GB (e2-medium) if the desk stays on this VM. Do not use 1 GB."
 echo "Stopped VM: no vCPU/RAM charge. Boot disk still bills. Do not delete the boot disk."
+echo "To lower RAM/disk later: bash goldpetal/scripts/gcp_s16_lower_size.sh (print-only; --apply-ram after hours)."
 echo
 echo "=== 1) See machine + disks (do not delete the boot disk) ==="
 echo "gcloud compute instances describe $VM --project=$PROJECT --zone=$ZONE --format='yaml(machineType,disks,status,resourcePolicies)'"
