@@ -7,12 +7,14 @@ var root = path.join(__dirname, "..");
 var html = fs.readFileSync(path.join(root, "rule-builder", "index.html"), "utf8");
 var css = fs.readFileSync(path.join(root, "rule-builder", "styles.css"), "utf8");
 var engine = fs.readFileSync(path.join(root, "rule-builder", "engine.js"), "utf8");
+var charges = fs.readFileSync(path.join(root, "rule-builder", "charges.js"), "utf8");
 var candle = fs.readFileSync(path.join(root, "rule-builder", "candle.js"), "utf8");
 var app = fs.readFileSync(path.join(root, "rule-builder", "app.js"), "utf8");
 
 html = html
   .replace(/<link rel="stylesheet" href="styles\.css" \/>/, "<style>\n" + css + "\n</style>")
   .replace(/<script src="engine\.js"><\/script>/, "<script>\n" + engine + "\n</script>")
+  .replace(/<script src="charges\.js"><\/script>/, "<script>\n" + charges + "\n</script>")
   .replace(/<script src="candle\.js"><\/script>/, "<script>\n" + candle + "\n</script>")
   .replace(/<script src="app\.js"><\/script>/, "<script>\n" + app + "\n</script>");
 

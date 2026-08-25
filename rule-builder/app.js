@@ -3,8 +3,19 @@
 
   var EXAMPLE =
     "if current close > current open\n" +
+    "if current close < current open\n" +
     "if current high > previous high\n" +
+    "if current high < previous high\n" +
+    "if current upper wick > current lower wick\n" +
     "if current upper wick < current lower wick";
+
+  var PRESET_ATOMS =
+    "current high > previous high\n" +
+    "current high < previous high\n" +
+    "current close > current open\n" +
+    "current close < current open\n" +
+    "current upper wick > current lower wick\n" +
+    "current upper wick < current lower wick";
 
   var PRESET_TREND =
     "bullish candle\n" +
@@ -231,10 +242,11 @@
     var match = comboMatches(combo);
     var gold = state.comboScores[combo.id];
     var goldLine = gold
-      ? "<p>Gold next-bar long · n=" + gold.n +
-        " · P(up)=" + fmtNum(gold.pUp, 3) +
-        " · pts/trade=" + fmtNum(gold.ptsPerTrade, 2) +
-        " · excess=" + fmtNum(gold.excess, 2) + "</p>"
+      ? "<p>Next-bar long · 100 lots · n=" + gold.n +
+        " · pts=" + fmtNum(gold.net, 1) +
+        " · gross=" + fmtInr(gold.grossInr) +
+        " · charges=" + fmtInr(gold.charges) +
+        " · after tax=" + fmtInr(gold.afterTax) + "</p>"
       : "";
     box.classList.remove("hidden");
     box.innerHTML =
@@ -354,7 +366,7 @@
     if (!state.result || !state.result.combinations.length) return;
     var table = document.createElement("table");
     table.className = "list";
-    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th><th>Gold n</th><th>P(up)</th><th>Excess</th></tr></thead>";
+    table.innerHTML = "<thead><tr><th>ID</th><th>Size</th><th>Rules</th><th>Combination</th><th>Sample</th><th>n</th><th>pts</th><th>After tax</th></tr></thead>";
     var tbody = document.createElement("tbody");
     state.result.combinations.forEach(function (combo) {
       var tr = document.createElement("tr");
@@ -369,8 +381,8 @@
         "<td>" + escapeHtml(combo.canonical) + "</td>" +
         "<td>" + (comboMatches(combo) ? "match" : "no") + "</td>" +
         "<td>" + (gold.n != null ? gold.n : "—") + "</td>" +
-        "<td>" + fmtNum(gold.pUp, 3) + "</td>" +
-        "<td>" + fmtNum(gold.excess, 2) + "</td>";
+        "<td>" + fmtNum(gold.net, 1) + "</td>" +
+        "<td>" + fmtInr(gold.afterTax) + "</td>";
       tr.addEventListener("click", function () { selectCombo(combo.id); });
       tbody.appendChild(tr);
     });
@@ -485,6 +497,12 @@
     return Number(n).toFixed(d == null ? 2 : d);
   }
 
+  function fmtInr(n) {
+    if (n == null || isNaN(n)) return "—";
+    var sign = n < 0 ? "-" : "";
+    return sign + "₹" + Math.abs(Math.round(n)).toLocaleString("en-IN");
+  }
+
   function scoreCombinationsOnLab() {
     state.comboScores = {};
     if (!state.lab || !state.result) return;
@@ -495,12 +513,12 @@
 
   function scoreTable(title, rows, nameFn) {
     var html = "<div class=\"score-card\"><h3>" + title + "</h3><table class=\"lab-table\"><thead><tr>" +
-      "<th>Rule</th><th>n</th><th>P(up)</th><th>pts/tr</th><th>excess</th></tr></thead><tbody>";
+      "<th>Rule</th><th>n</th><th>pts</th><th>gross</th><th>charges</th><th>after tax</th></tr></thead><tbody>";
     rows.forEach(function (row) {
-      var cls = row.excess > 0 ? "pos" : row.excess < 0 ? "neg" : "";
+      var cls = row.afterTax > 0 ? "pos" : row.afterTax < 0 ? "neg" : "";
       html += "<tr><td>" + escapeHtml(nameFn(row)) + "</td><td>" + row.n + "</td><td>" +
-        fmtNum(row.pUp, 3) + "</td><td>" + fmtNum(row.ptsPerTrade, 2) + "</td><td class=\"" + cls + "\">" +
-        fmtNum(row.excess, 2) + "</td></tr>";
+        fmtNum(row.net, 1) + "</td><td>" + fmtInr(row.grossInr) + "</td><td>" +
+        fmtInr(row.charges) + "</td><td class=\"" + cls + "\">" + fmtInr(row.afterTax) + "</td></tr>";
     });
     return html + "</tbody></table></div>";
   }
@@ -517,15 +535,21 @@
     var lab = state.lab;
     status.className = "status-line";
     status.textContent =
-      lab.nativeCount + " 15m bars → " + lab.barCount + " × " + lab.tf + "m · " +
+      lab.nativeCount + " bars (native ~" + lab.nativeTf + "m) → " + lab.barCount + " × " + lab.tf + "m · " +
       lab.first + " → " + lab.last + " · drift " + fmtNum(lab.baseline.ptsPerTrade, 2) +
-      " pts/bar · P(up) " + fmtNum(lab.baseline.pUp, 3) +
-      " · FLIP same-side skips " + lab.flipReversal.skippedSame;
+      " pts/bar · after-tax buy-every-bar " + fmtInr(lab.baseline.afterTax) +
+      " · FLIP same-side skips " + lab.flipIntuition.skippedSame;
     cards.innerHTML = "<div class=\"score-grid\">" +
-      scoreTable("Your four states (next-bar long)", lab.states, function (r) { return r.state + " · " + r.label; }) +
+      scoreTable("Your four states (next-bar long, after tax)", lab.states, function (r) { return r.state + " · " + r.label; }) +
       scoreTable("Wick dominance", lab.wicks, function (r) { return r.label; }) +
       "</div><div class=\"score-grid\">" +
       scoreTable("State + wick (n≥1)", lab.stateWicks.filter(function (r) { return r.n > 0; }), function (r) { return r.label; }) +
+      scoreTable("FLIP (side change only)", [
+        Object.assign({ label: "intuition hold overnight" }, lab.flipIntuition),
+        Object.assign({ label: "reversal hold overnight" }, lab.flipReversal),
+        Object.assign({ label: "intuition flatten session" }, lab.flipIntuitionSession),
+        Object.assign({ label: "reversal flatten session" }, lab.flipReversalSession)
+      ], function (r) { return r.label; }) +
       "</div>";
 
     var rows = lab.records.slice().reverse().slice(0, 120);
@@ -562,6 +586,19 @@
     scoreCombinationsOnLab();
     renderLab();
     renderResults();
+  }
+
+  function loadGold1h() {
+    $("tfSelect").value = "60";
+    fetch("data/goldpetal-1h.csv").then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.text();
+    }).then(function (text) {
+      applyCsvText(text, "Gold 1h");
+    }).catch(function () {
+      $("labStatus").className = "status-line error";
+      $("labStatus").textContent = "Could not fetch data/goldpetal-1h.csv. Upload the CSV instead.";
+    });
   }
 
   function loadGold15() {
@@ -628,6 +665,7 @@
     $("presetTrendBtn").addEventListener("click", function () { setRulesText(PRESET_TREND); });
     $("presetWickBtn").addEventListener("click", function () { setRulesText(PRESET_WICK); });
     $("presetS4WickBtn").addEventListener("click", function () { setRulesText(PRESET_S4_WICK); });
+    $("presetAtomsBtn").addEventListener("click", function () { setRulesText(PRESET_ATOMS); });
     $("clearBtn").addEventListener("click", function () { setRulesText(""); });
     $("treeViewBtn").addEventListener("click", function () { setView("tree"); });
     $("listViewBtn").addEventListener("click", function () { setView("list"); });
@@ -659,6 +697,7 @@
     });
 
     $("loadGoldBtn").addEventListener("click", loadGold15);
+    $("loadGold1hBtn").addEventListener("click", loadGold1h);
     $("tfSelect").addEventListener("change", function () {
       if (state.csvText) applyCsvText(state.csvText, "reload");
     });
@@ -671,7 +710,7 @@
     });
 
     buildCombinations();
-    loadGold15();
+    loadGold1h();
   }
 
   if (document.readyState === "loading") {

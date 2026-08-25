@@ -102,6 +102,46 @@ var flip = lab.scoreFlip(recs, lab.sideFromState);
 assert(flip.skippedSame >= 0, "same-side hours are skipped, not new trades");
 assert(flip.n <= recs.filter(function (r) { return r.hasNext; }).length, "flip count <= bars");
 
+console.log("session next skips overnight");
+var overnight = [
+  bar("2026-08-01 22:00:00", 100, 110, 95, 108),
+  bar("2026-08-01 23:00:00", 108, 112, 107, 111),
+  bar("2026-08-02 09:00:00", 120, 125, 118, 122),
+  bar("2026-08-02 10:00:00", 122, 124, 119, 121)
+];
+var overRecs = lab.recordSeries(overnight);
+assertEqual("overnight bar hasNext", overRecs[0].hasNext, true);
+assertEqual("overnight is not a session next", overRecs[0].hasSessionNext, false);
+assertEqual("next day morning is session next", overRecs[1].hasSessionNext, true);
+var overScore = lab.summarize(overRecs);
+assertEqual("baseline uses only same-session next", overScore.n, 1);
+
+console.log("angel charges + tax");
+var GoldCharges = require("./charges.js");
+var rt = GoldCharges.roundTripCharges("long", 16000, 16000);
+assert(rt > 300 && rt < 350, "100-lot round trip at 16000 is ~₹322, got " + rt);
+var book = GoldCharges.bookPnl([
+  { side: "long", entry: 16000, exit: 16100, pts: 100, month: "2026-08" }
+]);
+assertEqual("gross rupees 100 pts * 100 lots", book.grossInr, 10000);
+assert(book.tax > 0, "profit is taxed");
+assert(book.afterTax < book.afterCharges, "tax reduces take-home");
+var lossBook = GoldCharges.bookPnl([
+  { side: "long", entry: 16000, exit: 15900, pts: -100, month: "2026-08" }
+]);
+assertEqual("no tax on a net loss", lossBook.tax, 0);
+
+console.log("goldpetal 1h csv");
+var gold1hText = fs.readFileSync(path.join(__dirname, "data", "goldpetal-1h.csv"), "utf8");
+var gold1hBars = lab.parseBars(gold1hText);
+assertEqual("1343 hourly bars", gold1hBars.length, 1343);
+assertEqual("first stamp", gold1hBars[0].time, "2026-04-20 16:00:00");
+assertEqual("inferred native tf", lab.inferBarMinutes(gold1hBars), 60);
+var gold1h = lab.labFromText(gold1hText, 60);
+assertEqual("1h resample is identity", gold1h.barCount, 1343);
+assert(gold1h.baseline.n < gold1h.records.length, "overnight bars dropped from next-bar book");
+assert(gold1h.states[3].afterTax != null, "S4 after-tax is attached");
+
 console.log("gold15 sample");
 var goldText = fs.readFileSync(path.join(__dirname, "data", "gold15.csv"), "utf8");
 var gold15 = lab.labFromText(goldText, 15);
