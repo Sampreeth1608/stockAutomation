@@ -236,6 +236,24 @@ def run_once(
             f"cleared={snap.get('cleared') or []}",
             flush=True,
         )
+        try:
+            net = snap.get("net")
+            if net is not None and hasattr(broker, "seed_held_lots"):
+                from control_state import load_state
+
+                approved = [
+                    str(n)
+                    for n in (load_state().live_approved or [])
+                    if str(n).strip()
+                ]
+                if len(approved) == 1:
+                    broker.seed_held_lots(approved[0], int(net))
+                    print(
+                        f"Broker lots seeded from Angel: {approved[0]}={int(net)}",
+                        flush=True,
+                    )
+        except Exception as exc:
+            logger.warning("Could not seed broker lots from Angel: %s", exc)
     except Exception as exc:
         logger.warning("Angel snapshot at start failed: %s", exc)
 
